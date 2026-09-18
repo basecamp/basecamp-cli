@@ -14,7 +14,8 @@ import "time"
 //     the session. agentText cuts the text of an error before it is
 //     sanitized (rpc.go) and again after, to 120 runes.
 //   - Per session: maxTools tool calls remembered, maxRecorded refusals
-//     remembered as recorded, maxMode bytes of the mode last reported,
+//     remembered as recorded — a session that reaches that one ends, rather
+//     than record a refusal twice — maxMode bytes of the mode last reported,
 //     maxEarlyInit accounts of the MCP servers held until the session's id is
 //     known, and updatesBuffer updates for a consumer that has not read them,
 //     which are dropped rather than blocking it.
@@ -75,8 +76,10 @@ var decisionDrain = 2 * time.Second
 // them, and a session's memory is not its to grow.
 const (
 	maxRefusals = 1024
-	// Past maxRecorded a refusal is recorded again rather than remembered:
-	// recording one twice is a count too high.
+	// maxRecorded is the last tool call id a session remembers having
+	// refused. Reaching it ends the session (ErrRefusalMemoryFull): a
+	// session that cannot remember cannot promise the ledger one record per
+	// tool call, and recording one twice is a count too high.
 	maxRecorded   = 4096
 	maxTools      = 1024
 	maxToolCallID = 256

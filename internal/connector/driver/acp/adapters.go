@@ -357,11 +357,20 @@ var workerAdapters = map[string]Adapter{
 	"codex":  CodexACP,
 }
 
+// AdapterForWorker is the pinned adapter the acp driver runs for a
+// connect.json worker. It is how anything outside this package — doctor
+// among them — names the adapter a profile would run, rather than spelling
+// the naming rule again.
+func AdapterForWorker(worker string) (Adapter, bool) {
+	a, ok := workerAdapters[worker]
+	return a, ok
+}
+
 // ForWorker is the acp driver for a connect.json worker: its pinned adapter,
 // located in adaptersDir (DefaultAdaptersDir when empty). lookup reads the
 // connector's environment; os.LookupEnv when nil.
 func ForWorker(worker, adaptersDir string, lookup func(string) (string, bool)) (*Driver, error) {
-	a, ok := workerAdapters[worker]
+	a, ok := AdapterForWorker(worker)
 	if !ok {
 		return nil, fmt.Errorf("acp: no ACP adapter for worker %q", worker)
 	}

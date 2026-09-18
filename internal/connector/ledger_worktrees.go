@@ -349,6 +349,23 @@ func (l *Ledger) RetainedWorktrees(ctx context.Context) ([]Worktree, error) {
 	return l.Worktrees(ctx, WorktreeRetained)
 }
 
+// RetainedWorktreeStatus is the WorktreeLister that status and doctor run:
+// the worktrees kept for a person to deal with, as `connect worktrees list`
+// counts them — retained, and removing, which a prune is part way through.
+// The path, branch, task and reason are the row's; nothing here walks the
+// disk, so a status never waits on a worktree that cannot be read.
+func (l *Ledger) RetainedWorktreeStatus(ctx context.Context) ([]WorktreeStatus, error) {
+	records, err := l.Worktrees(ctx, WorktreeRetained, WorktreeRemoving)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]WorktreeStatus, 0, len(records))
+	for _, r := range records {
+		out = append(out, WorktreeStatus{Path: r.Path, Branch: r.Branch, TaskID: r.TaskID, Reason: string(r.RetainedReason)})
+	}
+	return out, nil
+}
+
 // UnfinishedWorktrees are worktrees a crash left between their creation and
 // their task's end: creating, live or removing, with no live task working in
 // them.

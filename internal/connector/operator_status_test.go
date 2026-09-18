@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -138,4 +139,49 @@ func TestOpenLedgerRefusesANewerSchema(t *testing.T) {
 
 	_, err = OpenLedger(path)
 	require.ErrorIs(t, err, ErrLedgerSchema)
+}
+
+// Status reports the retained worktrees the lister gives it. The lister card
+// 19's ledger provides reads the same ledger, which holds one connection, so
+// a listing made inside status's own read transaction would wait for the
+// connection that transaction holds.
+func TestStatusListsTheRetainedWorktrees(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	l, err := OpenLedger(filepath.Join(t.TempDir(), "state", LedgerFile))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = l.Close() })
+
+	id, err := l.BeginWorktree(ctx, Worktree{
+		Path: "/w/one", WorkDir: "/w/one/app", Route: "app",
+		Repository: "/repo", Branch: "basecamp-connect/1-a1b2c3", BaseCommit: "abc",
+	})
+	require.NoError(t, err)
+	require.NoError(t, l.MoveWorktree(ctx, id, WorktreeLive, WorktreeCreating))
+	require.NoError(t, l.RetainWorktree(ctx, id, RetainedDirty, WorktreeLive))
+
+	s, err := l.Status(ctx, l.RetainedWorktreeStatus)
+	require.NoError(t, err)
+	assert.True(t, s.WorktreesKnown, "a status given a lister says what it knows")
+	assert.Empty(t, s.WorktreesUnavailable)
+	require.Len(t, s.Worktrees, 1)
+	assert.Equal(t, WorktreeStatus{Path: "/w/one", Branch: "basecamp-connect/1-a1b2c3", Reason: "dirty"}, s.Worktrees[0])
+}
+
+// A listing that fails leaves the retained worktrees unavailable, with why:
+// the rest of the status is still worth reading, and "unavailable" is never
+// read as "none".
+func TestStatusReportsAWorktreeListingThatFailedAsUnavailable(t *testing.T) {
+	ctx := context.Background()
+	l, err := OpenLedger(filepath.Join(t.TempDir(), "state", LedgerFile))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = l.Close() })
+
+	s, err := l.Status(ctx, func(context.Context) ([]WorktreeStatus, error) {
+		return nil, errors.New("the worktrees table cannot be read")
+	})
+	require.NoError(t, err, "one unreadable listing does not blank the whole status")
+	assert.False(t, s.WorktreesKnown)
+	assert.Contains(t, s.WorktreesUnavailable, "the worktrees table cannot be read")
+	assert.Empty(t, s.Worktrees)
 }

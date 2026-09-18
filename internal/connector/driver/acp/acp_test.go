@@ -1331,6 +1331,43 @@ func TestARefusalRecordIsBounded(t *testing.T) {
 	assert.Len(t, tr.refusals, maxRefusals, "a turn holds so many refusals and no more")
 	assert.LessOrEqual(t, len(tr.refusals[0].ToolCallID), maxToolCallID, "a recorded id is cut, and then redacted")
 	assert.LessOrEqual(t, len(s.recorded), maxRecorded, "and a session remembers so many and no more")
+	assert.ErrorIs(t, s.unsafe, ErrRefusalMemoryFull, "and a session that reaches that bound ends")
+}
+
+// A session remembers so many refused tool call ids and no more, and the one
+// that fills that memory is the last refusal it records: past the bound a
+// repeat cannot be told from a first, so the session ends rather than write
+// the same tool call to the ledger twice.
+func TestARefusalPastWhatASessionCanRememberEndsIt(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t)
+	h.withConfig = func(cfg driver.SessionConfig) driver.SessionConfig {
+		cfg.Refusals = recorder
+		return cfg
+	}
+	s := h.open().(*session)
+	for i := range maxRecorded {
+		s.record(driver.PermissionRequest{ToolCallID: fmt.Sprintf("call-%d", i), Kind: driver.ToolEdit}, nil)
+	}
+	require.Equal(t, maxRecorded, len(recorder.Recorded()), "each of them recorded once")
+	assert.ErrorIs(t, s.failure(), ErrRefusalMemoryFull, "and the session that can remember no more ends")
+
+	// One more tool call, asked about twice. The session cannot say whether
+	// it has refused this one before.
+	s.record(driver.PermissionRequest{ToolCallID: "over", Kind: driver.ToolEdit}, nil)
+	s.record(driver.PermissionRequest{ToolCallID: "over", Kind: driver.ToolEdit}, nil)
+
+	over := 0
+	for _, r := range recorder.Recorded() {
+		if r.ToolCallID == "over" {
+			over++
+		}
+	}
+	assert.Equal(t, 0, over, "a refusal the session cannot promise is the only one is not written, let alone written twice")
+	assert.Equal(t, maxRecorded, len(recorder.Recorded()), "the ledger holds one record per tool call and no more")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	assert.Len(t, s.recorded, maxRecorded, "and the memory itself never grows past its bound")
 }
 
 // A cancel that arrives once the agent has answered the prompt, while the

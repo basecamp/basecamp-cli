@@ -16,6 +16,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/connector"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/acp"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
@@ -32,8 +33,10 @@ func newConnectDoctorCmd() *cobra.Command {
 		Short: "Check what the connector needs to run",
 		Long: `Check the connector for a set-up profile: connect.json, the token, the agent's
 identity, the stream ticket mint, the account feed, the ledger (its gaps, open
-losses, hold and messages waiting for a person), the worker binary the driver
-runs, and a handshake with the agent's Basecamp MCP server, started with a
+losses, hold, the worktrees it kept and messages waiting for a person), the
+worker the driver runs — the worker's own CLI on PATH under the spawn driver,
+the pinned ACP adapter in the connector's adapters directory under the acp
+driver — and a handshake with the agent's Basecamp MCP server, started with a
 worker's environment (without the basecamp_connect domain, which only a
 dispatched task's token opens).
 
@@ -144,7 +147,7 @@ func ledgerChecks(ctx context.Context, p connectProfile) []setup.Check {
 		return []setup.Check{{Name: "Ledger", Status: setup.StatusFail, Message: errorMessage(err)}}
 	}
 	defer func() { _ = ledger.Close() }()
-	s, err := ledger.Status(ctx, nil)
+	s, err := ledger.Status(ctx, ledger.RetainedWorktreeStatus)
 	if err != nil {
 		return []setup.Check{{Name: "Ledger", Status: setup.StatusFail, Message: errorMessage(err)}}
 	}
@@ -169,25 +172,38 @@ func ledgerChecks(ctx context.Context, p connectProfile) []setup.Check {
 		checks = append(checks, setup.Check{Name: "Lifecycle messages", Status: setup.StatusWarn,
 			Message: fmt.Sprintf("%d messages may or may not have been posted and wait for a person", len(s.Indeterminate))})
 	}
+	switch {
+	case !s.WorktreesKnown:
+		checks = append(checks, setup.Check{Name: "Worktrees", Status: setup.StatusWarn,
+			Message: "The worktrees the connector kept could not be listed: " + richtext.SanitizeSingleLine(s.WorktreesUnavailable),
+			Hint:    "basecamp connect worktrees list -P " + shellQuote(p.name)})
+	case len(s.Worktrees) > 0:
+		checks = append(checks, setup.Check{Name: "Worktrees", Status: setup.StatusWarn,
+			Message: fmt.Sprintf("%d worktree(s) kept for you to deal with; the connector removes none of its own accord", len(s.Worktrees)),
+			Hint:    "basecamp connect worktrees list -P " + shellQuote(p.name) + ", then prune"})
+	}
 	return checks
 }
 
-// workerBinaries are the executables the configured driver runs for the
-// configured worker.
+// workerBinaries are the executables the spawn driver runs for the
+// configured worker. The acp driver runs a pinned adapter instead, which
+// acpAdapterCheck names and locates.
 func workerBinaries(file setup.File) []string {
-	worker := file.WorkerName()
-	if file.Driver == setup.DriverACP {
-		switch worker {
-		case setup.WorkerClaude:
-			return []string{"claude-agent-acp"}
-		default:
-			return []string{worker + "-acp"}
-		}
-	}
-	return []string{worker}
+	return []string{file.WorkerName()}
 }
 
+// workerBinaryChecks looks for the worker where the driver that runs it
+// looks. The spawn driver runs the worker's own CLI, which is on PATH. The
+// acp driver runs a pinned adapter out of the connector's own npm prefix
+// (`make acp-adapters`), which is not on PATH and is not meant to be: it is
+// found and version-checked with acp.Locate, the driver's own locator, so
+// doctor passes the adapter the connector would start and no other. PATH
+// would both fail a correct install and pass an unpinned build that happens
+// to be on it.
 func workerBinaryChecks(file setup.File) []setup.Check {
+	if file.Driver == setup.DriverACP {
+		return []setup.Check{acpAdapterCheck(file.WorkerName())}
+	}
 	bins := workerBinaries(file)
 	checks := make([]setup.Check, 0, len(bins))
 	for _, bin := range bins {
@@ -204,6 +220,35 @@ func workerBinaryChecks(file setup.File) []setup.Check {
 	return checks
 }
 
+// acpAdapterCheck resolves the configured worker's pinned adapter where the
+// acp driver would, in the default adapters directory. A connector started
+// with --acp-adapters elsewhere is not what this checks; doctor has no such
+// flag, and the message says where it looked.
+func acpAdapterCheck(worker string) setup.Check {
+	a, ok := acp.AdapterForWorker(worker)
+	if !ok {
+		return setup.Check{Name: "Worker " + worker, Status: setup.StatusFail,
+			Message: fmt.Sprintf("The acp driver has no adapter for worker %q", worker),
+			Hint:    "basecamp connect setup --driver spawn, or pick a worker the acp driver runs."}
+	}
+	c := setup.Check{Name: "Adapter " + a.Name}
+	dir, err := acp.DefaultAdaptersDir(nil)
+	if err != nil {
+		c.Status, c.Message = setup.StatusFail, errorMessage(err)
+		c.Hint = "Set XDG_DATA_HOME or HOME to an absolute path, then run make acp-adapters."
+		return c
+	}
+	bin, err := acp.Locate(dir, a)
+	if err != nil {
+		c.Status, c.Message = setup.StatusFail, errorMessage(err)
+		c.Hint = "Install the pinned adapters: make acp-adapters"
+		return c
+	}
+	c.Status = setup.StatusPass
+	c.Message = fmt.Sprintf("%s@%s at %s", a.Package, a.Version, richtext.SanitizeSingleLine(bin))
+	return c
+}
+
 // driverChecks refuses what the run command refuses: doctor never calls a
 // connector ready that would not start.
 func driverChecks(p connectProfile) []setup.Check {
@@ -212,15 +257,10 @@ func driverChecks(p connectProfile) []setup.Check {
 		checks = append(checks, setup.Check{Name: "Platform", Status: setup.StatusFail,
 			Message: fmt.Sprintf("The connector does not run on %s: it ends a worker by its process group and start time, which macOS and Linux alone can say", runtime.GOOS)})
 	}
-	if p.file.Driver != setup.DriverSpawn {
+	if p.file.Driver != setup.DriverSpawn && p.file.Driver != setup.DriverACP {
 		checks = append(checks, setup.Check{Name: "Driver", Status: setup.StatusFail,
-			Message: fmt.Sprintf("Driver %q is not available yet; the connector runs %q", p.file.Driver, setup.DriverSpawn),
+			Message: fmt.Sprintf("Driver %q is not %q or %q, and the connector refuses to start on it", p.file.Driver, setup.DriverSpawn, setup.DriverACP),
 			Hint:    "basecamp connect setup -P " + shellQuote(p.name) + " --driver spawn"})
-	}
-	if p.file.Worktrees {
-		checks = append(checks, setup.Check{Name: "Worktrees", Status: setup.StatusFail,
-			Message: "connect.json asks for worktrees, which this basecamp does not support yet, and the connector refuses to start with them",
-			Hint:    "basecamp connect setup -P " + shellQuote(p.name) + " --worktrees=false"})
 	}
 	return checks
 }

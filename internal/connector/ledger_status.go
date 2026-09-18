@@ -107,12 +107,14 @@ type Status struct {
 
 	Tasks     []TaskStatus     `json:"live_tasks"`
 	Worktrees []WorktreeStatus `json:"retained_worktrees"`
-	// WorktreesKnown is false when no lister was given: the retained
-	// worktrees are unavailable, not known to be none.
-	WorktreesKnown bool             `json:"worktrees_known"`
-	Indeterminate  []IntentStatus   `json:"indeterminate_intents"`
-	Held           []HeldStatus     `json:"held_records"`
-	Dispatches     []DispatchStatus `json:"dispatches"`
+	// WorktreesKnown is false when the retained worktrees could not be
+	// listed: they are unavailable, not known to be none.
+	WorktreesKnown bool `json:"worktrees_known"`
+	// WorktreesUnavailable is why, when a listing was tried and failed.
+	WorktreesUnavailable string           `json:"worktrees_unavailable,omitempty"`
+	Indeterminate        []IntentStatus   `json:"indeterminate_intents"`
+	Held                 []HeldStatus     `json:"held_records"`
+	Dispatches           []DispatchStatus `json:"dispatches"`
 }
 
 // ConnectionStatus is the run command's own record of its last run: running
@@ -242,14 +244,38 @@ type DispatchedEvent struct {
 	Withdrawn bool `json:"withdrawn,omitempty"`
 }
 
-// WorktreeLister lists retained worktrees for status. Card 19's worktree
-// ledger provides it; nil means this build cannot say whether any are
-// retained — which status reports as unavailable, never as none.
+// WorktreeLister lists retained worktrees for status. Ledger.RetainedWorktreeStatus
+// is the one status and doctor run; nil means the caller cannot say whether
+// any are retained — which status reports as unavailable, never as none, as
+// it does a listing that fails.
 type WorktreeLister func(ctx context.Context) ([]WorktreeStatus, error)
 
-// Status reads everything status shows in one read transaction, so the
-// numbers agree with each other.
+// Status reads everything the ledger's own status shows in one read
+// transaction, so the numbers agree with each other, and then asks the
+// worktree lister. The lister runs after that transaction ends, never
+// inside it: the ledger holds one connection, and a lister that reads the
+// ledger too would wait for the connection the transaction holds.
 func (l *Ledger) Status(ctx context.Context, worktrees WorktreeLister) (Status, error) {
+	s, err := l.status(ctx)
+	if err != nil {
+		return Status{}, err
+	}
+	if worktrees != nil {
+		if s.Worktrees, err = worktrees(ctx); err != nil {
+			// A status that cannot list them says so and is still worth
+			// reading; what it never does is call them none.
+			s.Worktrees, s.WorktreesUnavailable = nil, err.Error()
+		} else {
+			s.WorktreesKnown = true
+		}
+	}
+	if s.Worktrees == nil {
+		s.Worktrees = []WorktreeStatus{}
+	}
+	return s, nil
+}
+
+func (l *Ledger) status(ctx context.Context) (Status, error) {
 	tx, err := l.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return Status{}, fmt.Errorf("connector: begin status: %w", err)
@@ -279,15 +305,6 @@ func (l *Ledger) Status(ctx context.Context, worktrees WorktreeLister) (Status, 
 		if err := step(ctx, tx, &s); err != nil {
 			return Status{}, err
 		}
-	}
-	if worktrees != nil {
-		s.WorktreesKnown = true
-		if s.Worktrees, err = worktrees(ctx); err != nil {
-			return Status{}, fmt.Errorf("connector: status worktrees: %w", err)
-		}
-	}
-	if s.Worktrees == nil {
-		s.Worktrees = []WorktreeStatus{}
 	}
 	return s, nil
 }

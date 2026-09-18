@@ -335,6 +335,11 @@ func (p *pendingCall) wait(out any) error {
 // abandon stops waiting for a call: its slot is closed, so whoever waits on
 // it gets errConnClosed, and a response that arrives later is dropped.
 func (c *conn) abandon(p *pendingCall) {
+	if p == nil {
+		// A turn that is ending before its prompt was registered has no
+		// call to abandon.
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if ch, ok := c.pending[p.id]; ok {

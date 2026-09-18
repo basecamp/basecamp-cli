@@ -225,7 +225,7 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 		return err
 	}
 	defer func() { _ = ledger.Close() }()
-	status, err := ledger.Status(cmd.Context(), nil)
+	status, err := ledger.Status(cmd.Context(), ledger.RetainedWorktreeStatus)
 	if err != nil {
 		return err
 	}
@@ -242,6 +242,15 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 		return nil
 	}
 	return p.app.OK(report, output.WithSummary(connectStatusSummary(report)))
+}
+
+// worktreesUnavailable is why status cannot say whether any worktrees are
+// retained. It never reads as none.
+func worktreesUnavailable(s connector.Status) string {
+	if s.WorktreesUnavailable != "" {
+		return s.WorktreesUnavailable
+	}
+	return "nothing listed them for this status"
 }
 
 func connectStatusSummary(r connectStatusReport) string {
@@ -331,7 +340,7 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 			t.TaskID, clean(t.AttemptID), clean(t.State), t.PID, clean(t.Worker), t.TakerPID, clean(t.Taker), stamp(t.LaunchedAt), t.EventIDs, clean(t.WorkDir))
 	}
 	if !s.WorktreesKnown {
-		fmt.Fprintf(w, "  Worktrees      unavailable until the worktree driver lands: this build cannot say whether any are retained\n")
+		fmt.Fprintf(w, "  Worktrees      unavailable: %s\n", clean(worktreesUnavailable(s)))
 	} else {
 		fmt.Fprintf(w, "  Worktrees      %d retained\n", len(s.Worktrees))
 		for _, wt := range s.Worktrees {

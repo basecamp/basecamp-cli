@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/acp"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
@@ -235,23 +237,76 @@ func TestConnectHoldFlagIsOnTheRunCommand(t *testing.T) {
 	assert.True(t, v)
 }
 
-func TestConnectDoctorWorkerBinaries(t *testing.T) {
+// doctor refuses what the run command refuses, and nothing the run command
+// runs. Both the acp driver and worktrees are on the run command now, so
+// neither is a failing check any more.
+func TestConnectDoctorRefusesOnlyWhatTheRunCommandRefuses(t *testing.T) {
 	file := setup.New("agent")
-	assert.Equal(t, []string{"claude"}, workerBinaries(file))
 	assert.Empty(t, driverChecks(connectProfile{name: "agent", file: file}))
-	file.Driver = setup.DriverACP
-	assert.Equal(t, []string{"claude-agent-acp"}, workerBinaries(file))
-	checks := driverChecks(connectProfile{name: "agent", file: file})
-	require.Len(t, checks, 1)
-	assert.Equal(t, setup.StatusFail, checks[0].Status, "a driver the run command refuses is not ready")
 
-	// Worktrees are the run command's other refusal.
+	acpFile := setup.New("agent")
+	acpFile.Driver = setup.DriverACP
+	assert.Empty(t, driverChecks(connectProfile{name: "agent", file: acpFile}),
+		"the acp driver is a driver the connector starts on")
+
 	worktrees := setup.New("agent")
 	worktrees.Worktrees = true
-	checks = driverChecks(connectProfile{name: "agent", file: worktrees})
+	assert.Empty(t, driverChecks(connectProfile{name: "agent", file: worktrees}),
+		"the connector starts with worktrees on")
+
+	unknown := setup.New("agent")
+	unknown.Driver = "someday"
+	checks := driverChecks(connectProfile{name: "agent", file: unknown})
 	require.Len(t, checks, 1)
-	assert.Equal(t, "Worktrees", checks[0].Name)
-	assert.Equal(t, setup.StatusFail, checks[0].Status, "what the connector refuses to start with is not ready")
+	assert.Equal(t, "Driver", checks[0].Name)
+	assert.Equal(t, setup.StatusFail, checks[0].Status)
+}
+
+// The acp driver runs a pinned adapter out of the connector's own npm
+// prefix, never one on PATH: doctor resolves it the way the driver does, so
+// a documented install passes and an unpinned build on PATH does not.
+func TestConnectDoctorFindsTheACPAdapterWhereTheDriverDoes(t *testing.T) {
+	data := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", data)
+
+	// A decoy on PATH, which is not what the acp driver would run.
+	decoy := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(decoy, "claude-agent-acp"), []byte("#!/bin/sh\nexit 0\n"), 0o700))
+	t.Setenv("PATH", decoy)
+
+	file := setup.New("agent")
+	file.Driver = setup.DriverACP
+	checks := workerBinaryChecks(file)
+	require.Len(t, checks, 1)
+	assert.Equal(t, setup.StatusFail, checks[0].Status,
+		"an unpinned executable that happens to be on PATH is not the pinned adapter")
+	assert.Contains(t, checks[0].Hint, "make acp-adapters")
+
+	// The adapters directory make acp-adapters writes.
+	adapter, ok := acp.AdapterForWorker(setup.WorkerClaude)
+	require.True(t, ok)
+	prefix := filepath.Join(data, "basecamp", "acp-adapters")
+	pkgDir := filepath.Join(prefix, "node_modules", filepath.FromSlash(adapter.Package))
+	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
+	manifest := fmt.Sprintf(`{"name":%q,"version":%q}`, adapter.Package, adapter.Version)
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "package.json"), []byte(manifest), 0o600))
+	binDir := filepath.Join(prefix, "node_modules", ".bin")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	bin := filepath.Join(binDir, adapter.Name)
+	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o700))
+
+	checks = workerBinaryChecks(file)
+	require.Len(t, checks, 1)
+	assert.Equal(t, setup.StatusPass, checks[0].Status, "the adapter make acp-adapters installed is the one doctor finds")
+	assert.Contains(t, checks[0].Message, bin)
+	assert.Contains(t, checks[0].Message, adapter.Version)
+
+	// A version other than the pin is not the adapter the driver would run.
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "package.json"),
+		[]byte(fmt.Sprintf(`{"name":%q,"version":"0.0.1-not-the-pin"}`, adapter.Package)), 0o600))
+	checks = workerBinaryChecks(file)
+	require.Len(t, checks, 1)
+	assert.Equal(t, setup.StatusFail, checks[0].Status, "an adapter off the pin is not ready")
 }
 
 func TestConnectDoctorReportsLedgerGapsAndTheHold(t *testing.T) {
@@ -272,6 +327,31 @@ func TestConnectDoctorReportsLedgerGapsAndTheHold(t *testing.T) {
 	assert.Equal(t, setup.StatusPass, byName["Ledger"].Status)
 	assert.Contains(t, byName["Gap 1"].Message, "500")
 	assert.Equal(t, setup.StatusWarn, byName["Hold"].Status)
+}
+
+// doctor reads card 19's worktree ledger too: worktrees the connector kept
+// are a person's to deal with, and doctor is where a person finds out.
+func TestConnectDoctorReportsTheWorktreesTheConnectorKept(t *testing.T) {
+	ctx := context.Background()
+	f := newOperatorFixture(t)
+	l := f.ledger(t, false)
+	id, err := l.BeginWorktree(ctx, connector.Worktree{
+		Path: "/w/one", WorkDir: "/w/one/app", Route: "app",
+		Repository: "/repo", Branch: "basecamp-connect/1-a1b2c3", BaseCommit: "abc",
+	})
+	require.NoError(t, err)
+	require.NoError(t, l.MoveWorktree(ctx, id, connector.WorktreeLive, connector.WorktreeCreating))
+	require.NoError(t, l.RetainWorktree(ctx, id, connector.RetainedDirty, connector.WorktreeLive))
+	require.NoError(t, l.Close())
+
+	byName := map[string]setup.Check{}
+	for _, c := range ledgerChecks(ctx, connectProfile{name: "agent", file: f.file}) {
+		byName[c.Name] = c
+	}
+	require.Contains(t, byName, "Worktrees")
+	assert.Equal(t, setup.StatusWarn, byName["Worktrees"].Status)
+	assert.Contains(t, byName["Worktrees"].Message, "1 worktree(s) kept")
+	assert.Contains(t, byName["Worktrees"].Hint, "basecamp connect worktrees list")
 }
 
 // fakeMCPServerArg marks a test binary run as the doctor's MCP server.
@@ -442,18 +522,41 @@ func TestTheDecisionCommandsSpeakSnakeCase(t *testing.T) {
 	assert.NotContains(t, out, `"StillHeld"`)
 }
 
-// Until the worktree driver lands, status says the retained worktrees are
-// unavailable — never that there are none.
-func TestStatusSaysWorktreesAreUnavailableNotNone(t *testing.T) {
+// Status reads card 19's worktree ledger: the worktrees the connector kept
+// are what it reports, with why each is kept.
+func TestStatusReportsTheWorktreesTheConnectorKept(t *testing.T) {
+	ctx := context.Background()
 	f := newOperatorFixture(t)
-	require.NoError(t, f.ledger(t, false).Close())
+	l := f.ledger(t, false)
+	id, err := l.BeginWorktree(ctx, connector.Worktree{
+		Path: "/w/one", WorkDir: "/w/one/app", Route: "app",
+		Repository: "/repo", Branch: "basecamp-connect/1-a1b2c3", BaseCommit: "abc",
+	})
+	require.NoError(t, err)
+	require.NoError(t, l.MoveWorktree(ctx, id, connector.WorktreeLive, connector.WorktreeCreating))
+	require.NoError(t, l.RetainWorktree(ctx, id, connector.RetainedDirty, connector.WorktreeLive))
+	require.NoError(t, l.Close())
 
 	styled, err := f.run(t, output.FormatStyled, "status")
 	require.NoError(t, err, styled)
-	assert.Contains(t, styled, "Worktrees      unavailable")
-	assert.NotContains(t, styled, "0 retained")
+	assert.Contains(t, styled, "Worktrees      1 retained")
+	assert.Contains(t, styled, "/w/one dirty")
+	assert.NotContains(t, styled, "Worktrees      unavailable")
 
 	out, err := f.run(t, output.FormatJSON, "status")
 	require.NoError(t, err, out)
-	assert.Contains(t, out, `"worktrees_known": false`)
+	assert.Contains(t, out, `"worktrees_known": true`)
+	assert.Contains(t, out, `"reason": "dirty"`)
+}
+
+// A listing that could not be read is unavailable, never none: the
+// distinction the nil lister carried is now what a failed listing carries.
+func TestStatusSaysWorktreesAreUnavailableNotNone(t *testing.T) {
+	var buf bytes.Buffer
+	renderConnectStatus(&buf, connectStatusReport{Profile: "agent", Status: connector.Status{
+		Queues: map[string]int{}, Blocked: map[string]int{},
+		WorktreesUnavailable: "the worktrees table cannot be read",
+	}})
+	assert.Contains(t, buf.String(), "Worktrees      unavailable: the worktrees table cannot be read")
+	assert.NotContains(t, buf.String(), "0 retained")
 }

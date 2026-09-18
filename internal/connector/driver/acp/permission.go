@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"slices"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
@@ -201,6 +202,14 @@ func (s *session) refuse(id json.RawMessage, req driver.PermissionRequest, t *tu
 	s.conn.reply(id, map[string]any{"outcome": map[string]any{"outcome": outcomeCanceled}})
 }
 
+// ErrRefusalMemoryFull is a session that has refused more distinct tool calls
+// than it can remember having refused (maxRecorded). Once-per-tool-call is
+// this driver's guarantee to the ledger, and past that bound a repeat cannot
+// be told from a first: the session ends, and writes no further refusal it
+// cannot promise is the only one, rather than going on and recording the same
+// tool call twice.
+var ErrRefusalMemoryFull = errors.New("acp: a session has refused more tool calls than it can remember, and cannot record another only once")
+
 // record puts a refusal on the turn it belongs to (invariant 4): the turn the
 // request was read in, which its claim carried. A request read in no turn
 // belongs to no turn — it is recorded in the ledger and on nothing else,
@@ -218,9 +227,25 @@ func (s *session) record(req driver.PermissionRequest, t *turn) {
 	s.mu.Lock()
 	// An id the agent did not give cannot be told from another: such a
 	// refusal is recorded every time rather than folded into one.
-	first := req.ToolCallID == "" || !s.recorded[key]
-	if len(s.recorded) < maxRecorded {
+	// A named one is recorded while the session can still remember having
+	// recorded it, and not once it cannot (ErrRefusalMemoryFull).
+	first := req.ToolCallID == "" || (!s.recordedFull && !s.recorded[key])
+	var (
+		ending bool
+		failed *turn
+		end    func()
+	)
+	if first && req.ToolCallID != "" {
 		s.recorded[key] = true
+		if len(s.recorded) >= maxRecorded {
+			// The last id this session can remember. Past it a repeat cannot
+			// be told from a first, so the session ends here rather than go
+			// on writing a refusal the ledger already has: once per tool
+			// call is the guarantee, and a client that cannot keep it stops.
+			s.recordedFull = true
+			ending = s.failLocked(ErrRefusalMemoryFull)
+			failed, end = s.turn, s.endUnsafe
+		}
 	}
 	if t != nil && s.turn == t && len(t.refusals) < maxRefusals && (req.ToolCallID == "" || !t.seen[key]) {
 		if t.seen == nil {
@@ -238,6 +263,9 @@ func (s *session) record(req driver.PermissionRequest, t *turn) {
 	// what happens when the ledger refuses the write.
 	if first && recorder != nil {
 		_ = recorder.RecordRefusal(context.Background(), refusal)
+	}
+	if ending {
+		s.endAfterTurn(failed, end)
 	}
 }
 

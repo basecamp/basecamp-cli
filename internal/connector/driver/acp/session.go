@@ -69,8 +69,12 @@ type session struct {
 	red *driver.Redactor
 	// recorder records each refusal once, as it is made (driver's
 	// "Refusals"); recorded is the tool call ids already recorded.
-	recorder      driver.RefusalRecorder
-	recorded      map[[sha256.Size]byte]bool
+	recorder driver.RefusalRecorder
+	recorded map[[sha256.Size]byte]bool
+	// recordedFull is set once recorded reaches maxRecorded: the session can
+	// remember no further tool call id, so it records no further refusal for
+	// one, and ends (ErrRefusalMemoryFull).
+	recordedFull  bool
 	replaying     bool
 	updatesClosed bool
 	closed        bool
