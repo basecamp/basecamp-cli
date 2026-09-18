@@ -1042,6 +1042,49 @@ func TestEveryRefusalCodexOnlyLogsIsRecorded(t *testing.T) {
 	assert.Len(t, result.Refusals, 3)
 }
 
+// A refusal read after the session's updates have closed is recorded and its
+// update dropped, not a panic. The reader owns the close, but it is not the
+// only goroutine that reads the worker's last word: a prompt's writer
+// finishing a canceled turn, and the policy check ending an unsafe one, both
+// call lastWord from goroutines of their own, and either may reach it after
+// the reader has gone. This makes that ordering rather than waiting for it —
+// the worker logs its refusal only once the reader has given up on it — and
+// then reads the last word from a goroutine that is not the reader's, as
+// those two do.
+func TestARefusalReadAfterTheUpdatesCloseIsNotAPanic(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t, scenario{
+		TurnContext: safeTurnContext(),
+		Events:      []string{`{"type":"turn.started"}`},
+		// The output ends while the worker lives on, so the reader waits out
+		// its grace and ends having read a stderr with no refusal in it.
+		CloseStdout: true,
+		Hang:        true,
+		// The refusal Codex logs on its way out, after all that.
+		StderrOnTerm: "patch rejected: writing outside of the project; rejected by user approval settings",
+	})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+	session := s.(*session)
+	go func() { _, _ = s.Prompt(context.Background(), "Event 1.") }()
+	// Drains until the session's updates are closed, which is the ordering
+	// this test is built on: no duration is waited out for it.
+	for range s.Updates() { //nolint:revive // the drain is the wait
+	}
+	require.Empty(t, recorder.Recorded(), "the reader ended having read no refusal")
+
+	// Now the worker is ended, and logs the refusal on its way out.
+	require.NoError(t, s.Close())
+	require.Eventually(t, func() bool { return strings.Contains(session.StderrTail(), "rejected") },
+		10*time.Second, 20*time.Millisecond, "the worker logged its refusal on its way out")
+	session.stderrRefusals()
+
+	assert.Len(t, recorder.Recorded(), 1,
+		"the refusal is recorded, and the update it carries is dropped rather than sent on a closed channel")
+}
+
 // A refusal Codex logged is recorded even when the turn it belonged to has
 // already ended: the reader reads the stderr of a worker that is gone, with
 // no turn left to hang it on.
