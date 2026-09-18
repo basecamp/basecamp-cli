@@ -444,7 +444,9 @@ type harnessRun struct {
 	StateDir string
 	// Fault is a standing misbehavior of the fake Basecamp for the run:
 	// "stall-catch-up" holds the feed's first poll until the socket has
-	// served every live event; "repair-stall" never answers a repair poll.
+	// served every live event; "repair-stall" never answers a repair poll;
+	// "guard-after-running" holds a guard acknowledgement until the
+	// connector has written its running line for an attempt.
 	Fault string
 	// Env is added to the connector's environment.
 	Env []string

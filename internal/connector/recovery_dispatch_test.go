@@ -621,24 +621,25 @@ func TestRecoveryTheGuardAcknowledgementIsPostedAtMostOnce(t *testing.T) {
 				// The guard is due a delay after admission, and the rows
 				// kill the connector as it posts. That kill must land on an
 				// attempt already running — a worker recorded, so a restart
-				// can end it and settle — and the delay is what buys the
-				// launch that time: a working directory, the ledger, the
-				// token socket, the agent's wrapper and, for the acp row,
-				// its whole handshake. At 50ms a loaded CI runner lost that
-				// race, the attempt was left launching with no worker to
-				// identify, and the restart held it rather than settle, as
-				// it must. A second is not a sleep for an outcome, it is the
-				// guard's own period, sized so the launch fits; the check
-				// after the kill says so when it does not, in a moment
-				// rather than at the surviving run's deadline.
+				// can end it and settle — and the launch it races (a working
+				// directory, the ledger, the token socket, the agent's
+				// wrapper and, for the acp row, its whole handshake) takes
+				// what the machine gives it: on a loaded CI runner, more than
+				// the guard's 50ms, and the attempt was left launching with
+				// no worker to identify, held by the restart rather than
+				// settled, as it must be. So the fake Basecamp holds the
+				// acknowledgement until the connector has written its running
+				// line ("guard-after-running"): the ordering is made, not
+				// waited for, and the guard's period can stay short. The
+				// check after the kill is what that ordering promises.
 				h := newHarness(t, d, harnessScenario{
-					GuardDelay: time.Second,
+					GuardDelay: 50 * time.Millisecond,
 					Plans:      map[string][]string{"101#1": {"linger"}},
 				})
 				h.publish(feedEntry{Event: todoEvent(101, 5001)})
-				h.run(harnessRun{Kill: row.kill, Killed: true})
+				h.run(harnessRun{Kill: row.kill, Killed: true, Fault: "guard-after-running"})
 				require.NotEmpty(t, recordedWorkers(t, h.ledger()),
-					"the guard outran the launch: the attempt was still launching when the guard was due, so no restart can identify its worker or settle it")
+					"the kill landed on an attempt still launching: the acknowledgement was posted before the running line")
 				h.run(harnessRun{})
 				h.run(harnessRun{})
 
