@@ -722,15 +722,10 @@ BEGIN
 END;
 
 -- The acknowledgement settles with the delivery: the id a worker points at is
--- written by the statement that acknowledges, or never. Three things have to
--- hold together — nothing was recorded before, the row was still waiting to be
--- acknowledged, and this same statement acknowledges it. Writing the id while
--- leaving the row exposed would put an id in the receipt that no worker ever
--- reported.
+-- written when it acknowledges, or never.
 CREATE TRIGGER task_events_acknowledgement_settles_once
 BEFORE UPDATE OF ack_id ON task_events
-WHEN NEW.ack_id IS NOT OLD.ack_id
- AND (OLD.ack_id IS NOT NULL OR OLD.delivery <> 'exposed' OR NEW.delivery <> 'delivered')
+WHEN NEW.ack_id IS NOT OLD.ack_id AND (OLD.ack_id IS NOT NULL OR OLD.delivery <> 'exposed')
 BEGIN
   SELECT RAISE(ABORT, 'an acknowledgement id is written with the acknowledgement, once');
 END;
@@ -799,6 +794,24 @@ WHEN (OLD.delivery = 'admitted' AND NEW.delivery IN ('delivered', 'completed'))
       AND NOT EXISTS (SELECT 1 FROM events WHERE id = OLD.event_id AND state = 'completed'))
 BEGIN
   SELECT RAISE(ABORT, 'a worker acknowledges and completes what it pulled; anything else is the dispatcher settling a completed record');
+END;
+`,
+	// 6. The acknowledgement id settles with the acknowledgement.
+	//
+	// Migration 5 shipped a trigger that read only the row as it was, so a
+	// statement could write the id and leave the row exposed — an id in the
+	// receipt that no worker ever reported. A ledger already at version 5
+	// keeps that trigger, so replacing it is its own migration rather than an
+	// edit to one that has shipped.
+	`
+DROP TRIGGER task_events_acknowledgement_settles_once;
+
+CREATE TRIGGER task_events_acknowledgement_settles_once
+BEFORE UPDATE OF ack_id ON task_events
+WHEN NEW.ack_id IS NOT OLD.ack_id
+ AND (OLD.ack_id IS NOT NULL OR OLD.delivery <> 'exposed' OR NEW.delivery <> 'delivered')
+BEGIN
+  SELECT RAISE(ABORT, 'an acknowledgement id is written with the acknowledgement, once');
 END;
 `,
 }

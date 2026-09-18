@@ -2,7 +2,10 @@ package connector
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -591,4 +594,59 @@ func TestAcknowledgingWritesTheIDItWasGiven(t *testing.T) {
 	require.NotNil(t, got)
 	assert.Equal(t, int64(99), *got)
 	assert.Equal(t, "delivered", f.rowContext(ctx, t, 1).Delivery)
+}
+
+// A ledger born under migration 5 carries that migration's trigger, which
+// read only the row as it was. Editing migration 5 would have left every such
+// ledger with it, because migrate skips what it has already applied — so the
+// replacement is migration 6, and this is the upgrade actually happening.
+func TestAnExistingLedgerGetsTheTighterAcknowledgementRule(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "state", "connector.db")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+
+	// A ledger as the previous version wrote it: migrations 1 through 5 and
+	// nothing after them.
+	old, err := sql.Open("sqlite", ledgerDSN(path, true))
+	require.NoError(t, err)
+	_, err = old.ExecContext(ctx, `CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`)
+	require.NoError(t, err)
+	for i := 0; i < 5; i++ {
+		_, err = old.ExecContext(ctx, migrations[i])
+		require.NoError(t, err, "migration %d", i+1)
+		_, err = old.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES (?, 'then')`, i+1)
+		require.NoError(t, err)
+	}
+	require.NoError(t, old.Close())
+	// The connector's own open makes the file private; a raw sql.Open does
+	// not, and the privacy check refuses what it finds.
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		if _, err := os.Stat(name); err == nil {
+			require.NoError(t, os.Chmod(name, 0o600))
+		}
+	}
+
+	ledger, err := OpenLedger(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ledger.Close() })
+	version, err := ledger.SchemaVersion(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, len(migrations), version, "the upgrade ran")
+
+	// The same refusal the fresh-ledger test pins, on a ledger that was not
+	// born with it.
+	for _, id := range []int64{1, 2} {
+		seenRecord(t, ledger, id)
+		_, err := ledger.Admission().Commit(ctx, admittedVerdict(id, 0, "recording:10304028989"))
+		require.NoError(t, err)
+	}
+	grant, err := ledger.CreateTask(ctx, []int64{1, 2})
+	require.NoError(t, err)
+	_, err = ledger.db.ExecContext(ctx, `UPDATE task_events SET delivery = 'exposed', exposed_at = 'launch' WHERE event_id = 1`)
+	require.NoError(t, err)
+
+	_, err = ledger.db.ExecContext(ctx, `UPDATE task_events SET ack_id = 99 WHERE task_id = ? AND event_id = 1`, grant.ID)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "an acknowledgement id is written with the acknowledgement, once")
 }
