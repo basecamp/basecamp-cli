@@ -320,9 +320,14 @@ func Parse(data []byte) (File, error) {
 	return f, nil
 }
 
-// refuseNullProjects names the project whose entry is null, which the type's
-// own refusal cannot. A malformed trust anchor withholds authorization; this
-// only makes the refusal findable.
+// refuseMalformedProjects names the project an entry belongs to when the
+// entry is one admission.Project refuses. It decodes each entry through that
+// type, so it refuses everything the type refuses — a null entry, an unknown
+// field, a value of the wrong type, a legacy path that is not the absolute
+// POSIX path the old writer wrote — and not a null entry alone. The strict
+// decode in Parse refuses the same file; what it cannot say is which of the
+// served projects carried the entry. A malformed trust anchor withholds
+// authorization either way; this only makes the refusal findable.
 func refuseMalformedProjects(data []byte) error {
 	var shape struct {
 		Projects map[string]json.RawMessage `json:"projects"`

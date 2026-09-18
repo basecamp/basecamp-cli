@@ -310,11 +310,20 @@ func verifyPerson(ctx context.Context, r Reader, name string, p Person, agentID 
 // anchor by hand — so it is written, and warned about.
 func ProjectChecks(ctx context.Context, r Reader, f File, firstSetup bool) []Check {
 	if len(f.Projects) == 0 {
+		// Not every mention is answered, and it is not only mentions that
+		// are. Gate checks scope and trust before it checks whether the
+		// project is served, so an event it drops there is discarded and
+		// never replied to; what reaches the served check is a mention from
+		// a trusted person or an operator's assignment, and both of those
+		// carry Acknowledge, so both get the holding reply. Telling an
+		// operator that every mention is answered promises more than the
+		// code does.
 		c := Check{
 			Name:   "Projects",
 			Status: StatusWarn,
-			Message: "No project is served: this agent is handed no work at all, and every mention gets a holding reply. " +
-				"The connector will start and do nothing.",
+			Message: "No project is served: this agent is handed no work at all, and the connector will start and do nothing. " +
+				"A mention from a trusted person, or an assignment from the operator, gets a holding reply; " +
+				"anything else — an untrusted mention, a project outside --project, a subscription, a completion — is discarded unanswered.",
 			// Quoted, not interpolated: this is a line we tell an operator
 			// to paste into a shell, and a profile name comes from a
 			// configuration file, which is not held to the check that
@@ -325,7 +334,8 @@ func ProjectChecks(ctx context.Context, r Reader, f File, firstSetup bool) []Che
 		}
 		if firstSetup {
 			c.Status = StatusFail
-			c.Message = "No project is served: every mention would get a holding reply and no work"
+			c.Message = "No project is served: a mention from a trusted person, or an assignment from the operator, " +
+				"would get a holding reply and no work; anything else would be discarded unanswered"
 		}
 		return []Check{c}
 	}
