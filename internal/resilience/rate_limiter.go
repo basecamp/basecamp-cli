@@ -12,6 +12,9 @@ import (
 type RateLimiter struct {
 	config RateLimiterConfig
 	store  *Store
+	// clock is the time the limiter reads. A field so that a test can put
+	// the deadline boundary where it wants it instead of racing a real one.
+	clock func() time.Time
 }
 
 // NewRateLimiter creates a new rate limiter with the given config.
@@ -30,12 +33,13 @@ func NewRateLimiter(store *Store, config RateLimiterConfig) *RateLimiter {
 	return &RateLimiter{
 		config: config,
 		store:  store,
+		clock:  time.Now,
 	}
 }
 
 // now returns the current time.
 func (rl *RateLimiter) now() time.Time {
-	return time.Now()
+	return rl.clock()
 }
 
 // refill adds tokens based on elapsed time since last refill.
@@ -78,9 +82,11 @@ func (rl *RateLimiter) take() (allowed bool, wait time.Duration, blocked bool) {
 		rlState := &state.RateLimiter
 		now := rl.now()
 
-		// Check Retry-After block
-		if rlState.IsBlocked() {
-			allowed, blocked, wait = false, true, rlState.BlockedFor()
+		// Check Retry-After block, against the transaction's own now the
+		// way the refill below is, and not against a second reading of the
+		// clock inside the state.
+		if blockEnds := rlState.RetryAfterUntil; blockEnds.After(now) {
+			allowed, blocked, wait = false, true, blockEnds.Sub(now)
 			return nil
 		}
 

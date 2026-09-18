@@ -28,8 +28,10 @@ func (e *GateError) Error() string { return e.Message }
 // Unwrap returns the SDK sentinel the rejection stands for.
 func (e *GateError) Unwrap() error { return e.sentinel }
 
-// pause sleeps for d or until ctx is done, whichever comes first.
-func pause(ctx context.Context, d time.Duration) error {
+// pause sleeps for d or until ctx is done, whichever comes first. A
+// variable, like jitter, so that a test can wake a gate on its own terms
+// rather than waiting on a real timer and hoping about the wake-up.
+var pause = func(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {
