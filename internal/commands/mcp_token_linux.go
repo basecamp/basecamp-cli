@@ -1,4 +1,4 @@
-//go:build unix
+//go:build linux
 
 package commands
 
@@ -26,11 +26,18 @@ const firstTokenFD = 3
 // exists at a path, in argv or in the environment; once read, the descriptor
 // is gone too, and nothing this process starts can inherit it.
 //
-// Descriptors below firstTokenFD are refused. Only a pipe or a socket is
-// taken, and anything else is left
-// exactly as it was — not read, not closed: a regular file would be the token
-// at a path, and a wrong number could name a descriptor this process already
-// uses.
+// This file is built for Linux alone, and shares that constraint with
+// internal/cli's inherited_fds_linux.go on purpose: a credential may arrive
+// on an inherited descriptor only where startup has already sealed every
+// inherited descriptor against the children the pre-command hooks start.
+// Everywhere else mcp_token_other.go refuses the handover, and
+// TestTheTokenIsOnlyReadWhereItIsSealed holds the two constraints together.
+//
+// Descriptors below sysfd.FirstNonStandard are refused: stdin and stdout are
+// the MCP wire, and stderr is the log. Only a pipe or a socket is taken, and
+// anything else is left exactly as it was — not read, not closed: a regular
+// file would be the token at a path, and a wrong number could name a
+// descriptor this process already uses.
 //
 // The read ends at the first newline or at end of file, and is bounded in
 // size and in time, so a write end left open somewhere cannot hang startup. A
