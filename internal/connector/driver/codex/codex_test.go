@@ -1063,63 +1063,81 @@ func (l *heldLedger) RecordRefusal(ctx context.Context, refusal driver.Refusal) 
 // write, so the reader is provably stopped on the first of two refusals with
 // the second still unread, and the verdict lands while it is there.
 func TestAnUnsafeVerdictWaitsForWhatTheWorkerPutOnItsStream(t *testing.T) {
-	ledger := &heldLedger{writing: make(chan struct{}, 1), release: make(chan struct{})}
 	denial := func(id string) string {
 		return `{"type":"item.completed","item":{"id":"` + id + `","type":"mcp_tool_call","server":"other","tool":"write",` +
 			`"error":{"message":"MCP tool call requires approval, but approval policy is never"},"status":"failed"}}`
 	}
 	unsafe := safeTurnContext()
 	unsafe["approval_policy"] = "on-request"
-	h := newHarness(t, scenario{
-		TurnContext:            unsafe,
-		TurnContextAfterEvents: true,
-		Events:                 []string{`{"type":"turn.started"}`, denial("item_1"), denial("item_2")},
-		// No turn.completed: the worker is still working when the check ends
-		// it, which is what this ending is for.
-		Hang: true,
-	})
-	cfg := h.config()
-	cfg.Refusals = ledger
-	s, err := h.drv.NewSession(context.Background(), cfg)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = s.Close() })
+	for name, deaf := range map[string]bool{
+		"a worker that took its prompt": false,
+		// Ending the worker closes its stdin, which wakes a prompt still
+		// blocked writing it. That writer is an ending of its own, and it
+		// would report the session as ended rather than as unsafe.
+		"a worker that stopped reading its input": true,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ledger := &heldLedger{writing: make(chan struct{}, 1), release: make(chan struct{})}
+			h := newHarness(t, scenario{
+				TurnContext:            unsafe,
+				TurnContextAfterEvents: true,
+				Events:                 []string{`{"type":"turn.started"}`, denial("item_1"), denial("item_2")},
+				Deaf:                   deaf,
+				// No turn.completed: the worker is still working when the
+				// check ends it, which is what this ending is for.
+				Hang: true,
+			})
+			cfg := h.config()
+			cfg.Refusals = ledger
+			s, err := h.drv.NewSession(context.Background(), cfg)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = s.Close() })
 
-	type answer struct {
-		result driver.PromptResult
-		err    error
+			type answer struct {
+				result driver.PromptResult
+				err    error
+			}
+			// A prompt long enough to fill the pipe, so a worker that does
+			// not read it leaves the write blocked.
+			prompt := "Task 1. Event 2."
+			if deaf {
+				prompt = strings.Repeat("Event 1. ", 200_000)
+			}
+			answers := make(chan answer, 1)
+			go func() {
+				result, err := s.Prompt(context.Background(), prompt)
+				answers <- answer{result, err}
+			}()
+			<-ledger.writing
+
+			// The reader is held on the first refusal with the second behind
+			// it, and the turn is in flight.
+			session := s.(*session)
+			session.mu.Lock()
+			inFlight := session.turn.done
+			session.mu.Unlock()
+
+			// The turn must not finish while the reader is held — and if it
+			// does, that is the failure, so the ledger is let go the moment
+			// it does. The half second is only what lets the run finish when
+			// it does not.
+			go func() {
+				select {
+				case <-inFlight:
+				case <-time.After(500 * time.Millisecond):
+				}
+				close(ledger.release)
+			}()
+
+			got := <-answers
+			require.ErrorIs(t, got.err, driver.ErrUnsafeMode, "an unsafe session is reported as unsafe, whoever gets to the turn first")
+			require.ErrorContains(t, got.err, `Codex applied "on-request"`)
+			assert.Len(t, ledger.Recorded(), 2, "both refusals reach the ledger")
+			assert.Len(t, got.result.Refusals, 2,
+				"the result carries what the ledger carries, and carries %d of the %d recorded",
+				len(got.result.Refusals), len(ledger.Recorded()))
+		})
 	}
-	answers := make(chan answer, 1)
-	go func() {
-		result, err := s.Prompt(context.Background(), "Task 1. Event 2.")
-		answers <- answer{result, err}
-	}()
-	<-ledger.writing
-
-	// The reader is held on the first refusal with the second behind it, and
-	// the turn is in flight.
-	session := s.(*session)
-	session.mu.Lock()
-	inFlight := session.turn.done
-	session.mu.Unlock()
-
-	// The turn must not finish while the reader is held — and if it does,
-	// that is the failure, so the ledger is let go the moment it does. The
-	// half second is only what lets the run finish when it does not.
-	go func() {
-		select {
-		case <-inFlight:
-		case <-time.After(500 * time.Millisecond):
-		}
-		close(ledger.release)
-	}()
-
-	got := <-answers
-	require.ErrorIs(t, got.err, driver.ErrUnsafeMode)
-	require.ErrorContains(t, got.err, `Codex applied "on-request"`)
-	assert.Len(t, ledger.Recorded(), 2, "both refusals reach the ledger")
-	assert.Len(t, got.result.Refusals, 2,
-		"the result carries what the ledger carries, and carries %d of the %d recorded",
-		len(got.result.Refusals), len(ledger.Recorded()))
 }
 
 // A session closed under a turn still reports the refusals that turn made.

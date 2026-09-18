@@ -474,6 +474,12 @@ type turn struct {
 	result   driver.PromptResult
 	err      error
 	canceled bool
+	// settling is a turn an ending has claimed: it is the one that finishes
+	// it, and every other ending leaves it alone. The turn stays the
+	// session's while it settles — a refusal read in the meantime still
+	// lands on it, which is the whole reason the claim is a flag and not a
+	// removal.
+	settling bool
 	refusals []driver.Refusal
 }
 
@@ -627,13 +633,40 @@ func (s *session) readerDone() {
 	}
 }
 
-func (s *session) finish(t *turn, result driver.PromptResult, err error) {
+// claim takes the turn in flight for the ending that is about to finish it,
+// so that no other ending can. It is what an ending does when it must be the
+// one reported and cannot be the first to get there — the unsafe verdict,
+// whose own act of ending the worker wakes the prompt's writer.
+//
+// It returns nil when there is no turn, or when another ending has it.
+func (s *session) claim() *turn {
 	s.mu.Lock()
-	if s.turn != t {
+	defer s.mu.Unlock()
+	if s.turn == nil || s.turn.settling {
+		return nil
+	}
+	s.turn.settling = true
+	return s.turn
+}
+
+// finish ends t with its result, unless an ending has claimed it.
+func (s *session) finish(t *turn, result driver.PromptResult, err error) {
+	s.end(t, result, err, false)
+}
+
+// settle ends a turn this ending claimed, giving up the claim in the same
+// step so that nothing can come between the two.
+func (s *session) settle(t *turn, result driver.PromptResult, err error) {
+	s.end(t, result, err, true)
+}
+
+func (s *session) end(t *turn, result driver.PromptResult, err error, claimed bool) {
+	s.mu.Lock()
+	if s.turn != t || (t.settling && !claimed) {
 		s.mu.Unlock()
 		return
 	}
-	s.turn = nil
+	s.turn, t.settling = nil, false
 	s.mu.Unlock()
 	t.result, t.err = result, err
 	close(t.done)
@@ -800,29 +833,28 @@ func (s *session) threadStarted(id string) {
 
 // unsafe ends the turn in flight with err and the process group.
 //
-// It runs on the policy check's own goroutine, which is the one thing that
-// ends a turn without being the reader. The refusals Codex put on its stream
-// are the reader's to record, so the reader is given the worker's output
-// before the turn is finished: ending it the moment the worker died would
-// hand back a result short of the refusals the ledger goes on to hold, which
-// is the one thing this ending is for.
+// It runs on the policy check's own goroutine, which is the one ending that
+// is not the reader's, and the one ending that must be reported: an unsafe
+// session is reported as unsafe (invariant 3). So it claims the turn before
+// it touches the worker. Ending the worker closes the worker's stdin, and a
+// prompt still blocked writing that stdin — a worker that stopped reading
+// its input — wakes on the close and would otherwise finish this turn itself,
+// with its own ErrSessionEnded, over a session already known to be unsafe.
+//
+// Then the reader is given the worker's output. The refusals Codex put on
+// its stream are the reader's to record, and a worker that is gone is not a
+// stream that has been read: asking the turn what it refused at the instant
+// the worker died answers short of what the ledger goes on to hold, which
+// for this ending is the one thing it is for.
 func (s *session) unsafe(err error) {
-	s.mu.Lock()
-	t := s.turn
-	s.mu.Unlock()
+	t := s.claim()
+	s.worker.Terminate(0)
 	if t == nil {
-		s.worker.Terminate(0)
 		return
 	}
-	// The worker goes first — the reader is not through the output until the
-	// worker has stopped writing it — and then the reader is waited for.
-	s.worker.Terminate(0)
 	s.readerDone()
-	// By now the reader has usually ended the turn itself, as unsafe: the
-	// verdict is this one, recorded before this ran. This is for the turn it
-	// did not end — one already canceled, or one whose output a descendant
-	// outside the group still holds.
-	s.finishUnsafe(t, err)
+	s.lastWord()
+	s.settle(t, driver.PromptResult{Refusals: s.refusalsOf(t)}, err)
 }
 
 // finishUnsafe ends a turn whose session did not run under the policy it was
@@ -830,9 +862,11 @@ func (s *session) unsafe(err error) {
 // carries the refusals it made and logged before it was stopped, as every
 // other ending does.
 //
-// It says what the turn's refusals are at the moment it runs. On the reader
-// that is every refusal of the turn, because the reader has parsed the stream
-// up to here; off it, unsafe waits for the reader first, for the same reason.
+// This is the reader's way of ending such a turn, and it says what the
+// turn's refusals are at the moment it runs — which on the reader is every
+// refusal of the turn, because the reader has parsed the stream up to here.
+// The policy check's own goroutine has unsafe, which waits for the reader
+// first, for that same reason.
 func (s *session) finishUnsafe(t *turn, err error) {
 	s.worker.Terminate(0)
 	s.lastWord()
