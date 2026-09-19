@@ -325,7 +325,7 @@ func TestRecoveryPostsUnknownAndRedispatchRunsItAgain(t *testing.T) {
 		assert.Equal(t, int64(5001), notices[0].RecordingID, "on the recording that asked")
 
 		l := h.ledger()
-		got, err := l.Redispatch(context.Background(), 101, "operator")
+		got, err := l.Redispatch(context.Background(), 101, "operator", []int64{adapterBucketID})
 		require.NoError(t, err)
 		assert.False(t, got.Held)
 		h.run(harnessRun{})
@@ -553,9 +553,13 @@ func TestRecoveryTheDispatchPromptIsUnderBudget(t *testing.T) {
 }
 
 // An attempt whose worker the connector cannot identify is held, not settled:
-// it stays live in the ledger, its conversation and its working directory
-// stay its own, and no restart runs anything for it — while the dispatcher
-// goes on running work that does not need them.
+// it stays live in the ledger, its conversation stays its own, its slot stays
+// taken, and no restart runs anything for it — while the dispatcher goes on
+// running everything else.
+//
+// What it no longer holds is a directory. There is none to hold: every worker
+// runs where the connector was started, so another conversation in the same
+// project starts beside the held attempt rather than waiting behind it.
 //
 // The crash here is at launching, just after the attempt is written and
 // before the driver is asked for anything. No process exists, but the ledger
@@ -578,21 +582,22 @@ func TestRecoveryHoldsAnAttemptItCannotIdentify(t *testing.T) {
 		// other project has been dispatched and finished: proof that its
 		// recovery returned and its dispatcher went on, not merely that it
 		// logged a decision.
-		// A further event in the held project, on another recording, needs the
-		// held directory: it waits.
+		// A further event in the held project, on another recording, is
+		// another conversation. It runs: the held attempt takes a slot, not
+		// a directory.
 		h.publish(feedEntry{Event: todoEvent(104, 5004)})
+		h.run(harnessRun{Until: "state:104=completed", RequireLog: "cannot be identified"})
+		assert.Equal(t, string(OutcomeSucceeded), outcomeOf(t, l, 104))
 		for i, other := range []int64{105, 106} {
 			h.publish(feedEntry{Event: otherTodoEvent(other, 6001+int64(i))})
 			h.run(harnessRun{Until: "state:" + strconv.FormatInt(other, 10) + "=completed",
 				RequireLog: "cannot be identified"})
 			assert.Equal(t, string(OutcomeSucceeded), outcomeOf(t, l, other))
 		}
-		assert.Equal(t, StateAdmitted, stateOf(t, l, 104), "nothing new starts in the held directory")
-		assert.Equal(t, 0, h.handed(104))
 		assert.Equal(t, StateDispatched, stateOf(t, l, 101), "the record stays live: nobody may act on it but a person")
 		assert.Equal(t, 0, h.handed(101), "no worker was ever given the event")
 		attempts = harnessAttempts(t, l)
-		require.Len(t, attempts, 3, "the held attempt, and one for each event in the other project")
+		require.Len(t, attempts, 4, "the held attempt, and one for each event that ran beside it")
 		assert.Equal(t, string(AttemptLaunching), attempts[0].State)
 		assert.Empty(t, attempts[0].StopReason)
 		assert.Empty(t, h.notices(101), "an attempt that is still live has no completion to post")
@@ -668,11 +673,13 @@ func TestRecoveryTheGuardAcknowledgementIsPostedAtMostOnce(t *testing.T) {
 }
 
 // One owner, one release point: a worker's tree that outlives it keeps its
-// attempt live, its record non-terminal and its working directory unreleased,
-// through any number of restarts, because recovery holds an attempt whose
-// worker it cannot verify rather than settling around it — while it goes on
-// running work that does not need that directory. Once the tree is gone, the
-// next restart settles the attempt and releases the directory.
+// attempt live and its record non-terminal through any number of restarts,
+// because recovery holds an attempt whose worker it cannot verify rather than
+// settling around it — while it goes on running everything else. Once the
+// tree is gone, the next restart settles the attempt.
+//
+// What is held is the attempt's slot and its conversation, not a directory:
+// another conversation in the same project runs beside it.
 func TestRecoveryAWorkersSurvivingTreeKeepsItsAttempt(t *testing.T) {
 	forEachDriver(t, func(t *testing.T, d harnessDriver) {
 		raceSubset(t, false)
@@ -697,12 +704,14 @@ func TestRecoveryAWorkersSurvivingTreeKeepsItsAttempt(t *testing.T) {
 		drivertest.RequireGroupHeld(t, worker)
 
 		h.publish(feedEntry{Event: todoEvent(104, 5004)})
+		h.run(harnessRun{Until: "state:104=completed",
+			RequireLog: "could not verify whether a previous worker still runs"})
+		assert.Equal(t, string(OutcomeSucceeded), outcomeOf(t, l, 104), "another conversation runs beside the held attempt")
 		for i, other := range []int64{105, 106} {
 			h.publish(feedEntry{Event: otherTodoEvent(other, 6001+int64(i))})
 			h.run(harnessRun{Until: "state:" + strconv.FormatInt(other, 10) + "=completed",
 				RequireLog: "could not verify whether a previous worker still runs"})
-			assert.Equal(t, string(OutcomeSucceeded), outcomeOf(t, l, other), "work that does not need the held directory still runs")
-			assert.Equal(t, StateAdmitted, stateOf(t, l, 104), "nothing new starts in the held directory")
+			assert.Equal(t, string(OutcomeSucceeded), outcomeOf(t, l, other), "work in the other project still runs")
 
 			assert.Equal(t, string(AttemptRunning), attemptState(t, l, attempts[0].id), "the attempt stays live while its tree runs")
 			assert.Equal(t, StateDispatched, stateOf(t, l, 101), "the record is not made terminal")
@@ -722,7 +731,6 @@ func TestRecoveryAWorkersSurvivingTreeKeepsItsAttempt(t *testing.T) {
 		assert.Equal(t, string(OutcomeUnknown), outcomeOf(t, l, 101))
 		assert.Len(t, h.notices(101), 1)
 		assert.Equal(t, 1, h.handed(101), "and never run again")
-		assert.Equal(t, 1, h.handed(104), "the task settled, the waiting event runs")
 		h.assertNoWorkerOutlivedItsRecord()
 	})
 }

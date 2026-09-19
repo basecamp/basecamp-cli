@@ -57,7 +57,7 @@ func TestPostedAskIsRetractedWhenItIsAnswered(t *testing.T) {
 		require.Equal(t, IntentSent, holding.State)
 
 		clock.Advance(12 * time.Minute)
-		_, err = ledger.Redispatch(ctx, 1, "jorge")
+		_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 		require.NoError(t, err)
 
 		in := obRetraction(t, ledger, holding, 1)
@@ -96,7 +96,7 @@ func TestPostedAskIsRetractedWhenItIsAnswered(t *testing.T) {
 		require.Contains(t, completion.Body, "Needs a person: basecamp connect redispatch 1")
 
 		clock.Advance(3 * time.Minute)
-		_, err = ledger.Redispatch(ctx, 1, "jorge")
+		_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 		require.NoError(t, err)
 
 		in := obRetraction(t, ledger, completion, 1)
@@ -143,7 +143,7 @@ func TestPostedAskIsRetractedWhenItIsAnswered(t *testing.T) {
 		holding := obIntent(t, ledger, holdingKey(1))
 		require.Equal(t, IntentSent, holding.State)
 
-		_, err = ledger.Redispatch(ctx, 1, "jorge")
+		_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 		require.NoError(t, err)
 		in := obRetraction(t, ledger, holding, 1)
 		assert.Equal(t, MessageChatLine, in.Destination.Kind)
@@ -161,7 +161,7 @@ func TestARetractionSpeaksOnlyForItsOwnEvent(t *testing.T) {
 	obAdmit(t, ledger, 1, "recording:10304028989")
 	l := obLaunch(t, ledger, 1)
 	obAdmit(t, ledger, 2, "recording:10304028989")
-	joined, err := ledger.JoinConversation(ctx, l.TaskID)
+	joined, err := ledger.JoinConversation(ctx, l.TaskID, []int64{adapterBucketID})
 	require.NoError(t, err)
 	require.Equal(t, []int64{2}, joined)
 	exposed, err := ledger.ExposeEvent(ctx, l.AttemptID, 2)
@@ -182,7 +182,7 @@ func TestARetractionSpeaksOnlyForItsOwnEvent(t *testing.T) {
 	// One of the two is decided. The other's ask is untouched, and the
 	// retraction does not speak for it.
 	clock.Advance(time.Minute)
-	_, err = ledger.Redispatch(ctx, 1, "jorge")
+	_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 	require.NoError(t, err)
 
 	first := obRetraction(t, ledger, completion, 1)
@@ -237,7 +237,7 @@ func TestARetractionWaitsWhileTheAskIsStillOpen(t *testing.T) {
 	require.Equal(t, IntentSent, holding.State)
 
 	clock.Advance(12 * time.Minute)
-	_, err = ledger.Redispatch(ctx, 1, "jorge")
+	_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 	require.NoError(t, err)
 	require.Equal(t, StateBlocked, getRecord(t, ledger, 1).State, "authorized, and still waiting on the route")
 
@@ -314,7 +314,7 @@ func TestAskStillOpenReadsWhatTheRecordIsWaitingFor(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, open(t, ctx, ledger, completion, 1), "unknown, and nobody has decided it")
 
-		_, err = ledger.Redispatch(ctx, 1, "jorge")
+		_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 		require.NoError(t, err)
 		assert.False(t, open(t, ctx, ledger, completion, 1), "redispatched: it is going to run")
 
@@ -407,7 +407,7 @@ func TestOnlyAnAskIsRetracted(t *testing.T) {
 	require.Equal(t, IntentSent, completion.State)
 
 	clock.Advance(time.Minute)
-	_, err = ledger.Redispatch(ctx, 1, "jorge")
+	_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 	require.NoError(t, err)
 
 	retractions := obRetractions(t, ledger)
@@ -429,7 +429,7 @@ func TestAnAskThatWasNeverSentIsNotRetracted(t *testing.T) {
 	completion := obIntent(t, ledger, completionKey(l.AttemptID))
 	require.Equal(t, IntentPending, completion.State)
 
-	_, err = ledger.Redispatch(ctx, 1, "jorge")
+	_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 	require.NoError(t, err)
 	assert.Empty(t, obRetractions(t, ledger))
 
@@ -454,7 +454,7 @@ func TestANoticeThatNeverAskedIsNotRetracted(t *testing.T) {
 	clock.Advance(5 * time.Minute)
 	_, err := ledger.EndAttempt(ctx, AttemptEnd{AttemptID: first.AttemptID, Stop: StopDeadline})
 	require.NoError(t, err)
-	_, err = ledger.Redispatch(ctx, 1, "jorge")
+	_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 	require.NoError(t, err)
 	basecamp := newFakeBasecamp(clock.Now)
 	ob := obOutbox(t, ledger, basecamp)
@@ -482,7 +482,7 @@ func TestRetractionWaitsForTheNoticeItAnswers(t *testing.T) {
 	t.Run("sent after the decision", func(t *testing.T) {
 		ctx := context.Background()
 		ledger, clock, ob, basecamp, holding := obSendingHoldingReply(t)
-		_, err := ledger.Redispatch(ctx, 1, "jorge")
+		_, err := ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 		require.NoError(t, err)
 		in := obRetraction(t, ledger, holding, 1)
 		require.Equal(t, IntentPending, in.State)
@@ -510,7 +510,7 @@ func TestRetractionWaitsForTheNoticeItAnswers(t *testing.T) {
 	t.Run("left indeterminate after the decision: it waits for the person", func(t *testing.T) {
 		ctx := context.Background()
 		ledger, clock, ob, basecamp, holding := obSendingHoldingReply(t)
-		_, err := ledger.Redispatch(ctx, 1, "jorge")
+		_, err := ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 		require.NoError(t, err)
 
 		_, err = ledger.settleReconciled(ctx, holding.ID, 0, obUnreachableNote)
@@ -535,7 +535,7 @@ func TestAPersonsResolutionOfTheNoticeDecidesItsRetraction(t *testing.T) {
 	t.Run("resolved sent: the ask is on the card, so it is answered", func(t *testing.T) {
 		ctx := context.Background()
 		ledger, clock, ob, basecamp, holding := obSendingHoldingReply(t)
-		_, err := ledger.Redispatch(ctx, 1, "jorge")
+		_, err := ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 		require.NoError(t, err)
 		obRoutedNow(t, ledger, 1)
 
@@ -558,7 +558,7 @@ func TestAPersonsResolutionOfTheNoticeDecidesItsRetraction(t *testing.T) {
 	t.Run("resolved sent after the outbox ticked: still answered", func(t *testing.T) {
 		ctx := context.Background()
 		ledger, clock, ob, basecamp, holding := obSendingHoldingReply(t)
-		_, err := ledger.Redispatch(ctx, 1, "jorge")
+		_, err := ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 		require.NoError(t, err)
 		obRoutedNow(t, ledger, 1)
 
@@ -583,7 +583,7 @@ func TestAPersonsResolutionOfTheNoticeDecidesItsRetraction(t *testing.T) {
 	t.Run("abandoned: nothing was said, so nothing is answered", func(t *testing.T) {
 		ctx := context.Background()
 		ledger, clock, ob, basecamp, holding := obSendingHoldingReply(t)
-		_, err := ledger.Redispatch(ctx, 1, "jorge")
+		_, err := ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 		require.NoError(t, err)
 		obRoutedNow(t, ledger, 1)
 
@@ -632,7 +632,7 @@ func TestAnAskIsRetractedOnce(t *testing.T) {
 	holding := obIntent(t, ledger, holdingKey(1))
 
 	clock.Advance(12 * time.Minute)
-	_, err = ledger.Redispatch(ctx, 1, "jorge")
+	_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 	require.NoError(t, err)
 	obRoutedNow(t, ledger, 1)
 	// The retraction goes out, and names the command in its own words. A
@@ -650,7 +650,7 @@ func TestAnAskIsRetractedOnce(t *testing.T) {
 	_, err = ledger.EndAttempt(ctx, AttemptEnd{AttemptID: l.AttemptID, Stop: StopDeadline})
 	require.NoError(t, err)
 	require.Equal(t, IntentPending, obIntent(t, ledger, completionKey(l.AttemptID)).State)
-	_, err = ledger.Redispatch(ctx, 1, "jorge")
+	_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 	require.NoError(t, err)
 
 	retractions := obRetractions(t, ledger)
@@ -865,9 +865,9 @@ VALUES (7, 'holding_reply:event:1',         'holding_reply', 'sent', 1, 48699913
 
 	// A person routes the project and redispatches. Deciding the record
 	// again while its prerequisite runs answers nothing twice.
-	_, err := ledger.Redispatch(ctx, 1, "jorge")
+	_, err := ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 	require.NoError(t, err)
-	_, err = ledger.Redispatch(ctx, 1, "jorge")
+	_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 	require.NoError(t, err)
 
 	answered := map[int64]Intent{}
@@ -957,7 +957,7 @@ func TestALegacyRefusedStartReplyIsReadAsTheReasonItWasWrittenFor(t *testing.T) 
 		require.Equal(t, IntentSent, sent.State)
 
 		clock.Advance(12 * time.Minute)
-		_, err := ledger.Redispatch(ctx, 1, "jorge")
+		_, err := ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 		require.NoError(t, err)
 		require.Equal(t, StateBlocked, getRecord(t, ledger, 1).State, "authorized, and still blocked on route_unusable")
 

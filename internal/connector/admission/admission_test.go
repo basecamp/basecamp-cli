@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -49,7 +50,7 @@ const (
 )
 
 // TestEveryCatalogueTypeHasAVerdict runs one operator-performed event of every
-// cataloged type, in a routed project, through admission. The v1 matrix types
+// cataloged type, in a served project, through admission. The v1 matrix types
 // are admitted under their trigger; everything else is discarded at the gate
 // for the price of its pointer.
 func TestEveryCatalogueTypeHasAVerdict(t *testing.T) {
@@ -69,7 +70,7 @@ func TestEveryCatalogueTypeHasAVerdict(t *testing.T) {
 	for _, eventType := range catalog {
 		t.Run(eventType, func(t *testing.T) {
 			f := newFakeReads()
-			s := summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, "<div>please look "+mentionOf(t, agentID)+"</div>")
+			s := summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, "<div>please look "+mentionOf(t, agentID)+"</div>")
 			s.Parent = &basecamp.Parent{ID: parentID}
 			s.CampfireID = campfireID
 			s.Assignees = []basecamp.Person{{ID: agentID}}
@@ -77,7 +78,7 @@ func TestEveryCatalogueTypeHasAVerdict(t *testing.T) {
 			f.assignments[eventID] = []int64{agentID}
 
 			v := decide(t, newAdmitter(t, basePolicy(), f), Event{
-				ID: eventID, EventType: eventType, BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID,
+				ID: eventID, EventType: eventType, BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID,
 			})
 
 			want, inMatrix := admitted[eventType]
@@ -90,7 +91,7 @@ func TestEveryCatalogueTypeHasAVerdict(t *testing.T) {
 			assert.Equal(t, StateAdmitted, v.State, "reason %q", v.Reason)
 			assert.Equal(t, want, v.Trigger)
 			assert.Equal(t, operatorID, v.RequesterID)
-			assert.Equal(t, "/work/connector", v.Route)
+			assert.True(t, v.Served)
 			assert.Equal(t, "internal", v.Class)
 			require.NotNil(t, v.Snapshot)
 			assert.Contains(t, v.Snapshot.Content, "please look")
@@ -104,12 +105,12 @@ func TestMentionIsMatchedByPersonIDNeverByName(t *testing.T) {
 	// attachment names the agent's Person id.
 	content := `<div>@Marie Chef (Agent) please <bc-attachment sgid="` + basecampSGID(strangerID) +
 		`" content-type="application/vnd.basecamp.mention"><figure><img alt="Marie Chef (Agent)">Marie Chef (Agent)</figure></bc-attachment></div>`
-	s := summaryWith(recordingID, routedProj, "Message", operatorID, content)
+	s := summaryWith(recordingID, servedProj, "Message", operatorID, content)
 	require.Equal(t, []int64{strangerID}, s.MentionedPersonIDs)
 	f.summaries[recordingID] = s
 
 	v := decide(t, newAdmitter(t, basePolicy(), f), Event{
-		ID: eventID, EventType: "message.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID,
+		ID: eventID, EventType: "message.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID,
 	})
 	assert.Equal(t, StateDiscarded, v.State)
 	assert.Equal(t, ReasonNotAddressed, v.Reason)
@@ -129,12 +130,12 @@ func TestPublishedDraft(t *testing.T) {
 	} {
 		t.Run(tc.status, func(t *testing.T) {
 			f := newFakeReads()
-			s := summaryWith(recordingID, routedProj, "Message", operatorID, mentionOf(t, agentID))
+			s := summaryWith(recordingID, servedProj, "Message", operatorID, mentionOf(t, agentID))
 			s.Status = tc.status
 			f.summaries[recordingID] = s
 
 			v := decide(t, newAdmitter(t, basePolicy(), f), Event{
-				ID: eventID, EventType: "message.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID,
+				ID: eventID, EventType: "message.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID,
 			})
 			assert.Equal(t, tc.state, v.State)
 			assert.Equal(t, tc.reason, v.Reason)
@@ -151,11 +152,11 @@ func TestPublishedDraft(t *testing.T) {
 }
 
 func TestChatLine(t *testing.T) {
-	ev := Event{ID: eventID, EventType: "chat.line.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID}
+	ev := Event{ID: eventID, EventType: "chat.line.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID}
 
 	t.Run("mention in a line is answered in its Campfire", func(t *testing.T) {
 		f := newFakeReads()
-		s := summaryWith(recordingID, routedProj, "Chat::Lines::RichText", operatorID, mentionOf(t, agentID))
+		s := summaryWith(recordingID, servedProj, "Chat::Lines::RichText", operatorID, mentionOf(t, agentID))
 		s.CampfireID = campfireID
 		f.summaries[recordingID] = s
 
@@ -167,7 +168,7 @@ func TestChatLine(t *testing.T) {
 
 	t.Run("a line under no visible Campfire is blocked, not retried in place", func(t *testing.T) {
 		f := newFakeReads()
-		f.summaryErrs = []error{&basecamp.UnresolvedRecordingError{BucketID: routedProj, RecordingID: recordingID}}
+		f.summaryErrs = []error{&basecamp.UnresolvedRecordingError{BucketID: servedProj, RecordingID: recordingID}}
 
 		v := decide(t, newAdmitter(t, basePolicy(), f), ev)
 		assert.Equal(t, StateBlocked, v.State)
@@ -179,7 +180,7 @@ func TestChatLine(t *testing.T) {
 
 	t.Run("a resolved line without its Campfire cannot be answered", func(t *testing.T) {
 		f := newFakeReads()
-		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Chat::Lines::RichText", operatorID, mentionOf(t, agentID))
+		f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Chat::Lines::RichText", operatorID, mentionOf(t, agentID))
 
 		v := decide(t, newAdmitter(t, basePolicy(), f), ev)
 		assert.Equal(t, StateBlocked, v.State)
@@ -189,10 +190,10 @@ func TestChatLine(t *testing.T) {
 
 func TestAssignments(t *testing.T) {
 	ev := func(performer int64) Event {
-		return Event{ID: eventID, EventType: "card.assignment_changed", BucketID: routedProj, RecordingID: recordingID, CreatorID: performer}
+		return Event{ID: eventID, EventType: "card.assignment_changed", BucketID: servedProj, RecordingID: recordingID, CreatorID: performer}
 	}
 	card := func(f *fakeReads) {
-		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", strangerID, "<div>a card</div>")
+		f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", strangerID, "<div>a card</div>")
 	}
 
 	t.Run("an assignment that adds someone else is discarded", func(t *testing.T) {
@@ -256,7 +257,7 @@ func TestAssignments(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				f := newFakeReads()
 				card(f)
-				f.members[routedProj] = map[int64]bool{memberID: true}
+				f.members[servedProj] = map[int64]bool{memberID: true}
 				f.assignments[eventID] = []int64{agentID}
 				p := basePolicy()
 				tc.policy(&p)
@@ -271,12 +272,12 @@ func TestAssignments(t *testing.T) {
 }
 
 func TestAReadThatFailsFiveTimesBlocks(t *testing.T) {
-	ev := Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID}
+	ev := Event{ID: eventID, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID}
 
 	t.Run("five failures", func(t *testing.T) {
 		f := newFakeReads()
 		f.summaryErrs = []error{errTransport, errTransport, errTransport, errTransport, errTransport, nil}
-		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
+		f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
 
 		var waits int
 		a, err := NewAdmitter(basePolicy(), f.reads(), WithSleep(func(context.Context, time.Duration) error { waits++; return nil }))
@@ -291,7 +292,7 @@ func TestAReadThatFailsFiveTimesBlocks(t *testing.T) {
 	t.Run("four failures then an answer", func(t *testing.T) {
 		f := newFakeReads()
 		f.summaryErrs = []error{errTransport, errTransport, errTransport, errTransport}
-		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
+		f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
 
 		v := decide(t, newAdmitter(t, basePolicy(), f), ev)
 		assert.Equal(t, StateAdmitted, v.State)
@@ -300,10 +301,10 @@ func TestAReadThatFailsFiveTimesBlocks(t *testing.T) {
 
 	t.Run("a failed subscription read blocks too", func(t *testing.T) {
 		f := newFakeReads()
-		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, "<div>done</div>")
+		f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, "<div>done</div>")
 		f.subErr = errTransport
 
-		v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "card.completed", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+		v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "card.completed", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 		assert.Equal(t, StateBlocked, v.State)
 		assert.Equal(t, ReasonReadFailed, v.Reason)
 		assert.Len(t, f.subCalls, DefaultReadAttempts)
@@ -311,10 +312,10 @@ func TestAReadThatFailsFiveTimesBlocks(t *testing.T) {
 
 	t.Run("a failed assignment read blocks too", func(t *testing.T) {
 		f := newFakeReads()
-		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, "<div>card</div>")
+		f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, "<div>card</div>")
 		f.assignErr = errTransport
 
-		v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "card.assignment_changed", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+		v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "card.assignment_changed", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 		assert.Equal(t, StateBlocked, v.State)
 		assert.Equal(t, ReasonReadFailed, v.Reason)
 		assert.Equal(t, DefaultReadAttempts, f.assignCalls)
@@ -365,7 +366,7 @@ func TestAReadThatFailsFiveTimesBlocks(t *testing.T) {
 
 	t.Run("a canceled context during a subscription read is not a verdict", func(t *testing.T) {
 		f := newFakeReads()
-		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, "<div>done</div>")
+		f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, "<div>done</div>")
 		f.subErr = errTransport
 		ctx, cancel := context.WithCancel(context.Background())
 		a, err := NewAdmitter(basePolicy(), f.reads(), WithSleep(func(context.Context, time.Duration) error {
@@ -373,13 +374,13 @@ func TestAReadThatFailsFiveTimesBlocks(t *testing.T) {
 			return ctx.Err()
 		}))
 		require.NoError(t, err)
-		_, err = a.Decide(ctx, Event{ID: eventID, EventType: "card.completed", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+		_, err = a.Decide(ctx, Event{ID: eventID, EventType: "card.completed", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 		require.ErrorIs(t, err, context.Canceled)
 	})
 
 	t.Run("a canceled context during an assignment read is not a verdict", func(t *testing.T) {
 		f := newFakeReads()
-		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, "<div>card</div>")
+		f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, "<div>card</div>")
 		f.assignErr = errTransport
 		ctx, cancel := context.WithCancel(context.Background())
 		a, err := NewAdmitter(basePolicy(), f.reads(), WithSleep(func(context.Context, time.Duration) error {
@@ -387,7 +388,7 @@ func TestAReadThatFailsFiveTimesBlocks(t *testing.T) {
 			return ctx.Err()
 		}))
 		require.NoError(t, err)
-		_, err = a.Decide(ctx, Event{ID: eventID, EventType: "card.assignment_changed", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+		_, err = a.Decide(ctx, Event{ID: eventID, EventType: "card.assignment_changed", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 		require.ErrorIs(t, err, context.Canceled)
 	})
 
@@ -427,9 +428,9 @@ func TestCompletions(t *testing.T) {
 
 	t.Run("the agent has no stake: discarded", func(t *testing.T) {
 		f := newFakeReads()
-		todo(f, routedProj)
+		todo(f, servedProj)
 
-		v := decide(t, newAdmitter(t, basePolicy(), f), completion(routedProj, operatorID))
+		v := decide(t, newAdmitter(t, basePolicy(), f), completion(servedProj, operatorID))
 		assert.Equal(t, StateDiscarded, v.State)
 		assert.Equal(t, ReasonNotAddressed, v.Reason)
 		assert.Equal(t, []int64{recordingID}, f.subCalls, "the subscription asked is the completed recording's own")
@@ -437,9 +438,9 @@ func TestCompletions(t *testing.T) {
 
 	t.Run("assigned to the agent: admitted with no subscription read", func(t *testing.T) {
 		f := newFakeReads()
-		todo(f, routedProj).Assignees = []basecamp.Person{{ID: strangerID}, {ID: agentID}}
+		todo(f, servedProj).Assignees = []basecamp.Person{{ID: strangerID}, {ID: agentID}}
 
-		v := decide(t, newAdmitter(t, basePolicy(), f), completion(routedProj, operatorID))
+		v := decide(t, newAdmitter(t, basePolicy(), f), completion(servedProj, operatorID))
 		assert.Equal(t, StateAdmitted, v.State)
 		assert.Equal(t, TriggerCompleted, v.Trigger)
 		assert.Empty(t, f.subCalls)
@@ -447,10 +448,10 @@ func TestCompletions(t *testing.T) {
 
 	t.Run("subscribed: admitted", func(t *testing.T) {
 		f := newFakeReads()
-		todo(f, routedProj)
+		todo(f, servedProj)
 		f.subscriptions[recordingID] = true
 
-		v := decide(t, newAdmitter(t, basePolicy(), f), completion(routedProj, operatorID))
+		v := decide(t, newAdmitter(t, basePolicy(), f), completion(servedProj, operatorID))
 		assert.Equal(t, StateAdmitted, v.State)
 		assert.Equal(t, TriggerCompleted, v.Trigger)
 	})
@@ -464,16 +465,16 @@ func TestCompletions(t *testing.T) {
 		assert.Equal(t, TriggerCompleted, v.Trigger)
 		assert.False(t, v.Acknowledge, "a completion is not a request: no acknowledgement, no guard")
 		assert.Equal(t, &ReplyDestination{Kind: ReplyComment, RecordingID: recordingID}, v.Reply)
-		assert.Equal(t, "/work/board", v.Route)
+		assert.True(t, v.Served)
 		assert.Empty(t, f.subCalls)
 		assert.Equal(t, 1, f.summaryCalls)
 	})
 
 	t.Run("in a project with no route: discarded before any read", func(t *testing.T) {
 		f := newFakeReads()
-		todo(f, unmapped).Assignees = []basecamp.Person{{ID: agentID}}
+		todo(f, unservedProj).Assignees = []basecamp.Person{{ID: agentID}}
 
-		v := decide(t, newAdmitter(t, basePolicy(), f), completion(unmapped, operatorID))
+		v := decide(t, newAdmitter(t, basePolicy(), f), completion(unservedProj, operatorID))
 		assert.Equal(t, StateDiscarded, v.State)
 		assert.Equal(t, ReasonNoRoute, v.Reason)
 		assert.Zero(t, f.totalReads())
@@ -542,9 +543,9 @@ func TestTheAgentNeverAuthorizesItself(t *testing.T) {
 
 	t.Run("content the agent wrote, surfaced by a trusted person, is not an instruction", func(t *testing.T) {
 		f := newFakeReads()
-		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Todo", agentID, mentionOf(t, agentID))
+		f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Todo", agentID, mentionOf(t, agentID))
 
-		v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "todo.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+		v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "todo.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 		assert.Equal(t, StateDiscarded, v.State)
 		assert.Equal(t, ReasonAgentAuthored, v.Reason)
 	})
@@ -553,11 +554,11 @@ func TestTheAgentNeverAuthorizesItself(t *testing.T) {
 func TestContentAuthorMustBeTrusted(t *testing.T) {
 	// A to-do moved in from another project is served as todo.created with the
 	// mover as creator. The instruction in it is the original author's.
-	ev := Event{ID: eventID, EventType: "todo.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID}
+	ev := Event{ID: eventID, EventType: "todo.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID}
 
 	t.Run("an untrusted author", func(t *testing.T) {
 		f := newFakeReads()
-		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Todo", strangerID, mentionOf(t, agentID))
+		f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Todo", strangerID, mentionOf(t, agentID))
 
 		v := decide(t, newAdmitter(t, basePolicy(), f), ev)
 		assert.Equal(t, StateDiscarded, v.State)
@@ -566,7 +567,7 @@ func TestContentAuthorMustBeTrusted(t *testing.T) {
 
 	t.Run("an author the read did not name is a failed read, not an untrusted one", func(t *testing.T) {
 		f := newFakeReads()
-		s := summaryWith(recordingID, routedProj, "Todo", strangerID, mentionOf(t, agentID))
+		s := summaryWith(recordingID, servedProj, "Todo", strangerID, mentionOf(t, agentID))
 		s.Creator = nil
 		f.summaries[recordingID] = s
 
@@ -578,7 +579,7 @@ func TestContentAuthorMustBeTrusted(t *testing.T) {
 
 	t.Run("operator-written content moved in by an allowlisted person", func(t *testing.T) {
 		f := newFakeReads()
-		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Todo", operatorID, mentionOf(t, agentID))
+		f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Todo", operatorID, mentionOf(t, agentID))
 		p := basePolicy()
 		p.Trust = Trust{Mode: TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{allowedID}}
 		moved := ev
@@ -590,7 +591,7 @@ func TestContentAuthorMustBeTrusted(t *testing.T) {
 
 	t.Run("content written by another Agent principal", func(t *testing.T) {
 		f := newFakeReads()
-		s := summaryWith(recordingID, routedProj, "Todo", otherAgent, mentionOf(t, agentID))
+		s := summaryWith(recordingID, servedProj, "Todo", otherAgent, mentionOf(t, agentID))
 		s.Creator.PersonableType = "Agent"
 		f.summaries[recordingID] = s
 		p := basePolicy()
@@ -603,7 +604,7 @@ func TestContentAuthorMustBeTrusted(t *testing.T) {
 
 	t.Run("an allowlisted author moved in by the operator", func(t *testing.T) {
 		f := newFakeReads()
-		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Todo", allowedID, mentionOf(t, agentID))
+		f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Todo", allowedID, mentionOf(t, agentID))
 		p := basePolicy()
 		p.Trust = Trust{Mode: TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{allowedID}}
 
@@ -613,12 +614,12 @@ func TestContentAuthorMustBeTrusted(t *testing.T) {
 
 	t.Run("a subscription comment by an untrusted author", func(t *testing.T) {
 		f := newFakeReads()
-		s := summaryWith(recordingID, routedProj, "Comment", strangerID, "<div>go</div>")
+		s := summaryWith(recordingID, servedProj, "Comment", strangerID, "<div>go</div>")
 		s.Parent = &basecamp.Parent{ID: parentID}
 		f.summaries[recordingID] = s
 		f.subscriptions[parentID] = true
 
-		v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "comment.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+		v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "comment.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 		assert.Equal(t, StateDiscarded, v.State)
 		assert.Equal(t, ReasonUntrustedAuthor, v.Reason)
 	})
@@ -628,14 +629,14 @@ func TestProjectTrustMode(t *testing.T) {
 	p := basePolicy()
 	p.Trust = Trust{Mode: TrustProject, OperatorID: operatorID}
 	comment := func(performer int64) Event {
-		return Event{ID: eventID, EventType: "comment.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: performer}
+		return Event{ID: eventID, EventType: "comment.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: performer}
 	}
 	setup := func(t *testing.T, author int64) *fakeReads {
 		f := newFakeReads()
-		s := summaryWith(recordingID, routedProj, "Comment", author, mentionOf(t, agentID))
+		s := summaryWith(recordingID, servedProj, "Comment", author, mentionOf(t, agentID))
 		s.Parent = &basecamp.Parent{ID: parentID}
 		f.summaries[recordingID] = s
-		f.members[routedProj] = map[int64]bool{memberID: true}
+		f.members[servedProj] = map[int64]bool{memberID: true}
 		return f
 	}
 
@@ -659,7 +660,7 @@ func TestProjectTrustMode(t *testing.T) {
 		// for the performer, and only the author's type gives it away.
 		f := setup(t, otherAgent)
 		f.summaries[recordingID].Creator.PersonableType = "Agent"
-		f.members[routedProj][otherAgent] = true
+		f.members[servedProj][otherAgent] = true
 		v := decide(t, newAdmitter(t, p, f), comment(otherAgent))
 		assert.Equal(t, StateDiscarded, v.State)
 		assert.Equal(t, ReasonAgentAuthored, v.Reason)
@@ -709,10 +710,10 @@ func TestProjectTrustMode(t *testing.T) {
 }
 
 func TestSubscribedComments(t *testing.T) {
-	comment := Event{ID: eventID, EventType: "comment.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID}
+	comment := Event{ID: eventID, EventType: "comment.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID}
 	setup := func(content string) *fakeReads {
 		f := newFakeReads()
-		s := summaryWith(recordingID, routedProj, "Comment", operatorID, content)
+		s := summaryWith(recordingID, servedProj, "Comment", operatorID, content)
 		s.Parent = &basecamp.Parent{ID: parentID}
 		f.summaries[recordingID] = s
 		return f
@@ -749,12 +750,12 @@ func TestSubscribedComments(t *testing.T) {
 		assert.Empty(t, v.Trigger)
 	})
 
-	t.Run("in an unmapped project only the mention is considered", func(t *testing.T) {
+	t.Run("in an unservedProj project only the mention is considered", func(t *testing.T) {
 		f := setup("<div>chatter</div>")
-		f.summaries[recordingID].Bucket = &basecamp.Bucket{ID: unmapped}
+		f.summaries[recordingID].Bucket = &basecamp.Bucket{ID: unservedProj}
 		f.subscriptions[parentID] = true
 		ev := comment
-		ev.BucketID = unmapped
+		ev.BucketID = unservedProj
 
 		v := decide(t, newAdmitter(t, basePolicy(), f), ev)
 		assert.Equal(t, StateDiscarded, v.State)
@@ -764,27 +765,27 @@ func TestSubscribedComments(t *testing.T) {
 }
 
 func TestNoRoute(t *testing.T) {
-	t.Run("a mention in an unmapped project is blocked and keeps no content", func(t *testing.T) {
+	t.Run("a mention in an unservedProj project is blocked and keeps no content", func(t *testing.T) {
 		f := newFakeReads()
-		f.summaries[recordingID] = summaryWith(recordingID, unmapped, "Kanban::Card", operatorID, mentionOf(t, agentID))
+		f.summaries[recordingID] = summaryWith(recordingID, unservedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
 
-		v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "card.created", BucketID: unmapped, RecordingID: recordingID, CreatorID: operatorID})
+		v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "card.created", BucketID: unservedProj, RecordingID: recordingID, CreatorID: operatorID})
 		assert.Equal(t, StateBlocked, v.State)
 		assert.Equal(t, ReasonNoRoute, v.Reason)
-		assert.False(t, v.Routed)
+		assert.False(t, v.Served)
 		assert.Nil(t, v.Snapshot, "only an admitted record carries content; this one is read again when a route appears")
 		assert.NotNil(t, v.Reply, "the holding reply needs a destination")
 		assert.Equal(t, TriggerMentioned, v.Trigger)
 		assert.NotEmpty(t, v.RecordingURL)
 	})
 
-	t.Run("an assignment in an unmapped project is blocked", func(t *testing.T) {
+	t.Run("an assignment in an unservedProj project is blocked", func(t *testing.T) {
 		f := newFakeReads()
-		f.summaries[recordingID] = summaryWith(recordingID, unmapped, "Todo", strangerID, "<div>todo</div>")
+		f.summaries[recordingID] = summaryWith(recordingID, unservedProj, "Todo", strangerID, "<div>todo</div>")
 		f.summaries[recordingID].Assignees = []basecamp.Person{{ID: agentID}}
 		f.assignments[eventID] = []int64{agentID}
 
-		v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "todo.assignment_changed", BucketID: unmapped, RecordingID: recordingID, CreatorID: operatorID})
+		v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "todo.assignment_changed", BucketID: unservedProj, RecordingID: recordingID, CreatorID: operatorID})
 		assert.Equal(t, StateBlocked, v.State)
 		assert.Equal(t, ReasonNoRoute, v.Reason)
 	})
@@ -795,7 +796,7 @@ func TestScope(t *testing.T) {
 	p := basePolicy()
 	p.Buckets = []int64{watchedProj}
 
-	v := decide(t, newAdmitter(t, p, f), Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+	v := decide(t, newAdmitter(t, p, f), Event{ID: eventID, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 	assert.Equal(t, StateDiscarded, v.State)
 	assert.Equal(t, ReasonOutOfScope, v.Reason)
 	assert.Zero(t, f.totalReads())
@@ -803,7 +804,7 @@ func TestScope(t *testing.T) {
 
 func TestInvalidPointer(t *testing.T) {
 	f := newFakeReads()
-	v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "card.created", BucketID: routedProj, CreatorID: operatorID})
+	v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "card.created", BucketID: servedProj, CreatorID: operatorID})
 	assert.Equal(t, StateDiscarded, v.State)
 	assert.Equal(t, ReasonInvalidPointer, v.Reason)
 	assert.Zero(t, f.totalReads())
@@ -820,12 +821,12 @@ func TestAllowlistMode(t *testing.T) {
 	p := basePolicy()
 	p.Trust = Trust{Mode: TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{allowedID}}
 	card := func(performer int64) Event {
-		return Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: performer}
+		return Event{ID: eventID, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: performer}
 	}
 
 	t.Run("an allowlisted person is trusted", func(t *testing.T) {
 		f := newFakeReads()
-		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", allowedID, mentionOf(t, agentID))
+		f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", allowedID, mentionOf(t, agentID))
 		v := decide(t, newAdmitter(t, p, f), card(allowedID))
 		assert.Equal(t, StateAdmitted, v.State)
 		assert.Zero(t, f.memberCalls)
@@ -833,8 +834,8 @@ func TestAllowlistMode(t *testing.T) {
 
 	t.Run("anyone else is not, without a read", func(t *testing.T) {
 		f := newFakeReads()
-		f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", memberID, mentionOf(t, agentID))
-		f.members[routedProj] = map[int64]bool{memberID: true}
+		f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", memberID, mentionOf(t, agentID))
+		f.members[servedProj] = map[int64]bool{memberID: true}
 		v := decide(t, newAdmitter(t, p, f), card(memberID))
 		assert.Equal(t, StateDiscarded, v.State)
 		assert.Equal(t, ReasonUntrustedPerformer, v.Reason)
@@ -845,7 +846,7 @@ func TestAllowlistMode(t *testing.T) {
 func TestProjectModeContentAuthor(t *testing.T) {
 	p := basePolicy()
 	p.Trust = Trust{Mode: TrustProject, OperatorID: operatorID}
-	movedIn := Event{ID: eventID, EventType: "todo.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID}
+	movedIn := Event{ID: eventID, EventType: "todo.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID}
 
 	for _, tc := range []struct {
 		author int64
@@ -857,8 +858,8 @@ func TestProjectModeContentAuthor(t *testing.T) {
 	} {
 		t.Run(strconv.FormatInt(tc.author, 10), func(t *testing.T) {
 			f := newFakeReads()
-			f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Todo", tc.author, mentionOf(t, agentID))
-			f.members[routedProj] = map[int64]bool{memberID: true}
+			f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Todo", tc.author, mentionOf(t, agentID))
+			f.members[servedProj] = map[int64]bool{memberID: true}
 
 			v := decide(t, newAdmitter(t, p, f), movedIn)
 			assert.Equal(t, tc.state, v.State)
@@ -872,14 +873,14 @@ func TestSubscribedNeverStandsInForARefusedMention(t *testing.T) {
 	// With a matrix where subscription is the only rule, a comment that
 	// mentions the agent is still not a subscription trigger.
 	f := newFakeReads()
-	s := summaryWith(recordingID, routedProj, "Comment", operatorID, mentionOf(t, agentID))
+	s := summaryWith(recordingID, servedProj, "Comment", operatorID, mentionOf(t, agentID))
 	s.Parent = &basecamp.Parent{ID: parentID}
 	f.summaries[recordingID] = s
 	f.subscriptions[parentID] = true
 
 	a, err := NewAdmitter(basePolicy(), f.reads(), WithMatrix(Matrix{"comment.created": {ruleSubscribed}}))
 	require.NoError(t, err)
-	v := decide(t, a, Event{ID: eventID, EventType: "comment.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+	v := decide(t, a, Event{ID: eventID, EventType: "comment.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 	assert.Equal(t, StateDiscarded, v.State)
 	assert.Equal(t, ReasonNotAddressed, v.Reason)
 	assert.Empty(t, f.subCalls)
@@ -889,13 +890,13 @@ func TestASubscriptionRuleWithoutAParentBlocks(t *testing.T) {
 	// A later matrix row may put the subscribed rule on a type the
 	// completeness check does not key on; the rule guards itself.
 	f := newFakeReads()
-	f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Message", operatorID, "<div>news</div>")
+	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Message", operatorID, "<div>news</div>")
 	a, err := NewAdmitter(basePolicy(), f.reads(), WithMatrix(Matrix{"message.created": {ruleSubscribed}}))
 	require.NoError(t, err)
 
 	var v Verdict
 	require.NotPanics(t, func() {
-		v = decide(t, a, Event{ID: eventID, EventType: "message.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+		v = decide(t, a, Event{ID: eventID, EventType: "message.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 	})
 	assert.Equal(t, StateBlocked, v.State)
 	assert.Equal(t, ReasonReadFailed, v.Reason)
@@ -908,9 +909,9 @@ func TestACommentWithoutItsRecordingCannotBeAnswered(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFakeReads()
-			f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Comment", operatorID, content)
+			f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Comment", operatorID, content)
 
-			v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "comment.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+			v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "comment.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 			assert.Equal(t, StateBlocked, v.State)
 			assert.Equal(t, ReasonReadFailed, v.Reason)
 			assert.Nil(t, v.Snapshot, "a blocked record keeps no content")
@@ -932,14 +933,14 @@ func TestAnEmptySummaryIsAFailedRead(t *testing.T) {
 	a, err := NewAdmitter(basePolicy(), reads, WithSleep(func(context.Context, time.Duration) error { return nil }))
 	require.NoError(t, err)
 
-	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 	assert.Equal(t, StateBlocked, v.State)
 	assert.Equal(t, ReasonReadFailed, v.Reason)
 }
 
 func TestAVerdictCarriesTheRevisionItWasDecidedFrom(t *testing.T) {
 	f := newFakeReads()
-	v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "card.moved", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID, Revision: 4})
+	v := decide(t, newAdmitter(t, basePolicy(), f), Event{ID: eventID, EventType: "card.moved", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID, Revision: 4})
 	assert.EqualValues(t, 4, v.Revision)
 }
 
@@ -947,7 +948,7 @@ func TestAThrottledReadWaitsAsLongAsTheServerAsks(t *testing.T) {
 	f := newFakeReads()
 	throttled := &basecamp.Error{Code: basecamp.CodeRateLimit, Message: "slow down", HTTPStatus: 429, Retryable: true, RetryAfter: 60}
 	f.summaryErrs = []error{throttled, throttled}
-	f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
+	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
 	var waits []time.Duration
 	a, err := NewAdmitter(basePolicy(), f.reads(), WithSleep(func(_ context.Context, d time.Duration) error {
 		waits = append(waits, d)
@@ -955,7 +956,7 @@ func TestAThrottledReadWaitsAsLongAsTheServerAsks(t *testing.T) {
 	}))
 	require.NoError(t, err)
 
-	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 	assert.Equal(t, StateAdmitted, v.State)
 	require.Len(t, waits, 2)
 	for _, w := range waits {
@@ -971,7 +972,7 @@ func TestAThrottleLongerThanTheBudgetIsHeldUntilTheDeadline(t *testing.T) {
 		WithSleep(func(context.Context, time.Duration) error { waited = true; return nil }))
 	require.NoError(t, err)
 
-	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 	assert.Equal(t, StateBlocked, v.State)
 	assert.Equal(t, ReasonThrottled, v.Reason)
 	assert.Equal(t, testNow.Add(time.Hour), v.RetryAt)
@@ -991,14 +992,14 @@ func TestTheThrottleBudgetIsSharedAcrossADecisionsReads(t *testing.T) {
 	}
 	f := newFakeReads()
 	f.summaryErrs = []error{throttle()}
-	f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Kanban::Card", operatorID, "<div>done</div>")
+	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, "<div>done</div>")
 	f.subErr = throttle()
 	var waits []time.Duration
 	a, err := NewAdmitter(basePolicy(), f.reads(), WithClock(func() time.Time { return testNow }),
 		WithSleep(func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }))
 	require.NoError(t, err)
 
-	v := decide(t, a, Event{ID: eventID, EventType: "card.completed", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+	v := decide(t, a, Event{ID: eventID, EventType: "card.completed", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 	assert.Equal(t, StateBlocked, v.State)
 	assert.Equal(t, ReasonThrottled, v.Reason)
 	assert.Equal(t, []time.Duration{90 * time.Second}, waits)
@@ -1014,7 +1015,7 @@ func TestAThrottleOnTheLastAttemptIsHeldNotFailed(t *testing.T) {
 		WithSleep(func(context.Context, time.Duration) error { return nil }))
 	require.NoError(t, err)
 
-	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: operatorID})
+	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
 	assert.Equal(t, ReasonThrottled, v.Reason)
 	assert.Equal(t, testNow.Add(time.Second), v.RetryAt)
 	assert.Equal(t, DefaultReadAttempts, f.summaryCalls)
@@ -1028,7 +1029,7 @@ func TestAThrottledMembershipReadIsHeld(t *testing.T) {
 	a, err := NewAdmitter(p, f.reads(), WithClock(func() time.Time { return testNow }))
 	require.NoError(t, err)
 
-	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: memberID})
+	v := decide(t, a, Event{ID: eventID, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: memberID})
 	assert.Equal(t, StateBlocked, v.State)
 	assert.Equal(t, ReasonThrottled, v.Reason)
 	assert.Equal(t, testNow.Add(10*time.Minute), v.RetryAt)
@@ -1039,18 +1040,18 @@ func TestMembershipIsAskedAsOfWhenTheEventWasSeen(t *testing.T) {
 	p.Trust = Trust{Mode: TrustProject, OperatorID: operatorID}
 	seen := testNow.Add(-time.Hour)
 	f := newFakeReads()
-	f.summaries[recordingID] = summaryWith(recordingID, routedProj, "Todo", memberID, mentionOf(t, agentID))
-	f.members[routedProj] = map[int64]bool{memberID: true}
+	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Todo", memberID, mentionOf(t, agentID))
+	f.members[servedProj] = map[int64]bool{memberID: true}
 
-	ev := Event{ID: eventID, EventType: "todo.created", BucketID: routedProj, RecordingID: recordingID, CreatorID: memberID, SeenAt: seen}
+	ev := Event{ID: eventID, EventType: "todo.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: memberID, SeenAt: seen}
 	decide(t, newAdmitter(t, p, f), ev)
 	require.Len(t, f.memberAsOf, 1)
 	assert.Equal(t, seen, f.memberAsOf[0], "the performer's membership, as of the event")
 
 	// An author distinct from the performer is asked as of the event too.
 	g := newFakeReads()
-	g.summaries[recordingID] = summaryWith(recordingID, routedProj, "Todo", memberID, mentionOf(t, agentID))
-	g.members[routedProj] = map[int64]bool{memberID: true}
+	g.summaries[recordingID] = summaryWith(recordingID, servedProj, "Todo", memberID, mentionOf(t, agentID))
+	g.members[servedProj] = map[int64]bool{memberID: true}
 	moved := ev
 	moved.CreatorID = operatorID
 	decide(t, newAdmitter(t, p, g), moved)
@@ -1060,12 +1061,196 @@ func TestMembershipIsAskedAsOfWhenTheEventWasSeen(t *testing.T) {
 	// Unknown seen time: the time admission started, never the zero time,
 	// which every cached listing would satisfy.
 	h := newFakeReads()
-	h.summaries[recordingID] = summaryWith(recordingID, routedProj, "Todo", memberID, mentionOf(t, agentID))
-	h.members[routedProj] = map[int64]bool{memberID: true}
+	h.summaries[recordingID] = summaryWith(recordingID, servedProj, "Todo", memberID, mentionOf(t, agentID))
+	h.members[servedProj] = map[int64]bool{memberID: true}
 	before := time.Now()
 	unknown := ev
 	unknown.SeenAt = time.Time{}
 	decide(t, newAdmitter(t, p, h), unknown)
 	require.Len(t, h.memberAsOf, 1)
 	assert.False(t, h.memberAsOf[0].Before(before))
+}
+
+// Copilot on #765: admission reads the served projects at each decision, not
+// once when the connector started.
+//
+// The dispatcher's reader already re-read the file, so serving a project while the
+// connector runs used to change only half the answer: admission went on
+// deciding against the startup policy. Unserving one left events admitted and
+// then silently unstarted — no work and no holding reply, so the person who
+// mentioned the agent got nothing. Serving one left events blocked no_route,
+// and the holding reply's own remedy ("a person can run it with redispatch")
+// could not work, because the redispatch re-ran admission against the same
+// stale policy.
+func TestAdmissionReadsTheServedProjectsAsTheyAreNow(t *testing.T) {
+	live := map[int64]Project{servedProj: {Class: "internal"}}
+	f := newFakeReads()
+	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
+	a := newAdmitter(t, basePolicy(), f, WithServed(func() (map[int64]Project, error) { return live, nil }))
+
+	ev := Event{ID: eventID, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID}
+	v := decide(t, a, ev)
+	require.Equal(t, StateAdmitted, v.State)
+	assert.True(t, v.Served)
+	assert.Equal(t, "internal", v.Class)
+
+	// The operator stops serving it. The next event is answered, not
+	// swallowed: blocked no_route is what the holding reply is written for.
+	delete(live, servedProj)
+	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
+	v = decide(t, a, Event{ID: eventID + 1, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateBlocked, v.State)
+	assert.Equal(t, ReasonNoRoute, v.Reason)
+	assert.False(t, v.Served)
+
+	// And serving it again takes effect without a restart, which is what
+	// makes the holding reply's redispatch a real remedy.
+	live[servedProj] = Project{Class: "client-work"}
+	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
+	v = decide(t, a, Event{ID: eventID + 2, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateAdmitted, v.State)
+	assert.Equal(t, "client-work", v.Class, "and the entry read is the live one, not the startup copy")
+}
+
+// A trigger the gate only admits in a served project is discarded there once
+// the project stops being served, and is not answered: only mentioned and
+// assigned get a holding reply.
+func TestTheGateReadsTheLiveServedSetToo(t *testing.T) {
+	live := map[int64]Project{servedProj: {}}
+	f := newFakeReads()
+	summary := summaryWith(recordingID, servedProj, "Todo", operatorID, "<div>ship it</div>")
+	summary.Assignees = []basecamp.Person{{ID: agentID}}
+	f.summaries[recordingID] = summary
+	a := newAdmitter(t, basePolicy(), f, WithServed(func() (map[int64]Project, error) { return live, nil }))
+
+	delete(live, servedProj)
+	v := decide(t, a, Event{ID: eventID, EventType: "card.completed", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateDiscarded, v.State)
+	assert.Equal(t, ReasonNoRoute, v.Reason)
+}
+
+// Copilot on #765: an unreadable connect.json is not "the operator serves no
+// projects", and must not be answered as if it were.
+//
+// The served set feeds admission now, so a parse, permission or read failure
+// that came back as an empty map would make every trusted mention
+// blocked(no_route)
+// and post the public holding reply — telling the person on the card that
+// their project is not served, when the project is there and the file is
+// what is broken. no_route also has no timed retry, so repairing the file
+// would not reconsider those records.
+func TestAnUnreadableConfigIsHeldAsOneRatherThanAnsweredAsUnserved(t *testing.T) {
+	broken := errors.New("connect.json cannot be read")
+	fail := true
+	f := newFakeReads()
+	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
+	a := newAdmitter(t, basePolicy(), f, WithServed(func() (map[int64]Project, error) {
+		if fail {
+			return nil, broken
+		}
+		return map[int64]Project{servedProj: {Class: "internal"}}, nil
+	}))
+
+	ev := Event{ID: eventID, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID}
+	v := decide(t, a, ev)
+	assert.Equal(t, StateBlocked, v.State)
+	assert.Equal(t, ReasonConfigUnreadable, v.Reason, "not no_route: nothing read the file, so nothing can say the project is unserved")
+	assert.False(t, v.Served)
+
+	// It waits for a person, as every blocked record does. An automatic
+	// sweep was built for this and taken back out: offering due blocked
+	// rows is a scheduler with its own claiming, and it re-decided five
+	// other blocked reasons besides this one. Carded, so that nothing here
+	// promises a timer that does not run.
+	blockedAt := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	_, retried := NextBlockedRetry(ReasonConfigUnreadable, blockedAt, blockedAt, time.Time{})
+	assert.False(t, retried, "no schedule claims this record, and nothing would act on one if it did")
+
+	// And once the file is readable the record decides normally.
+	fail = false
+	f.summaries[recordingID] = summaryWith(recordingID, servedProj, "Kanban::Card", operatorID, mentionOf(t, agentID))
+	v = decide(t, a, Event{ID: eventID + 1, EventType: "card.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateAdmitted, v.State)
+}
+
+// A trigger the gate only admits in a served project is held too, not
+// discarded: throwing the work away over a file nobody could read is the one
+// outcome that cannot be undone by fixing the file.
+func TestAnUnreadableConfigHoldsWhatTheGateWouldHaveDiscarded(t *testing.T) {
+	f := newFakeReads()
+	summary := summaryWith(recordingID, servedProj, "Todo", operatorID, "<div>ship it</div>")
+	summary.Assignees = []basecamp.Person{{ID: agentID}}
+	f.summaries[recordingID] = summary
+	a := newAdmitter(t, basePolicy(), f, WithServed(func() (map[int64]Project, error) {
+		return nil, errors.New("connect.json cannot be read")
+	}))
+
+	v := decide(t, a, Event{ID: eventID, EventType: "card.completed", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID})
+	assert.Equal(t, StateBlocked, v.State)
+	assert.Equal(t, ReasonConfigUnreadable, v.Reason)
+}
+
+// Copilot on #765: one verdict, one configuration. match used to read the
+// served map again after the admission reads, so a setting changed in that
+// window could admit the event on the new entry and stamp it with the old
+// entry's class.
+func TestAVerdictIsBuiltFromOneSnapshotOfTheServedProjects(t *testing.T) {
+	reads := 0
+	f := newFakeReads()
+	summary := summaryWith(recordingID, watchedProj, "Todo", operatorID, "<div>ship it</div>")
+	f.summaries[recordingID] = summary
+	a := newAdmitter(t, basePolicy(), f, WithServed(func() (map[int64]Project, error) {
+		reads++
+		// A different answer every time it is asked: a decision that reads
+		// twice cannot help but mix them.
+		if reads == 1 {
+			return map[int64]Project{watchedProj: {Class: "first", WatchCompletions: true}}, nil
+		}
+		return map[int64]Project{watchedProj: {Class: "second", WatchCompletions: true}}, nil
+	}))
+
+	v := decide(t, a, Event{ID: eventID, EventType: "card.completed", BucketID: watchedProj, RecordingID: recordingID, CreatorID: operatorID})
+	require.Equal(t, StateAdmitted, v.State)
+	assert.Equal(t, 1, reads, "the served projects are read once per decision, then passed down")
+	assert.Equal(t, "first", v.Class, "and the class is the snapshot the rest of the verdict was decided from")
+}
+
+// Copilot on #765: an unreadable connect.json must not permanently discard a
+// subscribed comment, which is the one outcome repairing the file cannot
+// reverse.
+//
+// comment.created admits under two rules: mentioned, which needs no served
+// project, and subscribed, which does. With the list unreadable the gate
+// keeps mentioned and drops subscribed, so the gate does not discard — and
+// match then finds no mention and returns not_addressed, terminally, before
+// anything notices the configuration could not be read. The hold has to come
+// before that return, not after it.
+func TestAnUnreadableConfigDoesNotDiscardASubscribedComment(t *testing.T) {
+	f := newFakeReads()
+	// A comment on a recording the agent is subscribed to, mentioning nobody.
+	summary := summaryWith(recordingID, servedProj, "Comment", operatorID, "<div>a thought</div>")
+	summary.Parent = &basecamp.Parent{ID: recordingID + 1}
+	f.summaries[recordingID] = summary
+	f.subscriptions[recordingID+1] = true
+
+	ev := Event{ID: eventID, EventType: "comment.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID}
+
+	// Readable and served, the same event is admitted as subscribed: this is
+	// work that would have run.
+	served := newAdmitter(t, basePolicy(), f, WithServed(func() (map[int64]Project, error) {
+		return map[int64]Project{servedProj: {}}, nil
+	}))
+	v := decide(t, served, ev)
+	require.Equal(t, StateAdmitted, v.State, "reason %q", v.Reason)
+	assert.Equal(t, TriggerSubscribed, v.Trigger)
+
+	// Unreadable, it is held — not discarded not_addressed, which no repair
+	// of the file could undo.
+	unknown := newAdmitter(t, basePolicy(), f, WithServed(func() (map[int64]Project, error) {
+		return nil, errors.New("connect.json cannot be read")
+	}))
+	v = decide(t, unknown, ev)
+	assert.Equal(t, StateBlocked, v.State)
+	assert.Equal(t, ReasonConfigUnreadable, v.Reason)
+	assert.NotEqual(t, ReasonNotAddressed, v.Reason, "a discard here is unrecoverable")
 }

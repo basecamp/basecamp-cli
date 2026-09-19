@@ -21,21 +21,20 @@ const pipeWaitDelay = 2 * time.Second
 
 // # One owner, one release point
 //
-// This is the connector's rule for a task's process tree, its working
-// directory, and its ledger record. All three belong to one owner — the
-// attempt — and are released at one point, in this order:
+// This is the connector's rule for a task's process tree and its ledger
+// record. Both belong to one owner — the attempt — and are released at one
+// point, in this order:
 //
 //  1. Every worker starts as the leader of its own process group
 //     (StartWorker), so the tree it makes can be signaled as one.
 //  2. A cancel, a deadline or a shutdown ends that group: SIGTERM, a bounded
 //     wait, then SIGKILL, by process group id and never by name (Terminate).
 //  3. The group is then CONFIRMED gone (ConfirmGroupGone). Only after that
-//     may the attempt be settled, its directory released, and its record
-//     made terminal.
+//     may the attempt be settled and its record made terminal.
 //  4. A group that cannot be confirmed gone — members left, a pid whose
 //     identity cannot be established, a platform that cannot say — leaves the
-//     record HELD: live in the ledger, its conversation and directory still
-//     its own, for a person to settle. Never terminal, never released.
+//     record HELD: live in the ledger, its conversation and a worker slot
+//     still its own, for a person to settle. Never terminal, never released.
 //  5. A restart reaps by the same rule (TerminateRecorded, then the same
 //     confirmation), and asks OwnsWorker first: a pid is not an identity, so
 //     ownership is the pid AND the kernel's own start time for it, compared
@@ -157,12 +156,12 @@ const pipeWaitDelay = 2 * time.Second
 //     acknowledgement and before any later instruction's, it is never the
 //     worker's own acknowledgement, and a listing the scan limit cut short
 //     adopts nothing.
-//   - An attempt is settled, its directory released and its record made
-//     terminal at one point (Dispatcher.release), and only after the group is
-//     confirmed gone and the ledger has taken the settlement.
+//   - An attempt is settled and its record made terminal at one point
+//     (Dispatcher.release), and only after the group is confirmed gone and
+//     the ledger has taken the settlement.
 //   - An attempt that cannot be confirmed or cannot be settled stays live and
-//     holds its conversation, its directory and one of the connector's worker
-//     slots, until a person settles it.
+//     holds its conversation and one of the connector's worker slots, until a
+//     person settles it.
 //
 // Where this can still be broken: adoption trusts Basecamp's ordering of
 // replies against this machine's clock for "after the acknowledgement", so a
@@ -386,7 +385,7 @@ var ErrGroupOutlivedLeader = errors.New("driver: the recorded process group outl
 //
 //   - (true, nil): the process is still that worker. It may be signaled.
 //   - (false, nil): it is gone, and its group has no members left. Its record
-//     may be settled and its directory released.
+//     may be settled.
 //   - (false, ErrGroupOutlivedLeader): the leader is gone or is now some other
 //     process, and the recorded group still has members — they may be the
 //     worker's children. Nothing may be settled or released.
@@ -609,7 +608,7 @@ func groupProbe(pgid int, err error) error {
 
 // ConfirmGroupGone is step 3 of the one-owner rule: it answers whether a
 // worker's process group is gone, and it is what every caller asks before
-// settling an attempt or releasing a working directory.
+// settling an attempt.
 //
 // It signals the group once more — a worker that ignored SIGTERM gets SIGKILL
 // — then waits up to grace for the last member to go. A group with members

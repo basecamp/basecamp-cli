@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,20 @@ type connectProfile struct {
 	app  *appctx.App
 	name string
 	file setup.File
+}
+
+// servedBucketsOf is the projects a connect.json serves, as the ledger's
+// decisions want them, from the file this command loaded when it started.
+// That is a reading and not a lock: nothing stops `connect setup --unserve`
+// completing between it and the write below, and holding the setup lock
+// across both is carded rather than done here.
+func servedBucketsOf(file setup.File) []int64 {
+	served := make([]int64, 0, len(file.Projects))
+	for bucket := range file.Projects {
+		served = append(served, bucket)
+	}
+	slices.Sort(served)
+	return served
 }
 
 func loadConnectProfile(cmd *cobra.Command) (connectProfile, error) {
@@ -327,8 +342,8 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 
 	fmt.Fprintf(w, "\n  Live tasks     %d\n", len(s.Tasks))
 	for _, t := range s.Tasks {
-		fmt.Fprintf(w, "    task %d  %s  %s  pid %d (%s)  token taker pid %d (%s)  since %s  events %v  in %s\n",
-			t.TaskID, clean(t.AttemptID), clean(t.State), t.PID, clean(t.Worker), t.TakerPID, clean(t.Taker), stamp(t.LaunchedAt), t.EventIDs, clean(t.WorkDir))
+		fmt.Fprintf(w, "    task %d  %s  %s  pid %d (%s)  token taker pid %d (%s)  since %s  events %v\n",
+			t.TaskID, clean(t.AttemptID), clean(t.State), t.PID, clean(t.Worker), t.TakerPID, clean(t.Taker), stamp(t.LaunchedAt), t.EventIDs)
 	}
 	fmt.Fprintf(w, "  Indeterminate  %d lifecycle messages wait for a person\n", len(s.Indeterminate))
 	for _, in := range s.Indeterminate {
@@ -377,7 +392,7 @@ and who authorized it is recorded.
 
 A completed or held record is admitted at once (a completed one whose task is
 still running, when that task ends). A blocked record keeps its state and
-runs what blocked it again — the read, the events lookup, the route check —
+runs what blocked it again — the read, the events lookup, the served check —
 and is admitted the moment that succeeds; if it blocks again, the record stays
 blocked with the authorization, and redispatch runs it again. While the hold
 stands the record is authorized and nothing launches until release.
@@ -431,7 +446,12 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 	}
 	defer done()
 
-	res, err := ledger.Redispatch(ctx, id, operatorName())
+	// The served projects as this command read them, rather than the bit on
+	// the record: a record admitted while its project was served is not
+	// authorization to run it after the operator stopped serving it. Read at
+	// start-up and not re-read here, so an unserve landing in between is not
+	// caught — see servedBucketsOf.
+	res, err := ledger.Redispatch(ctx, id, operatorName(), servedBucketsOf(p.file))
 	if err != nil {
 		return decisionError(err)
 	}

@@ -565,7 +565,7 @@ func (l *Ledger) Dispatch(ctx context.Context, token string, agentID int64) (*Ta
 
 // Instruction is what get_dispatch hands a worker. It is an allowlist: every
 // field is named here, and nothing the ledger holds reaches a worker unless
-// it is one of them. No route, no feed position, no token.
+// it is one of them. No directory, no feed position, no token.
 type Instruction struct {
 	EventID   int64  `json:"event_id"`
 	EventType string `json:"event_type"`

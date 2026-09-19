@@ -9,8 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
+	"os/exec"
 	"sync"
 	"testing"
 	"time"
@@ -53,11 +52,11 @@ func status(code int) error {
 // The known bc3 limitation: an Agent identity is refused the reads admission
 // makes. Setup has to say so, rather than write a file the connector would
 // start on and then block every event against.
-func TestRouteChecksNameTheAgentReadRefusal(t *testing.T) {
+func TestProjectChecksNameTheAgentReadRefusal(t *testing.T) {
 	f := validFile(t)
 	r := &fakeReader{projectErr: map[int64]error{projectID: status(http.StatusForbidden)}}
 
-	checks := RouteChecks(context.Background(), r, f)
+	checks := ProjectChecks(context.Background(), r, f, false)
 	require.Len(t, checks, 2)
 	byName := map[string]Check{}
 	for _, c := range checks {
@@ -72,12 +71,12 @@ func TestRouteChecksNameTheAgentReadRefusal(t *testing.T) {
 	assert.Equal(t, StatusPass, byName[fmt.Sprintf("Project %d", otherProj)].Status)
 }
 
-func TestRouteChecksReadProjectPeopleToo(t *testing.T) {
+func TestProjectChecksReadProjectPeopleToo(t *testing.T) {
 	f := validFile(t)
 	r := &fakeReader{projectPplErr: map[int64]error{otherProj: status(http.StatusForbidden)}}
 
 	var failed []Check
-	for _, c := range RouteChecks(context.Background(), r, f) {
+	for _, c := range ProjectChecks(context.Background(), r, f, false) {
 		if c.Status == StatusFail {
 			failed = append(failed, c)
 		}
@@ -87,12 +86,12 @@ func TestRouteChecksReadProjectPeopleToo(t *testing.T) {
 	assert.Contains(t, failed[0].Message, "people")
 }
 
-func TestRouteChecksForABotUserSayToAddTheAgent(t *testing.T) {
+func TestProjectChecksForABotUserSayToAddTheAgent(t *testing.T) {
 	f := validFile(t)
 	f.Agent = Agent{PersonID: agentID, Kind: KindBotUser, IdentityID: 99}
 	r := &fakeReader{projectErr: map[int64]error{projectID: status(http.StatusNotFound)}}
 
-	for _, c := range RouteChecks(context.Background(), r, f) {
+	for _, c := range ProjectChecks(context.Background(), r, f, false) {
 		if c.Status != StatusFail {
 			continue
 		}
@@ -103,12 +102,31 @@ func TestRouteChecksForABotUserSayToAddTheAgent(t *testing.T) {
 	t.Fatal("the refused project did not fail")
 }
 
-func TestRouteChecksWarnWithNoRoutes(t *testing.T) {
+// Serving no project is two different questions. A first setup that serves
+// none has not been set up, and is refused. Withdrawing the last one from an
+// existing setup is a thing an operator may mean — it is how the agent is
+// turned off through the interface that turned it on — so it is written, and
+// warned about (Copilot on #765).
+func TestProjectChecksSeparateAFirstSetupFromWithdrawingTheLastProject(t *testing.T) {
 	f := validFile(t)
-	f.Projects = map[int64]admission.Route{}
-	checks := RouteChecks(context.Background(), &fakeReader{}, f)
-	require.Len(t, checks, 1)
-	assert.Equal(t, StatusFail, checks[0].Status, "a connector with no route does no work, so it is not ready")
+	f.Projects = map[int64]admission.Project{}
+
+	first := ProjectChecks(context.Background(), &fakeReader{}, f, true)
+	require.Len(t, first, 1)
+	assert.Equal(t, StatusFail, first[0].Status, "a first setup that serves nothing has not been set up")
+
+	withdrawn := ProjectChecks(context.Background(), &fakeReader{}, f, false)
+	require.Len(t, withdrawn, 1)
+	assert.Equal(t, StatusWarn, withdrawn[0].Status, "and withdrawing the last one is written, not refused")
+	assert.Contains(t, withdrawn[0].Message, "no work at all")
+	assert.Contains(t, withdrawn[0].Hint, "--serve")
+
+	// A warn is not a failure, so nothing about it stops the file being
+	// written.
+	r := &Report{Written: true}
+	r.Add(withdrawn...)
+	assert.Empty(t, r.Failed())
+	assert.True(t, r.Ready())
 }
 
 func TestTicketCheck(t *testing.T) {
@@ -256,17 +274,6 @@ func TestSDKReaderMintsAndDiscardsTheTicket(t *testing.T) {
 	}
 }
 
-// A route directory's name reaches a one-line terminal sink; control
-// characters in it must not restyle or break that line.
-func TestRouteChecksSanitizeThePath(t *testing.T) {
-	f := validFile(t)
-	f.Projects = map[int64]admission.Route{projectID: {Path: "/work/evil\x1b[31m\nFAKE ✓ line"}}
-	checks := RouteChecks(context.Background(), &fakeReader{}, f)
-	require.Len(t, checks, 1)
-	assert.NotContains(t, checks[0].Message, "\x1b")
-	assert.NotContains(t, checks[0].Message, "\n")
-}
-
 // ErrorText is the one formatter for read errors: an HTTP answer is its
 // status and nothing the server wrote.
 func TestErrorTextKeepsNothingTheServerWrote(t *testing.T) {
@@ -304,25 +311,6 @@ func TestScopeCheck(t *testing.T) {
 	}
 }
 
-// A route kept from connect.json is checked as a new one is: a directory
-// that has since gone is not ready.
-func TestRouteChecksCheckEveryRoutesDirectory(t *testing.T) {
-	f := validFile(t)
-	gone := f.Projects[otherProj].Path
-	require.NoError(t, os.Remove(gone))
-	file := filepath.Join(t.TempDir(), "file")
-	require.NoError(t, os.WriteFile(file, nil, 0o600))
-	f.Projects[777] = admission.Route{Path: file}
-
-	byName := map[string]Check{}
-	for _, c := range RouteChecks(context.Background(), &fakeReader{}, f) {
-		byName[c.Name] = c
-	}
-	assert.Equal(t, StatusPass, byName[fmt.Sprintf("Project %d", projectID)].Status)
-	assert.Equal(t, StatusFail, byName[fmt.Sprintf("Project %d", otherProj)].Status, "a directory that is gone")
-	assert.Equal(t, StatusFail, byName["Project 777"].Status, "a file where the directory was")
-}
-
 // The lifetime bound is compared in whole seconds, so no value wraps past
 // it: the largest int, and the first value whose conversion to a Duration
 // overflows, are refused like any other absurd lifetime.
@@ -339,4 +327,29 @@ func TestUsableTicketBoundsTheLifetimeWithoutOverflow(t *testing.T) {
 	assert.False(t, UsableTicket(ticket(math.MaxInt64/int(time.Second))), "MaxInt64/1e9: the last value a Duration holds")
 	assert.False(t, UsableTicket(ticket(math.MaxInt64/int(time.Second)+1)), "just past it, where the conversion overflows")
 	assert.False(t, UsableTicket(ticket(math.MaxInt64)), "wraps to -1s when converted first")
+}
+
+// The hint is a line we tell an operator to paste into a shell, and it
+// carries a profile name read from a configuration file — which is not held
+// to the check that applied when the profile was created. An embedded single
+// quote is the case that tells quoting apart from wrapping.
+func TestProjectChecksQuoteTheProfileInTheHint(t *testing.T) {
+	f := validFile(t)
+	f.Projects = map[int64]admission.Project{}
+	f.Profile = `it's; echo pwned`
+	quoted := `'it'\''s; echo pwned'`
+
+	for _, firstSetup := range []bool{true, false} {
+		checks := ProjectChecks(context.Background(), &fakeReader{}, f, firstSetup)
+		require.Len(t, checks, 1)
+		hint := checks[0].Hint
+		assert.NotContains(t, hint, "-P it's", "first setup %v: the name is not interpolated raw", firstSetup)
+		assert.Contains(t, hint, "-P "+quoted, "first setup %v", firstSetup)
+
+		// And a real shell reads that word back as the name that went in,
+		// rather than running what follows the quote.
+		out, err := exec.CommandContext(t.Context(), "/bin/sh", "-c", "printf %s "+quoted).Output()
+		require.NoError(t, err)
+		assert.Equal(t, f.Profile, string(out), "first setup %v", firstSetup)
+	}
 }

@@ -3,8 +3,6 @@ package connector
 import (
 	"context"
 	"math"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,29 +13,44 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 )
 
-func TestThePolicyAllowsWorkInTheDirectoryAndTheAgentsToolsOnly(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "repo")
-	require.NoError(t, os.Mkdir(root, 0o700))
-	p := DefaultPolicy(root)
+func TestThePolicyAllowsEditsAndTheAgentsToolsOnly(t *testing.T) {
+	p := DefaultPolicy()
 	ctx := context.Background()
 	allow := func(req driver.PermissionRequest) bool { return p.Decide(ctx, req).Allow }
 
 	assert.True(t, allow(driver.PermissionRequest{Tool: "mcp__basecamp__basecamp_connect", Kind: driver.ToolOther}))
-	assert.True(t, allow(driver.PermissionRequest{Kind: driver.ToolEdit, Locations: []string{filepath.Join(root, "a.go")}}))
+	assert.True(t, allow(driver.PermissionRequest{Kind: driver.ToolEdit, Locations: []string{"/work/repo/a.go"}}))
 	assert.True(t, allow(driver.PermissionRequest{Kind: driver.ToolRead, Locations: []string{"lib/b.go"}}))
+	assert.True(t, allow(driver.PermissionRequest{Kind: driver.ToolThink}))
 
-	assert.False(t, allow(driver.PermissionRequest{Kind: driver.ToolEdit, Locations: []string{root + "/../other/a.go"}}))
-	assert.False(t, allow(driver.PermissionRequest{Kind: driver.ToolEdit, Locations: []string{root + "sitory/a.go"}}), "a sibling sharing a prefix is outside")
-	assert.False(t, allow(driver.PermissionRequest{Kind: driver.ToolEdit}), "an edit that names no path is not known to be inside")
-	assert.False(t, allow(driver.PermissionRequest{Kind: driver.ToolExecute, Locations: []string{root}}))
+	assert.False(t, allow(driver.PermissionRequest{Kind: driver.ToolExecute, Locations: []string{"/work/repo"}}))
 	assert.False(t, allow(driver.PermissionRequest{Kind: driver.ToolFetch}))
 	assert.False(t, allow(driver.PermissionRequest{Tool: "mcp__other__tool", Kind: driver.ToolOther}))
 	assert.False(t, allow(driver.PermissionRequest{Tool: "mcp__basecampx__tool", Kind: driver.ToolOther}))
 
 	rules := p.Rules()
-	assert.Equal(t, driver.ModeEditsInWorkDir, rules.Mode)
+	assert.Equal(t, driver.ModeEdits, rules.Mode)
 	assert.Equal(t, []string{MCPServerName}, rules.AllowMCPServers)
 	assert.NotContains(t, rules.AllowKinds, driver.ToolExecute)
+}
+
+// The gap, written down where it will be read rather than only in a comment.
+// The policy used to refuse an edit resolving outside the record's working
+// directory — through a symlink, through a dangling one, with no path at all.
+// The route that gave it a directory is gone, and the bound went with it
+// instead of being repointed at wherever the operator started the connector,
+// which would look like a guarantee and behave like an accident. Until the
+// sandbox launcher lands, a worker edits wherever the account can.
+//
+// Change this test only with the sandbox that makes it false.
+func TestThePolicyBoundsNoDirectory(t *testing.T) {
+	p := DefaultPolicy()
+	edit := func(locs ...string) bool {
+		return p.Decide(context.Background(), driver.PermissionRequest{Kind: driver.ToolEdit, Locations: locs}).Allow
+	}
+	assert.True(t, edit("/etc/passwd"), "nothing in the connector's policy refuses it")
+	assert.True(t, edit(), "an edit that names no path is not placed anywhere either")
+	assert.True(t, edit("../../elsewhere/a.go"))
 }
 
 func TestThePromptRepeatsNothingThatCouldCarryAnInstruction(t *testing.T) {
@@ -87,71 +100,4 @@ func TestTheWorstCasePromptIsUnderTheBudget(t *testing.T) {
 	t.Logf("worst-case prompt: %d tokens by the upper bound", worst)
 	assert.LessOrEqual(t, worst, 450, "margin under the budget")
 	assert.Less(t, worst, MaxPromptTokens)
-}
-
-// Copilot: containment is decided on the resolved path.
-func TestThePolicyResolvesSymlinksOutOfTheDirectory(t *testing.T) {
-	root := t.TempDir()
-	outside := t.TempDir()
-	require.NoError(t, os.Symlink(outside, filepath.Join(root, "link")))
-	p := DefaultPolicy(root)
-	edit := func(loc string) bool {
-		return p.Decide(context.Background(), driver.PermissionRequest{Kind: driver.ToolEdit, Locations: []string{loc}}).Allow
-	}
-	assert.False(t, edit(filepath.Join(root, "link", "secret.txt")), "through a link that leaves the directory")
-	assert.False(t, edit("link/new/dir/file.txt"), "a path not created yet, under that link")
-	assert.True(t, edit(filepath.Join(root, "new", "file.txt")), "a file not created yet, inside")
-}
-
-// Copilot r3: a call on the filesystem that names no path cannot be placed
-// inside the working directory.
-func TestThePolicyRefusesFilesystemCallsWithNoPath(t *testing.T) {
-	root := t.TempDir()
-	p := DefaultPolicy(root)
-	allow := func(kind driver.ToolKind) bool {
-		return p.Decide(context.Background(), driver.PermissionRequest{Kind: kind}).Allow
-	}
-	assert.False(t, allow(driver.ToolRead))
-	assert.False(t, allow(driver.ToolSearch))
-	assert.False(t, allow(driver.ToolEdit))
-	assert.True(t, allow(driver.ToolThink), "the one allowed kind that touches no file")
-}
-
-// A location that names nothing is not a location inside the working
-// directory: it would otherwise resolve to the directory itself and pass.
-func TestPolicyRefusesAnEditThatNamesNoPath(t *testing.T) {
-	dir := t.TempDir()
-	p := DefaultPolicy(dir)
-	for _, loc := range []string{"", "   "} {
-		decision := p.Decide(context.Background(), driver.PermissionRequest{
-			Tool: "Edit", Kind: driver.ToolEdit, Locations: []string{loc},
-		})
-		assert.False(t, decision.Allow, "an edit whose location is %q", loc)
-	}
-	allowed := p.Decide(context.Background(), driver.PermissionRequest{
-		Tool: "Edit", Kind: driver.ToolEdit, Locations: []string{filepath.Join(dir, "file.go")},
-	})
-	assert.True(t, allowed.Allow)
-}
-
-// Copilot on #738: a symlink that exists and points at something that does
-// not is not a name yet to be created. Opening it creates the file it points
-// at, which is wherever the link says — so the policy resolves the link
-// rather than reading the kernel's ENOENT as "nothing here yet".
-func TestADanglingLinkIsResolvedToWhereItPoints(t *testing.T) {
-	root := t.TempDir()
-	outside := filepath.Join(t.TempDir(), "missing")
-	require.NoError(t, os.Symlink(outside, filepath.Join(root, "dangling")))
-	require.NoError(t, os.Symlink(filepath.Join(root, "inside-missing"), filepath.Join(root, "inward")))
-	require.NoError(t, os.Symlink(filepath.Join(root, "loop"), filepath.Join(root, "loop")))
-	p := DefaultPolicy(root)
-	edit := func(loc string) bool {
-		return p.Decide(context.Background(), driver.PermissionRequest{Kind: driver.ToolEdit, Locations: []string{loc}}).Allow
-	}
-
-	assert.False(t, edit(filepath.Join(root, "dangling")), "writing it creates a file outside the working directory")
-	assert.False(t, edit(filepath.Join(root, "dangling", "under.txt")), "and so does writing under it")
-	assert.False(t, edit(filepath.Join(root, "loop")), "a path that resolves to nothing is refused, not guessed at")
-	assert.True(t, edit(filepath.Join(root, "inward")), "a link to a name inside the directory is still inside")
-	assert.True(t, edit(filepath.Join(root, "new", "file.txt")), "and a file not created yet, inside, is unaffected")
 }

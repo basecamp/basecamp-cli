@@ -872,7 +872,38 @@ END;
 	// account of it and nothing else. `git worktree list` in the repository
 	// still finds it, and `git worktree remove` still removes it.
 	migrationDropWorktrees,
+
+	// Migration 13. No directory is associated with a project any more.
+	//
+	// `routed` becomes `served`, which is what it has always held: whether
+	// connect.json lists the record's project, never anything about a
+	// filesystem. Renaming keeps every row's value — a record blocked
+	// no_route stays blocked no_route, and its holding reply still answers
+	// for it.
+	//
+	// The three path columns go. `events.route` and `tasks.route` held the
+	// directory a project was routed to and `tasks.work_dir` the directory a
+	// worker ran in; nothing writes or reads any of them now. The unique
+	// index over work_dir goes with it, and would have to go regardless:
+	// with every task in one directory it would admit one live task on the
+	// whole machine.
+	//
+	// Nothing on disk is touched. A directory a connector ran work in is
+	// still there, still whatever the worker left in it.
+	migrationDropRoutePaths,
 }
+
+// migrationDropRoutePaths is migration 13: the route's path, everywhere the
+// ledger held it. The index is dropped before its column, which is what
+// SQLite requires.
+const migrationDropRoutePaths = `
+ALTER TABLE events RENAME COLUMN routed TO served;
+ALTER TABLE events DROP COLUMN route;
+
+DROP INDEX IF EXISTS tasks_live_work_dir;
+ALTER TABLE tasks DROP COLUMN work_dir;
+ALTER TABLE tasks DROP COLUMN route;
+`
 
 // migrationWorktrees is migration 9 as it shipped: the worktrees a task ran
 // in. Nothing reads it — migration 12 drops the table — and it is kept here

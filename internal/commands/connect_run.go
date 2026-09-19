@@ -315,8 +315,28 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return err
 	}
 
+	// connect.json's served projects as they are now, for admission and for
+	// dispatch alike. What one reader buys is that neither half reads the
+	// startup file any more: both reload from the same place, share one
+	// cache, and treat a failed read the same way. Admission deciding
+	// against the file as it was at startup while the dispatcher read the
+	// current one is what left an unserved project's events admitted and
+	// never started — no work and no holding reply — and a newly served
+	// project's blocked until a restart (Copilot on #765).
+	//
+	// It is not a shared snapshot, and the sentence above is not saying it
+	// is. Admission and dispatch call Current independently, and the cache
+	// can expire between the two calls, so a setup change landing in that
+	// gap is seen by one and not the other (Copilot on #765). The
+	// difference from the bug this replaced is that the disagreement is
+	// bounded: one decision against a served set at most connectServedTTL
+	// old, where the startup file never caught up at all. Holding one
+	// snapshot across a whole decision needs a lock over setup, which is
+	// carded rather than done here.
+	served := newConnectServed(path, file, logger)
+
 	reads := admission.NewSDKReads(&basecamp.Config{BaseURL: app.Config.BaseURL}, tokens, account, connectSDKOptions()...)
-	admitter, err := admission.NewAdmitter(policy, reads)
+	admitter, err := admission.NewAdmitter(policy, reads, admission.WithServed(served.Current))
 	if err != nil {
 		return output.ErrUsage(err.Error())
 	}
@@ -347,13 +367,12 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil {
 			return err
 		}
-		routes := newConnectRoutes(path, file, logger)
 		worker, err := connectDriver(driverName, file.WorkerName(), f.adapters)
 		if err != nil {
 			return output.ErrUsage(err.Error())
 		}
 		options := connectDispatcherOptions(connectDispatch{
-			File: file, Buckets: buckets, Ledger: ledger, Driver: worker, Routes: routes.Current,
+			File: file, Buckets: buckets, Ledger: ledger, Driver: worker, Served: served.Current,
 			Profile: name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
 			// Replies are listed with their words, so the connector's own
 			// notices are left out even before their receipts are known, and
@@ -538,11 +557,11 @@ func connectUnsupportedOSError(goos string) error {
 	return output.ErrUsage(fmt.Sprintf("basecamp connect runs on Linux only, not %s: %s", goos, connectLinuxOnlyReason))
 }
 
-// connectRoutes is connect.json's routes as they are now, not as they were at
-// start: a route removed by `connect setup --unroute` stops authorizing
-// dispatch without a restart. A file that no longer loads, or that now names
-// another agent or account, authorizes nothing.
-type connectRoutes struct {
+// connectServed is connect.json's served projects as they are now, not as
+// they were at start: a project removed by `connect setup --unserve` stops
+// authorizing dispatch without a restart. A file that no longer loads, or
+// that now names another agent or account, authorizes nothing.
+type connectServed struct {
 	path     string
 	agent    setup.Agent
 	account  string
@@ -550,32 +569,50 @@ type connectRoutes struct {
 	now      func() time.Time
 	mu       sync.Mutex
 	loadedAt time.Time
-	routes   map[int64]admission.Route
-	failing  bool
+	projects map[int64]admission.Project
+	// err is why the last reload could not answer. It is kept apart from an
+	// empty map on purpose: "the operator serves no projects" and "nothing
+	// could read the file" are different answers, and only the first is
+	// safe to tell a person on a card (Copilot on #765).
+	err     error
+	failing bool
 }
 
-// connectRoutesTTL is how long a read of connect.json is reused.
-const connectRoutesTTL = 2 * time.Second
+// connectServedTTL is how long a read of connect.json is reused.
+const connectServedTTL = 2 * time.Second
 
-func newConnectRoutes(path string, file setup.File, log *slog.Logger) *connectRoutes {
-	return &connectRoutes{path: path, agent: file.Agent, account: file.AccountID, log: log, now: time.Now}
+func newConnectServed(path string, file setup.File, log *slog.Logger) *connectServed {
+	return &connectServed{path: path, agent: file.Agent, account: file.AccountID, log: log, now: time.Now}
 }
 
-// Current returns a copy of the routes connect.json approves now.
-func (r *connectRoutes) Current() map[int64]admission.Route {
+// Current returns a copy of the projects connect.json serves as of the last
+// read, or the reason it could not be read. "As of the last read" is the
+// honest span: a reading is reused for connectServedTTL, and nothing holds
+// the setup lock, so a `connect setup --unserve` can complete between any
+// read and whatever the caller goes on to do with it. Dispatch treats an error as authorizing
+// nothing; admission holds the record as a configuration error rather than
+// answering that the project is not served.
+func (r *connectServed) Current() (map[int64]admission.Project, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.routes == nil || r.now().Sub(r.loadedAt) >= connectRoutesTTL {
+	// A failure is cached for the TTL exactly as an answer is. Reloading on
+	// every call while the file is broken would read it once per event in
+	// admission and once per tick in dispatch (Copilot on #765); the answer
+	// would not change, and the log line is written once either way.
+	if (r.projects == nil && r.err == nil) || r.now().Sub(r.loadedAt) >= connectServedTTL {
 		r.reload()
 	}
-	out := make(map[int64]admission.Route, len(r.routes))
-	for k, v := range r.routes {
+	if r.err != nil {
+		return nil, r.err
+	}
+	out := make(map[int64]admission.Project, len(r.projects))
+	for k, v := range r.projects {
 		out[k] = v
 	}
-	return out
+	return out, nil
 }
 
-func (r *connectRoutes) reload() {
+func (r *connectServed) reload() {
 	r.loadedAt = r.now()
 	file, err := setup.Load(r.path)
 	switch {
@@ -589,16 +626,17 @@ func (r *connectRoutes) reload() {
 			r.log.Error("connector: dispatching nothing until connect.json is usable again", "error", err)
 		}
 		r.failing = true
-		r.routes = map[int64]admission.Route{}
+		r.projects, r.err = nil, err
 		return
 	}
 	if r.failing {
 		r.log.Info("connector: connect.json is usable again")
 	}
 	r.failing = false
-	r.routes = make(map[int64]admission.Route, len(file.Projects))
-	for bucket, route := range file.Projects {
-		r.routes[bucket] = route
+	r.err = nil
+	r.projects = make(map[int64]admission.Project, len(file.Projects))
+	for bucket, project := range file.Projects {
+		r.projects[bucket] = project
 	}
 }
 
@@ -608,7 +646,7 @@ type connectDispatch struct {
 	Buckets []int64
 	Ledger  *connector.Ledger
 	Driver  driver.Driver
-	Routes  func() map[int64]admission.Route
+	Served  func() (map[int64]admission.Project, error)
 
 	Profile     string
 	Executable  string
@@ -628,7 +666,7 @@ func connectDispatcherOptions(d connectDispatch) connector.DispatcherOptions {
 	return connector.DispatcherOptions{
 		Ledger:             d.Ledger,
 		Driver:             d.Driver,
-		Routes:             d.Routes,
+		Served:             d.Served,
 		Concurrency:        d.File.Concurrency,
 		Deadline:           time.Duration(d.File.Deadline),
 		Buckets:            d.Buckets,

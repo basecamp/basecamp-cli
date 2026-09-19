@@ -100,11 +100,11 @@ func eventList(ids []int64) string {
 	return "events " + strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
-// renderHoldingReply is the reply to a mention or assignment in a project that
-// has no route.
+// renderHoldingReply is the reply to a mention or assignment in a project
+// the connector does not serve.
 func renderHoldingReply(kind MessageKind, eventID int64) string {
 	lines := []string{
-		"I can't start on this here yet: this project has no working directory set up for me on the connector's machine, so nothing was run.",
+		"I can't start on this here yet: this project is not one my connector is set up to work in, so nothing was run.",
 		"Once the project is added to connect.json, a person can run it with: " + redispatchAsk(eventID),
 		"",
 		"Event " + strconv.FormatInt(eventID, 10) + " · " + lifecycleSignature,
@@ -496,7 +496,7 @@ ORDER BY o.id`, eventID)
 }
 
 // verdictIntents writes the guard for an admitted request and the holding
-// reply for an unrouted one.
+// reply for one in a project the connector does not serve.
 func verdictIntents(ctx context.Context, tx Tx, now time.Time, guardDelay time.Duration, v CommittedVerdict) error {
 	if !v.Acknowledge {
 		// Subscribed and completed are not requests: no guard, no holding

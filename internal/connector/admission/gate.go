@@ -23,7 +23,7 @@ func (g GateResult) Discarded() bool { return len(g.Rules) == 0 }
 //
 // The checks run in a fixed order and the first that ends the event names the
 // reason: the pointer's own ids, the matrix, the agent's own hand, scope, then
-// per rule the trust set and the route.
+// per rule the trust set and whether the project is served.
 func Gate(ev Event, p Policy, m Matrix) GateResult {
 	if ev.ID <= 0 || ev.BucketID <= 0 || ev.RecordingID <= 0 || ev.CreatorID <= 0 {
 		return GateResult{Reason: ReasonInvalidPointer}
@@ -52,7 +52,7 @@ func Gate(ev Event, p Policy, m Matrix) GateResult {
 
 	performer := ev.Performer()
 	isOperator := performer == p.Trust.OperatorID
-	_, routed := p.route(ev.BucketID)
+	_, served := p.served(ev.BucketID)
 
 	var (
 		open       []Rule
@@ -78,7 +78,7 @@ func Gate(ev Event, p Policy, m Matrix) GateResult {
 			drop(ReasonUntrustedPerformer)
 			continue
 		}
-		if rule.RequiresRoute && !routed {
+		if rule.RequiresServed && !served {
 			drop(ReasonNoRoute)
 			continue
 		}

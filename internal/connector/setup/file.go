@@ -5,11 +5,15 @@
 //
 // # connect.json
 //
-// connect.json is the only authority for which directory a project maps to
-// and for who may drive the agent. It is local policy: nothing read from
-// Basecamp adds a route or widens trust. Its admission part (trust and
-// projects) is exactly what admission.ParsePolicy reads; the rest belongs to
-// dispatch.
+// connect.json is the only local authority for which Basecamp projects may
+// drive the agent and for who may drive it. It is local policy: nothing read
+// from Basecamp serves a project or widens trust. Its admission part (trust
+// and projects) is exactly what admission.ParsePolicy reads; the rest belongs
+// to dispatch.
+//
+// No directory is associated with a project. The connector runs where it was
+// started, and a task that needs a clone or a directory of its own is the
+// agent's business to make.
 //
 // Because the file is the trust anchor, a copy another user could have
 // written is not one to act on. Save writes it owner-only (0600, in 0700
@@ -100,9 +104,10 @@ type File struct {
 	Agent Agent `json:"agent"`
 
 	// Trust and Projects are admission's, in admission's own types, so the
-	// two cannot drift.
-	Trust    admission.Trust           `json:"trust"`
-	Projects map[int64]admission.Route `json:"projects"`
+	// two cannot drift. Projects is the list of Basecamp projects this agent
+	// serves, keyed by project id.
+	Trust    admission.Trust             `json:"trust"`
+	Projects map[int64]admission.Project `json:"projects"`
 
 	Driver string `json:"driver"`
 	// Worker is the coding agent the driver runs: claude, or another row of
@@ -114,7 +119,8 @@ type File struct {
 
 	// LegacyWorktrees is the --worktrees setting of a connector that gave
 	// each task a git worktree of its own. Worktrees are gone: a task runs
-	// where its route says, and nothing here reads this. It is still a field
+	// where the connector was started, and nothing here reads this. It is
+	// still a field
 	// because Parse refuses an unknown key, and a connect.json written
 	// before they went has "worktrees" in it — accepting it is what lets
 	// that file still open. Parse zeroes it, and omitempty keeps it out of
@@ -164,7 +170,7 @@ func New(profile string) File {
 		Version:     Version,
 		Profile:     profile,
 		Trust:       admission.Trust{Mode: admission.TrustOperator},
-		Projects:    map[int64]admission.Route{},
+		Projects:    map[int64]admission.Project{},
 		Driver:      DefaultDriver,
 		Worker:      DefaultWorker,
 		Concurrency: DefaultConcurrency,
@@ -241,12 +247,9 @@ func (f File) Validate() error {
 	if _, err := f.Policy(f.Agent.PersonID); err != nil {
 		return err
 	}
-	for bucket, route := range f.Projects {
-		if !filepath.IsAbs(route.Path) || filepath.Clean(route.Path) != route.Path {
-			return fmt.Errorf("route for project %d: path %q is not a clean absolute path", bucket, route.Path)
-		}
-		if route.Class != "" && !ValidClass(route.Class) {
-			return fmt.Errorf("route for project %d: class %q must be lowercase letters, digits, - or _, at most 40", bucket, route.Class)
+	for bucket, project := range f.Projects {
+		if project.Class != "" && !ValidClass(project.Class) {
+			return fmt.Errorf("served project %d: class %q must be lowercase letters, digits, - or _, at most 40", bucket, project.Class)
 		}
 	}
 	switch f.Driver {
@@ -280,7 +283,16 @@ func (f File) WorkerName() string {
 // (only the last would count, so the file would not say what it reads as),
 // and anything after the object.
 func Parse(data []byte) (File, error) {
-	if err := refuseDuplicateKeys(data); err != nil {
+	// admission's, not setup's own: one walk, so the reader that authorizes
+	// and the reader that refuses cannot disagree about what a key says.
+	if err := admission.CheckCanonicalKeys(data); err != nil {
+		return File{}, fmt.Errorf("parse connect.json: %w", err)
+	}
+	// admission.Project refuses a malformed entry itself, so both readers
+	// fail closed. This runs first only to name the project in the message:
+	// a map value's own error cannot say which key it came from, and
+	// connect.json is a file an operator edits by hand.
+	if err := refuseMalformedProjects(data); err != nil {
 		return File{}, fmt.Errorf("parse connect.json: %w", err)
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -292,10 +304,17 @@ func Parse(data []byte) (File, error) {
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return File{}, errors.New("parse connect.json: trailing data after the object")
 	}
-	// Read, and forgotten: see LegacyWorktrees.
+	// Read, and forgotten: see LegacyWorktrees and admission.Project's
+	// LegacyPath. Both keys are in every connect.json written before the
+	// directories went, and DisallowUnknownFields would refuse the file
+	// outright without a field to decode them into.
 	f.LegacyWorktrees = false
 	if f.Projects == nil {
-		f.Projects = map[int64]admission.Route{}
+		f.Projects = map[int64]admission.Project{}
+	}
+	for id, project := range f.Projects {
+		project.LegacyPath = ""
+		f.Projects[id] = project
 	}
 	if err := f.Validate(); err != nil {
 		return File{}, err
@@ -303,73 +322,40 @@ func Parse(data []byte) (File, error) {
 	return f, nil
 }
 
-// canonicalKey reports whether a key is in its one canonical spelling:
-// lowercase letters, digits and underscores for names, plain decimal for
-// project ids.
-func canonicalKey(key string) bool {
-	if n, err := strconv.ParseInt(key, 10, 64); err == nil {
-		return strconv.FormatInt(n, 10) == key
+// refuseMalformedProjects names the project an entry belongs to when the
+// entry is one admission.Project refuses. It decodes each entry through that
+// type, so it refuses everything the type refuses — a null entry, an unknown
+// field, a value of the wrong type, a legacy path that is not the absolute
+// POSIX path the old writer wrote — and not a null entry alone. The strict
+// decode in Parse refuses the same file; what it cannot say is which of the
+// served projects carried the entry. A malformed trust anchor withholds
+// authorization either way; this only makes the refusal findable.
+func refuseMalformedProjects(data []byte) error {
+	var shape struct {
+		Projects map[string]json.RawMessage `json:"projects"`
 	}
-	if key == "" {
-		return false
+	// A document this cannot read is not this check's to report: the strict
+	// decode that follows says it better. This exists only to name a
+	// project, so it stands aside rather than competing.
+	if json.Unmarshal(data, &shape) != nil {
+		return nil //nolint:nilerr // the strict decode below reports it better
 	}
-	for _, r := range key {
-		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
-			return false
+	ids := make([]string, 0, len(shape.Projects))
+	for id := range shape.Projects {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		entry := shape.Projects[id]
+		if string(bytes.TrimSpace(entry)) == "null" {
+			return fmt.Errorf("project %s: its entry is null, which is not a served project; write {} for one with no settings, or take the project out", id)
+		}
+		var p admission.Project
+		if err := json.Unmarshal(entry, &p); err != nil {
+			return fmt.Errorf("project %s: %w", id, err)
 		}
 	}
-	return true
-}
-
-// refuseDuplicateKeys walks the JSON document and refuses any object that
-// names a key twice. encoding/json matches field names case-insensitively
-// and parses project ids as numbers, so "Trust" is "trust" and "048699913"
-// is 48699913 to it; every key must therefore be in its one canonical
-// spelling, which makes an exact comparison a complete one.
-func refuseDuplicateKeys(data []byte) error {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	var walk func() error
-	walk = func() error {
-		tok, err := dec.Token()
-		if err != nil {
-			return err
-		}
-		delim, ok := tok.(json.Delim)
-		if !ok {
-			return nil
-		}
-		switch delim {
-		case '{':
-			seen := map[string]bool{}
-			for dec.More() {
-				keyTok, err := dec.Token()
-				if err != nil {
-					return err
-				}
-				key, _ := keyTok.(string)
-				if !canonicalKey(key) {
-					return fmt.Errorf("key %q is not spelled canonically: names are lowercase, project ids plain decimal", key)
-				}
-				if seen[key] {
-					return fmt.Errorf("key %q appears twice in one object", key)
-				}
-				seen[key] = true
-				if err := walk(); err != nil {
-					return err
-				}
-			}
-		case '[':
-			for dec.More() {
-				if err := walk(); err != nil {
-					return err
-				}
-			}
-		}
-		_, err = dec.Token() // the closing delimiter
-		return err
-	}
-	return walk()
+	return nil
 }
 
 // VerifyAgent refuses a connect.json that does not describe the identity a

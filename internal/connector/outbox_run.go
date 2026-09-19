@@ -418,7 +418,7 @@ func (l *Ledger) claimIntent(ctx context.Context, skip ...int64) (Intent, bool, 
 			// blocked on that reason. Which reason is the key's to say
 			// (holdingReplyReason): what is written now answers no_route, and
 			// an upgraded ledger can still hold one an older build wrote for
-			// a route no worktree could be made in.
+			// a directory no worktree could be made in.
 			var stillBlocked bool
 			switch err := tx.QueryRowContext(ctx, `SELECT state = 'blocked' AND reason = ? FROM events WHERE id = ?`,
 				holdingReplyReason(in), in.EventID).Scan(&stillBlocked); {

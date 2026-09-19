@@ -53,7 +53,7 @@ var testAdapter = Adapter{
 	Version: testVersion,
 	Env:     []string{"FAKE_AGENT_KEY"},
 	SetEnv:  map[string]string{"FAKE_AGENT_SWITCH": "on"},
-	Modes:   map[driver.PermissionMode]string{driver.ModeEditsInWorkDir: "ask"},
+	Modes:   map[driver.PermissionMode]string{driver.ModeEdits: "ask"},
 	SessionMeta: map[string]any{
 		"vendor": map[string]any{"settingSources": []string{}},
 	},
@@ -70,7 +70,7 @@ type recordingPolicy struct {
 }
 
 func (p *recordingPolicy) Rules() driver.PermissionRules {
-	return driver.PermissionRules{Mode: driver.ModeEditsInWorkDir, WorkDir: p.workDir}
+	return driver.PermissionRules{Mode: driver.ModeEdits}
 }
 
 func (p *recordingPolicy) Decide(_ context.Context, req driver.PermissionRequest) driver.PermissionDecision {
@@ -879,7 +879,7 @@ func TestThePinnedAdapters(t *testing.T) {
 		got, ok := AdapterNamed(a.Name)
 		require.True(t, ok)
 		assert.Equal(t, a.Package, got.Package)
-		assert.NotEmpty(t, a.Modes[driver.ModeEditsInWorkDir], a.Name)
+		assert.NotEmpty(t, a.Modes[driver.ModeEdits], a.Name)
 		for _, name := range a.Env {
 			assert.NotContains(t, []string{"CLAUDE_CODE_EXECUTABLE", "CODEX_PATH", "CLAUDE_CODE_MESSAGING_TOKEN", "BASECAMP_TOKEN"}, name,
 				"%s may not take a variable that swaps its pinned agent or carries the host's token", a.Name)

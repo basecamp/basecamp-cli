@@ -1908,7 +1908,12 @@ var shellSafeRe = regexp.MustCompile(`^[A-Za-z0-9_./:@%+=-]+$`)
 // shellQuote renders s safe to embed in an emitted shell command. Clearly
 // inert strings pass through bare; anything else is single-quoted — the one
 // POSIX form in which nothing substitutes — with embedded single quotes
-// spelled '\”. This is an encoding applied to every embedded value, not a
+// spliced out and back in as:
+//
+//	'\''
+//
+// indented so gofmt leaves it as written. This is an
+// encoding applied to every embedded value, not a
 // metacharacter list: breadcrumbs interpolate user- and API-controlled text,
 // and escaping cases one at a time is how quoting bugs recur.
 func shellQuote(s string) string {

@@ -52,8 +52,8 @@ import (
 //     transaction that ends the task. One live task per conversation keeps
 //     the new task from starting before then.
 //  6. Admitted means dispatchable. A redispatch admits only a record that
-//     still has its snapshot and route; anything else is decided again by
-//     admission, whose verdict stands.
+//     still has its snapshot and a served project; anything else is decided
+//     again by admission, whose verdict stands.
 //  7. Shadow promote and import are atomic under a crash: each is one ledger
 //     transaction, and promote exposes the shadow ledger at the normal path
 //     only after its hold committed, by one rename (promote.go).

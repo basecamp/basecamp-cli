@@ -1146,3 +1146,5 @@ SUB basecamp uploads vault list
 SUB basecamp uploads vaults
 SUB basecamp uploads vaults create
 SUB basecamp uploads vaults list
+FLAG basecamp connect setup --remove-route type=stringArray
+FLAG basecamp connect setup --route type=stringArray

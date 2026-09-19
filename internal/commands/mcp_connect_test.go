@@ -54,7 +54,7 @@ func connectStateWithTask(t *testing.T) (string, connector.TaskGrant, *connector
 		RequesterID: 26909558, State: admission.StateAdmitted, Trigger: admission.TriggerMentioned,
 		Acknowledge: true, ConversationKey: "recording:501",
 		Reply:  &admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 501},
-		Routed: true, Route: "/work/secret-route", Class: "internal",
+		Served: true, Class: "internal",
 		Snapshot: &admission.Snapshot{Type: "Todo", Title: "A to-do", Content: "please do it"},
 	})
 	require.NoError(t, err)
@@ -112,7 +112,9 @@ func TestMCPCommandServesTheConnectDomainFromTheLedger(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(text), &body))
 	assert.Equal(t, int64(1), body.Instruction.EventID)
 	assert.Equal(t, "please do it", body.Instruction.Content)
-	assert.NotContains(t, text, "secret-route")
+	for _, absent := range []string{"route", "work_dir", "path", "position"} {
+		assert.NotContains(t, text, `"`+absent+`"`, "the instruction is an allowlist; no directory and no feed position")
+	}
 	assert.NotContains(t, text, grant.Token)
 
 	// Read back through the connector's own handle: a repeat writes nothing,

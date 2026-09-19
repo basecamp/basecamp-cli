@@ -53,7 +53,7 @@ func todoEvent(id, recording int64) eventfeed.Event {
 	}
 }
 
-// otherTodoEvent is todoEvent in the second routed project.
+// otherTodoEvent is todoEvent in the second served project.
 func otherTodoEvent(id, recording int64) eventfeed.Event {
 	e := todoEvent(id, recording)
 	e.BucketID = harnessOtherBucket

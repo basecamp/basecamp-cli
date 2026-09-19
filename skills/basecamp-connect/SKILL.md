@@ -3,8 +3,8 @@ name: basecamp-connect
 description: |
   Connect a Basecamp agent to this computer and manage the local agent
   connector's setup: the agent's credential (basecamp auth agent connect),
-  connect.json (who may drive the agent, which project routes to which
-  directory), and readiness (basecamp connect setup). Explains every setup
+  connect.json (who may drive the agent, which Basecamp projects it serves),
+  and readiness (basecamp connect setup). Explains every setup
   result and failure. Also reads what the connector ran (status, doctor) and
   carries out a person's decisions on its records (redispatch, discard,
   release, the cutover's shadow promote and import). Starting and supervising
@@ -20,7 +20,7 @@ triggers:
   - basecamp connect setup
   - basecamp auth agent connect
   - connect.json
-  - route a project to a directory
+  - serve a project
   - who can drive the agent
   - connector not ready
   - basecamp connect status
@@ -34,8 +34,10 @@ triggers:
 
 The local agent connector lets people in Basecamp hand work to a coding agent on
 this computer. It listens to the account's event feed **as a Basecamp agent**,
-admits what a trusted person asks of that agent, and runs the work in the local
-directory the project is routed to. The agent replies in Basecamp as itself.
+admits what a trusted person asks of that agent, and runs the work in the
+directory the connector itself was started in. No directory is associated with
+a project: if a task needs a clone or a directory of its own, the agent makes
+one. The agent replies in Basecamp as itself.
 
 You manage it for the person. They should never have to type a command: you
 check what is there, ask what you need in plain words, run the commands, and
@@ -46,7 +48,7 @@ explain the result. This skill is the reference you do that from.
 | Command | Owns | Run it when |
 |---------|------|-------------|
 | `basecamp auth agent connect -P '<profile>'` | The agent's **credential**, stored under a CLI profile | The profile does not exist yet, or the person agrees to replace its Agent credential |
-| `basecamp connect setup -P '<profile>'` | **Policy and readiness**: connect.json and the checks | First setup after the credential, and every change to trust or routes |
+| `basecamp connect setup -P '<profile>'` | **Policy and readiness**: connect.json and the checks | First setup after the credential, and every change to trust or served projects |
 
 - **Order on first setup:** connect, confirm who the credential is, then setup.
   Setup does not obtain a credential.
@@ -96,15 +98,15 @@ the person who the credential is and let them decide. After setup, check
 - **Numeric ids** (project, person, account and identity ids) go in bare, as
   digits only. Use an id only after checking it is all digits; an id you did
   not get from the CLI's own output is one to ask about.
-- **Every other value** goes in single quotes: profile names, directories, class
-  labels, anything the person typed. Write a single quote inside a value as
-  `'\''`. Single quotes stop `~` expanding, so write a directory as an absolute
-  path. Fixed words from this skill (`operator`, `spawn`, `90m`) need no quotes.
+- **Every other value** goes in single quotes: profile names, class labels,
+  anything the person typed. Write a single quote inside a value as
+  `'\''`. Fixed words from this skill (`operator`, `spawn`, `90m`) need no
+  quotes. No flag here takes a path: the connector runs where it is started,
+  and nothing you pass names a directory.
 
 Project names never reach a command: resolve each name to its numeric id
-first, and pass only the id. For example the directory
-`/home/me/Work/Q3 $launch` for project 222 is
-`--route '222=/home/me/Work/Q3 $launch'`.
+first, and pass only the id. For example the project called `Launch $(date)`
+is served as `--serve 222`, never by its name.
 
 **Interactive logins.** `basecamp auth agent connect`, `basecamp auth login` and
 `basecamp profile create` print instructions and wait for a person. Run them
@@ -126,14 +128,15 @@ The CLI's configuration, its profiles and (when it uses files) its credential
 store also live under `$XDG_CONFIG_HOME/basecamp`, so pointing
 `XDG_CONFIG_HOME` somewhere else hides every profile.
 
-connect.json holds ids, a trust mode and directory paths, and no credential.
+connect.json holds ids and a trust mode, no directory and no credential.
 Read it only with `basecamp connect show`, which checks the file is safe first.
 
 ## connect.json
 
-connect.json is the only authority for who may drive the agent and which
-directory a project's work runs in. Nothing read from Basecamp adds a route or
-widens trust.
+connect.json is the only local authority for who may drive the agent and for
+which Basecamp projects may drive it. Nothing read from Basecamp serves a
+project or widens trust. It names no directory: the connector runs where it is
+started.
 
 ```json
 {
@@ -143,7 +146,7 @@ widens trust.
   "agent": { "person_id": 4001, "kind": "agent" },
   "trust": { "mode": "operator", "operator_id": 1001 },
   "projects": {
-    "222": { "path": "/home/me/Work/app", "class": "internal", "watch_completions": true }
+    "222": { "class": "internal", "watch_completions": true }
   },
   "driver": "spawn",
   "worker": "claude",
@@ -160,7 +163,7 @@ widens trust.
 | `trust.mode` | Who may drive the agent: `operator`, `allowlist` or `project` | `--trust` |
 | `trust.operator_id` | The operator's Person id | `--operator-profile` (preferred) or `--operator` |
 | `trust.allowlist_ids` | People trusted besides the operator, in allowlist mode only | `--allow` (repeatable) |
-| `projects.<id>.path` | The directory that project's work runs in: absolute, symlinks resolved | `--route '<id>=<dir>'`, `--remove-route <id>` |
+| `projects.<id>` | A Basecamp project this agent serves. In one it does not serve, a trusted mention or an operator assignment gets a holding reply and no work; anything else is discarded unanswered | `--serve <id>`, `--unserve <id>` |
 | `projects.<id>.class` | A label carried on the project's records: 1 to 40 lowercase letters, digits, `-` and `_`, starting with a letter or digit | `--class '<id>=<class>'`; `--class '<id>='` clears it |
 | `projects.<id>.watch_completions` | Every trusted completion in the project reaches the agent, without assigning it | `--watch-completions <id>`, `--no-watch-completions <id>` |
 | `driver` | How workers are run: `spawn` (default) or `acp` | `--driver` |
@@ -169,7 +172,7 @@ widens trust.
 | `deadline` | Time limit per task, 1m to 24h (default 45m) | `--deadline 90m` |
 
 **Never edit connect.json by hand.** It is the trust anchor: setup verifies
-every person and route before writing it, writes it owner-only, and parses it
+every person and project before writing it, writes it owner-only, and parses it
 strictly (an unknown or misspelled key, a key given twice, or a loose permission
 makes it refused). Every change goes through setup.
 
@@ -220,7 +223,7 @@ could look up:
    `unknown profile` error (`api_error`) means no such profile, which is also
    what every other command says about it. **Never read
    connect.json directly** (no `cat`, no file read): that skips those checks.
-   To tell the person which projects are routed, look each id up under the
+   To tell the person which projects are served, look each id up under the
    agent's profile (`basecamp projects show <id> -P '<profile>' --json`); if that
    is refused, use the operator's profile. Say names, not ids.
 5. **Readiness,** once the profile is set up:
@@ -237,9 +240,9 @@ Work through these in order, asking only what you cannot find out.
 and `_`, starting with a letter or digit, for example the agent's name.
 Inspect it, all five steps above. If `basecamp connect show` prints a policy,
 the profile is already set up: say what it holds — the operator, the trust mode
-and each routed project — and go to Changing the setup later instead. Setup
-keeps everything you do not pass, so adding a route to a profile you have not
-looked at leaves trust and routes in place that nobody mentioned.
+and each served project — and go to Changing the setup later instead. Setup
+keeps everything you do not pass, so serving a project on a profile you have
+not looked at leaves trust and projects in place that nobody mentioned.
 
 - **The profile does not exist, Agent person** (the normal path): run
   `basecamp auth agent connect -P '<profile>'` as described under Interactive
@@ -281,8 +284,11 @@ pass `--allow <id>` for each.
   project it works in.
 - Show the names, let the person choose, and map each choice to its numeric
   `id` yourself. When a name matches more than one project, ask which.
-- For each project ask which local directory its work runs in. Check the
-  directory exists.
+- Do not ask where a project's work lives. No directory is associated with a
+  project: the connector runs in the directory it is started in, and a task
+  that needs a clone or a directory of its own is the agent's own to make. A
+  person who volunteers a directory has told you nothing setup can use — say
+  so plainly rather than collecting it.
 - Offer `--watch-completions` only when the person wants the agent to act on
   every completed to-do or card in a project without being assigned. Offer
   `--class` only when they want projects labelled (for example `internal`; see
@@ -291,12 +297,12 @@ pass `--allow <id>` for each.
   asked.
 
 **5. Confirm, then run setup.** Say back in plain words: the agent, the
-operator, the trust mode, and each project name with its directory. Then run,
-quoting values by the Shell quoting rule:
+operator, the trust mode, and each project name. Then run, quoting values by
+the Shell quoting rule:
 
 ```bash
 basecamp connect setup -P '<profile>' --operator-profile '<operator-profile>' \
-  --route '<project-id>=<dir>' --route '<project-id>=<dir>' --json
+  --serve <project-id> --serve <project-id> --json
 ```
 
 adding `--trust`, `--allow`, `--watch-completions` or `--class`
@@ -313,8 +319,8 @@ project names up the same way as on first setup, and quote values by the Shell q
 
 | To | Run |
 |----|-----|
-| Add a project, or move it to another directory | `basecamp connect setup -P '<profile>' --route '<id>=<dir>' --json` |
-| Remove a project | `basecamp connect setup -P '<profile>' --remove-route <id> --json` |
+| Serve a project | `basecamp connect setup -P '<profile>' --serve <id> --json` |
+| Stop serving a project | `basecamp connect setup -P '<profile>' --unserve <id> --json` |
 | Watch, or stop watching, a project's completions | `--watch-completions <id>` / `--no-watch-completions <id>` |
 | Label a project, or clear its label | `--class '<id>=<class>'` / `--class '<id>='` |
 | Trust only the operator, or project members | `--trust operator` / `--trust project` (leaving allowlist mode drops the list) |
@@ -323,23 +329,33 @@ project names up the same way as on first setup, and quote values by the Shell q
 | Change workers | `--driver`, `--worker claude` / `--worker codex`, `--concurrency`, `--deadline` |
 | Replace the agent's credential (only with the person's consent: it rotates the secret) | `basecamp auth agent connect -P '<profile>'`, then setup with no flags to re-check |
 
-A class or watch setting needs the project routed first, in the same run or an
-earlier one. A project cannot be routed and removed in one run. The last route
-cannot be removed on its own: with no routes the connector is not ready, so
-setup writes nothing. Say so, and ask what the person wants instead.
+A class or watch setting needs the project served first, in the same run or an
+earlier one. A project cannot be served and removed in one run.
+
+**Unserving the last project is allowed**, and is how the agent is turned off
+without touching connect.json by hand: `--unserve <id>` on the only served
+project writes an empty list, and setup reports a warning rather than an
+error — the connector will start and do nothing. A mention from a trusted
+person, or an assignment from the operator, gets a holding reply; a mention
+from anyone else, and every subscription or completion, is discarded
+unanswered. Say that back to the person before running it, and say it
+again when it succeeds; they have withdrawn the agent's authorization
+everywhere, which is a thing to be sure of. Serving one again is
+`--serve <id>`. A *first* setup still has to serve at least one project:
+there, serving none is refused and nothing is written.
 
 Some changes setup refuses on purpose, because connect.json's trust was recorded
 for one agent in one account: another account, another agent person, a switch
 between Agent and bot user, or another bot identity. Each refusal names
 connect.json. The way through is to remove that file and set the profile up
-afresh, which drops every route and trust setting. Remove it only after the
+afresh, which drops every served project and trust setting. Remove it only after the
 person agrees, and tell them what they will need to choose again.
 
 ## Reading setup's result
 
 With `--json`, success is `{"ok": true, "data": {...}, "summary": ...}` with
 `data.ready` true, `data.written` true, the file `path`, `agent_person_id`,
-`agent_kind`, `operator_id`, `trust_mode`, `routes` (a count) and `checks`
+`agent_kind`, `operator_id`, `trust_mode`, `projects` (a count) and `checks`
 (each `name`, `status`, `message`, sometimes `hint`). A `warn` check is usable;
 mention it.
 
@@ -351,7 +367,7 @@ the exit status: exit 7 is shared.
 
 | `code` (exit) | Means | Next step |
 |---------------|-------|-----------|
-| `usage` (1) | Input refused: a bad flag value, no operator on a first setup, a missing directory, a class or watch setting on an unrouted project, `--expect-identity` on an Agent credential, a person refused by trust (an Agent, a client, the agent itself, or unreadable), or connect.json itself unusable | Fix the input the message names and run again. |
+| `usage` (1) | Input refused: a bad flag value, no operator on a first setup, a class or watch setting on a project that is not served, `--expect-identity` on an Agent credential, a person refused by trust (an Agent, a client, the agent itself, or unreadable), or connect.json itself unusable | Fix the input the message names and run again. |
 | `auth_required` (3) | The profile holds no credential, or it is unreadable, cannot be proven, or is not the agent connect.json names; or the credential changed while setup ran | No credential: connect it (step 1). Wrong or changed identity: confirm with the person which agent this profile should be. Changed mid-run: run setup again. |
 | `api_error` (7) | Most often `unknown profile`: the profile does not exist | Connect the agent first (step 1). |
 | `not_ready` (7) | A readiness check failed. `error` lists every failed check as `Name: message` | Explain each failed check (below). |
@@ -362,14 +378,15 @@ A setup the person stops also writes nothing.
 
 ### Failed readiness checks
 
-Every run checks every route, including the ones it keeps. A kept route that
-fails blocks the whole write, so fix or remove it before other changes can land.
+Every run checks every served project, including the ones it keeps. A kept
+project that fails blocks the whole write, so fix it or stop serving it before
+other changes can land.
 
-- **Routes: No project is routed.** Every mention would get a holding reply and
-  no work. Add a project (step 4).
-- **Project `<id>`: the route's directory is no longer usable.** The directory
-  was moved or deleted. Ask where the project's work lives now and route it
-  again, or remove the route.
+- **Projects: No project is served.** A *failure* only on a first setup, where
+  it means the profile has not been set up: serve a project (step 4). On a
+  profile already set up it is a *warning*, not a failure — connect.json is
+  written, and the agent is left doing nothing until a project is served
+  again.
 - **Project `<id>`: reading the project was refused, and the message says
   Basecamp refuses this read to an Agent identity today.** This is Basecamp,
   not the setup: an Agent identity is refused the project and people reads
@@ -377,7 +394,7 @@ fails blocks the whole write, so fix or remove it before other changes can land.
   never act on them. First check the agent is a member of the project. If it
   is, the way to run today is the **bot-user path**: sign a bot user in under a
   profile of its own (step 1, Bot user) and set that profile up
-  (`basecamp connect setup -P '<bot-profile>' --operator-profile '<operator-profile>' --expect-identity <bot-identity-id> --route '<id>=<dir>'`).
+  (`basecamp connect setup -P '<bot-profile>' --operator-profile '<operator-profile>' --expect-identity <bot-identity-id> --serve <id>`).
   The Agent profile's credential stays as it is. Explain this and let the
   person decide before starting a bot-user sign-in: it needs a bot user account
   and its identity id.

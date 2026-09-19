@@ -450,7 +450,7 @@ func TestOutboxAFiredGuardIsReportedToTheWorker(t *testing.T) {
 		require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
 		require.Equal(t, 1, basecamp.postCount(), "only the follow-up's guard: the first was canceled")
 
-		joined, err := ledger.JoinConversation(ctx, l.TaskID)
+		joined, err := ledger.JoinConversation(ctx, l.TaskID, []int64{adapterBucketID})
 		require.NoError(t, err)
 		require.Equal(t, []int64{2}, joined)
 		instruction, _, err := d.Get(ctx, 2)

@@ -81,10 +81,10 @@ type Verdict struct {
 	// for a comment, the Campfire for a chat line, the recording otherwise.
 	ConversationKey string
 	Reply           *ReplyDestination
-	// Route and Class come from connect.json; Routed is false when the
-	// project has none.
-	Routed bool
-	Route  string
+	// Served is whether connect.json serves the record's project, and Class
+	// is that entry's classification. No directory comes from connect.json:
+	// the connector runs where it was started.
+	Served bool
 	Class  string
 	// RecordingURL is the recording's app URL, once read. A URL, not content.
 	RecordingURL string
@@ -98,11 +98,42 @@ type Admitter struct {
 	policy Policy
 	matrix Matrix
 	reads  Reads
+	// served reads the projects connect.json serves now, and says so when it
+	// cannot. Nil means the policy's own map, frozen at construction;
+	// WithServed makes it live.
+	served func() (map[int64]Project, error)
 
 	attempts int
 	backoff  time.Duration
 	sleep    func(context.Context, time.Duration) error
 	now      func() time.Time
+}
+
+// policyNow is the policy this decision runs against: the one the admitter
+// was built with, with the served projects as they are at this moment when a
+// source for them was given. Trust and the agent's own id never move.
+//
+// It is read once per decision and passed down, never read again part-way
+// through: a verdict assembled from two snapshots could admit an event on a
+// watch_completions flag that has just been turned on and stamp it with the
+// class from the entry that flag replaced (Copilot on #765).
+//
+// A source that cannot answer marks the policy unknown rather than returning
+// an empty map, which would read as "the operator serves nothing".
+//
+// The map is the caller's to copy; it is read, never written to.
+func (a *Admitter) policyNow() Policy {
+	if a.served == nil {
+		return a.policy
+	}
+	p := a.policy
+	projects, err := a.served()
+	if err != nil {
+		p.Projects, p.ProjectsUnknown = nil, true
+		return p
+	}
+	p.Projects = projects
+	return p
 }
 
 // decision is one Decide call: the admitter, plus what the call has spent
@@ -146,6 +177,24 @@ func WithReadRetry(attempts int, backoff time.Duration) Option {
 // WithSleep replaces the wait between read attempts. Tests use it.
 func WithSleep(sleep func(context.Context, time.Duration) error) Option {
 	return func(a *Admitter) { a.sleep = sleep }
+}
+
+// WithServed makes the served projects live: admission reads them at each
+// decision instead of from the policy it was built with.
+//
+// The dispatcher already rereads connect.json, so without this, serving a
+// project while the connector runs changed only half the answer. Unserving
+// one left its events admitted and then never started — no work and no
+// holding reply, so the person who mentioned the agent got nothing. Serving
+// one left them blocked no_route until a restart, and the holding reply's own
+// remedy could not work: a redispatch re-runs admission, against the same
+// stale policy (Copilot on #765).
+//
+// Only the projects are live. Trust is not: who may drive the agent is a
+// different kind of decision, and changing it under a running connector is
+// not something this option quietly does.
+func WithServed(served func() (map[int64]Project, error)) Option {
+	return func(a *Admitter) { a.served = served }
 }
 
 // WithMatrix replaces the trigger matrix.
@@ -206,9 +255,40 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		ev.SeenAt = a.now()
 	}
 
-	gate := Gate(ev, a.policy, a.matrix)
+	policy := a.policyNow()
+	gate := Gate(ev, policy, a.matrix)
 	if gate.Discarded() {
+		if policy.ProjectsUnknown && gate.Reason == ReasonNoRoute {
+			// The gate dropped it for want of a served project, and nothing
+			// could read which projects are served. Held rather than
+			// discarded: a discard is the one outcome repairing the file
+			// cannot reverse, and a blocked record can still be run. It
+			// waits for a person — `basecamp connect redispatch <id>` once
+			// the file is back — as every blocked record does. Nothing
+			// re-offers one on a timer.
+			return v.end(StateBlocked, ReasonConfigUnreadable), nil
+		}
+		// Every other gate discard turns on the trust set, the matrix or the
+		// --project scope, none of which the unreadable file touches.
 		return v.end(StateDiscarded, gate.Reason), nil
+	}
+	if policy.ProjectsUnknown {
+		// Before any read, and before anything below can end the verdict:
+		// nothing here can decide an event whose answer turns on a list that
+		// could not be read, and a discard is the one outcome repairing the
+		// file cannot reverse.
+		//
+		// It has to be here rather than after the trigger rules. A
+		// comment.created admits under mentioned, which needs no served
+		// project, or subscribed, which does — so with the list unknown the
+		// gate keeps the first and drops the second, does not discard, and
+		// match then returns not_addressed for a comment the agent is
+		// subscribed to. Terminally, over a broken file (Copilot on #765).
+		//
+		// Costing no reads is the other half: an unreadable file stops the
+		// connector spending the account's API budget on events it cannot
+		// decide.
+		return v.end(StateBlocked, ReasonConfigUnreadable), nil
 	}
 
 	if gate.ConfirmMembership {
@@ -256,11 +336,11 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	}
 
 	v.RecordingURL = summary.AppURL
-	if route, ok := a.policy.route(ev.BucketID); ok {
-		v.Routed, v.Route, v.Class = true, route.Path, route.Class
+	if project, ok := policy.served(ev.BucketID); ok {
+		v.Served, v.Class = true, project.Class
 	}
 
-	rule, state, reason, err := d.match(ctx, ev, gate.Rules, summary)
+	rule, state, reason, err := d.match(ctx, ev, policy, gate.Rules, summary)
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -271,11 +351,12 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	v.Trigger, v.Acknowledge = rule.Trigger, rule.Acknowledge
 	v.address(summary)
 
-	if !v.Routed {
-		// Mentioned and assigned are answered in an unmapped project rather
+	if !v.Served {
+		// Mentioned and assigned are answered in an unserved project rather
 		// than dropped: the record keeps its trigger and reply destination
-		// for the holding reply, and is read again when a route appears. The
-		// gate already discarded every trigger that requires a route.
+		// for the holding reply, and is read again once the operator serves
+		// the project. The gate already discarded every trigger that requires
+		// a served project.
 		return v.end(StateBlocked, ReasonNoRoute), nil
 	}
 	v.State = StateAdmitted
@@ -291,7 +372,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 
 // match tries the gate's open rules in matrix order and returns the first
 // that admits, or the state and reason that end the event.
-func (a *decision) match(ctx context.Context, ev Event, rules []Rule, summary *basecamp.RecordingSummary) (Rule, State, Reason, error) {
+func (a *decision) match(ctx context.Context, ev Event, policy Policy, rules []Rule, summary *basecamp.RecordingSummary) (Rule, State, Reason, error) {
 	agent := a.policy.AgentID
 	mentioned := slices.Contains(summary.MentionedPersonIDs, agent)
 	endState, endReason := StateDiscarded, ReasonNotAddressed
@@ -366,8 +447,8 @@ func (a *decision) match(ctx context.Context, ev Event, rules []Rule, summary *b
 			}
 
 		case TriggerCompleted:
-			route, routed := a.policy.route(ev.BucketID)
-			if routed && route.WatchCompletions {
+			project, served := policy.served(ev.BucketID)
+			if served && project.WatchCompletions {
 				return rule, "", "", nil
 			}
 			if assigned(summary, agent) {

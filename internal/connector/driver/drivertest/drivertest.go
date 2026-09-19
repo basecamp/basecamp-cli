@@ -1,8 +1,8 @@
 //go:build unix
 
 // Package drivertest is the shared way to test the connector's one-owner
-// rule: a task's process tree, its working directory, and its ledger record
-// have a single owner and a single release point (see the rule
+// rule: a task's process tree and its ledger record have a single owner and
+// a single release point (see the rule
 // written out in internal/connector/driver/worker.go).
 //
 // Cards that start workers or settle records use these helpers rather than

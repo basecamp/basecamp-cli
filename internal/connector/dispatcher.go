@@ -32,9 +32,12 @@ import (
 //     driver is asked for anything, a follow-up is exposed before its prompt
 //     is sent, and an attempt is ended in the ledger only after its worker is
 //     gone.
-//  2. The directory is the record's. A worker runs only in the route the
-//     record carries, and only while connect.json still approves that route
-//     for the record's project.
+//  2. The project is connect.json's. A worker runs only for a record whose
+//     project connect.json still serves, and stops being handed follow-ups
+//     the moment it stops serving it. Where the worker runs is not the
+//     record's: every task runs in the directory the connector was started
+//     in, and a task that needs a clone or a directory of its own is the
+//     agent's business to make.
 //  3. Nothing crosses to a worker that it does not need. The prompt names
 //     events and a recording URL, never content, and is under
 //     MaxPromptTokens at its worst case; the task token reaches only the
@@ -74,12 +77,20 @@ type DispatcherOptions struct {
 	Ledger *Ledger
 	// Driver starts workers.
 	Driver driver.Driver
-	// Routes is connect.json's current routes by project.
-	Routes func() map[int64]admission.Route
+	// Served is connect.json's served projects as they are now, by project
+	// id, and the reason they could not be read when that is the answer.
+	//
+	// A failure is not an empty map. Everything that decides on this set
+	// fails closed either way, but the two are different things to say out
+	// loud, and one consumer says something: reportStranded. Telling an
+	// operator that their projects are no longer served, when what happened
+	// is that nothing could read the file, is the same false claim the
+	// holding reply used to make on a card (Copilot on #765).
+	Served func() (map[int64]admission.Project, error)
 	// TokenWindow is how long a task token's socket waits for the worker's
 	// MCP server; DefaultTokenWindow when zero.
 	TokenWindow time.Duration
-	// Buckets is the --project scope; empty means every routed project.
+	// Buckets is the --project scope; empty means every served project.
 	Buckets []int64
 	// Concurrency is the most live tasks; setup's default when zero.
 	Concurrency int
@@ -92,14 +103,17 @@ type DispatcherOptions struct {
 
 	// MCP names what the worker's Basecamp MCP server runs as.
 	MCP WorkerMCP
-	// Policy is the permission policy; DefaultPolicy for the working
-	// directory when nil.
-	Policy func(workDir string) driver.PermissionPolicy
+	// Policy is the permission policy; DefaultPolicy when nil.
+	Policy func() driver.PermissionPolicy
 	// Lookup reads the connector's environment for the allowlists;
 	// os.LookupEnv when nil.
 	Lookup func(string) (string, bool)
 	// PrivateDir is an owner-only directory for session files.
 	PrivateDir string
+	// WorkDir is where every worker runs: the directory the connector was
+	// started in, os.Getwd() when empty. It is where the process starts, not
+	// a bound on where it may write — nothing here bounds that.
+	WorkDir string
 
 	// Replies, when set, is read for the adopted-reply rule.
 	Replies ReplyLister
@@ -191,8 +205,8 @@ func NewDispatcher(opts DispatcherOptions) (*Dispatcher, error) {
 		return nil, errors.New("connector: the dispatcher needs the ledger")
 	case opts.Driver == nil:
 		return nil, errors.New("connector: the dispatcher needs a driver")
-	case opts.Routes == nil:
-		return nil, errors.New("connector: the dispatcher needs connect.json's routes")
+	case opts.Served == nil:
+		return nil, errors.New("connector: the dispatcher needs connect.json's served projects")
 	case opts.MCP.Command == "" || opts.MCP.Profile == "" || opts.MCP.StateDir == "":
 		return nil, errors.New("connector: the dispatcher needs the worker's MCP server command, profile and state directory")
 	case opts.PrivateDir == "":
@@ -205,7 +219,16 @@ func NewDispatcher(opts DispatcherOptions) (*Dispatcher, error) {
 		opts.Launcher = driver.DirectLauncher{}
 	}
 	if opts.Policy == nil {
-		opts.Policy = func(workDir string) driver.PermissionPolicy { return DefaultPolicy(workDir) }
+		opts.Policy = func() driver.PermissionPolicy { return DefaultPolicy() }
+	}
+	if opts.WorkDir == "" {
+		// The connector runs where it was started, and so does every worker
+		// it starts. A directory it cannot name is one no driver could open.
+		wd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("connector: the dispatcher needs the directory it was started in: %w", err)
+		}
+		opts.WorkDir = wd
 	}
 	if opts.Lookup == nil {
 		opts.Lookup = os.LookupEnv
@@ -288,8 +311,8 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 // process's attempt half-settled, with a worker ended and its record still
 // live (Copilot on #738). So what recovery reads and what it settles go on a
 // context cancellation does not reach, as every other settlement does
-// (settleCtx). Only the working directories' own reconciliation, which
-// settles nothing, is left on the caller's context.
+// (settleCtx). Only the private directory's own sweep, which settles
+// nothing, is left on the caller's context.
 func (d *Dispatcher) Recover(ctx context.Context) error {
 	cleanupCtx := context.WithoutCancel(ctx)
 	d.sweepPrivateDir()
@@ -307,9 +330,11 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 			// Launching with no process recorded: the crash fell between the
 			// spawn and the write, so a worker may exist that cannot be
 			// named. Treated as running (the spec's rule) means it is not
-			// settled around either: its attempt stays live and its
-			// conversation and directory stay held.
-			d.log.Error("connector: an attempt was left mid-launch and its worker cannot be identified; it stays live and its directory held",
+			// settled around either: its attempt stays live, so its
+			// conversation stays held and it goes on taking a worker slot.
+			// It holds no directory: every worker runs where the connector
+			// was started.
+			d.log.Error("connector: an attempt was left mid-launch and its worker cannot be identified; it stays live, holding its conversation and a worker slot",
 				"attempt_id", a.AttemptID, "task_id", a.TaskID)
 			d.hold()
 			continue
@@ -319,9 +344,9 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 		if err != nil {
 			// A worker that may still be running with the operator's
 			// authority is not settled around. Its attempt stays live, so its
-			// conversation and its directory stay held and nothing new runs
-			// there, until a person has looked.
-			d.log.Error("connector: could not verify whether a previous worker still runs; its attempt stays live and its directory held",
+			// conversation stays held and nothing new runs on it, until a
+			// person has looked.
+			d.log.Error("connector: could not verify whether a previous worker still runs; its attempt stays live and its conversation held",
 				"attempt_id", a.AttemptID, "pid", a.Process.PID, "error", err)
 			d.hold()
 			continue
@@ -330,7 +355,7 @@ func (d *Dispatcher) Recover(ctx context.Context) error {
 			"task_id", a.TaskID, "was", string(a.State), "worker_signaled", signaled)
 		// Through the one release point, which confirms the group is gone
 		// before anything is settled or released.
-		d.release(cleanupCtx, Launch{TaskID: a.TaskID, AttemptID: a.AttemptID, Route: a.Route, WorkDir: a.WorkDir},
+		d.release(cleanupCtx, Launch{TaskID: a.TaskID, AttemptID: a.AttemptID},
 			worker, TokenHolder{Process: a.Taker.Identity(), Unaccounted: a.TakerUnaccounted},
 			AttemptEnd{AttemptID: a.AttemptID, Stop: StopLost}, nil)
 	}
@@ -395,14 +420,21 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	}
 	d.mu.Unlock()
 
-	approved := d.approvedRoutes()
+	served, servedErr := d.servedBuckets()
 	// Follow-ups first: an event on a live conversation joins its task, while
-	// connect.json still approves that task's directory for its project.
+	// connect.json still serves that task's project. The served set goes to
+	// the ledger as well as being checked here, so what joins is held to the
+	// task's own project and to the set as it is now — not to the served bit
+	// admission wrote on each record when it decided it.
 	for _, r := range runs {
-		if !r.authorized() {
+		// The same snapshot decides and is handed to the join. Reading it
+		// again inside authorized would let the cache turn over between the
+		// two, so a task could be authorized against one set and joined
+		// against another (Copilot on #765).
+		if servedErr != nil || !r.authorizedIn(served) {
 			continue
 		}
-		if _, err := d.ledger.JoinConversation(ctx, r.launch.TaskID); err != nil {
+		if _, err := d.ledger.JoinConversation(ctx, r.launch.TaskID, served); err != nil {
 			return err
 		}
 	}
@@ -414,16 +446,16 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	if d.free() <= 0 {
 		return nil
 	}
-	// Invariant 2, in the query: only records whose route connect.json
-	// approves now, in the projects this run hears, and on a directory no live
-	// task holds. A record the dispatcher cannot start never fills the window.
+	// Invariant 2, in the query: only records in a project this pass read as
+	// served, among the projects this run hears. A record the dispatcher
+	// cannot start never fills the window.
 	records, err := d.ledger.StartableRecordsWhere(ctx, StartableFilter{
-		Routes: approved, RouteHeld: true, Limit: d.opts.Concurrency * 4,
+		Served: served, Limit: d.opts.Concurrency * 4,
 	})
 	if err != nil {
 		return err
 	}
-	d.reportStranded(ctx, approved)
+	d.reportStranded(ctx, served, servedErr)
 	for _, record := range records {
 		// Asked again on every record, not counted down: a start that failed
 		// can have held its attempt, and a held attempt takes a slot as a
@@ -431,10 +463,7 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 		if d.free() <= 0 {
 			break
 		}
-		if d.workDirBusy(record.Decision.Route) {
-			continue
-		}
-		if err := d.start(ctx, record); err != nil {
+		if err := d.start(ctx, record, served); err != nil {
 			if errors.Is(err, ErrNotStartable) {
 				continue
 			}
@@ -455,61 +484,78 @@ func (d *Dispatcher) free() int {
 }
 
 // StrandedInterval is how often the dispatcher says how much admitted work
-// no route of connect.json's covers.
+// sits in a project connect.json no longer serves.
 const StrandedInterval = 10 * time.Minute
 
-// reportStranded counts the records waiting for a worker that no approved
-// route covers — a project unrouted, or its route changed since the record
-// was admitted — and says so, rather than leaving them silently unstarted.
-func (d *Dispatcher) reportStranded(ctx context.Context, approved map[int64]string) {
+// reportStranded counts the records waiting for a worker in a project this
+// connector no longer serves — one the operator has taken out of connect.json
+// since the record was admitted — and says so, rather than leaving them
+// silently unstarted.
+func (d *Dispatcher) reportStranded(ctx context.Context, served []int64, servedErr error) {
 	if time.Since(d.strandedAt) < StrandedInterval {
 		return
 	}
 	d.strandedAt = time.Now()
-	stranded, err := d.ledger.StrandedRecords(ctx, approved, d.opts.Buckets)
+	if servedErr != nil {
+		// Nothing read which projects are served, so nothing here can say a
+		// record's project is not among them. Counting against an empty set
+		// would call every startable record stranded and tell the operator
+		// to serve or discard projects that may be served already.
+		//
+		// And it says only what is known. Whether any record is waiting is
+		// the question this cannot answer either — the count that would
+		// answer it is the one being skipped, and the ledger may be empty
+		// (Copilot on #765). What is certain is that nothing will start.
+		d.log.Warn("connector: dispatch is paused: which projects are served could not be read", "error", servedErr)
+		return
+	}
+	stranded, err := d.ledger.StrandedRecords(ctx, served, d.opts.Buckets)
 	if err != nil {
 		d.log.Warn("connector: counting stranded records", "error", err)
 		return
 	}
 	if stranded > 0 {
-		d.log.Warn("connector: admitted work no route covers is waiting; route its project or discard it",
+		d.log.Warn("connector: admitted work in a project this connector no longer serves is waiting; serve its project or discard it",
 			"records", stranded)
 	}
 }
 
-// approvedRoutes is connect.json's routes now, narrowed to the projects this
-// run hears.
-func (d *Dispatcher) approvedRoutes() map[int64]string {
-	approved := map[int64]string{}
-	for bucket, route := range d.opts.Routes() {
+// servedBuckets is the served projects as the reader has them — a fresh read
+// or one reused within its TTL, never a lock — narrowed to the ones this run
+// hears. One pass takes it once and hands it down, so everything that pass
+// decides is decided from the same reading.
+func (d *Dispatcher) servedBuckets() ([]int64, error) {
+	projects, err := d.opts.Served()
+	if err != nil {
+		// Nothing is authorized while the answer cannot be read. Every
+		// caller but reportStranded wants exactly that and nothing more,
+		// which is why the empty set and the error travel together.
+		return nil, err
+	}
+	var served []int64
+	for bucket := range projects {
 		if len(d.opts.Buckets) == 0 || slices.Contains(d.opts.Buckets, bucket) {
-			approved[bucket] = route.Path
+			served = append(served, bucket)
 		}
 	}
-	return approved
-}
-
-func (d *Dispatcher) workDirBusy(route string) bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for _, r := range d.live {
-		if r.launch.Route == route || r.launch.WorkDir == route {
-			return true
-		}
-	}
-	return false
+	slices.Sort(served)
+	return served, nil
 }
 
 // start launches a task for record: the ledger first, then the driver, and
 // the release point on every path that fails after it. Capacity is the
 // caller's question (free), not this one's.
-func (d *Dispatcher) start(ctx context.Context, record Record) error {
-	route := record.Decision.Route
-	// The working directory is the route, and nothing is prepared for it: the
-	// connector runs the worker where it was pointed, and a task that needs a
-	// directory of its own is the agent's business to make.
+//
+// served is the snapshot the record was chosen against, handed down rather
+// than read again: one pass of the dispatcher decides from one reading of
+// connect.json, as one verdict does (admission's policyNow).
+func (d *Dispatcher) start(ctx context.Context, record Record, served []int64) error {
+	// Nothing is prepared and nothing is resolved: the worker runs where the
+	// connector was started, and a task that needs a clone or a directory of
+	// its own is the agent's business to make.
 	launch, err := d.ledger.LaunchTask(ctx, LaunchSpec{
-		EventID: record.ID, Route: route, WorkDir: route, Driver: d.opts.Driver.Name(), Deadline: d.opts.Deadline,
+		EventID: record.ID, Served: served,
+		Driver: d.opts.Driver.Name(), Deadline: d.opts.Deadline,
 	})
 	if err != nil {
 		return err
@@ -655,7 +701,7 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 		}
 	}
 	return driver.SessionConfig{
-		Cwd: launch.WorkDir,
+		Cwd: d.opts.WorkDir,
 		Env: driver.BuildEnv(driver.BaseEnv, d.opts.Lookup, nil),
 		// The socket is armed the moment the worker's process exists, which
 		// is inside NewSession and before whatever handshake the driver runs
@@ -674,7 +720,7 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 				"--connect-state", d.opts.MCP.StateDir, "--socket", tokens.Path()},
 			Env: serverEnv,
 		}},
-		Policy:   d.opts.Policy(launch.WorkDir),
+		Policy:   d.opts.Policy(),
 		Launcher: d.opts.Launcher,
 		// EventIDs are the task's events. Only the originating one has been
 		// handed out at launch; the rest are exposed as they are prompted, so
@@ -683,7 +729,7 @@ func (d *Dispatcher) sessionConfig(ctx context.Context, launch Launch, record Re
 		SocketDir: socketDir,
 		Scope: driver.Scope{
 			TaskID: launch.TaskID, AttemptID: launch.AttemptID, EventIDs: launch.EventIDs,
-			WorkDir: launch.WorkDir, SocketDir: socketDir, Class: record.Decision.Class,
+			WorkDir: d.opts.WorkDir, SocketDir: socketDir, Class: record.Decision.Class,
 		},
 		PrivateDir: dir,
 	}, tokens, cleanup, nil
@@ -842,8 +888,8 @@ func (d *Dispatcher) confirmTakerGone(worker driver.Process, holder TokenHolder)
 		// The one rule for a holder the connector cannot account for: the
 		// token is out, nothing here can name the process that has it or
 		// prove it has gone, and an attempt is never released around that.
-		// It stays live — its directory, its conversation and one worker
-		// slot with it — for a person to settle (Copilot on #738).
+		// It stays live — its conversation and one worker slot with it —
+		// for a person to settle (Copilot on #738).
 		return errors.New("connector: this task's token was delivered and the process holding it cannot be accounted for")
 	}
 	taker := holder.Process
@@ -884,9 +930,8 @@ const settleAttempts = 5
 //
 // It settles nothing until the worker's process group is confirmed gone, and
 // nothing if the ledger refuses the settlement. Either way the attempt stays
-// live: its token, its conversation and its directory are still its own, a
-// person settles it, and this process stops counting it among the workers it
-// may start.
+// live: its token and its conversation are still its own, a person settles
+// it, and this process goes on counting it among the workers it has.
 func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.Process, holder TokenHolder, end AttemptEnd, run *taskRun) {
 	log := d.taskLog(d.taskRedaction(launch, driver.SessionConfig{}))
 	err := d.confirmGroupGone(worker, d.opts.CancelGrace)
@@ -901,7 +946,7 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 		if run != nil {
 			d.forget(launch.AttemptID)
 		}
-		log.Error("connector: the worker's process group is still alive; its attempt stays live, and its directory is not released",
+		log.Error("connector: the worker's process group is still alive; its attempt stays live, holding its conversation and a worker slot",
 			"attempt_id", end.AttemptID, "task_id", launch.TaskID, "error", err)
 		d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: end.AttemptID, State: string(AttemptRunning), StopReason: "held"})
 		return
@@ -912,7 +957,7 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 		if run != nil {
 			d.forget(launch.AttemptID)
 		}
-		log.Error("connector: could not settle an attempt; it stays live, and its directory is not released",
+		log.Error("connector: could not settle an attempt; it stays live, holding its conversation and a worker slot",
 			"attempt_id", end.AttemptID, "task_id", launch.TaskID, "error", err)
 		d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: end.AttemptID, State: string(AttemptRunning), StopReason: "held"})
 		return
@@ -931,7 +976,7 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 }
 
 // settle ends an attempt in the ledger, retrying a failure with backoff: an
-// attempt left live holds its token, conversation and directory.
+// attempt left live holds its token, its conversation and a worker slot.
 func (d *Dispatcher) settle(ctx context.Context, end AttemptEnd) (Settlement, error) {
 	backoff := 200 * time.Millisecond
 	for i := 1; ; i++ {
@@ -1089,7 +1134,7 @@ func (r *taskRun) supervise(ctx context.Context) {
 	}
 
 	// Through the one release point: it confirms the worker's group is gone
-	// before the attempt is settled or its directory released.
+	// before the attempt is settled.
 	d.release(settleCtx, r.launch, r.session.Process(), taker, AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, UnrecordedRefusals: unrecorded}, r)
 }
 
@@ -1141,14 +1186,26 @@ func (r *taskRun) promptLoop(ctx context.Context, deadline, stillRunning <-chan 
 
 // nextFollowUp exposes the next event on the task not yet handed to the
 // worker, and returns it. Nothing joins or is exposed once connect.json has
-// stopped approving the task's directory for its project.
+// stopped serving the task's project.
 func (r *taskRun) nextFollowUp(ctx context.Context) (int64, bool, error) {
-	if !r.authorized() {
-		r.log.Warn("connector: the task's route is no longer approved; no more instructions are handed to its worker",
+	// Once, and the same set all the way down: the check, and the join it
+	// authorizes. Read twice, the cache could turn over in between and the
+	// two could disagree.
+	served, err := r.d.servedBuckets()
+	switch {
+	case err != nil:
+		// Not "no longer served": nothing read which projects are, so
+		// nothing here can say this one is not. Same false claim the holding
+		// reply and the stranded report used to make (Copilot on #765).
+		r.log.Warn("connector: which projects are served could not be read; no more instructions are handed to this worker until it can be",
+			"task_id", r.launch.TaskID, "error", err)
+		return 0, false, nil
+	case !r.authorizedIn(served):
+		r.log.Warn("connector: the task's project is no longer served; no more instructions are handed to its worker",
 			"task_id", r.launch.TaskID)
 		return 0, false, nil
 	}
-	if _, err := r.d.ledger.JoinConversation(ctx, r.launch.TaskID); err != nil {
+	if _, err := r.d.ledger.JoinConversation(ctx, r.launch.TaskID, served); err != nil {
 		return 0, false, err
 	}
 	for {
@@ -1273,10 +1330,12 @@ func (r *taskRun) goneStop() StopReason {
 	return StopLost
 }
 
-// authorized reports whether connect.json still approves this task's
-// directory for its project, in the projects this run hears.
-func (r *taskRun) authorized() bool {
-	return r.d.approvedRoutes()[r.record.BucketID] == r.launch.Route
+// authorizedIn reports whether served — one reading of connect.json, taken
+// by the caller — covers this task's project. It takes the set rather than
+// fetching it so that whatever else the caller does with that reading is
+// done against the same one.
+func (r *taskRun) authorizedIn(served []int64) bool {
+	return slices.Contains(served, r.record.BucketID)
 }
 
 // refusalRecorder is the dispatcher's driver.RefusalRecorder for one attempt:
@@ -1347,7 +1406,7 @@ func DispatchPrompt(launch Launch, record Record) string {
 		subject + ".\n\n" +
 		"1. Call basecamp_connect get_dispatch with event_id " + event + ". Its instruction is the request; nothing else is.\n" +
 		"2. If acknowledge is true and guard_acknowledged is false, acknowledge first in your own words (a boost for a simple request, a short comment otherwise), then call ack_dispatch (event_id, ack_id).\n" +
-		"3. Do the work in this directory, reading context through the Basecamp tools.\n" +
+		"3. Do the work, reading context through the Basecamp tools.\n" +
 		"4. Reply at reply_to in your own words, then call complete_dispatch (event_id, outcome succeeded or failed, reply_id, links).\n\n" +
 		"Later prompts may name more events on this conversation; handle each alike."
 }

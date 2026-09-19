@@ -59,7 +59,7 @@ func TestConnectRunsOnLinuxOnly(t *testing.T) {
 }
 
 // Copilot: dispatch authorization follows connect.json as it is now.
-func TestConnectRoutesFollowConnectJSON(t *testing.T) {
+func TestServedProjectsFollowConnectJSON(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "connect")
 	require.NoError(t, os.Mkdir(dir, 0o700))
 	path := filepath.Join(dir, "connect.json")
@@ -67,7 +67,7 @@ func TestConnectRoutesFollowConnectJSON(t *testing.T) {
 	file.AccountID = "2914079"
 	file.Agent = setup.Agent{PersonID: 52007412, Kind: setup.KindAgent}
 	file.Trust.OperatorID = 26909558
-	file.Projects = map[int64]admission.Route{48929974: {Path: "/work/repo"}}
+	file.Projects = map[int64]admission.Project{48929974: {Class: "internal"}}
 	write := func(f setup.File) {
 		data, err := json.Marshal(f)
 		require.NoError(t, err)
@@ -76,25 +76,62 @@ func TestConnectRoutesFollowConnectJSON(t *testing.T) {
 	write(file)
 
 	clock := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
-	routes := newConnectRoutes(path, file, slog.New(slog.DiscardHandler))
-	routes.now = func() time.Time { return clock }
-	assert.Equal(t, "/work/repo", routes.Current()[48929974].Path)
+	served := newConnectServed(path, file, slog.New(slog.DiscardHandler))
+	served.now = func() time.Time { return clock }
+	current, err := served.Current()
+	require.NoError(t, err)
+	require.Contains(t, current, int64(48929974))
+	assert.Equal(t, "internal", current[48929974].Class)
 
-	unrouted := file
-	unrouted.Projects = map[int64]admission.Route{}
-	write(unrouted)
-	clock = clock.Add(connectRoutesTTL)
-	assert.Empty(t, routes.Current(), "an unrouted project stops authorizing dispatch without a restart")
+	unserved := file
+	unserved.Projects = map[int64]admission.Project{}
+	write(unserved)
+	clock = clock.Add(connectServedTTL)
+	current, err = served.Current()
+	require.NoError(t, err, "serving nothing is an answer, not a failure")
+	assert.Empty(t, current, "a project no longer served stops authorizing dispatch without a restart")
 
-	other := file
-	other.Agent.PersonID = 1
-	write(other)
-	clock = clock.Add(connectRoutesTTL)
-	assert.Empty(t, routes.Current(), "a file naming another agent authorizes nothing")
+	// Each failure is checked from a *non-empty* last-good state, and on the
+	// map that failing call returned — not on one a previous call left in
+	// the variable. Asserting the stale one passes however much
+	// authorization a broken read hands back, which is the one place in this
+	// change where that would cost the most (Copilot on #765).
+	for _, tc := range []struct {
+		name   string
+		break_ func()
+		why    string
+	}{
+		{
+			name: "a file naming another agent",
+			break_: func() {
+				other := file
+				other.Agent.PersonID = 1
+				write(other)
+			},
+			why: "a file naming another agent is a failure to read the answer, not the answer",
+		},
+		{
+			name:   "a file that no longer parses",
+			break_: func() { require.NoError(t, os.WriteFile(path, []byte("{not json"), 0o600)) },
+			why:    "a file that no longer loads is reported as unreadable, never as an empty served set",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Back to serving something, so a leak of stale authorization
+			// has something to leak.
+			write(file)
+			clock = clock.Add(connectServedTTL)
+			good, err := served.Current()
+			require.NoError(t, err)
+			require.NotEmpty(t, good, "the last good read served a project")
 
-	require.NoError(t, os.WriteFile(path, []byte("{not json"), 0o600))
-	clock = clock.Add(connectRoutesTTL)
-	assert.Empty(t, routes.Current(), "a file that no longer loads authorizes nothing")
+			tc.break_()
+			clock = clock.Add(connectServedTTL)
+			broken, err := served.Current()
+			assert.Error(t, err, tc.why)
+			assert.Empty(t, broken, "and it hands back no authorization at all, stale or otherwise")
+		})
+	}
 }
 
 // Copilot and review r2: the run's --project scope reaches the dispatcher.
@@ -174,7 +211,7 @@ func TestTheDoctorCheckReadsTheProfilesConnectorLayout(t *testing.T) {
 	file.AccountID = "2914079"
 	file.Agent = setup.Agent{PersonID: 52007412, Kind: setup.KindAgent}
 	file.Trust.OperatorID = 26909558
-	file.Projects = map[int64]admission.Route{48929974: {Path: "/work/repo"}}
+	file.Projects = map[int64]admission.Project{48929974: {}}
 	path, err := setup.Path(config.GlobalConfigDir(), "agent")
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))

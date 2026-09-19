@@ -20,7 +20,7 @@ import (
 // It exists only on a server started for one task — a connector state
 // directory and that task's token — and every action is bound to the task
 // the token names. There is no listing: a worker never reads other tasks.
-// Nothing it returns carries the token, a feed position or a route; the
+// Nothing it returns carries the token, a feed position or a directory; the
 // instruction is an allowlist of fields (connector.Instruction).
 const (
 	connectDomainKey       = "connect"

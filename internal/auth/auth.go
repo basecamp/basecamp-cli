@@ -200,7 +200,12 @@ func (m *Manager) loginRemedy() (command, lead string) {
 // shellQuote renders s safe to embed in an emitted shell command: a clearly
 // inert name passes through bare, anything else is single-quoted — the one
 // POSIX form in which nothing substitutes — with embedded single quotes
-// spelled '\”. Profile names come from configuration files, which do not
+// spelled:
+//
+//	'\''
+//
+// indented so gofmt leaves it as written. Profile names come from
+// configuration files, which do not
 // apply the create-time name check.
 func shellQuote(s string) string {
 	if s != "" && strings.IndexFunc(s, shellActive) < 0 {

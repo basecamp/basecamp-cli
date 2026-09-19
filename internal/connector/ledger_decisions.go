@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -143,26 +144,28 @@ func (w LiveWorker) Identity() driver.Process {
 //
 //   - completed with outcome unknown or failed: the task's token is
 //     superseded; admitted at once when the task has ended, otherwise when it
-//     ends. Refused without a snapshot or a route.
-//   - held with its snapshot and route and no blocking reason: admitted.
+//     ends. Refused without a snapshot, or in a project connect.json does
+//     not serve.
+//   - held with its snapshot, in a served project and with no blocking
+//     reason: admitted.
 //   - blocked, or held over a blocking reason: authorized as blocked, and
 //     Rerun asks the caller to run what blocked it.
 //   - succeeded, discarded, and anything live (seen, admitted, queued,
 //     dispatched) are refused with ErrDecisionRefused.
-func (l *Ledger) Redispatch(ctx context.Context, eventID int64, by string) (RedispatchResult, error) {
+func (l *Ledger) Redispatch(ctx context.Context, eventID int64, by string, served []int64) (RedispatchResult, error) {
 	if strings.TrimSpace(by) == "" {
 		return RedispatchResult{}, errors.New("connector: a redispatch records who authorized it")
 	}
 	var out RedispatchResult
 	err := retryBusy(func() error {
 		var err error
-		out, err = l.redispatch(ctx, eventID, by)
+		out, err = l.redispatch(ctx, eventID, by, served)
 		return err
 	})
 	return out, err
 }
 
-func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (RedispatchResult, error) {
+func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string, served []int64) (RedispatchResult, error) {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
 		return RedispatchResult{}, fmt.Errorf("connector: begin redispatch: %w", err)
@@ -181,7 +184,17 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 	refuse := func(why string) error {
 		return fmt.Errorf("connector: redispatch of event %d %s: %w", eventID, why, ErrDecisionRefused)
 	}
-	dispatchable := !record.ContentDropped && len(record.Decision.Snapshot) > 0 && record.Decision.Routed && record.Decision.ConversationKey != ""
+	// Decision.Served is what admission wrote when it decided the record, so
+	// it says the project was served then; served is what the caller read
+	// from connect.json for this command. Both, because a redispatch that
+	// reported success and left the record for a dispatcher that will refuse
+	// to launch it is worse than one that refuses here (Copilot on #765).
+	//
+	// served is a reading, not a lock: `connect setup --unserve` landing
+	// between that read and this commit is not caught here. Carded.
+	dispatchable := !record.ContentDropped && len(record.Decision.Snapshot) > 0 &&
+		record.Decision.Served && slices.Contains(served, record.BucketID) &&
+		record.Decision.ConversationKey != ""
 	at := l.now()
 	now := stamp(at)
 	authorize := []assignment{{column: "authorized_at", value: now}, {column: "authorized_by", value: by}}
@@ -204,7 +217,7 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string) (Redi
 		case record.redispatchDecision != 0:
 			return RedispatchResult{}, refuse("already has a redispatch waiting for its task to end")
 		case !dispatchable:
-			return RedispatchResult{}, refuse("no longer has the snapshot and route a dispatch needs (retention dropped them, or the verdict carried none)")
+			return RedispatchResult{}, refuse("is missing something a dispatch needs: its content snapshot (retention dropped it, or the verdict carried none), or a project connect.json serves")
 		}
 		if !task.superseded {
 			// The replaced worker is refused by basecamp_connect from here on

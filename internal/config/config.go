@@ -896,8 +896,18 @@ func IsHTTPURL(rawURL string) bool {
 }
 
 // ShellQuote returns a POSIX single-quoted string safe for copy-paste into
-// a shell. Single quotes inside the value are escaped as '\” (end quote,
-// escaped literal quote, resume quote).
+// a shell. A single quote cannot be escaped inside single quotes, so each
+// one in the value is spliced out and back in as:
+//
+//	'\''
+//
+// that is: quote, backslash, quote, quote. It is written as an indented
+// block on purpose — gofmt reformats doc-comment prose and rewrites that
+// sequence into a curly closing quote, so a caller copying it out of prose
+// would get a form no shell reads (Copilot on #765).
+//
+// internal/richtext.ShellQuote is the shared one new code should use; this
+// copy predates it, as do the ones in internal/commands and internal/auth.
 func ShellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

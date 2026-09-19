@@ -281,13 +281,13 @@ func runFakeAgent(name string) int {
 	return d.Agent(w)
 }
 
-// Scenario constants: one account, one agent, one operator, one routed project.
+// Scenario constants: one account, one agent, one operator, one served project.
 const (
 	harnessAccount  = "2914079"
 	harnessAgent    = adapterAgentID
 	harnessOperator = adapterOperatorID
 	harnessBucket   = adapterBucketID
-	// harnessOtherBucket is a second routed project with its own directory.
+	// harnessOtherBucket is a second served project.
 	harnessOtherBucket = int64(48929974)
 	harnessOrigin      = "https://3.basecampapi.com"
 	harnessNamespace   = "basecamp-connect-recovery"
@@ -1116,7 +1116,7 @@ func runSecretScan(dirs []string) int {
 	return 0
 }
 
-// workDir is the first routed project's working directory.
+// workDir is the directory the connector runs in, and so every worker.
 func (h *harness) workDir() string { return filepath.Join(h.dir, "work") }
 
 // children is every process a fake worker started of its own, with the time

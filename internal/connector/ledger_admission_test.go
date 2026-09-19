@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -61,8 +63,7 @@ func admittedVerdict(id, revision int64, key string) admission.Verdict {
 		Acknowledge:     true,
 		ConversationKey: key,
 		Reply:           &admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 10304028989},
-		Routed:          true,
-		Route:           "/work/connector",
+		Served:          true,
 		Class:           "internal",
 		RecordingURL:    "https://app.basecamp.com/2914079/buckets/48699913/recordings/10304028972",
 		Snapshot: &admission.Snapshot{
@@ -163,8 +164,7 @@ func TestAdmissionCommitWritesTheVerdictOntoTheRecord(t *testing.T) {
 	assert.Equal(t, "recording:10304028989", d.ConversationKey)
 	assert.Equal(t, "comment", d.ReplyKind)
 	assert.Equal(t, int64(10304028989), d.ReplyRecordingID)
-	assert.True(t, d.Routed)
-	assert.Equal(t, "/work/connector", d.Route)
+	assert.True(t, d.Served)
 	assert.Equal(t, "internal", d.Class)
 	assert.Equal(t, v.RecordingURL, d.RecordingURL)
 	assert.Equal(t, adapterOperatorID, d.RequesterID)
@@ -639,7 +639,7 @@ func TestRunAdmissionDecidesWhatIntakeHandsOver(t *testing.T) {
 	admitter, err := admission.NewAdmitter(admission.Policy{
 		AgentID:  adapterAgentID,
 		Trust:    admission.Trust{Mode: admission.TrustOperator, OperatorID: adapterOperatorID},
-		Projects: map[int64]admission.Route{adapterBucketID: {Path: "/work/connector", Class: "internal"}},
+		Projects: map[int64]admission.Project{adapterBucketID: {Class: "internal"}},
 	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads})
 	require.NoError(t, err)
 
@@ -739,4 +739,84 @@ func mentionMarkup(id int64) string {
 	payload := `{"_rails":{"data":"gid://bc3/Person/` + strconv.FormatInt(id, 10) + `","pur":"attachable"}}`
 	sgid := base64.RawURLEncoding.EncodeToString([]byte(payload))
 	return `<bc-attachment sgid="` + sgid + `" content-type="application/vnd.basecamp.mention"></bc-attachment>`
+}
+
+// A connect.json that cannot be read holds its records rather than discarding
+// them or answering that the project is not served, and a person's
+// redispatch runs them once the file is back.
+//
+// Waiting for a person is what every other blocked record does, and it is
+// what this asserts — deliberately, and after taking an automatic sweep back
+// out. A retry that offers due blocked records is a scheduler of its own,
+// with its own claiming, and it turned out to re-decide five other blocked
+// reasons that have nothing to do with this change. It is carded rather than
+// carried here, so nothing in the code or the comments promises a timer that
+// does not run.
+func TestAnUnreadableConfigHoldsItsRecordsUntilTheFileAndAPersonAreBack(t *testing.T) {
+	ledger := newTestLedger(t)
+	queue, err := NewQueue(10, 100)
+	require.NoError(t, err)
+
+	reads := &adapterReads{summaries: map[int64]*basecamp.RecordingSummary{}}
+	reads.summaries[501] = &basecamp.RecordingSummary{
+		ID: 501, Status: "active", Type: "Todo", Title: "A to-do",
+		AppURL:             "https://app.basecamp.com/2914079/buckets/48699913/todos/501",
+		Bucket:             &basecamp.Bucket{ID: adapterBucketID},
+		Creator:            &basecamp.Person{ID: adapterOperatorID},
+		Content:            mentionMarkup(adapterAgentID) + "please look",
+		MentionedPersonIDs: []int64{adapterAgentID},
+		UpdatedAt:          time.Date(2026, 9, 17, 9, 0, 0, 0, time.UTC),
+	}
+
+	// Atomic, not a plain bool: RunAdmission reads this from a worker
+	// goroutine while the test writes it, and an unsynchronised pair like
+	// that is a race whether or not the detector happens to catch it on a
+	// given run — which is exactly how a mystery flake reaches somebody
+	// else's PR (Copilot on #765).
+	var broken atomic.Bool
+	broken.Store(true)
+	admitter, err := admission.NewAdmitter(admission.Policy{
+		AgentID: adapterAgentID,
+		Trust:   admission.Trust{Mode: admission.TrustOperator, OperatorID: adapterOperatorID},
+	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads},
+		admission.WithServed(func() (map[int64]admission.Project, error) {
+			if broken.Load() {
+				return nil, errors.New("connect.json cannot be read")
+			}
+			return map[int64]admission.Project{adapterBucketID: {Class: "internal"}}, nil
+		}))
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- RunAdmission(ctx, AdmissionOptions{Ledger: ledger, Queue: queue, Admitter: admitter, Workers: 1})
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+
+	ev := testEvent(1)
+	ev.EventType, ev.Kind, ev.RecordingID = "todo.created", "todo_created", 501
+	_, err = ledger.RecordSeen(ctx, ev, LanePoll)
+	require.NoError(t, err)
+	require.NoError(t, queue.Offer(ctx, ev.ID))
+
+	require.Eventually(t, func() bool {
+		return getRecord(t, ledger, ev.ID).State == StateBlocked
+	}, 5*time.Second, 10*time.Millisecond, "held while the file cannot be read")
+	held := getRecord(t, ledger, ev.ID)
+	require.Equal(t, string(admission.ReasonConfigUnreadable), held.Reason)
+	assert.NotEqual(t, StateDiscarded, held.State, "a discard is the one outcome repairing the file could not undo")
+
+	// The operator repairs the file and redispatches, which is the remedy
+	// for a blocked record and the one the holding reply names.
+	broken.Store(false)
+	res, err := ledger.Redispatch(ctx, ev.ID, "local:tester", []int64{adapterBucketID})
+	require.NoError(t, err)
+	require.True(t, res.Rerun, "a blocked record's prerequisite is run again")
+	require.NoError(t, queue.Offer(ctx, ev.ID))
+
+	require.Eventually(t, func() bool {
+		return getRecord(t, ledger, ev.ID).State == StateAdmitted
+	}, 5*time.Second, 10*time.Millisecond, "and the work that was held runs")
 }

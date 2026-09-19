@@ -156,17 +156,23 @@ func (s *fakeSession) promptList() []string {
 	return append([]string(nil), s.prompts...)
 }
 
+// testWorkDir stands in for the directory the connector was started in: every
+// worker runs there, and nothing about it bounds what a worker may write.
+const testWorkDir = "/work/connector"
+
 type dispatchHarness struct {
 	ledger *Ledger
 	fake   *fakeDriver
 	d      *Dispatcher
-	routes map[int64]admission.Route
-	mu     sync.Mutex
+	served map[int64]admission.Project
+	// servedErr stands in for a connect.json that cannot be read.
+	servedErr error
+	mu        sync.Mutex
 }
 
 func newDispatchHarness(t *testing.T, fake *fakeDriver, tweak func(*DispatcherOptions)) *dispatchHarness {
 	t.Helper()
-	h := &dispatchHarness{ledger: newTestLedger(t), fake: fake, routes: map[int64]admission.Route{adapterBucketID: {Path: testRoute}}}
+	h := &dispatchHarness{ledger: newTestLedger(t), fake: fake, served: map[int64]admission.Project{adapterBucketID: {}}}
 	// Session directories hold a unix socket, whose path the kernel keeps
 	// short; a test's own temporary directory can be too long for one.
 	private, err := os.MkdirTemp("/tmp", "bcc-test-")
@@ -176,15 +182,19 @@ func newDispatchHarness(t *testing.T, fake *fakeDriver, tweak func(*DispatcherOp
 	opts := DispatcherOptions{
 		Ledger: h.ledger,
 		Driver: fake,
-		Routes: func() map[int64]admission.Route {
+		Served: func() (map[int64]admission.Project, error) {
 			h.mu.Lock()
 			defer h.mu.Unlock()
-			out := map[int64]admission.Route{}
-			for k, v := range h.routes {
+			if h.servedErr != nil {
+				return nil, h.servedErr
+			}
+			out := map[int64]admission.Project{}
+			for k, v := range h.served {
 				out[k] = v
 			}
-			return out
+			return out, nil
 		},
+		WorkDir:     testWorkDir,
 		Concurrency: 2,
 		Deadline:    time.Hour,
 		MCP:         WorkerMCP{Command: "/usr/local/bin/basecamp", Profile: "agent", StateDir: "/state/2914079-52007412"},
@@ -337,8 +347,7 @@ func TestNothingCrossesToTheWorkerThatItDoesNotNeed(t *testing.T) {
 	}
 	_, hostToken := cfg.MCPServers[0].Env["BASECAMP_TOKEN"]
 	assert.False(t, hostToken)
-	assert.Equal(t, testRoute, cfg.Cwd)
-	assert.Equal(t, testRoute, cfg.Policy.Rules().WorkDir)
+	assert.Equal(t, testWorkDir, cfg.Cwd, "the worker runs where the connector was started")
 	serverEnv := make([]string, 0, len(cfg.MCPServers[0].Env))
 	for k, v := range cfg.MCPServers[0].Env {
 		serverEnv = append(serverEnv, k+"="+v)
@@ -500,10 +509,10 @@ func TestAFollowUpIsExposedBeforeItsPromptInTheSameSession(t *testing.T) {
 }
 
 // Dispatcher invariant 2.
-func TestARouteNoLongerApprovedIsNotDispatched(t *testing.T) {
+func TestAProjectNoLongerServedIsNotDispatched(t *testing.T) {
 	fake := newFakeDriver()
 	h := newDispatchHarness(t, fake, nil)
-	h.routes = map[int64]admission.Route{adapterBucketID: {Path: "/another/checkout"}}
+	h.served = map[int64]admission.Project{}
 	admitOn(t, h.ledger, 1, "recording:1")
 	h.run(t)
 	time.Sleep(150 * time.Millisecond)
@@ -524,11 +533,9 @@ func TestConcurrencyIsABound(t *testing.T) {
 	}
 	h := newDispatchHarness(t, fake, nil)
 	for i, id := range []int64{1, 2, 3} {
-		route := "/work/r" + string(rune('a'+i))
-		h.routes[adapterBucketID+int64(i)] = admission.Route{Path: route}
+		h.served[adapterBucketID+int64(i)] = admission.Project{}
 		seenRecord(t, h.ledger, id)
 		v := admittedVerdict(id, 0, "recording:"+string(rune('a'+i)))
-		v.Route = route
 		_, err := h.ledger.ledgerCommitWithBucket(v, adapterBucketID+int64(i))
 		require.NoError(t, err)
 	}
@@ -544,7 +551,7 @@ func TestConcurrencyIsABound(t *testing.T) {
 }
 
 // ledgerCommitWithBucket admits v and moves its record to another bucket, so
-// tests can have several routed projects.
+// tests can have several served projects.
 func (l *Ledger) ledgerCommitWithBucket(v admission.Verdict, bucket int64) (admission.State, error) {
 	state, err := l.Admission().Commit(context.Background(), v)
 	if err != nil {
@@ -622,61 +629,37 @@ func nextSession(t *testing.T, fake *fakeDriver) *fakeSession {
 	}
 }
 
-// admitRouted admits a record on its own conversation in bucket, routed to
-// route.
-func admitRouted(t *testing.T, ledger *Ledger, id, bucket int64, key, route string) {
+// admitIn admits a record on its own conversation in bucket.
+func admitIn(t *testing.T, ledger *Ledger, id, bucket int64, key string) {
 	t.Helper()
 	seenRecord(t, ledger, id)
 	v := admittedVerdict(id, 0, key)
-	v.Route = route
 	_, err := ledger.ledgerCommitWithBucket(v, bucket)
 	require.NoError(t, err)
 }
 
 // Review r1, blocking: records the dispatcher cannot start never fill the
-// window ahead of one it can.
+// window ahead of one it can. A project connect.json does not serve is the
+// case that remains: nothing else is filtered out of the query now that no
+// task holds a directory.
 func TestRecordsTheDispatcherCannotStartDoNotStarveOthers(t *testing.T) {
-	t.Run("a route no longer approved", func(t *testing.T) {
-		fake := newFakeDriver()
-		h := newDispatchHarness(t, fake, nil)
-		for i := int64(1); i <= 12; i++ {
-			admitRouted(t, h.ledger, i, 777, "recording:u"+string(rune('a'+i)), "/unrouted")
-		}
-		admitRouted(t, h.ledger, 50, adapterBucketID, "recording:ok", testRoute)
-		h.run(t)
-		s := nextSession(t, fake)
-		assert.Equal(t, int64(50), s.cfg.Scope.EventIDs[0])
-	})
-	t.Run("a backlog on a busy route", func(t *testing.T) {
-		fake := newFakeDriver()
-		hold := make(chan struct{})
-		fake.turn = func(s *fakeSession, _ int, _ string) (driver.PromptResult, error) {
-			select {
-			case <-hold:
-			case <-s.canceled:
-				return driver.PromptResult{Stop: driver.TurnCanceled}, nil
-			}
-			return driver.PromptResult{Stop: driver.TurnEndTurn}, nil
-		}
-		h := newDispatchHarness(t, fake, nil)
-		h.routes[888] = admission.Route{Path: "/work/other"}
-		for i := int64(1); i <= 12; i++ {
-			admitRouted(t, h.ledger, i, adapterBucketID, "recording:b"+string(rune('a'+i)), testRoute)
-		}
-		admitRouted(t, h.ledger, 50, 888, "recording:other", "/work/other")
-		h.run(t)
-		first, second := nextSession(t, fake), nextSession(t, fake)
-		assert.ElementsMatch(t, []string{testRoute, "/work/other"}, []string{first.cfg.Cwd, second.cfg.Cwd})
-		close(hold)
-	})
+	fake := newFakeDriver()
+	h := newDispatchHarness(t, fake, nil)
+	for i := int64(1); i <= 12; i++ {
+		admitIn(t, h.ledger, i, 777, "recording:u"+string(rune('a'+i)))
+	}
+	admitIn(t, h.ledger, 50, adapterBucketID, "recording:ok")
+	h.run(t)
+	s := nextSession(t, fake)
+	assert.Equal(t, int64(50), s.cfg.Scope.EventIDs[0])
 }
 
 func TestTheProjectScopeNarrowsDispatch(t *testing.T) {
 	fake := newFakeDriver()
 	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Buckets = []int64{888} })
-	h.routes[888] = admission.Route{Path: "/work/other"}
-	admitRouted(t, h.ledger, 1, adapterBucketID, "recording:1", testRoute)
-	admitRouted(t, h.ledger, 2, 888, "recording:2", "/work/other")
+	h.served[888] = admission.Project{}
+	admitIn(t, h.ledger, 1, adapterBucketID, "recording:1")
+	admitIn(t, h.ledger, 2, 888, "recording:2")
 	h.run(t)
 	s := nextSession(t, fake)
 	assert.Equal(t, int64(2), s.cfg.Scope.EventIDs[0])
@@ -731,10 +714,14 @@ func TestExitsTheDispatcherCausedAreNotFailures(t *testing.T) {
 	})
 }
 
-// Copilot and review r1, 5: an unverifiable worker is not settled around.
+// Copilot and review r1, 5: an unverifiable worker is not settled around. Its
+// attempt stays live and keeps the slot it took; with the concurrency at one,
+// that is the whole window, so nothing else runs. It holds no directory —
+// there is none to hold — so at a higher concurrency another conversation
+// would start beside it.
 func TestAWorkerThatCannotBeVerifiedKeepsItsAttemptLive(t *testing.T) {
 	fake := newFakeDriver()
-	h := newDispatchHarness(t, fake, nil)
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Concurrency = 1 })
 	admitOn(t, h.ledger, 1, "recording:1")
 	l := launch(t, h.ledger, 1)
 	require.NoError(t, h.ledger.MarkRunning(context.Background(), l.AttemptID, AttemptProcess{PID: 4242, PGID: 4242, StartedAt: time.Now(), SessionID: "s"}))
@@ -749,7 +736,7 @@ func TestAWorkerThatCannotBeVerifiedKeepsItsAttemptLive(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
-	assert.Empty(t, fake.sessions, "its directory stays held")
+	assert.Empty(t, fake.sessions, "its slot stays taken")
 }
 
 // Review r1, 7.
@@ -772,8 +759,9 @@ func TestASettlementThatFailsIsRetried(t *testing.T) {
 	assert.Equal(t, "finished", h.attemptsEnded(t, 1)[0].StopReason)
 }
 
-// Copilot r2: a route revoked while a task runs stops follow-ups joining it.
-func TestAFollowUpDoesNotJoinATaskWhoseRouteWasRevoked(t *testing.T) {
+// Copilot r2: a project unserved while a task runs stops follow-ups joining
+// it.
+func TestAFollowUpDoesNotJoinATaskWhoseProjectWasUnserved(t *testing.T) {
 	fake := newFakeDriver()
 	release := make(chan struct{})
 	fake.turn = func(*fakeSession, int, string) (driver.PromptResult, error) {
@@ -786,18 +774,18 @@ func TestAFollowUpDoesNotJoinATaskWhoseRouteWasRevoked(t *testing.T) {
 	s := nextSession(t, fake)
 
 	h.mu.Lock()
-	h.routes = map[int64]admission.Route{}
+	h.served = map[int64]admission.Project{}
 	h.mu.Unlock()
 	admitOn(t, h.ledger, 2, "recording:1")
 	time.Sleep(150 * time.Millisecond)
-	assert.Equal(t, StateQueued, getRecord(t, h.ledger, 2).State, "not handed to a worker in a directory no longer approved")
+	assert.Equal(t, StateQueued, getRecord(t, h.ledger, 2).State, "not handed to a worker for a project no longer served")
 	close(release)
 	h.attemptsEnded(t, 1)
 	assert.Len(t, s.promptList(), 1)
 }
 
 // Copilot r2: a crash mid-launch leaves a worker nobody can name.
-func TestAnAttemptLeftMidLaunchKeepsItsDirectoryHeld(t *testing.T) {
+func TestAnAttemptLeftMidLaunchKeepsItsSlot(t *testing.T) {
 	fake := newFakeDriver()
 	h := newDispatchHarness(t, fake, nil)
 	admitOn(t, h.ledger, 1, "recording:1")
@@ -859,16 +847,16 @@ func TestAnAttemptLeftLiveHoldsAWorkerSlot(t *testing.T) {
 		return driver.PromptResult{Stop: driver.TurnEndTurn}, nil
 	}
 	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Concurrency = 2 })
-	// One attempt whose worker cannot be identified, on its own route.
-	h.routes[900] = admission.Route{Path: "/work/held"}
-	admitRouted(t, h.ledger, 1, 900, "recording:held", "/work/held")
-	_, err := h.ledger.LaunchTask(context.Background(), LaunchSpec{EventID: 1, Route: "/work/held", Driver: "fake"})
+	// One attempt whose worker cannot be identified.
+	h.served[900] = admission.Project{}
+	admitIn(t, h.ledger, 1, 900, "recording:held")
+	_, err := h.ledger.LaunchTask(context.Background(), LaunchSpec{EventID: 1, Served: []int64{900, adapterBucketID}, Driver: "fake"})
 	require.NoError(t, err)
-	// Two more conversations, each with a route of its own.
-	h.routes[901] = admission.Route{Path: "/work/a"}
-	h.routes[902] = admission.Route{Path: "/work/b"}
-	admitRouted(t, h.ledger, 2, 901, "recording:a", "/work/a")
-	admitRouted(t, h.ledger, 3, 902, "recording:b", "/work/b")
+	// Two more conversations.
+	h.served[901] = admission.Project{}
+	h.served[902] = admission.Project{}
+	admitIn(t, h.ledger, 2, 901, "recording:a")
+	admitIn(t, h.ledger, 3, 902, "recording:b")
 
 	require.NoError(t, h.d.Recover(context.Background()))
 	h.run(t)
@@ -882,9 +870,8 @@ func TestAnAttemptLeftLiveHoldsAWorkerSlot(t *testing.T) {
 }
 
 // The one-owner rule (see internal/connector/driver/worker.go): a task whose
-// process tree is still alive never has its directory released or its record
-// settled.
-func TestATaskWithASurvivingGrandchildNeverReleasesItsDirectory(t *testing.T) {
+// process tree is still alive never has its record settled.
+func TestATaskWithASurvivingGrandchildIsNeverSettled(t *testing.T) {
 	work := t.TempDir()
 	worker, grandchild := drivertest.StartTree(t, work)
 	<-worker.Done() // the leader is gone; its grandchild is not
@@ -904,8 +891,7 @@ func TestATaskWithASurvivingGrandchildNeverReleasesItsDirectory(t *testing.T) {
 		}
 		return nil
 	}
-	h.routes[adapterBucketID] = admission.Route{Path: work}
-	admitRouted(t, h.ledger, 1, adapterBucketID, "recording:1", work)
+	admitIn(t, h.ledger, 1, adapterBucketID, "recording:1")
 	h.run(t)
 
 	require.Eventually(t, func() bool {
@@ -962,9 +948,8 @@ func TestRecoveryReleasesNothingWhileTheRecordedGroupSurvives(t *testing.T) {
 		o.Lines = ndjson.NewWriter(lines)
 		o.CancelGrace = 100 * time.Millisecond
 	})
-	h.routes[adapterBucketID] = admission.Route{Path: work}
-	admitRouted(t, h.ledger, 1, adapterBucketID, "recording:1", work)
-	l, err := h.ledger.LaunchTask(context.Background(), LaunchSpec{EventID: 1, Route: work, Driver: "fake"})
+	admitIn(t, h.ledger, 1, adapterBucketID, "recording:1")
+	l, err := h.ledger.LaunchTask(context.Background(), LaunchSpec{EventID: 1, Served: []int64{900, adapterBucketID}, Driver: "fake"})
 	require.NoError(t, err)
 	require.NoError(t, h.ledger.MarkRunning(context.Background(), l.AttemptID, AttemptProcess{
 		PID: worker.PID, PGID: worker.PGID, StartedAt: worker.StartedAt, SessionID: "s",
@@ -1031,8 +1016,7 @@ func TestAStartThatFailedAfterLaunchingReleasesNothingWhileItsGroupLives(t *test
 		}
 		return nil
 	}
-	h.routes[adapterBucketID] = admission.Route{Path: work}
-	admitRouted(t, h.ledger, 1, adapterBucketID, "recording:1", work)
+	admitIn(t, h.ledger, 1, adapterBucketID, "recording:1")
 	h.run(t)
 
 	require.Eventually(t, func() bool {
@@ -1379,13 +1363,12 @@ func TestAHeldAttemptTakesASlotWithinTheSamePass(t *testing.T) {
 	}
 	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Concurrency = 2 })
 	h.d.confirmGroupGone = func(driver.Process, time.Duration) error { return driver.ErrGroupOutlivedLeader }
-	// Three records on three directories, so nothing but the bound stops them.
+	// Three records on three conversations, so nothing but the bound stops
+	// them.
 	for i, id := range []int64{1, 2, 3} {
-		route := "/work/held" + string(rune('a'+i))
-		h.routes[adapterBucketID+int64(i)] = admission.Route{Path: route}
+		h.served[adapterBucketID+int64(i)] = admission.Project{}
 		seenRecord(t, h.ledger, id)
 		v := admittedVerdict(id, 0, "recording:held"+string(rune('a'+i)))
-		v.Route = route
 		_, err := h.ledger.ledgerCommitWithBucket(v, adapterBucketID+int64(i))
 		require.NoError(t, err)
 	}
@@ -1497,8 +1480,8 @@ func TestARefusedHandoffIsAlwaysSaidOutLoud(t *testing.T) {
 
 // Copilot on #738: a delivered token whose holder could not be identified
 // used to be the same zero taker as no delivery at all, so the release point
-// settled the attempt and released its directory around a process that may
-// still have held the task's credential. It is held instead — here, and
+// settled the attempt around a process that may still have held the task's
+// credential. It is held instead — here, and
 // after a restart, because the ledger carries the state too.
 func TestAnAttemptWhoseTokenHolderIsUnaccountedForIsHeld(t *testing.T) {
 	h := newDispatchHarness(t, newFakeDriver(), nil)
@@ -1602,4 +1585,55 @@ func TestAShutdownDoesNotWaitOutTheAdoptionBudget(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("a shutdown waited on the adoption budget")
 	}
+}
+
+// Copilot on #765: an unreadable connect.json is not "no project is served"
+// for the dispatcher either. The holding reply stopped making that claim on
+// a card; the stranded report would have gone on making it in the log,
+// counting every startable record and telling the operator to serve or
+// discard a project that may be served already.
+func TestAnUnreadableConfigStrandsNothingAndSaysWhy(t *testing.T) {
+	var logged safeBuffer
+	fake := newFakeDriver()
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.Logger = slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	})
+	admitIn(t, h.ledger, 1, adapterBucketID, "recording:1")
+
+	h.mu.Lock()
+	h.servedErr = errors.New("connect.json cannot be read")
+	h.mu.Unlock()
+
+	h.run(t)
+	time.Sleep(200 * time.Millisecond)
+
+	fake.mu.Lock()
+	sessions := len(fake.sessions)
+	fake.mu.Unlock()
+	assert.Zero(t, sessions, "nothing is authorized while the answer cannot be read")
+
+	out := logged.String()
+	assert.Contains(t, out, "could not be read", "the operator is told what actually happened")
+	assert.Contains(t, out, "dispatch is paused", "and what it means for them")
+	assert.NotContains(t, out, "no longer serves",
+		"and not told their project was unserved, which nothing established")
+	assert.NotContains(t, out, "work is waiting",
+		"nor told work is waiting, which the skipped count is the only thing that could have established")
+}
+
+// And it says nothing about waiting work on an empty ledger either: the
+// count that would establish it is the one being skipped.
+func TestAnUnreadableConfigClaimsNoWaitingWorkOnAnEmptyLedger(t *testing.T) {
+	var logged safeBuffer
+	fake := newFakeDriver()
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.Logger = slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	})
+	h.mu.Lock()
+	h.servedErr = errors.New("connect.json cannot be read")
+	h.mu.Unlock()
+
+	h.run(t)
+	time.Sleep(200 * time.Millisecond)
+	assert.NotContains(t, logged.String(), "work is waiting", "there is none, and nothing counted")
 }

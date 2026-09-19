@@ -1,9 +1,9 @@
 task: >-
-  Add our Redesign project to my agent's connector. Its work lives in
-  /home/me/Work/redesign. Tell me whether it's ready.
+  Add our Redesign project to my agent's connector. Tell me whether it's
+  ready.
 context: >-
   The agent's profile is helper, already connected and set up before with me as
-  the operator; my own profile is jorge. The directory exists.
+  the operator; my own profile is jorge.
 tags: [connect]
 mocks:
   - match: 'auth status.*jorge'
@@ -11,7 +11,7 @@ mocks:
   - match: '^me .*jorge'
     output: '{"ok":true,"data":{"identity":{"id":6001,"first_name":"Jorge","last_name":"M","email_address":"jorge@example.com"},"accounts":[{"id":999,"name":"Acme","current":true}],"person":{"id":1001,"name":"Jorge M"}}}'
   - match: 'connect show'
-    output: '{"ok":true,"data":{"path":"/home/me/.config/basecamp/connect/helper/connect.json","version":1,"profile":"helper","account_id":"999","agent":{"person_id":4001,"kind":"agent"},"trust":{"mode":"operator","operator_id":1001},"projects":{"111":{"path":"/home/me/Work/marketing"}},"driver":"spawn","concurrency":2,"deadline":"45m0s"},"summary":"Profile \"helper\": trust operator, 1 routed project(s)"}'
+    output: '{"ok":true,"data":{"path":"/home/me/.config/basecamp/connect/helper/connect.json","version":1,"profile":"helper","account_id":"999","agent":{"person_id":4001,"kind":"agent"},"trust":{"mode":"operator","operator_id":1001},"projects":{"111":{}},"driver":"spawn","concurrency":2,"deadline":"45m0s"},"summary":"Profile \"helper\": trust operator, 1 served project(s)"}'
   - match: 'auth status'
     output: '{"ok":true,"data":{"profile":"helper","authenticated":true,"oauth_type":"agent","account_id":"999","storage":"keyring"}}'
   - match: 'profile list'
@@ -22,15 +22,58 @@ mocks:
     output: '{"ok":false,"code":"not_ready","error":"The connector is not ready, so /home/me/.config/basecamp/connect/helper/connect.json was not written. Project 222: Reading the project was refused (HTTP 403). Basecamp refuses this read to an Agent identity today, and admission makes it for every event: the connector would see mentions and block each one on a read it cannot make","hint":"If the agent is not on this project, add it there. Otherwise: Until Basecamp allows Agent identities these reads, run the connector as a bot user: basecamp connect setup -P <bot-profile> --expect-identity <identity-id>"}'
 accept:
   - 'connect setup .*(-P|--profile)[ =]''?helper\b'
-  - 'connect setup .*--route[ =]''?222=''?/home/me/Work/redesign\b'
+  - 'connect setup .*--serve[ =](''222''|"222"|222)(\s|$)'
 reject:
+  # What these evals guarantee about setup commands: every one in the trace
+  # is a command the CLI would accept. The accepts above prove a correct one
+  # was issued; these prove no incorrect one was, which is the half a model
+  # can otherwise satisfy by issuing a command the CLI refuses and then
+  # retrying — the broad setup mock answers success either way.
+  #
+  # --serve carries a project id and nothing else: digits ending the shell
+  # word, bare or quoted either way, naming something above zero. Written as the
+  # shape of a wrong value rather than as a list of wrong values, because
+  # four rounds of review found four more spellings — and without lookahead,
+  # so Go's RE2 reads the same pattern the Ruby runner does.
+  #
+  # Deliberately narrower than parsePositiveID in two places, both of which
+  # the guard in internal/commands/connect_skilleval_test.go asserts rather
+  # than leaves implicit: a leading plus (+222 parses to 222) and fragments
+  # the shell would join into one word ('22''2' is 222). A trace may use
+  # neither. That guard holds both directions — everything these patterns
+  # allow, the CLI must accept; everything the CLI refuses, they must reject
+  # — and its doc comment names what it cannot model, which is the shell
+  # itself.
+  - 'connect setup .*--serve[ =]([0-9]*[^0-9\s''"]|0+(\s|$)|''[0-9]*[^0-9'']|''0*''|''[0-9]*''[^\s]|"[0-9]*[^0-9"]|"0*"|"[0-9]*"[^\s]|[0-9]+[''"])'
+  - 'connect setup .*--serve=(\s|$)'
+  # And --serve with no value at all, which cobra refuses outright.
+  - 'connect setup .*--serve\s*$'
+  # A value of all digits can still be too large for an int64, which no
+  # shape can see. Capped at 18 digits, comfortably above any real
+  # project id and safely below the 19 of MaxInt64 — so a trace may not
+  # carry 9223372036854775807 either, which the CLI would take. That
+  # narrowing is declared in the guard's corpus rather than left here.
+  - 'connect setup .*--serve[ =][''"]?[0-9]{19}'
+  # Form is not identity. Every rule above asks whether a --serve value is a
+  # value the CLI would take; none asks whether it is the project this case
+  # is about, so a trace could serve 2223, or 111, and then serve 222 and
+  # pass — the broad setup mock reports success for both (Copilot on #765).
+  # This is the last axis of these patterns that nothing was checking.
+  #
+  # A well-formed id that is not 222: shorter, longer, or three digits
+  # differing in one place. Written out rather than as a negative lookahead,
+  # which RE2 does not have, so Go's guard reads the same pattern the Ruby
+  # runner does.
+  - 'connect setup .*--serve[ =][''"]?([0-9]{1,2}|[0-9]{4,}|[013-9][0-9]{2}|[0-9][013-9][0-9]|[0-9][0-9][013-9])[''"]?(\s|$)'
+  # And the flag that no longer exists, in any spelling.
+  - 'connect setup .*--(route|remove-route)\b'
   - 'auth agent connect'
   - 'auth logout'
   - 'auth login'
   - 'profile create'
-  - '--remove-route'
+  - '--unserve'
   - '--with-token'
 accept_response:
   - '(?i)bot[- ]user'
   - '(?i)(member|add(ed)? (the agent )?to|on the project|in the project)'
-  - '(?i)(not|n.t)\W+(be(en)?\W+)?(written|write|changed|saved|added|add|routed)\b|nothing\W+(was\W+)?(written|changed)|unchanged'
+  - '(?i)(not|n.t)\W+(be(en)?\W+)?(written|write|changed|saved|added|add|served)\b|nothing\W+(was\W+)?(written|changed)|unchanged'

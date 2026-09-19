@@ -10,8 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const testRoute = "/work/connector"
-
 // admitOn writes an admitted record on a conversation key.
 func admitOn(t *testing.T, ledger *Ledger, id int64, key string) {
 	t.Helper()
@@ -22,7 +20,7 @@ func admitOn(t *testing.T, ledger *Ledger, id int64, key string) {
 
 func launch(t *testing.T, ledger *Ledger, id int64) Launch {
 	t.Helper()
-	l, err := ledger.LaunchTask(context.Background(), LaunchSpec{EventID: id, Route: testRoute, Driver: "fake", Deadline: time.Hour})
+	l, err := ledger.LaunchTask(context.Background(), LaunchSpec{EventID: id, Served: []int64{adapterBucketID}, Driver: "fake", Deadline: time.Hour})
 	require.NoError(t, err)
 	return l
 }
@@ -81,7 +79,7 @@ func TestALaunchHookFailureLeavesNothingWritten(t *testing.T) {
 	admitOn(t, ledger, 1, "recording:1")
 	ledger.SetHooks(Hooks{TaskLaunched: func(context.Context, Tx, Launch) error { return errors.New("outbox refused") }})
 
-	_, err := ledger.LaunchTask(context.Background(), LaunchSpec{EventID: 1, Route: testRoute, Driver: "fake"})
+	_, err := ledger.LaunchTask(context.Background(), LaunchSpec{EventID: 1, Served: []int64{adapterBucketID}, Driver: "fake"})
 	require.Error(t, err)
 	assert.Equal(t, StateAdmitted, getRecord(t, ledger, 1).State)
 	var tasks, attempts int
@@ -90,29 +88,22 @@ func TestALaunchHookFailureLeavesNothingWritten(t *testing.T) {
 	assert.Zero(t, attempts)
 }
 
-func TestALaunchMustNameTheRecordsRoute(t *testing.T) {
-	ledger := newTestLedger(t)
-	admitOn(t, ledger, 1, "recording:1")
-	_, err := ledger.LaunchTask(context.Background(), LaunchSpec{EventID: 1, Route: "/somewhere/else", Driver: "fake"})
-	assert.ErrorIs(t, err, ErrWorkDirMismatch)
-	assert.Equal(t, StateAdmitted, getRecord(t, ledger, 1).State)
-}
-
-// Ledger invariant 2.
-func TestOneLiveTaskPerConversationAndPerWorkingDirectory(t *testing.T) {
+// Ledger invariant 2. Two conversations run side by side now: nothing holds
+// a directory, because there is no per-task directory to hold.
+func TestOneLiveTaskPerConversationAndNoMore(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
 	admitOn(t, ledger, 1, "recording:1")
 	launch(t, ledger, 1)
 
 	admitOn(t, ledger, 3, "recording:3")
-	_, err := ledger.LaunchTask(ctx, LaunchSpec{EventID: 3, Route: testRoute, Driver: "fake"})
-	assert.ErrorIs(t, err, ErrNotStartable, "the working directory is busy")
+	second, err := ledger.LaunchTask(ctx, LaunchSpec{EventID: 3, Served: []int64{adapterBucketID}, Driver: "fake"})
+	require.NoError(t, err, "another conversation is another task, in the same directory")
+	assert.NotZero(t, second.TaskID)
 
-	// The database holds it too, whatever the code checks first.
-	_, err = ledger.db.ExecContext(context.Background(), `INSERT INTO tasks (token_sha256, created_at, conversation_key, work_dir) VALUES ('x', 'now', 'recording:9', ?)`, testRoute)
-	require.Error(t, err)
-	_, err = ledger.db.ExecContext(context.Background(), `INSERT INTO tasks (token_sha256, created_at, conversation_key, work_dir) VALUES ('y', 'now', 'recording:1', '/other')`)
+	// The database holds the conversation rule too, whatever the code checks
+	// first.
+	_, err = ledger.db.ExecContext(ctx, `INSERT INTO tasks (token_sha256, created_at, conversation_key) VALUES ('y', 'now', 'recording:1')`)
 	require.Error(t, err)
 }
 
@@ -287,7 +278,7 @@ func TestJoinConversationTakesLaterFollowUpsOnlyWhileTheTaskIsLive(t *testing.T)
 	admitOn(t, ledger, 2, "recording:1")
 	assert.Equal(t, StateQueued, getRecord(t, ledger, 2).State)
 
-	joined, err := ledger.JoinConversation(ctx, l.TaskID)
+	joined, err := ledger.JoinConversation(ctx, l.TaskID, []int64{adapterBucketID})
 	require.NoError(t, err)
 	assert.Equal(t, []int64{2}, joined)
 	pending, err := ledger.UnexposedEvents(ctx, l.TaskID)
@@ -297,7 +288,7 @@ func TestJoinConversationTakesLaterFollowUpsOnlyWhileTheTaskIsLive(t *testing.T)
 	_, err = ledger.EndAttempt(ctx, AttemptEnd{AttemptID: l.AttemptID, Stop: StopFinished})
 	require.NoError(t, err)
 	admitOn(t, ledger, 3, "recording:1")
-	joined, err = ledger.JoinConversation(ctx, l.TaskID)
+	joined, err = ledger.JoinConversation(ctx, l.TaskID, []int64{adapterBucketID})
 	require.NoError(t, err)
 	assert.Empty(t, joined)
 }
@@ -328,7 +319,6 @@ func TestLiveAttemptsIncludesLaunching(t *testing.T) {
 	require.Len(t, live, 1)
 	assert.Equal(t, AttemptLaunching, live[0].State)
 	assert.Equal(t, l.AttemptID, live[0].AttemptID)
-	assert.Equal(t, testRoute, live[0].WorkDir)
 }
 
 func TestAHookFailureRollsTheTransitionBack(t *testing.T) {
@@ -410,43 +400,120 @@ func TestAdoptableReplyRule(t *testing.T) {
 	assert.False(t, ok, "a lifecycle message is never adopted")
 }
 
-// Copilot: a follow-up admitted under another route waits for its own task.
-func TestAFollowUpOnAnotherRouteDoesNotJoinTheTask(t *testing.T) {
+// A follow-up on the task's conversation joins it. The conversation is the
+// whole of the test now: there is no second thing for it to match.
+func TestAFollowUpOnTheConversationJoinsTheTask(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
 	admitOn(t, ledger, 1, "recording:1")
 	l := launch(t, ledger, 1)
-	seenRecord(t, ledger, 2)
-	v := admittedVerdict(2, 0, "recording:1")
-	v.Route = "/work/moved"
-	_, err := ledger.Admission().Commit(ctx, v)
-	require.NoError(t, err)
+	admitOn(t, ledger, 2, "recording:1")
 
-	joined, err := ledger.JoinConversation(ctx, l.TaskID)
+	joined, err := ledger.JoinConversation(ctx, l.TaskID, []int64{adapterBucketID})
 	require.NoError(t, err)
-	assert.Empty(t, joined)
+	assert.Equal(t, []int64{2}, joined)
 }
 
-// Review r2: work no approved route covers is counted, not silently stuck.
-func TestStrandedRecordsCountsWorkNoRouteCovers(t *testing.T) {
+// Copilot on #765: the originating record is held to the served set too, not
+// only the records that join it.
+//
+// The ledger launches only what the set it is given covers, and a launch
+// naming no set authorizes nothing rather than defaulting open. For the
+// dispatcher that is belt and braces — one pass takes a single reading and
+// hands the same slice to the startable query and to LaunchSpec, so the
+// record is always in it — and it is what makes any other caller fail closed.
+//
+// It is not a fix for the window between reading connect.json and committing
+// the launch: an unserve landing there still starts this one task, and the
+// comment here used to say otherwise.
+func TestALaunchIsRefusedForAProjectTheSpecDoesNotServe(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	admitOn(t, ledger, 1, "recording:1")
+
+	_, err := ledger.LaunchTask(ctx, LaunchSpec{EventID: 1, Served: []int64{adapterBucketID + 1}, Driver: "fake"})
+	assert.ErrorIs(t, err, ErrNotStartable, "another project's served set does not authorize this record")
+
+	_, err = ledger.LaunchTask(ctx, LaunchSpec{EventID: 1, Driver: "fake"})
+	assert.ErrorIs(t, err, ErrNotStartable, "and a launch that names no served project authorizes nothing")
+
+	assert.Equal(t, StateAdmitted, getRecord(t, ledger, 1).State, "nothing was written either time")
+
+	l, err := ledger.LaunchTask(ctx, LaunchSpec{EventID: 1, Served: []int64{adapterBucketID}, Driver: "fake"})
+	require.NoError(t, err, "served, and it launches")
+	assert.NotZero(t, l.TaskID)
+}
+
+// Copilot on #765: a task is authorized against one project, so nothing from
+// another project joins it, however the conversation is shared.
+//
+// A conversation key is the recording's or the Campfire's, never the
+// bucket's, so two records on one conversation can sit in two projects — a
+// recording moved between them is the ordinary way. The record carries the
+// `served` bit admission wrote, which says the project was served *then*;
+// joining on that alone would expose an event through a task authorized
+// against a different project, and would go on doing it after the operator
+// stopped serving the second one.
+func TestAFollowUpInAnotherProjectDoesNotJoinTheTask(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	admitOn(t, ledger, 1, "recording:1")
+	l := launch(t, ledger, 1)
+
+	// Event 2 is on the same conversation and in another project.
+	seenRecord(t, ledger, 2)
+	_, err := ledger.ledgerCommitWithBucket(admittedVerdict(2, 0, "recording:1"), adapterBucketID+1)
+	require.NoError(t, err)
+
+	joined, err := ledger.JoinConversation(ctx, l.TaskID, []int64{adapterBucketID, adapterBucketID + 1})
+	require.NoError(t, err)
+	assert.Empty(t, joined, "the task is the originating project's; another project's record is not handed to its worker")
+	assert.Equal(t, StateQueued, getRecord(t, ledger, 2).State,
+		"and it waits behind the live task on its conversation for a task of its own, rather than riding along in this one")
+}
+
+// And the served set is read now, not as it was when the record was
+// admitted: a project the operator has stopped serving stops feeding the
+// live task on its conversation.
+func TestAFollowUpInAProjectNoLongerServedDoesNotJoinTheTask(t *testing.T) {
+	ledger := newTestLedger(t)
+	ctx := context.Background()
+	admitOn(t, ledger, 1, "recording:1")
+	l := launch(t, ledger, 1)
+	admitOn(t, ledger, 2, "recording:1")
+
+	joined, err := ledger.JoinConversation(ctx, l.TaskID, nil)
+	require.NoError(t, err)
+	assert.Empty(t, joined, "no project is served now")
+
+	joined, err = ledger.JoinConversation(ctx, l.TaskID, []int64{adapterBucketID + 5})
+	require.NoError(t, err)
+	assert.Empty(t, joined, "and the task's own project is not among those served")
+
+	joined, err = ledger.JoinConversation(ctx, l.TaskID, []int64{adapterBucketID})
+	require.NoError(t, err)
+	assert.Equal(t, []int64{2}, joined, "served again, and the follow-up joins")
+}
+
+// Review r2: work in a project no longer served is counted, not silently
+// stuck.
+func TestStrandedRecordsCountsWorkInUnservedProjects(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
 	admitOn(t, ledger, 1, "recording:1")
 	seenRecord(t, ledger, 2)
-	moved := admittedVerdict(2, 0, "recording:2")
-	moved.Route = "/work/moved"
-	_, err := ledger.Admission().Commit(ctx, moved)
+	_, err := ledger.ledgerCommitWithBucket(admittedVerdict(2, 0, "recording:2"), adapterBucketID+1)
 	require.NoError(t, err)
 
-	stranded, err := ledger.StrandedRecords(ctx, map[int64]string{adapterBucketID: testRoute}, nil)
+	stranded, err := ledger.StrandedRecords(ctx, []int64{adapterBucketID}, nil)
 	require.NoError(t, err)
-	assert.Equal(t, 1, stranded, "the record admitted under a route connect.json no longer has")
+	assert.Equal(t, 1, stranded, "the record in a project connect.json no longer serves")
 
-	stranded, err = ledger.StrandedRecords(ctx, map[int64]string{adapterBucketID: testRoute, adapterBucketID + 1: "/work/moved"}, nil)
+	stranded, err = ledger.StrandedRecords(ctx, []int64{adapterBucketID, adapterBucketID + 1}, nil)
 	require.NoError(t, err)
-	assert.Equal(t, 1, stranded, "the route must be approved for the record's own project")
+	assert.Zero(t, stranded, "both projects served")
 
-	stranded, err = ledger.StrandedRecords(ctx, map[int64]string{adapterBucketID + 5: testRoute}, []int64{adapterBucketID + 5})
+	stranded, err = ledger.StrandedRecords(ctx, []int64{adapterBucketID + 5}, []int64{adapterBucketID + 5})
 	require.NoError(t, err)
 	assert.Zero(t, stranded, "work in a project this run does not hear is another run's, not stranded")
 }

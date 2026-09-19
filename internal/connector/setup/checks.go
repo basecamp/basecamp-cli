@@ -296,16 +296,48 @@ func verifyPerson(ctx context.Context, r Reader, name string, p Person, agentID 
 	return c
 }
 
-// RouteChecks reads each routed project the way admission will, as the
+// ProjectChecks reads each served project the way admission will, as the
 // agent: the project, and its people (project trust mode's membership read).
-func RouteChecks(ctx context.Context, r Reader, f File) []Check {
+//
+// firstSetup says there is no connect.json yet. Serving no project is two
+// different questions depending on it, and answering both with one rule left
+// the operator no way to turn the agent off through the interface that
+// turned it on: an explicit --unserve of the last project produced a valid
+// empty file that the readiness check then refused to write (Copilot on
+// #765). A first setup that serves nothing has not been set up, and is
+// refused. Withdrawing the last project is a thing an operator may mean —
+// it is how you stop the agent working anywhere without editing the trust
+// anchor by hand — so it is written, and warned about.
+func ProjectChecks(ctx context.Context, r Reader, f File, firstSetup bool) []Check {
 	if len(f.Projects) == 0 {
-		return []Check{{
-			Name:    "Routes",
-			Status:  StatusFail,
-			Message: "No project is routed: every mention would get a holding reply and no work",
-			Hint:    "Add one: basecamp connect setup -P " + f.Profile + " --route <project-id>=<dir>",
-		}}
+		// Not every mention is answered, and it is not only mentions that
+		// are. Gate checks scope and trust before it checks whether the
+		// project is served, so an event it drops there is discarded and
+		// never replied to; what reaches the served check is a mention from
+		// a trusted person or an operator's assignment, and both of those
+		// carry Acknowledge, so both get the holding reply. Telling an
+		// operator that every mention is answered promises more than the
+		// code does.
+		c := Check{
+			Name:   "Projects",
+			Status: StatusWarn,
+			Message: "No project is served: this agent is handed no work at all, and the connector will start and do nothing. " +
+				"A mention from a trusted person, or an assignment from the operator, gets a holding reply; " +
+				"anything else — an untrusted mention, a project outside --project, a subscription, a completion — is discarded unanswered.",
+			// Quoted, not interpolated: this is a line we tell an operator
+			// to paste into a shell, and a profile name comes from a
+			// configuration file, which is not held to the check that
+			// applied when the profile was created. Validate happens to
+			// refuse an unsafe name before this runs today; that is a guard
+			// in another package's call order, not one at the point of use.
+			Hint: "Serve one: basecamp connect setup -P " + richtext.ShellQuote(f.Profile) + " --serve <project-id>",
+		}
+		if firstSetup {
+			c.Status = StatusFail
+			c.Message = "No project is served: a mention from a trusted person, or an assignment from the operator, " +
+				"would get a holding reply and no work; anything else would be discarded unanswered"
+		}
+		return []Check{c}
 	}
 	ids := make([]int64, 0, len(f.Projects))
 	for id := range f.Projects {
@@ -315,22 +347,13 @@ func RouteChecks(ctx context.Context, r Reader, f File) []Check {
 
 	checks := make([]Check, 0, len(ids))
 	for _, id := range ids {
-		checks = append(checks, routeCheck(ctx, r, f.Agent.Kind, id, f.Projects[id].Path))
+		checks = append(checks, projectCheck(ctx, r, f.Agent.Kind, id))
 	}
 	return checks
 }
 
-func routeCheck(ctx context.Context, r Reader, kind string, id int64, path string) Check {
+func projectCheck(ctx context.Context, r Reader, kind string, id int64) Check {
 	c := Check{Name: fmt.Sprintf("Project %d", id)}
-	// The directory is checked as a new route's is, whether the route was
-	// passed now or kept from connect.json: it must still resolve to itself,
-	// an existing directory.
-	if resolved, err := ResolveDir(path); err != nil || resolved != path {
-		c.Status = StatusFail
-		c.Message = "The route's directory is no longer usable: " + richtext.SanitizeSingleLine(path)
-		c.Hint = fmt.Sprintf("Route the project again: --route %d=<dir>, or remove it: --remove-route %d.", id, id)
-		return c
-	}
 	for _, read := range []struct {
 		what string
 		run  func(context.Context, int64) error
@@ -356,7 +379,7 @@ func routeCheck(ctx context.Context, r Reader, kind string, id int64, path strin
 		return c
 	}
 	c.Status = StatusPass
-	c.Message = "Readable by the agent, routed to " + richtext.SanitizeSingleLine(path)
+	c.Message = "Readable by the agent"
 	return c
 }
 

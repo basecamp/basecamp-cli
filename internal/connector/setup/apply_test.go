@@ -3,8 +3,6 @@
 package setup
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -66,46 +64,36 @@ func TestApplyTrust(t *testing.T) {
 	})
 }
 
-func TestApplyRoutes(t *testing.T) {
+func TestApplyServedProjects(t *testing.T) {
 	base := validFile(t)
 
-	t.Run("a route resolves to the real directory", func(t *testing.T) {
-		target := t.TempDir()
-		link := filepath.Join(t.TempDir(), "app")
-		require.NoError(t, os.Symlink(target, link))
-
-		out, err := Apply(base, Changes{Routes: map[int64]string{777: link}})
+	t.Run("serving a project adds it with no settings", func(t *testing.T) {
+		out, err := Apply(base, Changes{Serve: []int64{777}})
 		require.NoError(t, err)
-		want, err := filepath.EvalSymlinks(target)
-		require.NoError(t, err)
-		assert.Equal(t, want, out.Projects[777].Path, "the approved entry names where work really runs")
+		require.Contains(t, out.Projects, int64(777))
+		assert.Equal(t, admission.Project{}, out.Projects[777])
 	})
-	t.Run("rerouting keeps class and watch_completions", func(t *testing.T) {
-		dir := t.TempDir()
-		out, err := Apply(base, Changes{Routes: map[int64]string{projectID: dir}})
+	t.Run("serving a project again keeps class and watch_completions", func(t *testing.T) {
+		out, err := Apply(base, Changes{Serve: []int64{projectID}})
 		require.NoError(t, err)
 		assert.Equal(t, "internal", out.Projects[projectID].Class)
 		assert.True(t, out.Projects[projectID].WatchCompletions)
 	})
-	t.Run("a directory that does not exist is refused", func(t *testing.T) {
-		_, err := Apply(base, Changes{Routes: map[int64]string{777: filepath.Join(t.TempDir(), "missing")}})
+	t.Run("a project id that is not one is refused", func(t *testing.T) {
+		_, err := Apply(base, Changes{Serve: []int64{0}})
+		assert.Error(t, err)
+		_, err = Apply(base, Changes{Serve: []int64{-1}})
 		assert.Error(t, err)
 	})
-	t.Run("a file is not a directory", func(t *testing.T) {
-		file := filepath.Join(t.TempDir(), "f")
-		require.NoError(t, os.WriteFile(file, nil, 0o600))
-		_, err := Apply(base, Changes{Routes: map[int64]string{777: file}})
-		assert.Error(t, err)
-	})
-	t.Run("class and watch_completions need a route", func(t *testing.T) {
+	t.Run("class and watch_completions need the project served", func(t *testing.T) {
 		_, err := Apply(base, Changes{Classes: map[int64]string{777: "internal"}})
 		assert.Error(t, err)
 		_, err = Apply(base, Changes{WatchCompletions: map[int64]bool{777: true}})
 		assert.Error(t, err)
 	})
-	t.Run("class and watch_completions apply with a new route", func(t *testing.T) {
+	t.Run("class and watch_completions apply to a project served in the same run", func(t *testing.T) {
 		out, err := Apply(base, Changes{
-			Routes:           map[int64]string{777: t.TempDir()},
+			Serve:            []int64{777},
 			Classes:          map[int64]string{777: "client-work"},
 			WatchCompletions: map[int64]bool{777: true, projectID: false},
 		})
@@ -124,10 +112,10 @@ func TestApplyRoutes(t *testing.T) {
 		assert.NotContains(t, out.Projects, projectID)
 
 		again, err := Apply(out, Changes{Remove: []int64{projectID}})
-		require.NoError(t, err, "removing a route that is already gone is idempotent")
+		require.NoError(t, err, "unserving a project that is already gone is idempotent")
 		assert.Equal(t, out.Projects, again.Projects)
-		_, err = Apply(base, Changes{Remove: []int64{projectID}, Routes: map[int64]string{projectID: t.TempDir()}})
-		assert.Error(t, err, "routing and removing one project in one run")
+		_, err = Apply(base, Changes{Remove: []int64{projectID}, Serve: []int64{projectID}})
+		assert.Error(t, err, "serving and removing one project in one run")
 	})
 }
 
@@ -137,16 +125,4 @@ func TestApplyDispatchSettings(t *testing.T) {
 	assert.Equal(t, DriverACP, out.Driver)
 	assert.Equal(t, 4, out.Concurrency)
 	assert.Equal(t, Duration(90*time.Minute), out.Deadline)
-}
-
-func TestResolveDirExpandsHome(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	require.NoError(t, os.Mkdir(filepath.Join(home, "work"), 0o700))
-
-	got, err := ResolveDir("~/work")
-	require.NoError(t, err)
-	want, err := filepath.EvalSymlinks(filepath.Join(home, "work"))
-	require.NoError(t, err)
-	assert.Equal(t, want, got)
 }

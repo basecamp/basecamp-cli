@@ -934,10 +934,10 @@ func decodeUpdate(raw json.RawMessage) (sessionUpdate, bool) {
 	var locations []json.RawMessage
 	if json.Unmarshal(fields["locations"], &locations) == nil {
 		if len(locations) > maxLocations {
-			// More paths than this driver carries. The policy allows a call
-			// only when every path it names is inside the working directory,
-			// so judging it on the ones that fit would allow a call by
-			// leaving out the path that refuses it.
+			// More paths than this driver carries, so the policy could not
+			// be shown the call whole. Marked unplaceable and refused
+			// without being asked (permission.go), rather than judged on the
+			// paths that fit.
 			u.Unplaceable = true
 			locations = locations[:maxLocations]
 		}
@@ -950,9 +950,9 @@ func decodeUpdate(raw json.RawMessage) (sessionUpdate, bool) {
 			}
 			if len(loc.Path) > maxLocationPath {
 				// A pathname longer than the driver carries is not a path
-				// this call can be placed by either: what is cut off can be
-				// the part that leaves the working directory, and a tool that
-				// normalizes before it opens would still reach it.
+				// this call can be placed by either: what is cut off is part
+				// of where the call would land, so the policy would be shown
+				// a path that is not the one the tool opens.
 				u.Unplaceable = true
 				loc.Path = loc.Path[:maxLocationPath]
 			}
