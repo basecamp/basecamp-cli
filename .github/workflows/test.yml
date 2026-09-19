@@ -166,7 +166,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: race-shard-${{ matrix.shard }}
+          # The name is the directory the aggregate reads: download-artifact
+          # extracts each one to <path>/<name>/, so this has to be the
+          # shard-N the union check looks for, not a name of its own.
+          name: shard-${{ matrix.shard }}
           path: |
             shard-records/shard-${{ matrix.shard }}/all.txt
             shard-records/shard-${{ matrix.shard }}/shard.${{ matrix.shard }}.txt
@@ -190,7 +193,7 @@ jobs:
       - name: Download what each shard recorded
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: race-shard-*
+          pattern: shard-*
           path: shard-records
 
       # Naming what came back before judging it: a check that runs over

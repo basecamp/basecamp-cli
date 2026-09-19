@@ -57,4 +57,14 @@ refuses "a test assigned that the repository does not have"
 plant; : > "$work/shard-1/all.txt"
 refuses "a shard whose enumeration is empty"
 
+# The aggregate reads the shards through uploaded artifacts, so a report
+# that never arrives looks exactly like a shard with nothing to say. It
+# must not: an aggregator that cannot read a shard's report would have an
+# opinion about it anyway.
+plant; rm -rf "$work/shard-2"
+refuses "a shard whose report never arrived"
+
+plant; mv "$work/shard-3" "$work/race-shard-3"
+refuses "a report that arrived under a name the checker does not read"
+
 echo "All union checks behaved."

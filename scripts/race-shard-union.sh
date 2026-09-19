@@ -23,13 +23,12 @@ fail() { echo "SHARD COVERAGE FAILED: $*" >&2; exit 1; }
 
 sorted() { LC_ALL=C sort -u "$1"; }
 
-expected=""
+# Compared as sorted files rather than hashed: cmp is POSIX and md5sum is
+# not on macOS, and this check is in make check, which people run locally.
 for i in $(seq 1 "$total"); do
-  [ -s "$dir/shard-$i/all.txt" ] || fail "shard $i recorded no enumeration; it did not get far enough to have one"
-  sum=$(sorted "$dir/shard-$i/all.txt" | md5sum | cut -d' ' -f1)
-  if [ -z "$expected" ]; then
-    expected="$sum"
-  elif [ "$sum" != "$expected" ]; then
+  [ -s "$dir/shard-$i/all.txt" ] || fail "shard $i recorded no enumeration; either it did not get far enough to have one, or its report did not reach here"
+  sorted "$dir/shard-$i/all.txt" > "$dir/all.$i.sorted"
+  if [ "$i" != 1 ] && ! cmp -s "$dir/all.1.sorted" "$dir/all.$i.sorted"; then
     fail "shard $i enumerated a different set of tests than shard 1, so the shards did not all see the same repository"
   fi
 done
@@ -43,7 +42,7 @@ for i in $(seq 1 "$total"); do
 done
 
 cat "$dir"/shard-*/shard.*.txt | LC_ALL=C sort -u > "$dir/union.txt"
-sorted "$dir/shard-1/all.txt" > "$dir/expected.txt"
+cp "$dir/all.1.sorted" "$dir/expected.txt"
 
 missing=$(LC_ALL=C comm -23 "$dir/expected.txt" "$dir/union.txt")
 [ -z "$missing" ] || fail "$(echo "$missing" | wc -l) test(s) were in no shard and so did not run, e.g. $(echo "$missing" | head -1)"
