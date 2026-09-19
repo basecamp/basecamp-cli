@@ -316,16 +316,21 @@ func TestIsAuthorityKey(t *testing.T) {
 //
 // This used to assert single quotes around the path unconditionally, because
 // the copy of the quoting this package called wrapped every value whether or
-// not it needed it. The shared richtext.ShellQuote leaves a path that can
-// mean nothing to a shell alone, so an ordinary path now appears bare — the
-// same word, spelled shorter. What "for shell safety" was actually claiming
-// is the second case: a path that does carry shell syntax is encoded, and an
-// apostrophe in it is spliced rather than merely wrapped, which is the one
-// spelling a wrapper gets wrong.
+// not it needed it. The shared richtext.ShellQuote leaves a value that can
+// mean nothing to a shell alone, so on a POSIX filesystem an ordinary path
+// now appears bare — the same word, spelled shorter. What "for shell safety"
+// was actually claiming is the second case: a path that does carry shell
+// syntax is encoded, and an apostrophe in it is spliced rather than merely
+// wrapped, which is the one spelling a wrapper gets wrong.
+//
+// Both cases are asked of richtext.ShellQuote rather than spelled out, so
+// they mean the same thing on a platform whose paths are not built from
+// inert characters. Whether an ordinary path comes out bare is a POSIX
+// question and is pinned in internal/config/trust_unix_test.go.
 func TestConfigSet_AuthorityKeyWarnsWithPath(t *testing.T) {
 	for name, dir := range map[string]string{
-		"an ordinary path needs no quoting": "plain",
-		"an apostrophe in it is spliced":    "o'brien",
+		"an ordinary path":             "plain",
+		"a path with an apostrophe in": "o'brien",
 	} {
 		t.Run(name, func(t *testing.T) {
 			app, _ := setupConfigTestApp(t)
@@ -359,7 +364,7 @@ func TestConfigSet_AuthorityKeyWarnsWithPath(t *testing.T) {
 			assert.Contains(t, stderr, "basecamp config trust "+richtext.ShellQuote(absPath),
 				"the warning must name the command with the path encoded for a shell")
 			if dir == "plain" {
-				assert.Contains(t, stderr, absPath, "an unquoted path stays readable")
+				assert.Contains(t, stderr, absPath, "the path itself appears in the command a person pastes")
 			} else {
 				assert.NotContains(t, stderr, absPath, "a path with an apostrophe cannot appear raw")
 				assert.Contains(t, stderr, `'\''`, "the apostrophe must be spliced out and back in")

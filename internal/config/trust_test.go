@@ -239,35 +239,33 @@ func TestLoadTrustStore_EmptyDir(t *testing.T) {
 	assert.Nil(t, ts)
 }
 
-// The untrusted-config warning names a command a person pastes, so the path
-// in it is shell-quoted. This package used to quote it with a copy of its
-// own that wrapped every value in single quotes unconditionally; it now
-// calls richtext.ShellQuote, which leaves a path that needs no quoting
-// bare. The same shell word either way — these pin which spelling, so the
-// change to the message is a decision and not a drift.
-func TestTheTrustWarningQuotesThePathOnlyWhenItHasTo(t *testing.T) {
-	for name, dirName := range map[string]string{
-		"a plain path goes bare":         "plain",
-		"an apostrophe in it is spliced": "o'brien",
-	} {
-		t.Run(name, func(t *testing.T) {
-			dir := filepath.Join(t.TempDir(), dirName)
-			require.NoError(t, os.MkdirAll(dir, 0o755))
-			configPath := filepath.Join(dir, "config.json")
-			require.NoError(t, os.WriteFile(configPath, []byte(`{"base_url": "https://evil.example.com"}`), 0o644))
+// The untrusted-config warning names a `basecamp config trust <path>` a
+// person pastes, so the path in it is shell-quoted. An apostrophe in the
+// path is the case that tells quoting apart from wrapping — it has to be
+// spliced out of the quotes and back in, since no escape reaches inside
+// single quotes — and that holds wherever this builds.
+//
+// The other half of the change lives in trust_unix_test.go: this package's
+// deleted copy wrapped every value whether or not it needed it, and the
+// shared richtext.ShellQuote leaves an inert one alone. That is a statement
+// about POSIX paths only. A Windows path carries backslashes, which mean
+// something to a shell, so there is no bare path to assert there — and the
+// Go suite runs on Linux, so an ungated assertion about it would have gone
+// on passing while being wrong for everyone who runs the tests on Windows
+// (Copilot on #769).
+func TestTheTrustWarningSplicesAnApostropheInThePath(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "o'brien")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	configPath := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(configPath, []byte(`{"base_url": "https://evil.example.com"}`), 0o644))
 
-			want := "basecamp config trust " + richtext.ShellQuote(configPath) + "`"
-			if dirName == "plain" {
-				require.NotContains(t, want, "'", "a plain path must come through unquoted")
-			} else {
-				require.Contains(t, want, `'\''`, "an apostrophe must be spliced, not wrapped")
-			}
+	want := "basecamp config trust " + richtext.ShellQuote(configPath) + "`"
+	require.Contains(t, want, `'\''`, "an apostrophe must be spliced, not wrapped")
+	require.NotContains(t, want, "/o'brien/", "and the raw apostrophe must not survive")
 
-			assert.Contains(t, captureStderr(t, func() {
-				loadFromFile(Default(), configPath, SourceLocal, nil)
-			}), want)
-		})
-	}
+	assert.Contains(t, captureStderr(t, func() {
+		loadFromFile(Default(), configPath, SourceLocal, nil)
+	}), want)
 }
 
 // captureStderr runs fn with os.Stderr redirected and returns what it wrote.
