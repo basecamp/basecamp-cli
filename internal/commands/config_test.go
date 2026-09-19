@@ -18,6 +18,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/names"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 func TestAtomicWriteFile_OverwriteExisting(t *testing.T) {
@@ -310,37 +311,61 @@ func TestIsAuthorityKey(t *testing.T) {
 
 // --- config set authority-key warning test ---
 
+// The warning names a `basecamp config trust <path>` a person pastes, so the
+// path in it is shell-quoted.
+//
+// This used to assert single quotes around the path unconditionally, because
+// the copy of the quoting this package called wrapped every value whether or
+// not it needed it. The shared richtext.ShellQuote leaves a path that can
+// mean nothing to a shell alone, so an ordinary path now appears bare — the
+// same word, spelled shorter. What "for shell safety" was actually claiming
+// is the second case: a path that does carry shell syntax is encoded, and an
+// apostrophe in it is spliced rather than merely wrapped, which is the one
+// spelling a wrapper gets wrong.
 func TestConfigSet_AuthorityKeyWarnsWithPath(t *testing.T) {
-	app, _ := setupConfigTestApp(t)
+	for name, dir := range map[string]string{
+		"an ordinary path needs no quoting": "plain",
+		"an apostrophe in it is spliced":    "o'brien",
+	} {
+		t.Run(name, func(t *testing.T) {
+			app, _ := setupConfigTestApp(t)
 
-	// Work in a temp dir so config set writes .basecamp/config.json there
-	tmpDir, _ := filepath.EvalSymlinks(t.TempDir())
-	origDir, _ := os.Getwd()
-	require.NoError(t, os.Chdir(tmpDir))
-	defer os.Chdir(origDir)
+			// Work in a temp dir so config set writes .basecamp/config.json there
+			tmpDir, _ := filepath.EvalSymlinks(t.TempDir())
+			tmpDir = filepath.Join(tmpDir, dir)
+			require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".basecamp"), 0o755))
+			origDir, _ := os.Getwd()
+			require.NoError(t, os.Chdir(tmpDir))
+			defer os.Chdir(origDir)
 
-	require.NoError(t, os.MkdirAll(".basecamp", 0755))
+			// Capture stderr for the warning
+			origStderr := os.Stderr
+			r, w, _ := os.Pipe()
+			os.Stderr = w
 
-	// Capture stderr for the warning
-	origStderr := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
+			err := executeConfigCommand(app, "set", "base_url", "https://custom.example.com")
+			require.NoError(t, err)
 
-	err := executeConfigCommand(app, "set", "base_url", "https://custom.example.com")
-	require.NoError(t, err)
+			w.Close()
+			var buf [4096]byte
+			n, _ := r.Read(buf[:])
+			os.Stderr = origStderr
 
-	w.Close()
-	var buf [4096]byte
-	n, _ := r.Read(buf[:])
-	os.Stderr = origStderr
+			stderr := string(buf[:n])
+			absPath := filepath.Join(tmpDir, ".basecamp", "config.json")
 
-	stderr := string(buf[:n])
-	absPath := filepath.Join(tmpDir, ".basecamp", "config.json")
-
-	assert.Contains(t, stderr, `"base_url"`)
-	assert.Contains(t, stderr, "requires trust")
-	assert.Contains(t, stderr, absPath, "warning must include the exact config path")
-	assert.Contains(t, stderr, "'"+absPath+"'", "path must be single-quoted for shell safety")
+			assert.Contains(t, stderr, `"base_url"`)
+			assert.Contains(t, stderr, "requires trust")
+			assert.Contains(t, stderr, "basecamp config trust "+richtext.ShellQuote(absPath),
+				"the warning must name the command with the path encoded for a shell")
+			if dir == "plain" {
+				assert.Contains(t, stderr, absPath, "an unquoted path stays readable")
+			} else {
+				assert.NotContains(t, stderr, absPath, "a path with an apostrophe cannot appear raw")
+				assert.Contains(t, stderr, `'\''`, "the apostrophe must be spliced out and back in")
+			}
+		})
+	}
 }
 
 // TestConfigSet_GatedNonAuthorityKeyWarns verifies the trust warning also fires

@@ -22,7 +22,12 @@ import (
 func TestShellQuoteSurvivesARealShell(t *testing.T) {
 	for _, in := range []string{
 		"agent", "", "two words", "a;rm -rf /", "$(echo pwned)", "`echo pwned`",
-		"it's", "'", "'; echo pwned; '", "a\nb", `back\slash`, "*", "~root",
+		"it's", "'", "'; echo pwned; '", "a\nb", "a\tb", `back\slash`, "*", "~root",
+		// The shapes the three deleted copies carried: a profile name
+		// (auth), a config path (config), and an opaque feed position
+		// (commands). An apostrophe in a home directory is the case that
+		// tells quoting apart from wrapping, and it is not hypothetical.
+		"work profile", "/home/o'brien/.basecamp/config.json", "pos 1; rm -rf /",
 	} {
 		out, err := exec.CommandContext(t.Context(), "/bin/sh", "-c", "printf %s "+ShellQuote(in)).Output()
 		require.NoError(t, err, "input %q quoted as %s", in, ShellQuote(in))

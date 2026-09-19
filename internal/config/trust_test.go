@@ -2,12 +2,16 @@ package config
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 func TestTrustStore_EmptyByDefault(t *testing.T) {
@@ -233,4 +237,54 @@ func TestLoadFromFile_TrustedRepoProfiles(t *testing.T) {
 func TestLoadTrustStore_EmptyDir(t *testing.T) {
 	ts := LoadTrustStore("")
 	assert.Nil(t, ts)
+}
+
+// The untrusted-config warning names a command a person pastes, so the path
+// in it is shell-quoted. This package used to quote it with a copy of its
+// own that wrapped every value in single quotes unconditionally; it now
+// calls richtext.ShellQuote, which leaves a path that needs no quoting
+// bare. The same shell word either way — these pin which spelling, so the
+// change to the message is a decision and not a drift.
+func TestTheTrustWarningQuotesThePathOnlyWhenItHasTo(t *testing.T) {
+	for name, dirName := range map[string]string{
+		"a plain path goes bare":         "plain",
+		"an apostrophe in it is spliced": "o'brien",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), dirName)
+			require.NoError(t, os.MkdirAll(dir, 0o755))
+			configPath := filepath.Join(dir, "config.json")
+			require.NoError(t, os.WriteFile(configPath, []byte(`{"base_url": "https://evil.example.com"}`), 0o644))
+
+			want := "basecamp config trust " + richtext.ShellQuote(configPath) + "`"
+			if dirName == "plain" {
+				require.NotContains(t, want, "'", "a plain path must come through unquoted")
+			} else {
+				require.Contains(t, want, `'\''`, "an apostrophe must be spliced, not wrapped")
+			}
+
+			assert.Contains(t, captureStderr(t, func() {
+				loadFromFile(Default(), configPath, SourceLocal, nil)
+			}), want)
+		})
+	}
+}
+
+// captureStderr runs fn with os.Stderr redirected and returns what it wrote.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stderr
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stderr = w
+	done := make(chan string, 1)
+	go func() {
+		var b strings.Builder
+		_, _ = io.Copy(&b, r)
+		done <- b.String()
+	}()
+	fn()
+	require.NoError(t, w.Close())
+	os.Stderr = orig
+	return <-done
 }

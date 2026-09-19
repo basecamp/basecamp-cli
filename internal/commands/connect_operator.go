@@ -71,7 +71,7 @@ func loadConnectProfile(cmd *cobra.Command) (connectProfile, error) {
 	file, err := setup.Load(path)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		return connectProfile{}, output.ErrUsageHint(fmt.Sprintf("Profile %q is not set up as a connector", name), "Run: basecamp connect setup -P "+shellQuote(name))
+		return connectProfile{}, output.ErrUsageHint(fmt.Sprintf("Profile %q is not set up as a connector", name), "Run: basecamp connect setup -P "+richtext.ShellQuote(name))
 	case err != nil:
 		return connectProfile{}, output.ErrUsage("connect.json cannot be used: " + err.Error())
 	}
@@ -119,7 +119,7 @@ func openConnectLedger(ctx context.Context, p connectProfile, requireStopped boo
 	}
 	path := filepath.Join(dir, connector.LedgerFile)
 	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-		return nil, done, output.ErrUsageHint(fmt.Sprintf("Profile %q's connector has no ledger yet", p.name), "Run the connector first: basecamp connect -P "+shellQuote(p.name))
+		return nil, done, output.ErrUsageHint(fmt.Sprintf("Profile %q's connector has no ledger yet", p.name), "Run the connector first: basecamp connect -P "+richtext.ShellQuote(p.name))
 	}
 	// Opening for a decision migrates the ledger, and a connector running on
 	// an older binary's schema must not have its triggers replaced under it.
@@ -232,9 +232,9 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	ledger, err := connector.OpenLedgerReadOnly(cmd.Context(), filepath.Join(dir, connector.LedgerFile))
 	if errors.Is(err, os.ErrNotExist) {
 		if shadow {
-			return output.ErrUsageHint(fmt.Sprintf("Profile %q has no shadow ledger", p.name), "Run the shadow connector first: basecamp connect -P "+shellQuote(p.name)+" --shadow")
+			return output.ErrUsageHint(fmt.Sprintf("Profile %q has no shadow ledger", p.name), "Run the shadow connector first: basecamp connect -P "+richtext.ShellQuote(p.name)+" --shadow")
 		}
-		return output.ErrUsageHint(fmt.Sprintf("Profile %q's connector has no ledger yet", p.name), "Run the connector first: basecamp connect -P "+shellQuote(p.name))
+		return output.ErrUsageHint(fmt.Sprintf("Profile %q's connector has no ledger yet", p.name), "Run the connector first: basecamp connect -P "+richtext.ShellQuote(p.name))
 	}
 	if err != nil {
 		return err
@@ -764,7 +764,7 @@ The file is JSON:
 				return err
 			}
 			if _, err := os.Lstat(filepath.Join(dir, connector.LedgerFile)); errors.Is(err, os.ErrNotExist) {
-				return output.ErrUsageHint(fmt.Sprintf("Profile %q's connector has no ledger yet", p.name), "Promote the shadow first: basecamp connect shadow promote -P "+shellQuote(p.name))
+				return output.ErrUsageHint(fmt.Sprintf("Profile %q's connector has no ledger yet", p.name), "Promote the shadow first: basecamp connect shadow promote -P "+richtext.ShellQuote(p.name))
 			}
 			// The connector must be stopped: the open takes the instance lock
 			// and holds it for the import.

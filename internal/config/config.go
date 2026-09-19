@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // Config holds the resolved configuration.
@@ -246,7 +248,7 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 
 	if v, ok := fileCfg["base_url"].(string); ok && v != "" {
 		if untrusted {
-			fmt.Fprintf(os.Stderr, "warning: ignoring base_url %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, ShellQuote(path))
+			fmt.Fprintf(os.Stderr, "warning: ignoring base_url %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, richtext.ShellQuote(path))
 		} else {
 			cfg.BaseURL = v
 			cfg.Sources["base_url"] = string(source)
@@ -274,7 +276,7 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 		// point it at any user-writable path, so gate it like other authority
 		// keys. filepath.Clean normalizes the accepted value.
 		if untrusted {
-			fmt.Fprintf(os.Stderr, "warning: ignoring cache_dir %q from %s config at %s\n  (trust-gated key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, ShellQuote(path))
+			fmt.Fprintf(os.Stderr, "warning: ignoring cache_dir %q from %s config at %s\n  (trust-gated key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, richtext.ShellQuote(path))
 		} else {
 			cfg.CacheDir = filepath.Clean(v)
 			cfg.Sources["cache_dir"] = string(source)
@@ -282,7 +284,7 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 	}
 	if v, ok := fileCfg["cache_enabled"].(bool); ok {
 		if untrusted {
-			fmt.Fprintf(os.Stderr, "warning: ignoring cache_enabled from %s config at %s\n  (trust-gated key from local/repo config; run `basecamp config trust %s` to allow)\n", source, path, ShellQuote(path))
+			fmt.Fprintf(os.Stderr, "warning: ignoring cache_enabled from %s config at %s\n  (trust-gated key from local/repo config; run `basecamp config trust %s` to allow)\n", source, path, richtext.ShellQuote(path))
 		} else {
 			cfg.CacheEnabled = v
 			cfg.Sources["cache_enabled"] = string(source)
@@ -315,7 +317,7 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 	}
 	if v, ok := fileCfg["llm_provider"].(string); ok && v != "" {
 		if untrusted {
-			fmt.Fprintf(os.Stderr, "warning: ignoring llm_provider %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, ShellQuote(path))
+			fmt.Fprintf(os.Stderr, "warning: ignoring llm_provider %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, richtext.ShellQuote(path))
 		} else {
 			cfg.LLMProvider = v
 			cfg.Sources["llm_provider"] = string(source)
@@ -325,7 +327,7 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 		// Gate like other LLM authority keys: an untrusted config could
 		// silently substitute a costlier paid model.
 		if untrusted {
-			fmt.Fprintf(os.Stderr, "warning: ignoring llm_model %q from %s config at %s\n  (trust-gated key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, ShellQuote(path))
+			fmt.Fprintf(os.Stderr, "warning: ignoring llm_model %q from %s config at %s\n  (trust-gated key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, richtext.ShellQuote(path))
 		} else {
 			cfg.LLMModel = v
 			cfg.Sources["llm_model"] = string(source)
@@ -342,7 +344,7 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 	}
 	if v, ok := fileCfg["llm_endpoint"].(string); ok && v != "" {
 		if untrusted {
-			fmt.Fprintf(os.Stderr, "warning: ignoring llm_endpoint %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, ShellQuote(path))
+			fmt.Fprintf(os.Stderr, "warning: ignoring llm_endpoint %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, richtext.ShellQuote(path))
 		} else {
 			// Keep the value even if malformed (non-http(s)/hostless):
 			// summarize.ValidateEndpoint rejects it at the point of
@@ -361,7 +363,7 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 			// Gate like other LLM authority keys: block a malicious repo from
 			// inflating paid-LLM concurrency (cost amplification).
 			if untrusted {
-				fmt.Fprintf(os.Stderr, "warning: ignoring llm_max_concurrent from %s config at %s\n  (trust-gated key from local/repo config; run `basecamp config trust %s` to allow)\n", source, path, ShellQuote(path))
+				fmt.Fprintf(os.Stderr, "warning: ignoring llm_max_concurrent from %s config at %s\n  (trust-gated key from local/repo config; run `basecamp config trust %s` to allow)\n", source, path, richtext.ShellQuote(path))
 			} else if iv >= 1 && iv <= 10 && fv == float64(iv) {
 				cfg.LLMMaxConcurrent = iv
 				cfg.Sources["llm_max_concurrent"] = string(source)
@@ -373,7 +375,7 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 			iv := int(fv)
 			// Gate like other LLM authority keys (cost amplification).
 			if untrusted {
-				fmt.Fprintf(os.Stderr, "warning: ignoring llm_token_budget from %s config at %s\n  (trust-gated key from local/repo config; run `basecamp config trust %s` to allow)\n", source, path, ShellQuote(path))
+				fmt.Fprintf(os.Stderr, "warning: ignoring llm_token_budget from %s config at %s\n  (trust-gated key from local/repo config; run `basecamp config trust %s` to allow)\n", source, path, richtext.ShellQuote(path))
 			} else if iv >= 100 && iv <= 100000 && fv == float64(iv) {
 				cfg.LLMTokenBudget = iv
 				cfg.Sources["llm_token_budget"] = string(source)
@@ -393,7 +395,7 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 	}
 	if v, ok := fileCfg["default_profile"].(string); ok && v != "" {
 		if untrusted {
-			fmt.Fprintf(os.Stderr, "warning: ignoring default_profile %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, ShellQuote(path))
+			fmt.Fprintf(os.Stderr, "warning: ignoring default_profile %q from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", v, source, path, richtext.ShellQuote(path))
 		} else {
 			cfg.DefaultProfile = v
 			cfg.Sources["default_profile"] = string(source)
@@ -401,7 +403,7 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 	}
 	if v, ok := fileCfg["profiles"].(map[string]any); ok {
 		if untrusted {
-			fmt.Fprintf(os.Stderr, "warning: ignoring profiles from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", source, path, ShellQuote(path))
+			fmt.Fprintf(os.Stderr, "warning: ignoring profiles from %s config at %s\n  (authority key from local/repo config; run `basecamp config trust %s` to allow)\n", source, path, richtext.ShellQuote(path))
 		} else {
 			for name, profileData := range v {
 				if profileMap, ok := profileData.(map[string]any); ok {
@@ -893,21 +895,4 @@ func IsHTTPURL(rawURL string) bool {
 		return false
 	}
 	return (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != ""
-}
-
-// ShellQuote returns a POSIX single-quoted string safe for copy-paste into
-// a shell. A single quote cannot be escaped inside single quotes, so each
-// one in the value is spliced out and back in as:
-//
-//	'\''
-//
-// that is: quote, backslash, quote, quote. It is written as an indented
-// block on purpose — gofmt reformats doc-comment prose and rewrites that
-// sequence into a curly closing quote, so a caller copying it out of prose
-// would get a form no shell reads (Copilot on #765).
-//
-// internal/richtext.ShellQuote is the shared one new code should use; this
-// copy predates it, as do the ones in internal/commands and internal/auth.
-func ShellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

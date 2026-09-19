@@ -21,9 +21,11 @@ import "strings"
 // which is held to whatever check applied when the value was first created.
 // Escaping cases one at a time is how quoting bugs recur.
 //
-// internal/commands and internal/auth each carry a copy of this, written
-// before there was a shared home for it. This is the one new code should
-// use; converging those two is not this change's to do.
+// internal/auth, internal/config and internal/commands each carried a copy
+// of this, written before there was a shared home for it. They are gone:
+// this is the only one, and the only one new code should use. The config
+// copy quoted unconditionally, so paths that need no quoting now appear
+// bare in its warnings — the same shell word, spelled shorter.
 func ShellQuote(s string) string {
 	if s != "" && strings.IndexFunc(s, shellActive) < 0 {
 		return s

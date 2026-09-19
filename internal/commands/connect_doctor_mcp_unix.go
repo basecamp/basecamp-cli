@@ -14,6 +14,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
@@ -83,7 +84,7 @@ func mcpHandshakeCheck(ctx context.Context, profile string) setup.Check {
 	if err != nil {
 		session = nil
 		c.Status, c.Message = setup.StatusFail, "The agent's MCP server did not complete the handshake: "+setup.ErrorText(err)
-		c.Hint = "Run basecamp mcp -P " + shellQuote(profile) + " and read its stderr."
+		c.Hint = "Run basecamp mcp -P " + richtext.ShellQuote(profile) + " and read its stderr."
 		return c
 	}
 	tools := 0
@@ -98,6 +99,6 @@ func mcpHandshakeCheck(ctx context.Context, profile string) setup.Check {
 		c.Status, c.Message = setup.StatusFail, "The agent's MCP server lists no tools"
 		return c
 	}
-	c.Status, c.Message = setup.StatusPass, fmt.Sprintf("The agent's MCP server (basecamp mcp -P %s) answered with %d tools; the basecamp_connect domain is served only to a dispatched worker", shellQuote(profile), tools)
+	c.Status, c.Message = setup.StatusPass, fmt.Sprintf("The agent's MCP server (basecamp mcp -P %s) answered with %d tools; the basecamp_connect domain is served only to a dispatched worker", richtext.ShellQuote(profile), tools)
 	return c
 }
