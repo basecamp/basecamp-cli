@@ -2,11 +2,11 @@ package resilience
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"strconv"
@@ -25,8 +25,13 @@ import (
 // each child is one CLI invocation against the shared store in BH_STATE_DIR.
 //
 // BH_MODE=ops runs BH_OPS gated operations, each held for BH_HOLD, and prints
-// OK or REJECT per operation plus PEAK, the most live slot holders it saw
-// while holding one. BH_MODE=linger churns BH_OPS acquire/release pairs, prints
+// OK or REJECT per operation, plus PEAK, the most live slot holders it saw
+// while holding one, and QUEUED, how many of its operations were admitted
+// out of an empty bucket and so can only have got there by waiting for a
+// refill. BH_BARRIER=1 makes it print READY and hold before its first
+// operation until the parent sends it a line, so the parent can set up the
+// condition under test with every child already running.
+// BH_MODE=linger churns BH_OPS acquire/release pairs, prints
 // DONE, then stays alive until stdin closes so the parent can check that its
 // releases were not lost while the process still counts as a live holder.
 func TestHelperProcess(t *testing.T) {
@@ -45,12 +50,26 @@ func TestHelperProcess(t *testing.T) {
 	case "ops":
 		hooks := NewGatingHooksFromConfig(store, cfg)
 		op := basecamp.OperationInfo{Service: "Projects", Operation: "List"}
-		peak := 0
+		if os.Getenv("BH_BARRIER") == "1" {
+			fmt.Println("READY")
+			_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+		}
+		peak, queued := 0, 0
 		for range ops {
+			// Read the bucket before gating: an operation admitted when
+			// there was nothing to admit it with waited for a refill, which
+			// is the queueing this test exists to see. A gate that failed
+			// fast would have rejected that same operation instead.
+			tokens, tokensErr := hooks.rateLimiter.Tokens()
+			starved := tokensErr == nil && tokens < cfg.RateLimiter.TokensPerRequest
+
 			ctx, err := hooks.OnOperationGate(context.Background(), op)
 			if err != nil {
 				fmt.Printf("REJECT %v\n", err)
 				continue
+			}
+			if starved {
+				queued++
 			}
 			if inUse, err := hooks.bulkhead.InUse(); err == nil {
 				peak = max(peak, inUse)
@@ -60,6 +79,7 @@ func TestHelperProcess(t *testing.T) {
 			fmt.Println("OK")
 		}
 		fmt.Printf("PEAK %d\n", peak)
+		fmt.Printf("QUEUED %d\n", queued)
 	case "linger":
 		bh := NewBulkhead(store, cfg.Bulkhead)
 		rl := NewRateLimiter(store, cfg.RateLimiter)
@@ -74,6 +94,17 @@ func TestHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+// isReportLine picks the helper's tallied output out of the test binary's
+// own chatter.
+func isReportLine(l string) bool {
+	for _, prefix := range []string{"OK", "REJECT", "PEAK", "QUEUED"} {
+		if strings.HasPrefix(l, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 type helperEnv map[string]string
 
 func helperCommand(t *testing.T, env helperEnv) *exec.Cmd {
@@ -86,25 +117,9 @@ func helperCommand(t *testing.T, env helperEnv) *exec.Cmd {
 	return cmd
 }
 
-// runInvocation runs one child to completion and returns its report lines.
-func runInvocation(t *testing.T, env helperEnv) []string {
-	t.Helper()
-	cmd := helperCommand(t, env)
-	var out bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &out
-	require.NoError(t, cmd.Run(), out.String())
-	var lines []string
-	for _, l := range strings.Split(out.String(), "\n") {
-		if strings.HasPrefix(l, "OK") || strings.HasPrefix(l, "REJECT") || strings.HasPrefix(l, "PEAK") {
-			lines = append(lines, l)
-		}
-	}
-	return lines
-}
-
 type invocationTally struct {
-	ok, rejected, peak int
-	rejections         []string
+	ok, rejected, peak, queued int
+	rejections                 []string
 }
 
 func tally(lines []string) invocationTally {
@@ -119,78 +134,167 @@ func tally(lines []string) invocationTally {
 		case strings.HasPrefix(l, "PEAK"):
 			n, _ := strconv.Atoi(strings.TrimPrefix(l, "PEAK "))
 			tl.peak = max(tl.peak, n)
+		case strings.HasPrefix(l, "QUEUED"):
+			n, _ := strconv.Atoi(strings.TrimPrefix(l, "QUEUED "))
+			tl.queued += n
 		}
 	}
 	return tl
 }
 
-// runWorkers runs `workers` goroutines that each perform `calls` sequential
-// child invocations, the shape of a parallel smoke test, and tallies the lot.
-func runWorkers(t *testing.T, workers, calls int, env helperEnv) invocationTally {
+// runBarrieredInvocations starts n children and waits for every one of them
+// to be up and holding before releasing them together.
+//
+// Spawning a process takes as long as the machine takes, so a test that
+// lets the children race each other into the gate is really measuring how
+// fast they start: on a slow box they arrive one at a time, the bucket
+// refills between them, and the gate is never asked to queue anything. The
+// barrier removes the machine from that question. Every child is already
+// running when the first one gates, so the load the gate sees is the load
+// the test asked for and not the load the box could deliver.
+func runBarrieredInvocations(t *testing.T, n int, env helperEnv) invocationTally {
 	t.Helper()
+	barriered := helperEnv{"BH_BARRIER": "1"}
+	maps.Copy(barriered, env)
+
+	type child struct {
+		cmd    *exec.Cmd
+		stdin  io.WriteCloser
+		stdout io.ReadCloser
+	}
+	kids := make([]child, 0, n)
+	ready := make(chan error, n)
+	for range n {
+		cmd := helperCommand(t, barriered)
+		stdin, err := cmd.StdinPipe()
+		require.NoError(t, err)
+		stdout, err := cmd.StdoutPipe()
+		require.NoError(t, err)
+		require.NoError(t, cmd.Start())
+		kids = append(kids, child{cmd, stdin, stdout})
+	}
+
+	// Each child announces itself on its own line; nobody is released until
+	// the last one has.
+	scanners := make([]*bufio.Scanner, len(kids))
+	for i, k := range kids {
+		scanners[i] = bufio.NewScanner(k.stdout)
+		go func(sc *bufio.Scanner) {
+			for sc.Scan() {
+				if sc.Text() == "READY" {
+					ready <- nil
+					return
+				}
+			}
+			ready <- errors.New("child exited before reaching the barrier")
+		}(scanners[i])
+	}
+	for range kids {
+		require.NoError(t, <-ready)
+	}
+
+	for _, k := range kids {
+		_, err := io.WriteString(k.stdin, "go\n")
+		require.NoError(t, err)
+		require.NoError(t, k.stdin.Close())
+	}
+
 	var mu sync.Mutex
 	var all []string
 	var wg sync.WaitGroup
-	for range workers {
+	for i := range kids {
 		wg.Add(1)
-		go func() {
+		go func(sc *bufio.Scanner) {
 			defer wg.Done()
-			for range calls {
-				lines := runInvocation(t, env)
-				mu.Lock()
-				all = append(all, lines...)
-				mu.Unlock()
+			var lines []string
+			for sc.Scan() {
+				if l := sc.Text(); isReportLine(l) {
+					lines = append(lines, l)
+				}
 			}
-		}()
+			mu.Lock()
+			all = append(all, lines...)
+			mu.Unlock()
+		}(scanners[i])
 	}
 	wg.Wait()
+	for _, k := range kids {
+		require.NoError(t, k.cmd.Wait())
+	}
 	return tally(all)
 }
 
-// The smoke-test shape: ten workers each making eight sequential calls
-// through the production defaults. Before queueing, the shared 50-token
+// The smoke-test shape: ten parallel workers making eighty calls between
+// them through the production defaults. Before queueing, the shared 50-token
 // bucket drained in the first half second and every later call failed with
 // "rate limit exceeded" while the server had never answered 429.
 //
-// Eighty calls against a fifty-token bucket is what makes this a test of
-// queueing: thirty of them cannot be served from the starting bucket at all,
-// so "every call succeeded" is only reachable by waiting for refills. The
-// run is therefore bounded below by the refill, never above: it used to
-// assert that the whole thing — eighty process spawns and three seconds of
-// deliberate refill — finished inside DefaultMaxWait, which is one
-// operation's queueing budget and no statement about this run. On a
-// contended box that margin is spent on the machine, and it failed on CI at
-// 10.73s and again at 10.97s with the gate having behaved perfectly.
+// The claim is that the gate queues, and the test now watches that happen
+// rather than inferring it from arithmetic. Each child reports how many of
+// its operations were admitted out of an empty bucket — only reachable by
+// waiting for a refill, since a gate that failed fast would have rejected
+// that same operation — and the run cannot pass with that count at zero.
+// It is a floor and not an accounting: a call that reads the bucket just
+// after a refill lands is served without waiting and is not counted, so the
+// number comes out a little under the thirty calls the starting bucket
+// cannot cover. What it rules out is the case that matters, a run where the
+// wait path was never entered and every assertion here was free.
+//
+// The children are released from a barrier so they issue their calls at the
+// rate the test asked for rather than at the rate the machine can fork
+// processes; left to race each other in, on a slow box they arrive spread
+// out, the bucket refills between them, and nothing ever queues.
+//
+// What is deliberately not asserted is how long the whole thing took. It
+// used to require the run to finish inside DefaultMaxWait, which is one
+// operation's queueing budget and no statement at all about a run of eighty:
+// bounded below by three seconds of deliberate refill and above by nothing
+// but the box. On a contended one that margin goes to the machine, and it
+// failed on CI at 10.73s and again at 10.97s with the gate having behaved
+// perfectly both times.
 func TestGateQueuesTenParallelWorkersThroughTheDefaults(t *testing.T) {
-	const workers, calls = 10, 8
+	const workers, callsEach = 10, 8
 	cfg := DefaultConfig()
-	require.Greater(t, float64(workers*calls), cfg.RateLimiter.MaxTokens,
+	require.Greater(t, float64(workers*callsEach), cfg.RateLimiter.MaxTokens,
 		"the run has to outlast the bucket or nothing queues")
 
 	dir := t.TempDir()
-	tl := runWorkers(t, workers, calls, helperEnv{"BH_STATE_DIR": dir, "BH_MODE": "ops", "BH_OPS": "1", "BH_HOLD": "10ms"})
+	tl := runBarrieredInvocations(t, workers, helperEnv{
+		"BH_STATE_DIR": dir, "BH_MODE": "ops",
+		"BH_OPS": strconv.Itoa(callsEach), "BH_HOLD": "10ms",
+	})
 
-	assert.Equal(t, workers*calls, tl.ok, "every call succeeds: %v", tl.rejections)
+	assert.Equal(t, workers*callsEach, tl.ok, "every call succeeds: %v", tl.rejections)
 	assert.Zero(t, tl.rejected)
+	assert.Positive(t, tl.queued,
+		"no call was ever admitted out of an empty bucket, so the wait path was never entered and this test measured nothing")
 	assert.LessOrEqual(t, tl.peak, cfg.Bulkhead.MaxConcurrent, "never more than MaxConcurrent live holders")
 }
 
-// Fifteen simultaneous invocations against ten slots: nobody fails, nobody
-// sees more than ten holders, and the wall clock shows the overflow waited
-// for a second round rather than being admitted alongside the first.
+// Fifteen simultaneous invocations against ten slots: nobody fails, and the
+// slot table fills to exactly ten and no further, so five of them were made
+// to wait for a second round rather than being admitted alongside the first.
+//
+// "Simultaneous" is why the children come off a barrier. Left to race each
+// other into the gate they arrive as fast as the box can fork, and on a slow
+// one the first ten are done before the last five start — at which point
+// nothing is oversubscribed and the test passes having measured nothing. The
+// old evidence that the overflow waited was that the run took at least two
+// holds, which slow spawning satisfies all by itself; the peak says it
+// directly.
 func TestGateQueuesOversubscribedInvocationsWithinTheSlotLimit(t *testing.T) {
 	dir := t.TempDir()
-	hold := 150 * time.Millisecond
-	start := time.Now()
-	tl := runWorkers(t, 15, 1, helperEnv{
+	cfg := DefaultConfig()
+	const invocations = 15
+	tl := runBarrieredInvocations(t, invocations, helperEnv{
 		"BH_STATE_DIR": dir, "BH_MODE": "ops", "BH_OPS": "1",
-		"BH_HOLD": hold.String(), "BH_MAX_TOKENS": "100",
+		"BH_HOLD": (150 * time.Millisecond).String(), "BH_MAX_TOKENS": "100",
 	})
-	elapsed := time.Since(start)
 
-	assert.Equal(t, 15, tl.ok, "every invocation succeeds: %v", tl.rejections)
-	assert.LessOrEqual(t, tl.peak, 10, "never more than MaxConcurrent live holders")
-	assert.GreaterOrEqual(t, elapsed, 2*hold, "the overflow waited for a slot")
+	assert.Equal(t, invocations, tl.ok, "every invocation succeeds: %v", tl.rejections)
+	assert.Zero(t, tl.rejected)
+	assert.Equal(t, cfg.Bulkhead.MaxConcurrent, tl.peak,
+		"the slot table filled to exactly MaxConcurrent, so the overflow waited")
 
 	state, err := NewStore(dir).Load()
 	require.NoError(t, err)
