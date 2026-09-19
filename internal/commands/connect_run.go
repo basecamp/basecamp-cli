@@ -560,10 +560,15 @@ func connectSupportedOS(goos string) bool {
 // then the other is not told two different stories about their machine.
 const connectLinuxOnlyReason = "the task token reaches a worker's MCP server over an inherited descriptor, and Linux is the only platform that seals the descriptors a process inherits"
 
-// connectUnsupportedOSError is the run command's refusal on a platform the
-// connector does not run on.
+// connectUnsupportedOSError is the refusal on a platform the connector does
+// not run on, given by the run command and by `service install`, which would
+// otherwise write a unit that supervises a process that cannot start.
+//
+// It opens on the connector rather than on "basecamp connect ..." because a
+// refusal is prose, not a command to run, and a hint that begins like a
+// command is read as one — by a person, and by TestHintCommandsResolve.
 func connectUnsupportedOSError(goos string) error {
-	return output.ErrUsage(fmt.Sprintf("basecamp connect runs on Linux only, not %s: %s", goos, connectLinuxOnlyReason))
+	return output.ErrUsage(fmt.Sprintf("The connector runs on Linux only, not %s: %s", goos, connectLinuxOnlyReason))
 }
 
 // connectServed is connect.json's served projects as they are now, not as

@@ -52,6 +52,14 @@ load smoke_helper
   mark_out_of_scope "Applies a reconciliation file to a local connector ledger — covered by Go tests in internal/commands and internal/connector"
 }
 
+@test "connect service install is out of scope" {
+  mark_out_of_scope "Writes a systemd user unit and asks systemctl to start it, which the smoke runner has no session for — covered by Go tests in internal/commands"
+}
+
+@test "connect service uninstall is out of scope" {
+  mark_out_of_scope "Stops a systemd user unit and removes it, which the smoke runner has no session for — covered by Go tests in internal/commands"
+}
+
 @test "auth refresh is out of scope" {
   mark_out_of_scope "Requires OAuth credentials"
 }
