@@ -275,30 +275,58 @@ func (l *Ledger) DueBlockedRetries(ctx context.Context, scope BlockedRetryScope)
 // history.
 const blockedRetryOrder = ` ORDER BY next_retry_at, id`
 
-// ScheduledBlockedIDs is every record in scope the retry schedule still has
+// StillScheduledBlockedIDs is the subset of ids the retry schedule still has
 // something to do about, due now or later.
 //
-// It is the live bound on the sweep's claims: a claim is worth keeping only
-// while the record it names can still be offered, and a record that has been
-// decided, or whose window has passed, can never be. Without it the claim set
-// held one entry per record ever retried and dropped none (Copilot on #770).
+// It answers the only question the sweep asks — "of the records I hold a
+// claim for, which can still be offered?" — rather than the one it used to
+// ask, which was for the entire live backlog. For the claims held those have
+// the same answer and wildly different costs: after an outage the schedule
+// holds every record the outage blocked, and a sweep reading all of them once
+// a minute to prune a handful of claims does work proportional to the backlog
+// instead of to the claims, and delays the stranded and loss repair sharing
+// its goroutine (Copilot on #770).
 //
-// It is deliberately unlimited. A short answer would read as "these are all
-// the records still on the schedule" and prune the claims of the ones it left
-// out, which is the offer-twice this whole mechanism exists to prevent. The
-// set it returns is the connector's live backlog, not its history.
+// A claim is worth keeping only while the record it names can still be
+// offered, and a record that has been decided, or whose window has passed,
+// can never be. Asking about exactly the claimed ids is what makes pruning
+// safe: the caller drops only the ids it asked about and did not get back, so
+// an id this was never asked about cannot be pruned by its absence.
 //
-// It comes back in the schedule's order rather than by id, for the reason
-// DueBlockedRetries does: asked for id order, SQLite reads every blocked row
-// the ledger holds instead of only the scheduled ones. The caller reads it as
-// a set, so the order is the index's to choose.
-func (l *Ledger) ScheduledBlockedIDs(ctx context.Context, scope BlockedRetryScope) ([]int64, error) {
-	where, args := scheduledBlockedWhere(scope.Buckets)
-	//nolint:gosec // G202: the clauses are this package's constants and placeholders, never values
-	rows, err := l.db.QueryContext(ctx, `SELECT id FROM events`+where+blockedRetryOrder, args...)
-	if err != nil {
-		return nil, fmt.Errorf("connector: list blocked records on the retry schedule: %w", err)
+// It reads in chunks and returns their union. A chunk dropped or shortened
+// would read as "no longer scheduled" and prune live claims, which is the
+// offer-twice the claim exists to prevent, so a failed chunk fails the call.
+func (l *Ledger) StillScheduledBlockedIDs(ctx context.Context, scope BlockedRetryScope, ids []int64) ([]int64, error) {
+	if len(ids) == 0 {
+		return nil, nil
 	}
+	l.blockedScheduleReads.Add(1)
+	var live []int64
+	for chunk := range slices.Chunk(ids, scheduledIDChunk) {
+		where, args := scheduledBlockedWhere(scope.Buckets)
+		where += ` AND id IN (` + placeholders(len(chunk)) + `)`
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		//nolint:gosec // G202: the clauses are this package's constants and placeholders, never values
+		rows, err := l.db.QueryContext(ctx, `SELECT id FROM events`+where, args...)
+		if err != nil {
+			return nil, fmt.Errorf("connector: list the claimed blocked records still on the retry schedule: %w", err)
+		}
+		chunkLive, err := scanIDs(rows)
+		if err != nil {
+			return nil, fmt.Errorf("connector: list the claimed blocked records still on the retry schedule: %w", err)
+		}
+		live = append(live, chunkLive...)
+	}
+	return live, nil
+}
+
+// scheduledIDChunk bounds the placeholders one read may carry, well under
+// SQLite's variable limit with the bucket scope's own placeholders alongside.
+const scheduledIDChunk = 400
+
+func scanIDs(rows *sql.Rows) ([]int64, error) {
 	defer func() { _ = rows.Close() }()
 	var ids []int64
 	for rows.Next() {

@@ -908,7 +908,9 @@ const blockedRetryBatch = 100
 // It claims before it offers, and gives the claim back when the offer fails,
 // so a record is never left claimed and unoffered. It also drops the claims
 // the ledger has nothing left to say about, which is what keeps the claim set
-// the size of the backlog rather than the size of the history.
+// the size of the backlog rather than the size of the history — asking about
+// the claims it holds, so that pruning costs the backlog in flight and not
+// the whole retained schedule.
 //
 // The batch counts records offered, not records read. A row already claimed
 // is due and will stay due until admission decides it, so a batch that
@@ -930,10 +932,16 @@ func (in *Intake) sweepBlockedRetries(ctx context.Context) {
 	// Pruned before the offers, from one reading: a record the schedule is
 	// finished with cannot come back, and a record that is still on it keeps
 	// its claim whether or not it is due in this tick.
-	if scheduled, err := in.ledger.ScheduledBlockedIDs(ctx, scope); err != nil {
-		in.log.Warn("could not read the blocked records still on the retry schedule", "error", err)
-	} else {
-		in.pruneBlockedClaims(scheduled)
+	//
+	// The reading is of the claims held, not of the schedule: holding none is
+	// the common case and asks nothing at all, and holding some asks about
+	// those and not about the backlog behind them.
+	if held := in.claimedBlockedIDs(); len(held) > 0 {
+		if live, err := in.ledger.StillScheduledBlockedIDs(ctx, scope, held); err != nil {
+			in.log.Warn("could not read the blocked records still on the retry schedule", "error", err)
+		} else {
+			in.pruneBlockedClaims(held, live)
+		}
 	}
 	for offered := 0; offered < batch; {
 		records, err := in.ledger.DueBlockedRetries(ctx, scope)
@@ -968,21 +976,42 @@ func (in *Intake) sweepBlockedRetries(ctx context.Context) {
 	}
 }
 
-// pruneBlockedClaims keeps the claims of the records still on the schedule
-// and drops the rest. A dropped claim can only belong to a record no sweep
-// will offer again, so dropping it cannot cause a second offer.
-func (in *Intake) pruneBlockedClaims(scheduled []int64) {
+// claimedBlockedIDs is the ids the sweep currently holds a retry claim for.
+// It is the question the pruning read asks about, and it bounds that read by
+// the backlog in flight rather than by the whole retained schedule.
+func (in *Intake) claimedBlockedIDs() []int64 {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if len(in.retriedBlocked) == 0 {
+		return nil
+	}
+	held := make([]int64, 0, len(in.retriedBlocked))
+	for id := range in.retriedBlocked {
+		held = append(held, id)
+	}
+	return held
+}
+
+// pruneBlockedClaims drops the claims among asked whose records the schedule
+// is finished with — the ones the ledger did not name in live. A dropped
+// claim can only belong to a record no sweep will offer again, so dropping it
+// cannot cause a second offer.
+//
+// It considers only the ids it asked about. A claim taken while the read was
+// in flight was never put to the ledger, and dropping it for not coming back
+// would offer its record a second time.
+func (in *Intake) pruneBlockedClaims(asked, live []int64) {
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	if len(in.retriedBlocked) == 0 {
 		return
 	}
-	live := make(map[int64]struct{}, len(scheduled))
-	for _, id := range scheduled {
-		live[id] = struct{}{}
+	scheduled := make(map[int64]struct{}, len(live))
+	for _, id := range live {
+		scheduled[id] = struct{}{}
 	}
-	for id := range in.retriedBlocked {
-		if _, ok := live[id]; !ok {
+	for _, id := range asked {
+		if _, ok := scheduled[id]; !ok {
 			delete(in.retriedBlocked, id)
 		}
 	}
