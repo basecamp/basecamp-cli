@@ -199,7 +199,7 @@ func TestRedispatchReadsTheServedSetUnderTheLock(t *testing.T) {
 	assert.NotContains(t, authorized.file.Projects, int64(48699913), "and gone from the profile everything below decides with")
 
 	_, err = setup.TryLock(path)
-	assert.ErrorIs(t, err, setup.ErrSetupRunning, "and the lock is held until the decision has been written")
+	assert.ErrorIs(t, err, setup.ErrSetupRunning, "and it is still held when the reading comes back, for the caller to keep across its write")
 }
 
 // A setup that outlasts the wait leaves the redispatch unwritten, reported
@@ -326,4 +326,29 @@ func TestTheRedispatchCommandKeepsNoStartUpReading(t *testing.T) {
 	require.NotNil(t, call, "the command authorizes through authorizedRedispatch")
 	assert.Equal(t, "p", call[1],
 		"and binds the authorized profile back over p, so the start-up reading is out of scope rather than merely unused")
+}
+
+// The release is deferred rather than called, so the lock is still held when
+// the ledger writes. A test that only sees the lock free once the helper has
+// returned cannot tell that apart from a release taken before the write, and
+// that difference is the whole of the race (Codex on #771). This is the one
+// claim about this path that only the source can answer.
+func TestTheRedispatchHoldsTheLockAcrossTheLedgersWrite(t *testing.T) {
+	source, err := os.ReadFile("connect_operator.go")
+	require.NoError(t, err)
+	body := string(source)
+	start := strings.Index(body, "func authorizedRedispatch(")
+	require.Positive(t, start, "authorizedRedispatch is where the hold lives")
+	body = body[start:]
+	if end := strings.Index(body, "\nfunc "); end > 0 {
+		body = body[:end]
+	}
+
+	deferred := strings.Index(body, "defer release()")
+	write := strings.Index(body, "ledger.Redispatch(")
+	require.Positive(t, deferred, "the release is deferred, so every path out takes it")
+	require.Positive(t, write)
+	assert.Less(t, deferred, write, "and deferred before the write, so the write happens under the lock")
+	assert.NotContains(t, body[deferred+len("defer release()"):], "release()",
+		"and nowhere else: a second release would let go before the write on some path")
 }

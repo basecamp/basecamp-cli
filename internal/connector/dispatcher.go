@@ -80,12 +80,14 @@ const MCPServerName = "basecamp"
 
 // ErrPolicyBusy is Authorize's answer when another process holds
 // connect.json's lock — a `connect setup` mid-run, which holds it across its
-// network checks. It authorizes nothing and means nothing is wrong: the pass
+// network checks, or a `connect redispatch` writing its decision. The file is
+// not necessarily being changed; the lock is held, which is all this knows
+// and all it needs to. It authorizes nothing and means nothing is wrong: the pass
 // dispatches none and asks again on the next tick, and so does every pass
 // until that setup lets go. A dispatcher that waited here instead would park
 // its hot path on a file another process writes, which is a worse thing to
 // own than a queue that drains the moment the policy is settled.
-var ErrPolicyBusy = errors.New("connector: connect.json is being changed by another command")
+var ErrPolicyBusy = errors.New("connector: connect.json's lock is held by another command")
 
 // ErrPolicyUnreadable is Authorize's answer when the served set could not be
 // taken under its lock at all: a host that cannot lock, a connect.json that
@@ -539,15 +541,16 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 			// offer it again.
 			continue
 		case errors.Is(err, ErrPolicyBusy):
-			// Somebody is changing connect.json. Nothing is wrong and
-			// nothing is lost: this pass authorizes nothing and the next
-			// tick asks again. Every pass for as long as that setup runs
+			// Another command holds the policy lock — a setup changing
+			// connect.json, or a redispatch writing a decision against it.
+			// Nothing is wrong and nothing is lost: this pass authorizes
+			// nothing and the next tick asks again. Every pass for as long as that setup runs
 			// gives up the same way, so the connector starts nothing while
 			// its policy is being rewritten — which is the right thing to
 			// do with a policy somebody is in the middle of changing, and
 			// is cheaper than a dispatcher blocked on a file `connect
 			// setup` holds across its network checks.
-			d.log.Debug("connector: connect.json is being changed; nothing is dispatched this pass")
+			d.log.Debug("connector: connect.json's lock is held by another command; nothing is dispatched this pass")
 			return nil
 		case errors.Is(err, ErrPolicyUnreadable):
 			// Something is wrong, and the reader has already said so once.

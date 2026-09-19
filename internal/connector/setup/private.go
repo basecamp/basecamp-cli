@@ -114,14 +114,14 @@ const lockPoll = 20 * time.Millisecond
 // permission to change it.
 //
 // The wait is for the connector's hold, which is milliseconds. It cannot
-// tell one holder from another, though, so a second `connect setup` that
-// finishes inside LockWait is now queued rather than refused. That is a
-// change: this used to refuse on sight, on the reasoning that a second setup
-// on one profile is a mistake to report and not a queue. It is the price of
-// not failing the first setup that happens to overlap a dispatcher pass, and
-// the reasoning survives where it matters — a setup that is actually running
-// takes far longer than LockWait, so a person who started two still gets
-// told.
+// tell one holder from another, though, so a second `connect setup` whose
+// predecessor finishes inside LockWait is now queued rather than refused —
+// two setups run one after the other where they used to be one setup and one
+// refusal. That is a real change, and the price of not failing a setup that
+// happens to overlap a dispatcher pass. Nothing is written twice by it: each
+// one loads, changes and saves under the lock in turn, which is what the
+// lock is for. A second setup whose predecessor is still going after
+// LockWait is still refused.
 func Lock(ctx context.Context, path string) (unlock func(), err error) {
 	return lock(ctx, path, LockWait)
 }

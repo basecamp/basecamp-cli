@@ -191,7 +191,7 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string, serve
 	// to launch it is worse than one that refuses here (Copilot on #765).
 	//
 	// served is a reading its caller took under connect.json's own lock and
-	// holds until this commits (`connect redispatch`'s authorizedProfile,
+	// holds until this commits (`connect redispatch`'s authorizedRedispatch,
 	// in internal/commands), so an unserve lands wholly before that read or
 	// wholly after this write. This checks the set it was given; the caller
 	// is what makes the set current.

@@ -71,7 +71,7 @@ func TestAPassAuthorizesNothingWhileThePolicyIsBusy(t *testing.T) {
 func TestAPassAuthorizesNothingWhenThePolicyCannotBeRead(t *testing.T) {
 	for name, cause := range map[string]error{
 		"the policy could not be read under its lock": ErrPolicyUnreadable,
-		"something nothing here classified":           errors.New("connect.json cannot be locked"),
+		"an otherwise unclassified error":             errors.New("connect.json cannot be locked"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			fake := newFakeDriver()

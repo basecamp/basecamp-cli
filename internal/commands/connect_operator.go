@@ -465,8 +465,14 @@ A completed or held record is admitted at once (a completed one whose task is
 still running, when that task ends). A blocked record keeps its state and
 runs what blocked it again — the read, the events lookup, the served check —
 and is admitted the moment that succeeds; if it blocks again, the record stays
-blocked with the authorization, and redispatch runs it again. While the hold
-stands the record is authorized and nothing launches until release.
+blocked with the authorization, and redispatch runs it again. That re-run
+reads Basecamp, so it cannot hold the policy lock, and it decides against the
+served projects as they were when the redispatch was authorized: an unserve
+landing while it runs is not seen by that verdict. Nothing starts on it — the
+connector reads connect.json under its lock at every launch and refuses a
+project no longer served, and basecamp connect status counts what is left
+waiting. While the hold stands the record is authorized and nothing launches
+until release.
 
 It works on the ledger's transactions, so it is safe while the connector runs;
 the running connector dispatches what it admits.`,
@@ -597,9 +603,20 @@ func redispatchSummary(r connectRedispatchReport) string {
 	return s
 }
 
-// rerunPrerequisite decides a blocked record again, as the agent, exactly as
-// the connector's admission would: the verdict is revision-guarded, so a
-// running connector deciding it at the same time is not a second verdict.
+// rerunPrerequisite decides a blocked record again, as the agent, by the same
+// rules the connector's admission applies: the verdict is revision-guarded,
+// so a running connector deciding it at the same time is not a second
+// verdict.
+//
+// By the same rules, and not against the same reading. The connector's
+// admission asks a live reader for the served projects; this decides against
+// the file as it was when the redispatch was authorized, because deciding
+// reads Basecamp and nothing that waits on the network is done under a lock
+// `connect setup` waits on. So an unserve completing while this runs is not
+// seen here, and the verdict can admit a record whose project has just
+// stopped being served. That is the deliberate residue, and it starts
+// nothing: the launch reads connect.json under the lock and refuses it, and
+// the stranded report names what is left waiting.
 func rerunPrerequisite(ctx context.Context, p connectProfile, ledger *connector.Ledger, id int64) (string, string, error) {
 	agent, err := verifiedConnectAgent(ctx, p)
 	if err != nil {
