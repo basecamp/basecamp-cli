@@ -25,7 +25,13 @@ sorted() { LC_ALL=C sort -u "$1"; }
 
 # Compared as sorted files rather than hashed: cmp is POSIX and md5sum is
 # not on macOS, and this check is in make check, which people run locally.
-for i in $(seq 1 "$total"); do
+#
+# The loops count in the shell rather than through seq for the same reason.
+# macOS does ship seq, but BSD seq reads "first larger than last" as a
+# request to count down, so `seq 5 4` prints "5 4" where GNU seq prints
+# nothing. The inner loop below ends on exactly that range, so on macOS
+# every correct run was refused, comparing the last shard against itself.
+for ((i = 1; i <= total; i++)); do
   [ -s "$dir/shard-$i/all.txt" ] || fail "shard $i recorded no enumeration; either it did not get far enough to have one, or its report did not reach here"
   sorted "$dir/shard-$i/all.txt" > "$dir/all.$i.sorted"
   if [ "$i" != 1 ] && ! cmp -s "$dir/all.1.sorted" "$dir/all.$i.sorted"; then
@@ -33,9 +39,9 @@ for i in $(seq 1 "$total"); do
   fi
 done
 
-for i in $(seq 1 "$total"); do
+for ((i = 1; i <= total; i++)); do
   [ -s "$dir/shard-$i/shard.$i.txt" ] || fail "shard $i was assigned no tests"
-  for j in $(seq $((i + 1)) "$total"); do
+  for ((j = i + 1; j <= total; j++)); do
     overlap=$(LC_ALL=C comm -12 <(sorted "$dir/shard-$i/shard.$i.txt") <(sorted "$dir/shard-$j/shard.$j.txt"))
     [ -z "$overlap" ] || fail "shards $i and $j were both assigned $(echo "$overlap" | wc -l) test(s), e.g. $(echo "$overlap" | head -1)"
   done

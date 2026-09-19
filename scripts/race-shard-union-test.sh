@@ -67,4 +67,28 @@ refuses "a shard whose report never arrived"
 plant; mv "$work/shard-3" "$work/race-shard-3"
 refuses "a report that arrived under a name the checker does not read"
 
+# The check must not depend on how seq reads a backwards range. macOS ships
+# seq, but BSD seq treats "first larger than last" as counting down, and the
+# overlap loop ends on exactly that range. With seq, this case compared the
+# last shard against itself and refused every correct split on macOS.
+plant
+bsd=$work/bsdbin
+mkdir -p "$bsd"
+cat > "$bsd/seq" <<'SEQ'
+#!/usr/bin/env bash
+# BSD seq(1): "If first is larger than last the default incr is -1."
+first=$1; last=$2
+if [ "$first" -gt "$last" ]; then
+  for ((n = first; n >= last; n--)); do echo "$n"; done
+else
+  for ((n = first; n <= last; n++)); do echo "$n"; done
+fi
+SEQ
+chmod +x "$bsd/seq"
+PATH="$bsd:$PATH" "$union" "$work" 4 >/dev/null || {
+  echo "FAIL: the union check refused a complete, disjoint split where seq counts down over a backwards range, as BSD seq does on macOS" >&2
+  exit 1
+}
+echo "ok - accepts a complete, disjoint split under BSD seq semantics"
+
 echo "All union checks behaved."
