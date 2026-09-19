@@ -16,6 +16,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui/resolve"
 )
 
@@ -361,7 +362,7 @@ Valid keys: account_id, project_id (or project), todolist_id, base_url, cache_di
 				absPath, _ := filepath.Abs(configPath)
 				ts := config.LoadTrustStore(config.GlobalConfigDir())
 				if ts == nil || !ts.IsTrusted(configPath) {
-					fmt.Fprintf(os.Stderr, "warning: %q in local config requires trust to take effect; run:\n  basecamp config trust %s\n", key, config.ShellQuote(absPath))
+					fmt.Fprintf(os.Stderr, "warning: %q in local config requires trust to take effect; run:\n  basecamp config trust %s\n", key, richtext.ShellQuote(absPath))
 				}
 			}
 

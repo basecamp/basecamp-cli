@@ -15,6 +15,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // codexWrapper runs script through sh as the probe's command, with a
@@ -27,9 +29,13 @@ func codexWrapper(t *testing.T, script string, deadline time.Duration) (int, err
 		t.Skip("sh not available")
 	}
 	pidFile := filepath.Join(t.TempDir(), "descendant.pid")
-	// TempDir follows TMPDIR, which may hold a space or a shell metacharacter,
-	// so the path goes into the script single-quoted.
-	script = strings.ReplaceAll(script, "PIDFILE", "'"+strings.ReplaceAll(pidFile, "'", `'\''`)+"'")
+	// TempDir follows TMPDIR, which may hold a space or a shell
+	// metacharacter, so the path is encoded before it goes into the script.
+	// richtext.ShellQuote is the one implementation of that; this used to
+	// splice the quotes inline here, which is a copy with no name on it and
+	// so the kind a search for duplicate quoting never finds (Copilot on
+	// #769).
+	script = strings.ReplaceAll(script, "PIDFILE", richtext.ShellQuote(pidFile))
 
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()

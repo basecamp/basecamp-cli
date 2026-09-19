@@ -170,7 +170,7 @@ func ledgerChecks(ctx context.Context, p connectProfile) []setup.Check {
 	if s.Hold != nil {
 		checks = append(checks, setup.Check{Name: "Hold", Status: setup.StatusWarn,
 			Message: fmt.Sprintf("Held since %s by %s: nothing dispatches or posts", s.Hold.HeldAt.UTC().Format(time.RFC3339), richtext.SanitizeSingleLine(s.Hold.HeldBy)),
-			Hint:    "Review held records in basecamp connect status, then basecamp connect release -P " + shellQuote(p.name)})
+			Hint:    "Review held records in basecamp connect status, then basecamp connect release -P " + richtext.ShellQuote(p.name)})
 	}
 	if len(s.Indeterminate) > 0 {
 		checks = append(checks, setup.Check{Name: "Lifecycle messages", Status: setup.StatusWarn,
@@ -373,7 +373,7 @@ func driverChecks(p connectProfile) []setup.Check {
 	if p.file.Driver != setup.DriverSpawn && p.file.Driver != setup.DriverACP {
 		checks = append(checks, setup.Check{Name: "Driver", Status: setup.StatusFail,
 			Message: fmt.Sprintf("Driver %q is not %q or %q, and the connector refuses to start on it", p.file.Driver, setup.DriverSpawn, setup.DriverACP),
-			Hint:    "basecamp connect setup -P " + shellQuote(p.name) + " --driver spawn"})
+			Hint:    "basecamp connect setup -P " + richtext.ShellQuote(p.name) + " --driver spawn"})
 	}
 	return checks
 }

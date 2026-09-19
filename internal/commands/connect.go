@@ -130,7 +130,7 @@ func runConnectShow(app *appctx.App) error {
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		return output.ErrNotFoundHint("connect.json for profile", name,
-			"The profile has not been set up. Set it up: basecamp connect setup -P "+shellQuote(name)+" --operator-profile '<your profile>' --serve <project-id>")
+			"The profile has not been set up. Set it up: basecamp connect setup -P "+richtext.ShellQuote(name)+" --operator-profile '<your profile>' --serve <project-id>")
 	case err != nil && runtime.GOOS == "windows":
 		return output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(err),
 			"The connector's setup is not supported on Windows: this CLI cannot verify who can change connect.json there.")
@@ -618,7 +618,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 // connect.json nobody else may change is usage.
 func classifyWriteError(name string, err error) error {
 	var apiErr *output.Error
-	profile := shellQuote(name)
+	profile := richtext.ShellQuote(name)
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		// A person who stopped the command, or a deadline: the run ended,
@@ -853,7 +853,7 @@ func parsePositiveID(flag, raw string) (int64, error) {
 // against an Agent's credential or connect.json, and a person's login with
 // nothing pinning it to the bot.
 func refuseCredentialConflicts(name, path, held string, expect int64, exists bool, existing setup.File) error {
-	profile := shellQuote(name)
+	profile := richtext.ShellQuote(name)
 	switch {
 	// What connect.json already says comes first: a remediation that the
 	// existing file would refuse anyway is no remediation.
@@ -891,7 +891,7 @@ func connectAccount(app *appctx.App, name string) (string, error) {
 	p := app.Config.Profiles[name]
 	if p == nil {
 		return "", output.ErrUsageHint(fmt.Sprintf("Profile %q does not exist", name),
-			"Connect the agent first: basecamp auth agent connect -P "+shellQuote(name))
+			"Connect the agent first: basecamp auth agent connect -P "+richtext.ShellQuote(name))
 	}
 	bound, err := canonicalAccount(p.AccountID)
 	if err != nil {
@@ -937,7 +937,7 @@ func unboundProfileError(cfg *config.Config, name string) error {
 	}
 	global := filepath.Join(config.GlobalConfigDir(), "config.json")
 	return output.ErrUsageHint(message,
-		"For an Agent, connecting it binds its own account: basecamp auth agent connect -P "+shellQuote(name)+
+		"For an Agent, connecting it binds its own account: basecamp auth agent connect -P "+richtext.ShellQuote(name)+
 			". A bot user's browser login binds none, so for a bot add account_id to the profile's entry in "+richtext.SanitizeSingleLine(global)+".")
 }
 
@@ -1036,7 +1036,7 @@ func operatorProfileManager(ctx context.Context, app *appctx.App, profile string
 	case err != nil:
 		return nil, err
 	case kind == "":
-		return nil, output.ErrUsageHint(fmt.Sprintf("Operator profile %q holds no credential", profile), "Log in: basecamp auth login -P "+shellQuote(profile))
+		return nil, output.ErrUsageHint(fmt.Sprintf("Operator profile %q holds no credential", profile), "Log in: basecamp auth login -P "+richtext.ShellQuote(profile))
 	case kind == setup.KindAgent:
 		return nil, output.ErrUsage(fmt.Sprintf("Operator profile %q holds an Agent's credential; an operator is a person", profile))
 	}

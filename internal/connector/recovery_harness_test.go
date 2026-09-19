@@ -28,6 +28,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector/driver/drivertest"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver/spawn"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // The integrated recovery harness (plan step 22).
@@ -361,7 +362,7 @@ func newHarness(t *testing.T, d harnessDriver, sc harnessScenario) *harness {
 	require.NoError(t, exeErr)
 	h.agent = filepath.Join(dir, "agent")
 	wrapper := "#!/bin/sh\n" +
-		harnessAgentEnv + "=" + shellQuote(d.Name) + " " + harnessDirEnv + "=" + shellQuote(dir) + " exec " + shellQuote(exe) + ` "$@"` + "\n"
+		harnessAgentEnv + "=" + richtext.ShellQuote(d.Name) + " " + harnessDirEnv + "=" + richtext.ShellQuote(dir) + " exec " + richtext.ShellQuote(exe) + ` "$@"` + "\n"
 	require.NoError(t, os.WriteFile(h.agent, []byte(wrapper), 0o700)) //nolint:gosec // the fake agent's wrapper must be executable
 	for _, name := range []string{feedFile, storeFile, linesFile, pollsFile, agentLogFile, liveFile} {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0o600))
@@ -388,8 +389,6 @@ func harnessStateDir(t *testing.T, dir string) string {
 	}
 	return state
 }
-
-func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 func (h *harness) writeScenario() {
 	data, err := json.Marshal(h.sc)

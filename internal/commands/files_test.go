@@ -20,6 +20,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 func TestIsStorageURL(t *testing.T) {
@@ -1493,21 +1494,36 @@ func TestScopeProject(t *testing.T) {
 	assert.Equal(t, "", scopeProject(app, ""))
 }
 
-// TestShellQuote pins the breadcrumb encoding: inert strings (IDs, plain
-// Basecamp URLs) pass bare, and everything else is single-quoted so no shell
-// syntax survives — quoting is an encoding, not a metacharacter list.
-func TestShellQuote(t *testing.T) {
+// TestBreadcrumbsQuoteTheProjectTheyCarry pins the breadcrumb encoding at
+// the caller. This package used to hold its own copy of the quoting and
+// this test called it directly; the copy is richtext.ShellQuote now, so the
+// test asks the breadcrumb itself instead — inert names pass bare, and
+// everything else is single-quoted so no shell syntax survives. Quoting is
+// an encoding, not a metacharacter list.
+func TestBreadcrumbsQuoteTheProjectTheyCarry(t *testing.T) {
+	for input, want := range map[string]string{
+		"789":                " --project 789",
+		"release;id":         ` --project 'release;id'`,
+		"$(command) project": ` --project '$(command) project'`,
+		"My Project":         ` --project 'My Project'`,
+		"O'Brien's":          ` --project 'O'\''Brien'\''s'`,
+		"":                   "",
+	} {
+		assert.Equal(t, want, breadcrumbScope(input), "breadcrumbScope(%q)", input)
+	}
+}
+
+// And the upload reference a breadcrumb echoes back gets the same treatment:
+// a plain ID or URL stays readable, a URL carrying shell syntax does not
+// survive as shell syntax.
+func TestABreadcrumbReferenceIsQuotedLikeTheProject(t *testing.T) {
 	for input, want := range map[string]string{
 		"789": "789",
 		"https://3.basecamp.com/99999/buckets/456/uploads/789":                  "https://3.basecamp.com/99999/buckets/456/uploads/789",
 		"https://3.basecamp.com/99999/buckets/456/uploads/789?x=$(touch pwned)": `'https://3.basecamp.com/99999/buckets/456/uploads/789?x=$(touch pwned)'`,
-		"release;id":         `'release;id'`,
-		"$(command) project": `'$(command) project'`,
-		"My Project":         `'My Project'`,
-		"O'Brien's":          `'O'\''Brien'\''s'`,
-		"":                   `''`,
+		"": `''`,
 	} {
-		assert.Equal(t, want, shellQuote(input), "shellQuote(%q)", input)
+		assert.Equal(t, want, richtext.ShellQuote(input), "richtext.ShellQuote(%q)", input)
 	}
 }
 

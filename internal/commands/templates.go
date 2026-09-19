@@ -14,6 +14,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // NewTemplatesCmd creates the templates command for managing project and to-do list templates.
@@ -295,7 +296,7 @@ func validateTemplateCopyTodoset(cmd *cobra.Command, app *appctx.App, todosetID,
 func templateCommandContextArgs(profile string, persistentAccount bool, accountID string) string {
 	args := ""
 	if profile != "" {
-		args += " --profile " + shellQuote(profile)
+		args += " --profile " + richtext.ShellQuote(profile)
 	}
 	return args + replyAccountArg(persistentAccount, accountID)
 }

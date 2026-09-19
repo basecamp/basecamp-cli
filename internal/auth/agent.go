@@ -15,6 +15,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // Agent self-tokens: the RFC 6749 §4.4 client_credentials grant.
@@ -465,7 +466,7 @@ func (m *Manager) accountToBind() string {
 	source := config.Source(m.cfg.Sources["account_id"])
 	supplied := source == config.SourceFlag || source == config.SourceEnv
 	if supplied && m.cfg.AccountID != "" {
-		return shellQuote(m.cfg.AccountID)
+		return richtext.ShellQuote(m.cfg.AccountID)
 	}
 	return "<account-id>"
 }
@@ -511,11 +512,11 @@ func (m *Manager) agentRemedy(err error, clientID, scope string) error {
 func (m *Manager) agentLoginCommand(clientID, scope string) string {
 	id := "<client-id>"
 	if clientID != "" {
-		id = shellQuote(clientID)
+		id = richtext.ShellQuote(clientID)
 	}
 	profile := "<profile>"
 	if m.cfg.ActiveProfile != "" {
-		profile = shellQuote(m.cfg.ActiveProfile)
+		profile = richtext.ShellQuote(m.cfg.ActiveProfile)
 	}
 	command := "... | basecamp auth login --with-client-credentials --client-id " + id + " -P " + profile
 	// A profile with no entry yet is one the login creates, and creating
@@ -538,7 +539,7 @@ func (m *Manager) agentLoginCommand(clientID, scope string) string {
 	// back with full access, or be refused for asking for more than its
 	// client is allowed. full is the default and adding it says nothing.
 	if scope != "" && scope != scopeFull {
-		command += " --scope " + shellQuote(scope)
+		command += " --scope " + richtext.ShellQuote(scope)
 	}
 	return command
 }

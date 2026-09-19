@@ -15,6 +15,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // The account event feed: the catch-up poll lane (`events poll`), the agent
@@ -549,7 +550,7 @@ func (r feedRequest) resumeNotice(position string, capped bool, maxPages int) st
 // into a command somebody pastes, and nothing about it promises to be a bare
 // word.
 func (r feedRequest) positionCommand(position string) string {
-	return fmt.Sprintf("%s --position %s%s", r.lane.pollCmd, shellQuote(position), r.filters)
+	return fmt.Sprintf("%s --position %s%s", r.lane.pollCmd, richtext.ShellQuote(position), r.filters)
 }
 
 // newEventsPollCmd builds `basecamp events poll`.
