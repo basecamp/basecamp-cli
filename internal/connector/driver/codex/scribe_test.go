@@ -294,3 +294,51 @@ func TestTheRecorderIsNeverCalledTwiceAtOnce(t *testing.T) {
 	defer mu.Unlock()
 	assert.Equal(t, 1, peak, "the recorder saw one call at a time, and %d at once", peak)
 }
+
+// A turn's refusals are in the ledger before its result comes back. The
+// writes are not on the reader any more, so an ending that settled a turn
+// without waiting would hand a caller a result whose refusals the ledger did
+// not yet hold — and the dispatcher settles an attempt on what it holds.
+func TestDrainingWaitsForWhatIsQueuedWithoutClosing(t *testing.T) {
+	var mu sync.Mutex
+	written := 0
+	release := make(chan struct{})
+	first := make(chan struct{})
+	var once sync.Once
+	s := newScribe(
+		func(driver.Refusal) {
+			once.Do(func() { close(first) })
+			<-release
+			mu.Lock()
+			written++
+			mu.Unlock()
+		},
+		func(driver.Update) {},
+	)
+	t.Cleanup(s.close)
+	for range 4 {
+		s.hand(pending{refusal: driver.Refusal{ToolCallID: "one"}})
+	}
+	<-first
+
+	drained := make(chan struct{})
+	go func() { defer close(drained); s.drain() }()
+	select {
+	case <-drained:
+		t.Fatal("the drain returned with refusals still queued")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+	<-drained
+	mu.Lock()
+	assert.Equal(t, 4, written, "everything handed over is written, and %d was", written)
+	mu.Unlock()
+
+	// And the scribe is still open afterwards: draining is not closing.
+	s.hand(pending{refusal: driver.Refusal{ToolCallID: "after"}})
+	s.drain()
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 5, written, "draining is not closing")
+}

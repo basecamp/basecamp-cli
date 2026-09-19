@@ -1348,7 +1348,7 @@ func TestARefusalReadAfterTheUpdatesCloseIsNotAPanic(t *testing.T) {
 	require.NoError(t, s.Close())
 	require.Eventually(t, func() bool { return strings.Contains(session.StderrTail(), "rejected") },
 		10*time.Second, 20*time.Millisecond, "the worker logged its refusal on its way out")
-	session.stderrRefusals()
+	session.stderrRefusals(nil)
 
 	assert.Len(t, recorder.Recorded(), 1,
 		"the refusal is recorded, and the update it carries is dropped rather than sent on a closed channel")
@@ -1472,7 +1472,7 @@ func TestWhatARefusalKeepsOfWhatTheAgentWroteIsBounded(t *testing.T) {
 	// credential and replaces the whole thing — which is what a long run of
 	// one character gets, and would prove nothing about the cut.
 	long := strings.Repeat("tool.call-", 8*maxToolCallID/10)
-	session.refused("item:"+long, long, "mcp__other__write", driver.ToolOther)
+	session.refused(nil, "item:"+long, long, "mcp__other__write", driver.ToolOther)
 	require.NoError(t, s.Close())
 
 	session.mu.Lock()
@@ -1502,7 +1502,7 @@ func TestASessionRemembersSoManyRefusalsAndNoMore(t *testing.T) {
 	session := s.(*session)
 
 	for i := range maxRecorded + 10 {
-		session.refused(fmt.Sprintf("item:call-%d", i), fmt.Sprintf("call-%d", i), "exec", driver.ToolExecute)
+		session.refused(nil, fmt.Sprintf("item:call-%d", i), fmt.Sprintf("call-%d", i), "exec", driver.ToolExecute)
 	}
 	session.mu.Lock()
 	remembered := len(session.recorded)

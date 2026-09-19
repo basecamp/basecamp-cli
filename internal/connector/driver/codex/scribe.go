@@ -90,8 +90,12 @@ type scribe struct {
 	// the scribe had already gone. It lives under the same lock that
 	// publishes finished, so admitting one and deciding everything is
 	// written are a single decision rather than two that can cross.
-	late  int
-	quiet *sync.Cond
+	late int
+	// writes counts the writes the scribe itself has taken off the queue
+	// and not yet finished, so a drain can tell an empty queue from a
+	// finished one.
+	writes int
+	quiet  *sync.Cond
 	// writing is held across every call to record, wherever it is made
 	// from. The recorder is promised it is never called concurrently with
 	// itself (driver.go), and a late write runs on its reader's goroutine
@@ -161,6 +165,28 @@ func (s *scribe) noWaiting() {
 	s.mu.Unlock()
 }
 
+// drain waits for everything handed over so far to be written, without
+// saying there is no more. A turn's result is settled after this, so a
+// refusal read in that turn is in the ledger before the prompt that made it
+// comes back — the ordering callers had when the write was on the reader.
+//
+// It is called from a turn's ending, which runs away from the reader, so
+// waiting here holds up no reading.
+func (s *scribe) drain() {
+	s.mu.Lock()
+	for (len(s.queue) > 0 || s.writes > 0) && !s.finished {
+		s.quiet.Wait()
+	}
+	s.mu.Unlock()
+	// A late write is on its caller's own goroutine and counted the same
+	// way; this waits for those too.
+	s.mu.Lock()
+	for s.late > 0 {
+		s.quiet.Wait()
+	}
+	s.mu.Unlock()
+}
+
 // close says there is no more, and waits for what there is to be written.
 // Whoever calls it promises the reader is through. It is idempotent.
 func (s *scribe) close() {
@@ -204,11 +230,13 @@ func (s *scribe) run() {
 			// queued to a scribe that has decided it is done.
 			s.finished = true
 			s.room.Broadcast()
+			s.quiet.Broadcast()
 			s.mu.Unlock()
 			return
 		}
 		next := s.queue[0]
 		s.queue = s.queue[1:]
+		s.writes++
 		s.room.Signal()
 		s.mu.Unlock()
 
@@ -220,6 +248,10 @@ func (s *scribe) run() {
 		// The update comes after the write, which is the contract's own
 		// order: a refusal is recorded before the update for it is emitted.
 		s.emit(next.update)
+		s.mu.Lock()
+		s.writes--
+		s.quiet.Broadcast()
+		s.mu.Unlock()
 	}
 }
 

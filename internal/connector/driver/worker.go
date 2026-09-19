@@ -114,6 +114,13 @@ func (o *output) Read(p []byte) (int, error) {
 		if err := o.f.SetReadDeadline(time.Now().Add(window)); err != nil {
 			return 0, err
 		}
+		if !stopped && o.stopped.Load() {
+			// Asked between the sample and the deadline. The idle window
+			// just installed would hide that until it expired, and the
+			// budget would be most of the way gone by then, so the window
+			// is opened again as a drain's.
+			continue
+		}
 		n, err := o.f.Read(p)
 		switch {
 		case n > 0:
