@@ -50,9 +50,36 @@ cases.each do |path|
     next
   end
 
-  found = STRING_LISTS.flat_map { |key| Array(doc[key]).map { |pat| [key, pat] } }
+  # Shape before content. Normalizing a malformed case into something
+  # compilable is how a checker reports success over input it never really
+  # examined: a scalar `accept:` coerced to a one-item list compiles fine here
+  # and raises NoMethodError in the runner, which calls .each on it, and a
+  # string where a mock belongs compiles fine here and raises TypeError there,
+  # where the entry is indexed as a mapping (Copilot on #768).
+  found = []
+  STRING_LISTS.each do |key|
+    list = doc[key]
+    next if list.nil? # the runner reads these as `(c[key] || [])`
+    unless list.is_a?(Array)
+      errors << "#{rel}: #{key}: expected a list of patterns, got #{list.class} — the runner calls .each on it"
+      next
+    end
+    list.each_with_index { |pat, i| found << ["#{key}[#{i}]", pat] }
+  end
   MATCH_LISTS.each do |key, field|
-    found += Array(doc[key]).map { |entry| ["#{key}[].#{field}", entry.is_a?(Hash) ? entry[field] : entry] }
+    list = doc[key]
+    next if list.nil?
+    unless list.is_a?(Array)
+      errors << "#{rel}: #{key}: expected a list of entries, got #{list.class} — the runner iterates it"
+      next
+    end
+    list.each_with_index do |entry, i|
+      unless entry.is_a?(Hash)
+        errors << "#{rel}: #{key}[#{i}]: expected a mapping with a #{field}: key, got #{entry.class} — the runner indexes it as one"
+        next
+      end
+      found << ["#{key}[#{i}].#{field}", entry[field]]
+    end
   end
 
   found.each do |key, pat|

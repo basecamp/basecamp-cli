@@ -251,6 +251,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read  # dorny/paths-filter enumerates PR files via the REST API
     if: github.event_name == 'pull_request'
     outputs:
       run: ${{ steps.decide.outputs.run }}
@@ -281,6 +282,18 @@ jobs:
           # answer for them too.
           HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }} # zizmor: ignore[secrets-outside-env] -- a presence test, not the key; adding an environment would block PR-triggered runs
         run: |
+          # A preflight that cannot tell must not be allowed to say no. The
+          # filter answers true or false; anything else means it did not answer,
+          # and treating that as "nothing to run" would rebuild the defect this
+          # job exists to remove, one level up (Copilot on #768).
+          case "$CHANGED" in
+            true|false) ;;
+            *)
+              echo "::error::the paths filter did not answer (skill='$CHANGED'), so this preflight cannot say whether the evals are needed"
+              exit 1
+              ;;
+          esac
+
           if [ "$CHANGED" != "true" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "No skill or eval changes on this pull request." >> "$GITHUB_STEP_SUMMARY"
