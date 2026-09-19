@@ -23,18 +23,41 @@ cases = Dir.glob(File.join(root, "skill-evals", "cases", "**", "*.yml")).sort
 STRING_LISTS = %w[accept reject accept_response reject_response].freeze
 MATCH_LISTS = { "mocks" => "match", "expect_sequence" => "match" }.freeze
 MODELLED_SITES = STRING_LISTS.length + MATCH_LISTS.length
+# Case keys the runner reads that carry no pattern. Declared rather than
+# inferred: a key the runner starts reading has to be classified by someone, and
+# the failure when it is not is this check going red.
+NON_PATTERN_KEYS = %w[context file max_commands tags task].freeze
 
 errors = []
 patterns = 0
 
 # A checker that has fallen behind the runner reports success over the keys it
-# still knows. The runner compiles one pattern kind per Regexp.new; if that
-# count moves, a pattern kind was added or removed and this list has to move
-# with it.
-sites = File.read(runner).scan(/Regexp\.new\(/).length
+# still knows. Two questions, because cardinality alone answers neither: a
+# runner edit that drops one pattern key and adds another in the same commit
+# leaves the count at six, and this checker would go on scanning the key that
+# no longer exists while never seeing the new one (Copilot on #768).
+runner_src = File.read(runner)
+modelled_keys = (STRING_LISTS + MATCH_LISTS.keys).sort
+
+# Identity: every case key the runner reads is either one this checker
+# compiles, or one declared here as carrying no pattern.
+carriers = (runner_src.scan(/\bc\["([a-z_]+)"\]/).flatten.uniq - NON_PATTERN_KEYS).sort
+unless carriers == modelled_keys
+  (carriers - modelled_keys).each do |key|
+    errors << "#{runner}: reads c[#{key.inspect}], which this checker does not compile — add it to " \
+              "STRING_LISTS or MATCH_LISTS, or to NON_PATTERN_KEYS if it carries no pattern"
+  end
+  (modelled_keys - carriers).each do |key|
+    errors << "#{runner}: no longer reads c[#{key.inspect}], but this checker still compiles it"
+  end
+end
+
+# Cardinality: catches a second pattern field added to a key already modelled,
+# which leaves the key set unchanged.
+sites = runner_src.scan(/Regexp\.new\(/).length
 if sites != MODELLED_SITES
   errors << "#{runner}: the runner compiles #{sites} pattern kinds, this checker models " \
-            "#{MODELLED_SITES} (#{(STRING_LISTS + MATCH_LISTS.keys).join(", ")}) — update both together"
+            "#{MODELLED_SITES} (#{modelled_keys.join(", ")}) — update both together"
 end
 
 cases.each do |path|
