@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -251,7 +252,7 @@ func connectServiceUnit(exe, profile string, projects []int64, shadow, hold bool
 	// another connect.json, keep its ledger somewhere else, and run a worker
 	// it could not find — active, and failing every dispatch.
 	for _, e := range env {
-		fmt.Fprintf(&b, "Environment=%s\n", systemdQuote(e))
+		fmt.Fprintf(&b, "Environment=%s\n", systemdQuote(e, false))
 	}
 	fmt.Fprintf(&b, "ExecStart=%s\n", systemdExecLine(exe, args))
 	fmt.Fprintf(&b, "Restart=always\n")
@@ -267,23 +268,54 @@ func connectServiceUnit(exe, profile string, projects []int64, shadow, hold bool
 	return b.String()
 }
 
-// systemdExecLine renders an ExecStart command line. systemd reads
-// double-quoted arguments with C-style escapes, which is what the
-// executable's own path may need; the arguments after it are literals and
-// validated ids.
+// systemdExecLine renders an ExecStart command line.
 func systemdExecLine(exe string, args []string) string {
 	parts := make([]string, 0, len(args)+1)
-	parts = append(parts, systemdQuote(exe))
+	parts = append(parts, systemdQuote(exe, true))
 	for _, a := range args {
-		parts = append(parts, systemdQuote(a))
+		parts = append(parts, systemdQuote(a, true))
 	}
 	return strings.Join(parts, " ")
 }
 
-// systemdQuote quotes one word for a unit file's command line.
-func systemdQuote(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
-	return `"` + r.Replace(s) + `"`
+// systemdQuote quotes one value for a unit file.
+//
+// Quoting is not enough on its own. systemd expands its own % specifiers
+// everywhere — %u is the user name, %% is a literal percent — and expands
+// $VAR in a command line even inside double quotes. A home directory with a
+// percent in it, or a path holding $HOME verbatim, would otherwise be
+// rewritten into something else or refused. So % is always doubled, and $
+// is doubled only where it means anything: expandDollar is true for a
+// command line and false for Environment=, which takes $ literally.
+//
+// Control characters are written as C escapes, which systemd reads inside
+// double quotes, rather than being allowed to end the directive.
+func systemdQuote(s string, expandDollar bool) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		switch {
+		case r == '\\' || r == '"':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case r == '%':
+			b.WriteString("%%")
+		case r == '$' && expandDollar:
+			b.WriteString("$$")
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r < 0x20 || r == 0x7f:
+			fmt.Fprintf(&b, `\x%02x`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 // connectServiceEnvKeys are the variables the unit pins. A systemd user
@@ -431,6 +463,14 @@ func connectServiceEnable(unit, wantPath string) ([]byte, error) {
 	if out, err := runSystemctl("enable", unit); err != nil {
 		return out, err
 	}
+	// A unit sitting in start-limit-hit refuses to restart until its window
+	// expires — "start of the service was attempted too often" — so a
+	// reinstall made right after fixing whatever stopped it would do
+	// nothing for five minutes. Clearing the counter is what makes
+	// installing again the way to recover, which is what install says it
+	// is. Best effort: a unit that was never failed has nothing to clear
+	// and systemctl says so.
+	_, _ = runSystemctl("reset-failed", unit)
 	return runSystemctl("restart", unit)
 }
 
@@ -457,15 +497,21 @@ func connectServiceCheckFragment(unit, wantPath string) ([]byte, error) {
 // running after a reboot, so the unit's own "Restart" promise stops at the
 // next power cut.
 func connectServiceLingerWarning(ctx context.Context) string {
-	user := os.Getenv("USER")
-	if user == "" {
-		user = "$USER"
+	// The process's own user, not $USER: exec runs no shell, so an unset
+	// USER would be passed to loginctl as the four characters "$USER" and
+	// the lookup would fail silently — no warning, on exactly the machines
+	// most likely to need one. USER can also name a different account than
+	// the one whose manager this unit is being installed into.
+	me, err := user.Current()
+	if err != nil {
+		return ""
 	}
+	name := me.Username
 	// Bounded: loginctl talks to logind, and an install must not hang on a
 	// warning it can do without.
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "loginctl", "show-user", user, "-p", "Linger", "--value").Output() //nolint:gosec // fixed argv, USER read from the environment
+	out, err := exec.CommandContext(ctx, "loginctl", "show-user", name, "-p", "Linger", "--value").Output() //nolint:gosec // fixed argv, the name is this process's own user
 	if err != nil {
 		return ""
 	}
@@ -473,7 +519,7 @@ func connectServiceLingerWarning(ctx context.Context) string {
 		return ""
 	}
 	return "This user's systemd manager starts at login, so the service will not come back after a reboot until someone logs in. " +
-		"To have it start at boot: sudo loginctl enable-linger " + user
+		"To have it start at boot: sudo loginctl enable-linger " + richtext.ShellQuote(name)
 }
 
 func runConnectServiceUninstall(cmd *cobra.Command) error {
@@ -496,11 +542,26 @@ func runConnectServiceUninstall(cmd *cobra.Command) error {
 	// Stopping is best effort: the unit file must go even when there is no
 	// session bus to talk to, or an uninstall on a machine without a user
 	// session would leave the unit behind for the next login to start.
-	_, _ = runSystemctl("disable", "--now", name)
+	// Best effort is not the same as unreported, though — a stop that
+	// failed may have left the connector running, and saying "Stopped" then
+	// would be the summary telling someone the opposite of what happened.
+	stopOut, stopErr := runSystemctl("disable", "--now", name)
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("cannot remove %s: %w", richtext.SanitizeSingleLine(path), err)
 	}
 	_, _ = runSystemctl("daemon-reload")
-	return app.OK(map[string]any{"unit": name, "path": path, "removed": true},
-		output.WithSummary(fmt.Sprintf("Stopped %s and removed %s", name, path)))
+
+	summary := fmt.Sprintf("Stopped %s and removed %s", name, path)
+	stopped := true
+	if stopErr != nil {
+		stopped = false
+		why := strings.TrimSpace(string(stopOut))
+		if why == "" {
+			why = stopErr.Error()
+		}
+		summary = fmt.Sprintf("Removed %s, but could not stop %s, which may still be running: %s",
+			path, name, richtext.SanitizeSingleLine(why))
+	}
+	return app.OK(map[string]any{"unit": name, "path": path, "removed": true, "stopped": stopped},
+		output.WithSummary(summary))
 }

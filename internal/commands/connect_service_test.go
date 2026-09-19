@@ -178,8 +178,9 @@ func TestConnectServiceInstallWritesAndStartsTheUnit(t *testing.T) {
 		{"daemon-reload"},
 		{"show", "-p", "FragmentPath", "--value", "basecamp-connect-agent.service"},
 		{"enable", "basecamp-connect-agent.service"},
+		{"reset-failed", "basecamp-connect-agent.service"},
 		{"restart", "basecamp-connect-agent.service"},
-	}, *calls, "reloaded, checked to be the file systemd reads, enabled and restarted, or the new command line never runs")
+	}, *calls, "reloaded, checked to be the file systemd reads, enabled, cleared and restarted, or the new command line never runs")
 }
 
 // A unit for a profile that was never set up would start a connector that
@@ -383,6 +384,91 @@ func runConnectServiceInstallForTest(t *testing.T, app *appctx.App) error {
 	t.Helper()
 	_, err := runConnectServiceCmd(t, app, "install")
 	return err
+}
+
+// systemd expands its own %% specifiers everywhere and $VAR in a command
+// line even inside double quotes, so a home directory with a percent in it,
+// or a path holding $HOME verbatim, would be rewritten into something else
+// before the connector ever ran.
+func TestConnectServiceUnitSurvivesAPathSystemdWouldRewrite(t *testing.T) {
+	unit := connectServiceUnit(`/opt/%u/$agent/base"camp`, "agent", nil, false, false,
+		[]string{`PATH=/opt/%u/bin:/x$y`})
+
+	assert.Contains(t, unitDirective(t, unit, "ExecStart"), `"/opt/%%u/$$agent/base\"camp"`,
+		"a command line expands both %% and $")
+	assert.Contains(t, unit, `Environment="PATH=/opt/%%u/bin:/x$y"`,
+		"Environment expands %% but takes $ literally, so doubling it there would corrupt the value")
+}
+
+// A control character in a path must not end the directive and begin
+// another.
+func TestConnectServiceUnitEscapesControlCharacters(t *testing.T) {
+	unit := connectServiceUnit("/opt/a\tb/basecamp", "agent", nil, false, false, nil)
+
+	exec := unitDirective(t, unit, "ExecStart")
+	assert.Contains(t, exec, `\t`)
+	assert.NotContains(t, exec, "\t", "a real tab is written as an escape, not passed through")
+}
+
+// The unit gives up after five failed starts, and systemd then refuses to
+// restart it until the window passes — "start of the service was attempted
+// too often". So the install that follows a fix has to clear the counter,
+// or installing again would do nothing for five minutes, which is what the
+// command tells people to do.
+func TestConnectServiceInstallClearsAFailedUnitBeforeStartingIt(t *testing.T) {
+	calls := connectServiceHome(t)
+	writeConnectSetup(t, "agent")
+	app, _ := connectServiceApp(t, "agent")
+
+	_, err := runConnectServiceCmd(t, app, "install")
+	require.NoError(t, err)
+
+	order := make([]string, 0, len(*calls))
+	for _, c := range *calls {
+		order = append(order, c[0])
+	}
+	require.Contains(t, order, "reset-failed")
+	assert.Less(t, indexOfCall(order, "reset-failed"), indexOfCall(order, "restart"),
+		"clearing the counter after the restart would be too late")
+}
+
+// A stop that failed may have left the connector running, and a summary
+// that said "Stopped" would be telling someone the opposite of what
+// happened.
+func TestConnectServiceUninstallSaysWhenItCouldNotStopTheConnector(t *testing.T) {
+	connectServiceHome(t)
+	writeConnectSetup(t, "agent")
+	app, said := connectServiceApp(t, "agent")
+	_, err := runConnectServiceCmd(t, app, "install", "--no-enable")
+	require.NoError(t, err)
+
+	prev := runSystemctl
+	runSystemctl = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "disable" {
+			return []byte("Failed to disable unit: Connection reset by peer"), errors.New("exit status 1")
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { runSystemctl = prev })
+	said.Reset()
+
+	_, err = runConnectServiceCmd(t, app, "uninstall")
+	require.NoError(t, err, "the unit file still has to go")
+	assert.Contains(t, said.String(), "may still be running")
+	assert.NotContains(t, said.String(), "Stopped basecamp-connect-agent.service")
+
+	path, err := connectServiceUnitPath("agent")
+	require.NoError(t, err)
+	assert.NoFileExists(t, path)
+}
+
+func indexOfCall(order []string, want string) int {
+	for i, c := range order {
+		if c == want {
+			return i
+		}
+	}
+	return -1
 }
 
 // unitDirective returns the value of a unit file's directive.
