@@ -278,8 +278,8 @@ func TestStdinResolvesBeforeAccountAndProject(t *testing.T) {
 		{"schedule create --description", NewScheduleCmd, []string{
 			"create", "Title", "--starts-at", "2026-01-01T10:00:00Z", "--ends-at", "2026-01-01T11:00:00Z", "--description", "-",
 		}},
-		{"templates update --description", NewTemplatesCmd, []string{"update", "1", "--description", "-"}},
-		{"templates construct --description", NewTemplatesCmd, []string{"construct", "1", "--name", "P", "--description", "-"}},
+		{"templates projects update --description", NewTemplatesCmd, []string{"projects", "update", "1", "--description", "-"}},
+		{"templates projects construct --description", NewTemplatesCmd, []string{"projects", "construct", "1", "--name", "P", "--description", "-"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			transport := &countingTransport{}
@@ -340,8 +340,8 @@ func TestMalformedIDRejectedBeforeReadingStdin(t *testing.T) {
 		{"cards update", NewCardsCmd, []string{"update", "nope", "--body", "-"}},
 		{"cards column update", NewCardsCmd, []string{"column", "update", "nope", "--description", "-"}},
 		{"gauges update", NewGaugesCmd, []string{"update", "nope", "--description", "-"}},
-		{"templates update", NewTemplatesCmd, []string{"update", "nope", "--description", "-"}},
-		{"templates construct", NewTemplatesCmd, []string{"construct", "nope", "--name", "P", "--description", "-"}},
+		{"templates projects update", NewTemplatesCmd, []string{"projects", "update", "nope", "--description", "-"}},
+		{"templates projects construct", NewTemplatesCmd, []string{"projects", "construct", "nope", "--name", "P", "--description", "-"}},
 		{"messages update", NewMessagesCmd, []string{"update", "nope", "--body", "-"}},
 		{"todos update", NewTodosCmd, []string{"update", "nope", "--description", "-"}},
 		{"todolists update", NewTodolistsCmd, []string{"update", "nope", "--description", "-"}},

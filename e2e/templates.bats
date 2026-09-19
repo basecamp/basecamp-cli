@@ -15,11 +15,11 @@ load test_helper
 
 # Show errors
 
-@test "templates show without id shows error" {
+@test "templates projects show without id shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp templates show
+  run basecamp templates projects show
   assert_failure
   assert_output_contains "ID required"
 }
@@ -27,30 +27,30 @@ load test_helper
 
 # Create errors
 
-@test "templates create without name shows error" {
+@test "templates projects create without name shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp templates create
+  run basecamp templates projects create
   assert_failure
   assert_json_value '.error' '<name> required'
   assert_json_value '.code' 'usage'
 }
 
-@test "templates create --name without value shows error" {
+@test "templates projects create --name without value shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp templates create --name
+  run basecamp templates projects create --name
   assert_failure
   assert_output_contains "--name requires a value"
 }
 
-@test "templates create --description without value shows error" {
+@test "templates projects create --description without value shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp templates create "Test" --description
+  run basecamp templates projects create "Test" --description
   assert_failure
   assert_output_contains "--description requires a value"
 }
@@ -58,20 +58,20 @@ load test_helper
 
 # Update errors
 
-@test "templates update without id shows error" {
+@test "templates projects update without id shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp templates update
+  run basecamp templates projects update
   assert_failure
   assert_output_contains "ID required"
 }
 
-@test "templates update without fields shows error" {
+@test "templates projects update without fields shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp templates update 123
+  run basecamp templates projects update 123
   assert_failure
   assert_output_contains "No update fields specified"
 }
@@ -79,11 +79,11 @@ load test_helper
 
 # Delete errors
 
-@test "templates delete without id shows error" {
+@test "templates projects delete without id shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp templates delete
+  run basecamp templates projects delete
   assert_failure
   assert_output_contains "ID required"
 }
@@ -91,29 +91,20 @@ load test_helper
 
 # Construct errors
 
-@test "templates construct without template id shows error" {
+@test "templates projects construct without template id shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp templates construct
+  run basecamp templates projects construct
   assert_failure
   assert_output_contains "ID required"
 }
 
-@test "templates construct without project name shows error" {
+@test "templates projects construct with malformed start date shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp templates construct 123
-  assert_failure
-  assert_output_contains "name required"
-}
-
-@test "templates construct with malformed start date shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999}'
-
-  run basecamp templates construct 123 --name "Project" --start-date someday
+  run basecamp templates projects construct 123 --name "Project" --start-date someday
   assert_failure
   assert_output_contains "Invalid start date"
 }
@@ -121,20 +112,20 @@ load test_helper
 
 # Construction status errors
 
-@test "templates construction without template id shows error" {
+@test "templates projects construction without template id shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp templates construction
+  run basecamp templates projects construction
   assert_failure
   assert_output_contains "ID required"
 }
 
-@test "templates construction without construction id shows error" {
+@test "templates projects construction without construction id shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp templates construction 123
+  run basecamp templates projects construction 123
   # Cobra returns "accepts 2 arg(s)" error
   assert_failure
 }
@@ -142,26 +133,17 @@ load test_helper
 
 # Template library copy errors
 
-@test "templates copy without template id shows error" {
+@test "templates todolists duplication without copy id shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp templates copy
+  run basecamp templates todolists duplication
   assert_failure
   assert_output_contains "ID required"
 }
 
-@test "templates copy-status without copy id shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999}'
-
-  run basecamp templates copy-status
-  assert_failure
-  assert_output_contains "ID required"
-}
-
-@test "templates copy --confirm-adding-people is accepted" {
-  run basecamp templates copy --help
+@test "templates todolists duplicate --confirm-adding-people is accepted" {
+  run basecamp templates todolists duplicate --help
   assert_success
   assert_output_contains "--confirm-adding-people"
 }
@@ -169,22 +151,13 @@ load test_helper
 
 # Flag parsing
 
-@test "templates list --status without value shows error" {
+@test "templates projects list --status without value shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp templates list --status
+  run basecamp templates projects list --status
   assert_failure
   assert_output_contains "--status requires a value"
-}
-
-@test "templates list --status with invalid value shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999}'
-
-  run basecamp templates list --status bogus
-  assert_failure
-  assert_output_contains "unknown --status value"
 }
 
 
@@ -197,10 +170,9 @@ load test_helper
   run basecamp templates --help
   assert_success
   assert_output_contains "basecamp templates"
-  assert_output_contains "construct"
-  assert_output_contains "construction"
-  assert_output_contains "library"
-  assert_output_contains "copy-status"
+  assert_output_contains "projects"
+  assert_output_contains "todolists"
+  assert_output_contains "card-tables"
 }
 
 
@@ -212,4 +184,176 @@ load test_helper
 
   run basecamp templates foobar
   # Command may show help or require project - just verify it runs
+}
+
+
+# Kind subgroups
+
+@test "templates --help lists the kind subgroups" {
+  run basecamp templates --help
+  assert_success
+  assert_output_contains "projects"
+  assert_output_contains "todolists"
+}
+
+@test "templates projects without subcommand shows help" {
+  run basecamp templates projects
+  assert_success
+  assert_output_contains "construct"
+  assert_output_contains "construction"
+}
+
+@test "templates todolists without subcommand shows help" {
+  run basecamp templates todolists
+  assert_success
+  assert_output_contains "duplicate"
+  assert_output_contains "duplication"
+}
+
+@test "templates projects construct without project name shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates projects construct 123
+  assert_failure
+  assert_output_contains "name required"
+}
+
+@test "templates projects list --status with invalid value shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates projects list --status bogus
+  assert_failure
+  assert_output_contains "unknown --status value"
+}
+
+@test "templates todolists duplicate without template id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates todolists duplicate
+  assert_failure
+  assert_output_contains "ID required"
+}
+
+@test "templates todolists duplicate accepts --in and --confirm-adding-people" {
+  run basecamp templates todolists duplicate --help
+  assert_success
+  assert_output_contains "--in"
+  assert_output_contains "--confirm-adding-people"
+}
+
+@test "templates todolists duplication without id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates todolists duplication
+  assert_failure
+  assert_output_contains "ID required"
+}
+
+@test "templates todolists copy is an alias for duplicate" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates todolists copy
+  assert_failure
+  assert_output_contains "ID required"
+}
+
+@test "templates todolists copy-status is an alias for duplication" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates todolists copy-status
+  assert_failure
+  assert_output_contains "ID required"
+}
+
+@test "templates card-tables without subcommand shows help" {
+  run basecamp templates card-tables
+  assert_success
+  assert_output_contains "duplicate"
+  assert_output_contains "duplication"
+}
+
+@test "templates card-tables create without name shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates card-tables create
+  assert_failure
+  assert_json_value '.error' '<name> required'
+}
+
+@test "templates card-tables duplicate without template id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates card-tables duplicate
+  assert_failure
+  assert_output_contains "ID required"
+}
+
+@test "templates card-tables duplicate has no --todoset flag" {
+  run basecamp templates card-tables duplicate --help
+  assert_success
+  assert_output_contains "--in"
+  assert_output_not_contains "--todoset"
+}
+
+@test "templates card-tables duplication without id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates card-tables duplication
+  assert_failure
+  assert_output_contains "ID required"
+}
+
+@test "todolists templatify without id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp todolists templatify
+  assert_failure
+  assert_output_contains "ID required"
+}
+
+@test "todolists templatify has no --move-cards-to-triage flag" {
+  run basecamp todolists templatify --help
+  assert_success
+  assert_output_contains "--copy-comments"
+  assert_output_not_contains "--move-cards-to-triage"
+}
+
+@test "card-tables without subcommand shows help" {
+  run basecamp card-tables
+  assert_success
+  assert_output_contains "templatify"
+  assert_output_contains "templatification"
+}
+
+@test "card-tables templatify offers --move-cards-to-triage" {
+  run basecamp card-tables templatify --help
+  assert_success
+  assert_output_contains "--move-cards-to-triage"
+}
+
+@test "card-tables templatification requires two ids" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp card-tables templatification 123
+  assert_failure
+}
+
+@test "templates todolists create without name shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp templates todolists create
+  assert_failure
+  assert_json_value '.error' '<name> required'
 }
