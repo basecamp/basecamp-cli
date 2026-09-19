@@ -1507,6 +1507,58 @@ func TestASessionRemembersSoManyRefusalsAndNoMore(t *testing.T) {
 	session.mu.Lock()
 	remembered := len(session.recorded)
 	session.mu.Unlock()
-	assert.LessOrEqual(t, remembered, maxRecorded, "a session remembers so many and no more, and remembered %d", remembered)
+	assert.Equal(t, maxRecorded, remembered, "a session remembers so many and no more, and remembered %d", remembered)
+	waitDone(t, s)
+}
+
+// Two tool call ids that begin alike are two refusals. What a session
+// remembers a refusal by is bounded, because the agent writes it — but
+// bounding it by cutting would make a prefix the identity, and every later
+// refusal sharing that start would be taken for a repeat and recorded
+// nowhere.
+func TestTwoIdsThatBeginAlikeAreTwoRefusals(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t, scenario{TurnContext: safeTurnContext(), Hang: true})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	session := s.(*session)
+	tr := &turn{done: make(chan struct{})}
+	session.mu.Lock()
+	session.turn = tr
+	session.mu.Unlock()
+
+	same := strings.Repeat("tool.call-", 4*maxToolCallID/10)
+	session.refused(tr, "item:"+same+"-one", same+"-one", "exec", driver.ToolExecute)
+	session.refused(tr, "item:"+same+"-two", same+"-two", "exec", driver.ToolExecute)
+	require.NoError(t, s.Close())
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	assert.Len(t, tr.refusals, 2, "two ids alike for longer than a session keeps are still two refusals")
+	assert.Len(t, recorder.Recorded(), 2, "and the ledger has both")
+}
+
+// The refusal that fills a session's memory is recorded like any other. The
+// session ends on it — past it a repeat cannot be told from a first — but it
+// ends after taking that refusal, not instead of it.
+func TestTheRefusalThatFillsTheMemoryIsStillRecorded(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t, scenario{TurnContext: safeTurnContext(), Hang: true})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	session := s.(*session)
+
+	for i := range maxRecorded {
+		session.refused(nil, fmt.Sprintf("item:call-%d", i), fmt.Sprintf("call-%d", i), "exec", driver.ToolExecute)
+	}
+	require.NoError(t, s.Close())
+	assert.Len(t, recorder.Recorded(), maxRecorded,
+		"every refusal up to and including the one that filled the memory, and the ledger has %d", len(recorder.Recorded()))
 	waitDone(t, s)
 }

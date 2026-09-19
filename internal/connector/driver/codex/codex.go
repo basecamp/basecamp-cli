@@ -65,6 +65,8 @@ package codex
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -465,6 +467,9 @@ type session struct {
 	verifyDone  chan struct{}
 	verifyErr   error
 	closed      bool
+	// full is a session that has refused more distinct tool calls than it
+	// can remember having refused. It is ending; it records no more.
+	full bool
 	// updatesClosed is the reader's record that the updates channel is
 	// closed. It is read and written under the same lock every emit takes,
 	// so a goroutine still finishing a turn cannot send on a channel that
@@ -1087,7 +1092,7 @@ func (s *session) refused(t *turn, key, id, tool string, kind driver.ToolKind) {
 	// long would otherwise have that megabyte kept on the turn, in the
 	// queue, and in what this session remembers having refused.
 	refusal := driver.Refusal{ToolCallID: cut(s.red.Sanitize(id), maxToolCallID), Tool: s.red.Sanitize(tool)}
-	key = cut(key, maxToolCallID+len("stderr:000:"))
+	key = identity(key)
 	s.mu.Lock()
 	// The turn the caller is settling, where it named one: an ending reads
 	// the worker's last word after another ending may already have taken
@@ -1097,25 +1102,37 @@ func (s *session) refused(t *turn, key, id, tool string, kind driver.ToolKind) {
 	if on == nil {
 		on = s.turn
 	}
+	if s.full {
+		// The session is ending for want of memory; it cannot tell a repeat
+		// from a first any more, and recording one twice would be worse
+		// than recording neither.
+		s.mu.Unlock()
+		return
+	}
 	first := !s.recorded[key]
+	overfull := false
 	if first {
-		if len(s.recorded) >= maxRecorded {
-			// Past what a session can remember, a repeat cannot be told from
-			// a first, and recording one twice is worse than this: the
-			// session ends rather than go on guessing.
-			s.mu.Unlock()
-			s.endedOverfull()
-			return
-		}
 		s.recorded[key] = true
 		if on != nil {
 			on.refusals = append(on.refusals, refusal)
+		}
+		// The one that fills the memory is recorded like any other. Past it
+		// a repeat cannot be told from a first, and recording one twice
+		// would be worse, so the session ends — after this refusal has been
+		// taken, not instead of it.
+		if len(s.recorded) >= maxRecorded {
+			s.full, overfull = true, true
 		}
 	}
 	s.mu.Unlock()
 	if !first {
 		return
 	}
+	defer func() {
+		if overfull {
+			s.endedOverfull()
+		}
+	}()
 	// The write and the update it precedes both belong to the scribe: the
 	// reader hands them over and goes back to reading, which is what lets
 	// the bound on its reading be a clock. See scribe.go.
@@ -1253,6 +1270,19 @@ func cut(s string, keep int) string {
 		return s
 	}
 	return s[:keep]
+}
+
+// identity is what a session remembers a refusal by. It is bounded, because
+// the agent writes it and a session's memory is not the agent's to grow; and
+// it is not a prefix, because two tool call ids that begin alike are two
+// refusals and cutting them to a common start would record only the first.
+// A digest is bounded and keeps them apart.
+func identity(key string) string {
+	if len(key) <= maxToolCallID {
+		return key
+	}
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:])
 }
 
 // endedOverfull ends a session that has refused more distinct tool calls
