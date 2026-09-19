@@ -471,7 +471,13 @@ service. Install the service and let the OS run it.
     basecamp connect service install -P '<profile>'
 
 That writes a systemd user unit, enables it and starts it. The unit restarts
-the connector whenever it stops, so a crash, a kill or a reboot brings it back.
+the connector whenever it stops, so a crash or a kill brings it back.
+
+**A reboot is the exception.** A user manager starts at login, so unless
+lingering is on, the connector stays down after a restart until someone signs
+in. Install says so when it finds lingering off, and gives the
+`sudo loginctl enable-linger` command. Pass that on; do not run it, and do not
+tell anyone an unattended machine will come back on its own until they have.
 Pass the run's shape to install, not to the connector: `--project <id>`
 (repeatable) to hear only some projects, `--shadow` to admit and log without
 dispatching or posting anything, `--hold` to run with the durable hold set.
@@ -504,9 +510,12 @@ is running.
     systemctl --user is-active basecamp-connect-'<profile>'.service
     systemctl --user status basecamp-connect-'<profile>'.service
 
-A unit in `failed` after several restarts is a connector that cannot start;
-run `basecamp connect doctor -P '<profile>'` and explain the failed check,
-rather than reinstalling the service and watching it fail again.
+A unit in `failed` after several restarts is a connector that cannot start:
+the unit gives up after five tries rather than retrying forever and reporting
+`activating` while nothing works. Run `basecamp connect doctor -P '<profile>'`
+and explain the failed check. Once the cause is fixed, `service install` again
+— it clears the failure counter, which a bare `systemctl --user restart` does
+not, so restarting by hand from `failed` is refused until the window passes.
 
 ### The pointer lines
 
