@@ -213,10 +213,14 @@ func connectServiceUnitPath(profile string) (string, error) {
 
 // connectServiceUnit renders the unit.
 //
-// Every value in it is either the profile name, which is validated to
-// letters, numbers, hyphens and underscores, or a project id, which is
-// parsed as a number before it gets here. Nothing a person typed reaches
-// the file as text, so no directive can be smuggled in on a second line.
+// The command line holds only the profile name, validated to letters,
+// numbers, hyphens and underscores, and project ids parsed as numbers
+// before they get here, so nothing a person typed reaches it as text.
+//
+// The Environment lines are the exception and are free text: they carry
+// PATH and the XDG variables as install found them. They are quoted, and
+// connectServiceEnv refuses any that holds a newline, which is the only
+// character that could end the directive and begin another.
 func connectServiceUnit(exe, profile string, projects []int64, shadow, hold bool, env []string) string {
 	args := []string{"connect", "--profile", profile}
 	for _, id := range projects {
@@ -236,7 +240,8 @@ func connectServiceUnit(exe, profile string, projects []int64, shadow, hold bool
 	fmt.Fprintf(&b, "Description=Basecamp agent connector for profile %s\n", profile)
 	fmt.Fprintf(&b, "Documentation=https://github.com/basecamp/basecamp-cli\n")
 	fmt.Fprintf(&b, "After=network-online.target\n")
-	fmt.Fprintf(&b, "Wants=network-online.target\n\n")
+	fmt.Fprintf(&b, "Wants=network-online.target\n")
+	// [Unit], not [Service]: systemd moved the start limit here in v229.
 	fmt.Fprintf(&b, "StartLimitIntervalSec=%d\n", connectServiceStartLimitSec)
 	fmt.Fprintf(&b, "StartLimitBurst=%d\n\n", connectServiceStartLimitN)
 	fmt.Fprintf(&b, "[Service]\n")
