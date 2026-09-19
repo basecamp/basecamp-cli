@@ -316,11 +316,23 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	}
 
 	// connect.json's served projects as they are now, for admission and for
-	// dispatch alike. One reader, so the two halves of the answer cannot
-	// disagree: admission deciding against the startup file while the
-	// dispatcher read the current one is what left an unserved project's
-	// events admitted and never started — no work and no holding reply — and
-	// a newly served project's blocked until a restart (Copilot on #765).
+	// dispatch alike. What one reader buys is that neither half reads the
+	// startup file any more: both reload from the same place, share one
+	// cache, and treat a failed read the same way. Admission deciding
+	// against the file as it was at startup while the dispatcher read the
+	// current one is what left an unserved project's events admitted and
+	// never started — no work and no holding reply — and a newly served
+	// project's blocked until a restart (Copilot on #765).
+	//
+	// It is not a shared snapshot, and the sentence above is not saying it
+	// is. Admission and dispatch call Current independently, and the cache
+	// can expire between the two calls, so a setup change landing in that
+	// gap is seen by one and not the other (Copilot on #765). The
+	// difference from the bug this replaced is that the disagreement is
+	// bounded: one decision against a served set at most connectServedTTL
+	// old, where the startup file never caught up at all. Holding one
+	// snapshot across a whole decision needs a lock over setup, which is
+	// carded rather than done here.
 	served := newConnectServed(path, file, logger)
 
 	reads := admission.NewSDKReads(&basecamp.Config{BaseURL: app.Config.BaseURL}, tokens, account, connectSDKOptions()...)
