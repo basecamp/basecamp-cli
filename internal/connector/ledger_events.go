@@ -220,12 +220,18 @@ type BlockedRetryScope struct {
 	Buckets []int64
 	// Now is the moment the sweep is asking about.
 	Now time.Time
-	// Limit is the most records one sweep takes.
+	// Limit is the most records one page of the query returns.
 	Limit int
+	// AfterID pages: only records above it. The caller pages because only it
+	// knows which rows it has already claimed, and a page that came back full
+	// of claims would otherwise spend a sweep's whole budget on work nothing
+	// can do.
+	AfterID int64
 }
 
-// DueBlockedRetries returns the blocked records whose next retry has come,
-// in scope, oldest first, at most Limit of them.
+// DueBlockedRetries returns one page of the blocked records whose next retry
+// has come, in scope, oldest first, at most Limit of them and all above
+// AfterID.
 //
 // The schedule is not re-derived here. next_retry_at is what
 // admission.NextBlockedRetry answered when the verdict was written, so this
@@ -238,8 +244,8 @@ func (l *Ledger) DueBlockedRetries(ctx context.Context, scope BlockedRetryScope)
 		return nil, nil
 	}
 	where, args := scheduledBlockedWhere(scope.Buckets)
-	where += ` AND next_retry_at <= ?`
-	args = append(args, stamp(scope.Now))
+	where += ` AND next_retry_at <= ? AND id > ?`
+	args = append(args, stamp(scope.Now), scope.AfterID)
 	//nolint:gosec // G202: the clauses are this package's constants and placeholders, never values
 	rows, err := l.db.QueryContext(ctx, selectRecords+where+` ORDER BY id LIMIT ?`, append(args, scope.Limit)...)
 	if err != nil {

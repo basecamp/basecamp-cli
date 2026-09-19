@@ -209,9 +209,11 @@ type Intake struct {
 
 	repairs     sync.WaitGroup
 	repairQueue chan Loss
-	// repairQueueSize and repairSweep override the pool's defaults in tests.
+	// repairQueueSize, repairSweep and retryBatch override the defaults in
+	// tests.
 	repairQueueSize int
 	repairSweep     time.Duration
+	retryBatch      int
 	// inFlight is the losses a worker is walking or the queue is holding, so
 	// the sweeper does not offer one twice.
 	inFlight map[int64]bool
@@ -907,11 +909,23 @@ const blockedRetryBatch = 100
 // so a record is never left claimed and unoffered. It also drops the claims
 // the ledger has nothing left to say about, which is what keeps the claim set
 // the size of the backlog rather than the size of the history.
+//
+// The batch counts records offered, not records read. A row already claimed
+// is due and will stay due until admission decides it, so a batch that
+// counted those would come back full of them tick after tick and never reach
+// the rows behind — the window starvation the claim is there to prevent,
+// through the limit instead of through the offer (Copilot on #770). So it
+// pages, and the claims are filtered out of each page before the budget is
+// spent.
 func (in *Intake) sweepBlockedRetries(ctx context.Context) {
+	batch := in.retryBatch
+	if batch <= 0 {
+		batch = blockedRetryBatch
+	}
 	scope := BlockedRetryScope{
 		Buckets: in.opts.Filters.Buckets,
 		Now:     in.now(),
-		Limit:   blockedRetryBatch,
+		Limit:   batch,
 	}
 	// Pruned before the offers, from one reading: a record the schedule is
 	// finished with cannot come back, and a record that is still on it keeps
@@ -921,23 +935,36 @@ func (in *Intake) sweepBlockedRetries(ctx context.Context) {
 	} else {
 		in.pruneBlockedClaims(scheduled)
 	}
-	records, err := in.ledger.DueBlockedRetries(ctx, scope)
-	if err != nil {
-		in.log.Warn("could not read the blocked records due for a retry", "error", err)
-		return
-	}
-	for _, record := range records {
-		release, claimed := in.claimBlockedRetry(record.ID, record.Revision)
-		if !claimed {
-			continue
-		}
-		if err := in.queue.Offer(ctx, record.ID); err != nil {
-			release()
-			in.log.Warn("a blocked record due for a retry could not be offered; it stays for the next sweep",
-				"event_id", record.ID, "reason", record.Reason, "error", err)
+	for offered := 0; offered < batch; {
+		records, err := in.ledger.DueBlockedRetries(ctx, scope)
+		if err != nil {
+			in.log.Warn("could not read the blocked records due for a retry", "error", err)
 			return
 		}
-		in.log.Debug("a blocked record was offered for its timed retry", "event_id", record.ID, "reason", record.Reason)
+		if len(records) == 0 {
+			return
+		}
+		for _, record := range records {
+			scope.AfterID = record.ID
+			release, claimed := in.claimBlockedRetry(record.ID, record.Revision)
+			if !claimed {
+				continue
+			}
+			if err := in.queue.Offer(ctx, record.ID); err != nil {
+				release()
+				in.log.Warn("a blocked record due for a retry could not be offered; it stays for the next sweep",
+					"event_id", record.ID, "reason", record.Reason, "error", err)
+				return
+			}
+			in.log.Debug("a blocked record was offered for its timed retry", "event_id", record.ID, "reason", record.Reason)
+			if offered++; offered == batch {
+				return
+			}
+		}
+		if len(records) < scope.Limit {
+			// The last page: there is nothing behind it to reach.
+			return
+		}
 	}
 }
 

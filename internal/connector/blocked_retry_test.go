@@ -528,3 +528,57 @@ func TestARedispatchMakesABlockedRecordDueAtOnce(t *testing.T) {
 	assert.Equal(t, []int64{1}, dueIDs(t, ledger, BlockedRetryScope{Now: clock.Now(), Limit: 10}),
 		"and if the rerun never happens, the sweep picks it up")
 }
+
+// Copilot on #770, and it is the starvation the card named, reintroduced
+// through the back door. The claim stops a row being offered twice; it does
+// nothing if the claimed rows still spend the sweep's budget. A limit filled
+// entirely by rows already claimed offers nothing at all, tick after tick,
+// while the rows behind them are never reached.
+func TestASweepsLimitCountsWorkItCanActuallyDo(t *testing.T) {
+	intake, ledger, queue, clock := retryIntake(t)
+	ctx := context.Background()
+	intake.retryBatch = 2
+	for id := int64(1); id <= 3; id++ {
+		blockRecord(t, ledger, id, adapterBucketID, admission.ReasonReadFailed)
+	}
+	clock.Advance(admission.BlockedRetryInterval)
+
+	intake.sweepBlockedRetries(ctx)
+	require.Equal(t, 2, queue.Depth(), "the batch is two")
+	assert.Equal(t, int64(1), takeID(t, queue))
+	assert.Equal(t, int64(2), takeID(t, queue))
+
+	// Admission has not got to them, so 1 and 2 are still blocked, still due
+	// and still claimed. They are not work this sweep can do, and must not
+	// spend its budget.
+	intake.sweepBlockedRetries(ctx)
+	require.Equal(t, 1, queue.Depth(), "the record behind them is reached")
+	assert.Equal(t, int64(3), takeID(t, queue))
+}
+
+// Copilot on #770: nil is documented as "the schedule owes no attempt", and
+// the load treated it as permission to run now. Absent information is not
+// consent — a blocked record with no next attempt stays blocked until
+// something gives it one.
+func TestABlockedRecordWithNoScheduledAttemptIsNotRunnable(t *testing.T) {
+	ledger, clock := retryLedger(t)
+	ctx := context.Background()
+	ledger.SetHooks(LifecycleHooks(ledger, LifecycleOptions{}))
+	// no_route waits for the operator to serve the project: untimed, so the
+	// verdict writes no next attempt at all.
+	blockRecord(t, ledger, 1, adapterBucketID, admission.ReasonNoRoute)
+	require.Nil(t, getRecord(t, ledger, 1).Decision.NextRetryAt)
+
+	_, ok, err := ledger.Admission().LoadUndecided(ctx, 1)
+	require.NoError(t, err)
+	assert.False(t, ok, "nothing has given this record an attempt to make")
+
+	// A person is what gives an untimed record one.
+	_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
+	require.NoError(t, err)
+	_, ok, err = ledger.Admission().LoadUndecided(ctx, 1)
+	require.NoError(t, err)
+	assert.True(t, ok, "the redispatch is the attempt")
+	assert.Equal(t, []int64{1}, dueIDs(t, ledger, BlockedRetryScope{Now: clock.Now(), Limit: 10}),
+		"and if the rerun never happens, the sweep picks it up rather than stranding it")
+}
