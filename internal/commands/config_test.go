@@ -323,10 +323,14 @@ func TestIsAuthorityKey(t *testing.T) {
 // syntax is encoded, and an apostrophe in it is spliced rather than merely
 // wrapped, which is the one spelling a wrapper gets wrong.
 //
-// Both cases are asked of richtext.ShellQuote rather than spelled out, so
-// they mean the same thing on a platform whose paths are not built from
-// inert characters. Whether an ordinary path comes out bare is a POSIX
-// question and is pinned in internal/config/trust_unix_test.go.
+// The expectation is asked of richtext.ShellQuote rather than spelled out,
+// because this path is absolute and so is rooted in whatever the host calls
+// its temporary directory — a spelling that may hold apostrophes or spaces
+// of its own, and that is different again on Windows. Comparing against the
+// encoder means the same thing on every machine. Whether an ordinary path
+// comes out bare cannot be asked of an absolute path for that reason; it is
+// pinned against a fixed relative fixture in
+// internal/config/trust_unix_test.go.
 func TestConfigSet_AuthorityKeyWarnsWithPath(t *testing.T) {
 	for name, dir := range map[string]string{
 		"an ordinary path":             "plain",
@@ -363,9 +367,12 @@ func TestConfigSet_AuthorityKeyWarnsWithPath(t *testing.T) {
 			assert.Contains(t, stderr, "requires trust")
 			assert.Contains(t, stderr, "basecamp config trust "+richtext.ShellQuote(absPath),
 				"the warning must name the command with the path encoded for a shell")
-			if dir == "plain" {
-				assert.Contains(t, stderr, absPath, "the path itself appears in the command a person pastes")
-			} else {
+			// Only the apostrophe fixture gets extra assertions. The
+			// ordinary one is covered by the exact ShellQuote comparison
+			// above; asking it for a raw substring would be asking about
+			// TMPDIR, which may hold an apostrophe of its own and would
+			// then correctly be spliced (Copilot on #769).
+			if dir != "plain" {
 				assert.NotContains(t, stderr, absPath, "a path with an apostrophe cannot appear raw")
 				assert.Contains(t, stderr, `'\''`, "the apostrophe must be spliced out and back in")
 			}

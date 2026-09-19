@@ -245,27 +245,31 @@ func TestLoadTrustStore_EmptyDir(t *testing.T) {
 // spliced out of the quotes and back in, since no escape reaches inside
 // single quotes — and that holds wherever this builds.
 //
+// The fixture is a relative path under a directory this test changes into,
+// so the expectation is an exact string rather than a substring of whatever
+// the host spells its temporary directory as. TMPDIR may itself hold
+// apostrophes or spaces, and a quoting test rooted in it would be asserting
+// something about the machine (Copilot on #769).
+//
 // The other half of the change lives in trust_unix_test.go: this package's
 // deleted copy wrapped every value whether or not it needed it, and the
 // shared richtext.ShellQuote leaves an inert one alone. That is a statement
 // about POSIX paths only. A Windows path carries backslashes, which mean
 // something to a shell, so there is no bare path to assert there — and the
 // Go suite runs on Linux, so an ungated assertion about it would have gone
-// on passing while being wrong for everyone who runs the tests on Windows
-// (Copilot on #769).
+// on passing while being wrong for everyone who runs the tests on Windows.
 func TestTheTrustWarningSplicesAnApostropheInThePath(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "o'brien")
-	require.NoError(t, os.MkdirAll(dir, 0o755))
-	configPath := filepath.Join(dir, "config.json")
+	t.Chdir(t.TempDir())
+	const configPath = "o'brien/config.json"
+	require.NoError(t, os.MkdirAll("o'brien", 0o755))
 	require.NoError(t, os.WriteFile(configPath, []byte(`{"base_url": "https://evil.example.com"}`), 0o644))
 
-	want := "basecamp config trust " + richtext.ShellQuote(configPath) + "`"
-	require.Contains(t, want, `'\''`, "an apostrophe must be spliced, not wrapped")
-	require.NotContains(t, want, "/o'brien/", "and the raw apostrophe must not survive")
+	// quote, backslash, quote, quote — the splice, not a wrapper.
+	require.Equal(t, `'o'\''brien/config.json'`, richtext.ShellQuote(configPath))
 
 	assert.Contains(t, captureStderr(t, func() {
 		loadFromFile(Default(), configPath, SourceLocal, nil)
-	}), want)
+	}), "basecamp config trust "+`'o'\''brien/config.json'`+"`")
 }
 
 // captureStderr runs fn with os.Stderr redirected and returns what it wrote.
