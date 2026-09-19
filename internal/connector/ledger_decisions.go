@@ -468,9 +468,12 @@ WHERE event_id = ? AND state = 'pending' AND kind IN ('guard_ack', 'holding_repl
 // AuthorizedBlocked lists blocked records a person authorized, oldest first:
 // authorized since the record entered its current run of blocked states, so
 // an authorization that answered an earlier outcome does not count.
-// The redispatch command runs the prerequisite itself; this is for the
-// blocked-record recovery schedule to run it again when that did not settle
-// it (the schedule is plan step 22's, and nothing calls this yet).
+// The redispatch command runs the prerequisite itself; this would be for
+// running it again when that did not settle it. Nothing calls it. The timed
+// retry that now runs (Intake.sweepBlockedRetries) is not it: that schedule
+// is keyed on the reason, not on who authorized the record, and the reasons
+// it leaves alone — no_route, unroutable, bucket_mismatch — are the ones a
+// re-run on a timer could only repeat the same answer for.
 func (l *Ledger) AuthorizedBlocked(ctx context.Context, limit int) ([]int64, error) {
 	rows, err := l.db.QueryContext(ctx, `SELECT id FROM events WHERE state = 'blocked' AND authorized_at >= blocked_at ORDER BY id LIMIT ?`, limit)
 	if err != nil {
@@ -510,10 +513,19 @@ func pendingNote(task eventTask) string {
 // authorization counts for that block only when it is not older than it
 // (AuthorizedBlocked), and neither a move's own later stamp nor a clock that
 // stepped back may make a fresh one look stale.
+// It also makes the record due now, whatever it was blocked on. A person
+// asking for a rerun is not a timer and does not wait for one: the redispatch
+// command runs admission itself straight after this, and a blocked record
+// with no attempt owed it is not one admission will load (LoadUndecided) —
+// which is every untimed reason, no_route above all, the one a person is
+// most likely to redispatch. Writing "due now" rather than leaving the
+// schedule as it was is also what keeps a rerun that never happened — the
+// command died between the two — on the sweep's list instead of stranding it.
 func authorizeBlocked(ctx context.Context, tx *sql.Tx, eventID int64, now, by string) error {
 	if _, err := tx.ExecContext(ctx, `
-UPDATE events SET authorized_at = MAX(?, COALESCE(blocked_at, '')), authorized_by = ?
-WHERE id = ? AND state = 'blocked'`, now, by, eventID); err != nil {
+UPDATE events SET authorized_at = MAX(?, COALESCE(blocked_at, '')), authorized_by = ?,
+                  next_retry_at = ?
+WHERE id = ? AND state = 'blocked'`, now, by, now, eventID); err != nil {
 		return fmt.Errorf("connector: authorize event %d: %w", eventID, err)
 	}
 	return nil

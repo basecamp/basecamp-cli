@@ -41,7 +41,9 @@ const (
 	// StateQueued waits behind another event on its conversation.
 	StateQueued RecordState = "queued"
 	// StateBlocked is retained and retried: a reason, never a transport
-	// failure dressed up as a verdict.
+	// failure dressed up as a verdict. Retried by the intake sweep, on
+	// admission.NextBlockedRetry's schedule (Intake.sweepBlockedRetries), and
+	// by a person at any time with `basecamp connect redispatch <id>`.
 	StateBlocked RecordState = "blocked"
 	// StateDispatched was handed to a worker.
 	StateDispatched RecordState = "dispatched"
@@ -891,7 +893,68 @@ END;
 	// Nothing on disk is touched. A directory a connector ran work in is
 	// still there, still whatever the worker left in it.
 	migrationDropRoutePaths,
+
+	// Migration 14. The blocked-record retry schedule, written onto the row
+	// the verdict is written on.
+	//
+	// retry_since is when the record entered its CURRENT blocked reason, and
+	// that is the whole reason it is not blocked_at. blocked_at is when the
+	// record entered its current run of blocked states and survives every
+	// blocked-to-blocked verdict, which is right for what reads it (a
+	// person's authorization, AuthorizedBlocked) and wrong for a window: the
+	// reasons carry different ones. A record that spent a week as the
+	// unbounded config_unreadable and then blocks read_failed would be
+	// measured against a week-old clock and get none of the twenty-four
+	// hours read_failed promises — the retry stranding the work it is there
+	// to recover (Copilot on #770).
+	//
+	// next_retry_at is admission.NextBlockedRetry's answer, stored: the
+	// moment the record is next owed an attempt, and NULL when it is owed
+	// none — an untimed reason, a window that has passed, or any state but
+	// blocked. It is written by the one move that writes the state, so it
+	// cannot disagree with the row it is on, and the sweep's query is an
+	// indexed comparison against it rather than a scan that dates every
+	// blocked row in the ledger from the beginning of its history.
+	//
+	// The backfill gives every blocked record on a timed reason one attempt
+	// now, and the ordinary schedule takes over from its verdict — except
+	// that it never asks before a deadline a server already named.
+	// MAX(decided_at, retry_at) is what "one attempt now, and not before the
+	// throttle is over" means as one expression; a throttled row whose
+	// retry_at has passed is due like any other, and a row with no retry_at
+	// at all — every reason but throttled, and any throttled row written
+	// before the column existed — is due at the next sweep, which is the
+	// attempt nothing had computed for it. Copying decided_at alone would
+	// have retried into an active throttle, which is how a rate limit
+	// becomes a harder one (Copilot on #770).
+	//
+	// The reason list is written out here rather than shared with the Go
+	// one: a migration says what was true at its own version, and it must
+	// keep saying that after the code moves on.
+	//
+	// It is not reversible and does not try to be. A ledger newer than the
+	// running build is refused at open (ErrLedgerSchema), so a downgrade
+	// never reads these rows rather than reading them wrongly; the columns
+	// are additive, so an older build that did open it would ignore them.
+	// It is run-once rather than idempotent: the migration runner applies it
+	// inside a transaction only when schema_migrations is short of 14, and
+	// its ALTER TABLE would refuse a second run outright rather than
+	// backfill twice.
+	migrationBlockedRetrySchedule,
 }
+
+// migrationBlockedRetrySchedule is migration 14.
+const migrationBlockedRetrySchedule = `
+ALTER TABLE events ADD COLUMN retry_since   TEXT;
+ALTER TABLE events ADD COLUMN next_retry_at TEXT;
+UPDATE events SET retry_since = blocked_at,
+                 next_retry_at = MAX(decided_at, COALESCE(retry_at, decided_at))
+WHERE state = 'blocked' AND decided_at IS NOT NULL AND reason IN (
+  'read_failed', 'read_unresolved', 'delta_unverified',
+  'trust_unverified', 'throttled', 'config_unreadable'
+);
+CREATE INDEX events_next_retry ON events (state, next_retry_at);
+`
 
 // migrationDropRoutePaths is migration 13: the route's path, everywhere the
 // ledger held it. The index is dropped before its column, which is what

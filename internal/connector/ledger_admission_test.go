@@ -99,9 +99,18 @@ func TestAdmissionLoadsAnUndecidedRecordAtItsRevision(t *testing.T) {
 	}, ev)
 	assert.False(t, ev.SeenAt.IsZero(), "admission dates membership refusals from SeenAt")
 
-	// A blocked record is decided again, at the revision its verdict left.
+	// A blocked record is decided again, at the revision its verdict left —
+	// once its own schedule says so, and not before, whoever hands the id
+	// over (LoadUndecided).
+	at := ledger.now()
+	ledger.now = func() time.Time { return at }
 	_, err = store.Commit(ctx, blockedVerdict(1, 0, admission.ReasonReadFailed))
 	require.NoError(t, err)
+	_, ok, err = store.LoadUndecided(ctx, 1)
+	require.NoError(t, err)
+	require.False(t, ok, "its next attempt is ten minutes away")
+
+	ledger.now = func() time.Time { return at.Add(admission.BlockedRetryInterval) }
 	ev, ok, err = store.LoadUndecided(ctx, 1)
 	require.NoError(t, err)
 	require.True(t, ok)

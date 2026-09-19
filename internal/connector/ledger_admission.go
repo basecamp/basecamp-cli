@@ -42,12 +42,32 @@ var undecided = []RecordState{StateSeen, StateBlocked}
 // LoadUndecided loads a seen or blocked record as the event admission decides,
 // with the revision it was loaded at. An unknown id, or a record past
 // deciding, is not ok and is skipped.
+//
+// A blocked record is loaded only when something has given it an attempt to
+// make, and only once that attempt is due — whoever handed the id over. The
+// queue carries an id and not the revision it was claimed at, and `basecamp
+// connect redispatch` runs beside a live connector, so a person can re-decide
+// a record between the sweep's offer and admission taking it; without this,
+// admission would load the newer revision and decide it at once, inside the
+// interval that re-decision had just written (Copilot on #770).
+//
+// No next_retry_at means no attempt is owed — an untimed reason, or a window
+// that has passed — and that is a reason to stay blocked, not permission to
+// run. Absent information is not consent: read the other way, a record with
+// no schedule would be eligible immediately and on every tick after it. What
+// gives an untimed record an attempt is a person: a redispatch stamps
+// next_retry_at as it authorizes (authorizeBlocked), so the rerun it asks for
+// runs at once and a rerun that never happened is picked up by the sweep
+// rather than stranded.
 func (a Admission) LoadUndecided(ctx context.Context, id int64) (admission.Event, bool, error) {
 	record, ok, err := a.ledger.Get(ctx, id)
 	if err != nil || !ok {
 		return admission.Event{}, false, err
 	}
 	if record.State != StateSeen && record.State != StateBlocked {
+		return admission.Event{}, false, nil
+	}
+	if next := record.Decision.NextRetryAt; record.State == StateBlocked && (next == nil || next.After(a.ledger.now())) {
 		return admission.Event{}, false, nil
 	}
 	return admission.Event{

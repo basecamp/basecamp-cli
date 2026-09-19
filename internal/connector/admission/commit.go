@@ -135,15 +135,42 @@ func (k *keyedMutex) lock(ctx context.Context, key string) (func(), error) {
 // unverified assignment delta is retried every ten minutes for a day after it
 // was first blocked, and on redispatch at any time after that. A throttled
 // record (throttled) is on the same schedule, never before the server's
-// deadline. bucket_mismatch
-// and unroutable are not timed: the pointer's bucket and type never change, so
-// only a person's redispatch re-runs them. A blocked record is never
-// discarded for having failed: the checkpoint may already be past the event,
-// and a tombstone would turn an outage into a permanent loss.
+// deadline. A record blocked because connect.json could not be read
+// (config_unreadable) is on the same interval with no window at all: that is
+// a local file a person repairs, and an operator away for a week is
+// ordinary, where a day of a failing server means the server is not coming
+// back on its own. bucket_mismatch and unroutable are not timed: the
+// pointer's bucket and type never change, so only a person's redispatch
+// re-runs them. no_route is not timed either — it waits for the operator to
+// serve the project, which is a decision, not a delay. A blocked record is
+// never discarded for having failed: the checkpoint may already be past the
+// event, and a tombstone would turn an outage into a permanent loss.
+//
+// The intake sweep is what runs this schedule (internal/connector,
+// Intake.sweepBlockedRetries): it asks the ledger for the records this
+// function calls due and offers them back to admission.
 const (
 	BlockedRetryInterval = 10 * time.Minute
 	BlockedRetryWindow   = 24 * time.Hour
 )
+
+// timedBlockedReasons is every blocked reason the schedule re-runs, and for
+// each whether its retries stop at BlockedRetryWindow.
+//
+// NextBlockedRetry is its only reader, and that is the whole of how a reason
+// reaches the sweep: the answer is computed once, when the verdict is
+// written, and stored on the row (events.next_retry_at). The ledger's queries
+// never see a reason — they compare that stored moment. A second filter by
+// reason down there could only ever repeat this one, and would be a copy of
+// the schedule that could fall out of step with it (Copilot on #770).
+var timedBlockedReasons = map[Reason]bool{
+	ReasonReadFailed:       true,
+	ReasonReadUnresolved:   true,
+	ReasonDeltaUnverified:  true,
+	ReasonTrustUnverified:  true,
+	ReasonThrottled:        true,
+	ReasonConfigUnreadable: false,
+}
 
 // NextBlockedRetry returns when a blocked record should next be re-run, and
 // false when it waits for something other than time: the operator serving the
@@ -151,17 +178,28 @@ const (
 // notBefore is a throttled record's Verdict.RetryAt; no retry is scheduled
 // before it, and a deadline past the window hands the record to redispatch
 // rather than asking early.
-func NextBlockedRetry(reason Reason, blockedAt, lastAttempt, notBefore time.Time) (time.Time, bool) {
-	switch reason {
-	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified, ReasonTrustUnverified, ReasonThrottled:
-	default:
+//
+// since is when the record entered the reason it is blocked on NOW, which is
+// not when it entered blocked. The reasons carry different windows, so a
+// record that spent a week as the unbounded config_unreadable and then blocks
+// read_failed must get read_failed's twenty-four hours from the moment
+// read_failed began; measured from the older stamp it would get none, which
+// is the retry stranding the work it is there to recover (Copilot on #770).
+// The ledger keeps that stamp per reason (events.retry_since).
+//
+// The returned time may be in the past — a connector that was not running
+// when a retry came due is late, not excused — so a caller asks whether next
+// is at or before now, never whether it is in the future.
+func NextBlockedRetry(reason Reason, since, lastAttempt, notBefore time.Time) (time.Time, bool) {
+	bounded, timed := timedBlockedReasons[reason]
+	if !timed {
 		return time.Time{}, false
 	}
 	next := lastAttempt.Add(BlockedRetryInterval)
 	if notBefore.After(next) {
 		next = notBefore
 	}
-	if next.After(blockedAt.Add(BlockedRetryWindow)) {
+	if bounded && next.After(since.Add(BlockedRetryWindow)) {
 		return time.Time{}, false
 	}
 	return next, true

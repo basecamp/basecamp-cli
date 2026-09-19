@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
 
 // Record is one row of the events table.
@@ -54,6 +56,15 @@ type Decision struct {
 	BlockedAt *time.Time
 	// RetryAt is a throttled verdict's server deadline; nil otherwise.
 	RetryAt *time.Time
+	// RetrySince is when the record entered the reason it is blocked on now
+	// — not when it entered blocked, which is BlockedAt. The retry window is
+	// the reason's, so it counts from here.
+	RetrySince *time.Time
+	// NextRetryAt is when the schedule next owes this record an attempt, as
+	// admission.NextBlockedRetry answered when the verdict was written. Nil
+	// when it owes none: an untimed reason, a window that has passed, or any
+	// state but blocked.
+	NextRetryAt *time.Time
 
 	Trigger          string
 	Acknowledge      bool
@@ -192,6 +203,130 @@ func (l *Ledger) CountInState(ctx context.Context, state RecordState) (int, erro
 	return n, nil
 }
 
+// BlockedRetryScope narrows DueBlockedRetries to what this run may decide.
+type BlockedRetryScope struct {
+	// Buckets is the run's --project scope — the same slice admission's
+	// policy gates on, with the same meaning: empty is a run restricted to no
+	// project, which is every project the agent can see, NOT no project at
+	// all.
+	//
+	// It is not optional, and it is not a detail. out_of_scope is a terminal
+	// discard, and the projects a run leaves out are another run's to
+	// dispatch: a sweep that offered a record from outside its scope would
+	// cause the permanent loss the retry exists to prevent. Every other
+	// terminal verdict a re-offered record can reach — stale, not_addressed,
+	// untrusted_performer, agent_authored — is the verdict a fresh event
+	// would get, and is correct.
+	Buckets []int64
+	// Now is the moment the sweep is asking about.
+	Now time.Time
+	// Limit is the most records one page of the query returns.
+	Limit int
+	// AfterRetryAt and AfterID are one cursor, in the order the query returns
+	// rows: the next page is what sorts after them. The caller pages because
+	// only it knows which rows it has already claimed, and a page that came
+	// back full of claims would otherwise spend a sweep's whole budget on
+	// work nothing can do.
+	//
+	// The cursor is the due time first and the id second because that is the
+	// order events_next_retry holds, and paging in any other order is what
+	// makes the query ignore it. Their zero values are before every row.
+	AfterRetryAt time.Time
+	AfterID      int64
+}
+
+// DueBlockedRetries returns one page of the blocked records whose next retry
+// has come, in scope, the longest overdue first, at most Limit of them and
+// all sorting after the cursor.
+//
+// The schedule is not re-derived here. next_retry_at is what
+// admission.NextBlockedRetry answered when the verdict was written, so this
+// is an indexed comparison against a stored moment rather than a scan that
+// dates every blocked row the ledger has ever held. A record the schedule is
+// finished with has no next_retry_at and is not read at all (Copilot on
+// #770).
+//
+// That only holds if the query is ordered the way events_next_retry is.
+// Ordered by id instead, SQLite planned it against events_state_id and
+// walked every blocked row the ledger has ever held, filtering next_retry_at
+// after the fact — the index present, the schema right, the tests green, and
+// the scan the stored due time exists to remove happening anyway (Copilot on
+// #770). The plan is the thing that has to be checked, and
+// TestTheSweepsQueriesUseTheDueTimeIndex checks it.
+func (l *Ledger) DueBlockedRetries(ctx context.Context, scope BlockedRetryScope) ([]Record, error) {
+	if scope.Limit <= 0 {
+		return nil, nil
+	}
+	where, args := scheduledBlockedWhere(scope.Buckets)
+	where += ` AND next_retry_at <= ? AND (next_retry_at, id) > (?, ?)`
+	args = append(args, stamp(scope.Now), stamp(scope.AfterRetryAt), scope.AfterID)
+	//nolint:gosec // G202: the clauses are this package's constants and placeholders, never values
+	rows, err := l.db.QueryContext(ctx, selectRecords+where+blockedRetryOrder+` LIMIT ?`, append(args, scope.Limit)...)
+	if err != nil {
+		return nil, fmt.Errorf("connector: list blocked records due for a retry: %w", err)
+	}
+	return scanRecords(rows)
+}
+
+// blockedRetryOrder is the order events_next_retry holds, and the only order
+// either query may ask for: id is the rowid, so an index entry is
+// (state, next_retry_at, id) and this needs no sort at all. Asking for any
+// other order sends both queries to events_state_id and the whole blocked
+// history.
+const blockedRetryOrder = ` ORDER BY next_retry_at, id`
+
+// ScheduledBlockedIDs is every record in scope the retry schedule still has
+// something to do about, due now or later.
+//
+// It is the live bound on the sweep's claims: a claim is worth keeping only
+// while the record it names can still be offered, and a record that has been
+// decided, or whose window has passed, can never be. Without it the claim set
+// held one entry per record ever retried and dropped none (Copilot on #770).
+//
+// It is deliberately unlimited. A short answer would read as "these are all
+// the records still on the schedule" and prune the claims of the ones it left
+// out, which is the offer-twice this whole mechanism exists to prevent. The
+// set it returns is the connector's live backlog, not its history.
+//
+// It comes back in the schedule's order rather than by id, for the reason
+// DueBlockedRetries does: asked for id order, SQLite reads every blocked row
+// the ledger holds instead of only the scheduled ones. The caller reads it as
+// a set, so the order is the index's to choose.
+func (l *Ledger) ScheduledBlockedIDs(ctx context.Context, scope BlockedRetryScope) ([]int64, error) {
+	where, args := scheduledBlockedWhere(scope.Buckets)
+	//nolint:gosec // G202: the clauses are this package's constants and placeholders, never values
+	rows, err := l.db.QueryContext(ctx, `SELECT id FROM events`+where+blockedRetryOrder, args...)
+	if err != nil {
+		return nil, fmt.Errorf("connector: list blocked records on the retry schedule: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// scheduledBlockedWhere selects the blocked records the schedule still runs,
+// narrowed to buckets. Both queries are built from it so neither can read a
+// different set from the other.
+func scheduledBlockedWhere(buckets []int64) (string, []any) {
+	where := ` WHERE state = ? AND next_retry_at IS NOT NULL`
+	args := []any{string(StateBlocked)}
+	if len(buckets) > 0 {
+		scoped := slices.Compact(slices.Sorted(slices.Values(buckets)))
+		where += ` AND bucket_id IN (` + placeholders(len(scoped)) + `)`
+		for _, bucket := range scoped {
+			args = append(args, bucket)
+		}
+	}
+	return where, args
+}
+
 // lifecycle is the ledger's state machine: for each state, the states a record
 // may move to from it.
 //
@@ -202,7 +337,8 @@ func (l *Ledger) CountInState(ctx context.Context, state RecordState) (int, erro
 // twice, or where a tombstone whose payload has been dropped is picked up as
 // work with nothing in it.
 //
-// Blocked is not terminal on purpose: it is retained and retried, so it has
+// Blocked is not terminal on purpose: it is retained and retried — on the
+// timer DueBlockedRetries feeds, and on a person's redispatch — so it has
 // edges back into the working states. Completed and discarded have none.
 var lifecycle = map[RecordState][]RecordState{
 	// seen to queued is one edge, not two: admission commits an admitted
@@ -357,18 +493,25 @@ func (l *Ledger) move(ctx context.Context, db dbtx, t transition) (bool, error) 
 	// retry_at holds only for the move that set it. And a record moving to
 	// blocked or discarded loses its snapshot: only a record on its way to a
 	// worker carries content.
-	now := l.timestamp()
+	at := l.now()
+	now := stamp(at)
 	var retryAt any
 	if !t.retryAt.IsZero() {
 		retryAt = stamp(t.retryAt)
+	}
+	retrySince, nextRetry, err := l.blockedSchedule(ctx, db, t, at)
+	if err != nil {
+		return false, err
 	}
 	var query strings.Builder
 	query.WriteString(`UPDATE events SET state = ?, reason = ?, revision = revision + 1,
   updated_at = CASE WHEN state = ? THEN updated_at ELSE ? END,
   blocked_at = CASE WHEN ? <> 'blocked' THEN NULL ELSE COALESCE(blocked_at, ?) END,
   retry_at = ?,
+  retry_since = ?,
+  next_retry_at = ?,
   snapshot = CASE WHEN ? IN ('blocked', 'discarded') THEN NULL ELSE snapshot END`)
-	args := []any{string(t.state), t.reason, string(t.state), now, string(t.state), now, retryAt, string(t.state)}
+	args := []any{string(t.state), t.reason, string(t.state), now, string(t.state), now, retryAt, retrySince, nextRetry, string(t.state)}
 	for _, a := range t.set {
 		query.WriteString(", " + a.column + " = ?")
 		args = append(args, a.value)
@@ -411,6 +554,55 @@ func (l *Ledger) move(ctx context.Context, db dbtx, t transition) (bool, error) 
 		return false, fmt.Errorf("connector: set state of %d: %w", t.id, err)
 	}
 	return affected > 0, nil
+}
+
+// blockedSchedule is the retry schedule this move writes: when the record
+// entered the reason it will be blocked on, and when it is next owed an
+// attempt. Both are nil for any state but blocked, and next is nil for a
+// blocked record the schedule does not run — an untimed reason, or a window
+// that has passed.
+//
+// The window start is per REASON, not per block. blocked_at survives every
+// blocked-to-blocked verdict, which is right for the person's authorization
+// that reads it and wrong here: a record that spent a week as the unbounded
+// config_unreadable and then blocks read_failed would be measured against a
+// week-old clock and get none of read_failed's twenty-four hours (Copilot on
+// #770).
+//
+// It reads the row it is about to write, which every caller that writes a
+// verdict does inside its own transaction. Outside one the read could in
+// principle see a row another writer is changing — but AcquireInstanceLock is
+// a flock keyed on account and agent, so there is no other writer, and the
+// UPDATE's own revision and state guards are what keep the move correct
+// either way. Only the schedule stamp could be stale, and only in a case the
+// lock does not allow.
+func (l *Ledger) blockedSchedule(ctx context.Context, db dbtx, t transition, at time.Time) (since, next any, err error) {
+	if t.state != StateBlocked {
+		return nil, nil, nil
+	}
+	var (
+		wasState, wasReason string
+		wasSince            sql.NullString
+	)
+	switch err := db.QueryRowContext(ctx,
+		`SELECT state, reason, retry_since FROM events WHERE id = ?`, t.id).Scan(&wasState, &wasReason, &wasSince); {
+	case errors.Is(err, sql.ErrNoRows):
+		// No row to move. The UPDATE matches nothing and says so.
+		return nil, nil, nil
+	case err != nil:
+		return nil, nil, fmt.Errorf("connector: read the retry schedule of %d: %w", t.id, err)
+	}
+	sinceAt := at
+	if wasState == string(StateBlocked) && wasReason == t.reason && wasSince.Valid {
+		if sinceAt, err = parseStamp(wasSince.String); err != nil {
+			return nil, nil, err
+		}
+	}
+	since = stamp(sinceAt)
+	if due, ok := admission.NextBlockedRetry(admission.Reason(t.reason), sinceAt, at, t.retryAt); ok {
+		next = stamp(due)
+	}
+	return since, next, nil
 }
 
 // heldByWorker is true of a dispatched events row a worker was handed and
@@ -507,7 +699,8 @@ const selectRecords = `
 SELECT id, state, reason, lane, event_type, kind, action, bucket_id, creator_id,
        performed_by_id, recording_id, details, actor_type, visible_to_clients,
        created_at, seen_at, updated_at, content_dropped, revision, decided_at,
-       blocked_at, retry_at, trigger_name, acknowledge, conversation_key,
+       blocked_at, retry_at, retry_since, next_retry_at,
+       trigger_name, acknowledge, conversation_key,
        reply_kind, reply_recording_id, served, class, recording_url,
        requester_id, snapshot
 FROM events`
@@ -526,7 +719,8 @@ func scanRecords(rows *sql.Rows) ([]Record, error) {
 			performedBy                  sql.NullInt64
 			visibleToClients             sql.NullBool
 			decidedAt, blockedAt         sql.NullString
-			retryAt                      sql.NullString
+			retryAt, retrySince          sql.NullString
+			nextRetryAt                  sql.NullString
 			acknowledge, served          int
 			snapshot                     []byte
 			d                            = &r.Decision
@@ -535,7 +729,7 @@ func scanRecords(rows *sql.Rows) ([]Record, error) {
 			&r.Action, &r.BucketID, &r.CreatorID, &performedBy, &r.RecordingID,
 			&details, &r.ActorType, &visibleToClients, &createdAt, &seenAt,
 			&updatedAt, &contentDropped, &r.Revision, &decidedAt, &blockedAt,
-			&retryAt, &d.Trigger, &acknowledge, &d.ConversationKey, &d.ReplyKind,
+			&retryAt, &retrySince, &nextRetryAt, &d.Trigger, &acknowledge, &d.ConversationKey, &d.ReplyKind,
 			&d.ReplyRecordingID, &served, &d.Class, &d.RecordingURL,
 			&d.RequesterID, &snapshot); err != nil {
 			return nil, fmt.Errorf("connector: scan event record: %w", err)
@@ -571,7 +765,8 @@ func scanRecords(rows *sql.Rows) ([]Record, error) {
 		for _, stamped := range []struct {
 			raw sql.NullString
 			to  **time.Time
-		}{{decidedAt, &d.DecidedAt}, {blockedAt, &d.BlockedAt}, {retryAt, &d.RetryAt}} {
+		}{{decidedAt, &d.DecidedAt}, {blockedAt, &d.BlockedAt}, {retryAt, &d.RetryAt},
+			{retrySince, &d.RetrySince}, {nextRetryAt, &d.NextRetryAt}} {
 			if !stamped.raw.Valid {
 				continue
 			}

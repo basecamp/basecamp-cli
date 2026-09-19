@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -246,6 +247,43 @@ func TestNextBlockedRetry(t *testing.T) {
 
 	_, ok = NextBlockedRetry(ReasonNoRoute, blockedAt, blockedAt, time.Time{})
 	assert.False(t, ok, "no_route waits for connect.json, not for time")
+
+	// config_unreadable is the one reason with no window. A day of a failing
+	// server means the server is not coming back on its own; a broken
+	// connect.json is a local file, and an operator away for a week is
+	// ordinary.
+	next, ok = NextBlockedRetry(ReasonConfigUnreadable, blockedAt, blockedAt, time.Time{})
+	require.True(t, ok)
+	assert.Equal(t, blockedAt.Add(10*time.Minute), next)
+	next, ok = NextBlockedRetry(ReasonConfigUnreadable, blockedAt, blockedAt.Add(30*24*time.Hour), time.Time{})
+	require.True(t, ok, "a month later it is still asking")
+	assert.Equal(t, blockedAt.Add(30*24*time.Hour+10*time.Minute), next)
+}
+
+// Which reasons automatic re-decision is turned on for, stated as a set
+// rather than read off the implementation: this is the feature, and a reason
+// joining or leaving it is a decision somebody makes, not a diff nobody
+// notices.
+func TestTheScheduleRunsExactlySixReasons(t *testing.T) {
+	every := []Reason{
+		ReasonInvalidPointer, ReasonNotInMatrix, ReasonAgentAuthored, ReasonDelegated,
+		ReasonOutOfScope, ReasonUntrustedPerformer, ReasonAssignmentNotOperator,
+		ReasonUntrustedAuthor, ReasonStale, ReasonNotAddressed,
+		ReasonReadFailed, ReasonReadUnresolved, ReasonThrottled, ReasonTrustUnverified,
+		ReasonDeltaUnverified, ReasonBucketMismatch, ReasonUnroutable, ReasonNoRoute,
+		ReasonConfigUnreadable,
+	}
+	var scheduled []Reason
+	for _, reason := range every {
+		if _, ok := NextBlockedRetry(reason, testNow, testNow, time.Time{}); ok {
+			scheduled = append(scheduled, reason)
+		}
+	}
+	slices.Sort(scheduled)
+	assert.Equal(t, []Reason{
+		ReasonConfigUnreadable, ReasonDeltaUnverified, ReasonReadFailed,
+		ReasonReadUnresolved, ReasonThrottled, ReasonTrustUnverified,
+	}, scheduled, "the six reasons automatic re-decision is turned on for")
 }
 
 type sliceSource struct {
