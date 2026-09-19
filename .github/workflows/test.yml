@@ -193,6 +193,16 @@ jobs:
       - name: Test the skill drift check
         run: make test-skill-drift
 
+      # Same Ruby the eval runner gets, because the point of the check is the
+      # engine: these patterns are Onigmo, and Go's RE2 guard cannot see them.
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: '3.3'
+
+      - name: Compile the skill-eval patterns
+        run: make check-eval-patterns
+
   cli-surface:
     name: CLI Surface Check
     runs-on: ubuntu-latest
@@ -231,12 +241,19 @@ jobs:
         if: always()
         run: git worktree remove /tmp/baseline-tree --force 2>/dev/null || true
 
-  skill-eval:
-    name: Skill Evals
+  # Whether the evals can run at all, answered before the job that would run
+  # them. Split out because a job cannot skip itself: a step-level `if` leaves
+  # the job green, and "Skill Evals: success" with no case run is the reading
+  # this repository actually had. A `needs` + job-level `if` reports Skipped,
+  # which is what happened.
+  skill-eval-gate:
+    name: Skill Evals (preflight)
     runs-on: ubuntu-latest
     permissions:
       contents: read
     if: github.event_name == 'pull_request'
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -246,26 +263,79 @@ jobs:
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
+          # test.yml is in its own filter so the job proves itself on the PR
+          # that introduces or edits it.
           filters: |
             skill:
               - 'skills/basecamp/SKILL.md'
               - 'skills/basecamp-connect/SKILL.md'
               - 'skill-evals/**'
+              - '.github/workflows/test.yml'
+
+      - name: Decide whether the evals can run
+        id: decide
+        env:
+          CHANGED: ${{ steps.filter.outputs.skill }}
+          # Presence only, never the value. Fork PRs receive no secrets, so this
+          # is false there by construction and the skip below is the honest
+          # answer for them too.
+          HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }} # zizmor: ignore[secrets-outside-env] -- a presence test, not the key; adding an environment would block PR-triggered runs
+        run: |
+          if [ "$CHANGED" != "true" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No skill or eval changes on this pull request." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          cases=$(find skill-evals/cases -name '*.yml' | wc -l | tr -d ' ')
+
+          if [ "$HAS_KEY" != "true" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Skill Evals did not run::ANTHROPIC_API_KEY is not configured for this repository, so none of the $cases eval cases were run on a pull request that changes them. The Skill Evals job below reports Skipped, not success."
+            {
+              echo "### Skill Evals: NOT RUN"
+              echo
+              echo "This pull request changes a skill or its evals, and **$cases eval cases were not run**."
+              echo "\`ANTHROPIC_API_KEY\` is not configured for this repository, and fork pull requests never receive secrets."
+              echo
+              echo "What still covers these files:"
+              echo "- \`make check-eval-patterns\` compiles every pattern in every case under Onigmo, the engine the runner uses."
+              echo "- \`TestConnectSkillEvalRejectsHoldTheServeValueRule\` holds the \`--serve\` value rule in the connector cases."
+              echo
+              echo "Neither runs a case. If these evals must gate this repository, configure the secret; until then this job is Skipped rather than green."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+  skill-eval:
+    name: Skill Evals
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: skill-eval-gate
+    if: needs.skill-eval-gate.outputs.run == 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Ruby
-        if: steps.filter.outputs.skill == 'true'
         uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
         with:
           ruby-version: '3.3'
 
       - name: Run skill evals
-        if: steps.filter.outputs.skill == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }} # zizmor: ignore[secrets-outside-env] -- fork PRs don't receive secrets so untrusted code never sees the key; adding an environment would block PR-triggered runs
         run: |
+          # The gate decided the key is there. If it is not, the gate is broken,
+          # and that is a failure rather than a quiet exit 0 — the whole point
+          # of this job is that it never reports success without running a case.
           if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "::warning::ANTHROPIC_API_KEY not configured, skipping skill evals"
-            exit 0
+            echo "::error::the preflight said the evals could run, but ANTHROPIC_API_KEY is empty here"
+            exit 1
           fi
           make skill-eval
 

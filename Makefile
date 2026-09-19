@@ -15,6 +15,7 @@ DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Go parameters
 GOCMD := go
+RUBY ?= ruby
 GOBUILD := $(GOCMD) build
 GOTEST := $(GOCMD) test
 GOVET := $(GOCMD) vet
@@ -411,9 +412,24 @@ replace-check:
 check-smoke-coverage: build
 	@scripts/check-smoke-coverage.sh
 
+# Compile every skill-eval pattern under the engine that reads them (Ruby's
+# Onigmo). This is not the evals — those need an API key CI does not have, and
+# the Skill Evals job says so rather than running none and reporting success.
+# It is the part of them that was landing malformed and green: the Go guard in
+# internal/commands/connect_skilleval_test.go models the shape of a --serve
+# value in four of the case files and nothing else, so a mock, expect_sequence
+# or accept_response pattern that does not compile reached main unnoticed.
+#
+# Fails when ruby is missing rather than skipping: a check that cannot run and
+# reports success is the defect this target exists to close.
+.PHONY: check-eval-patterns
+check-eval-patterns:
+	@command -v $(RUBY) >/dev/null || (echo "Install ruby: the skill-eval patterns are Ruby regexes and cannot be compiled without it" && exit 1)
+	@$(RUBY) scripts/check-eval-patterns.rb
+
 # Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet lint lint-actions test test-e2e test-sync-skills check-naming check-surface check-skill-drift test-skill-drift check-bare-groups check-lint-lockstep check-smoke-coverage provenance-check tidy-check
+check: fmt-check vet lint lint-actions test test-e2e test-sync-skills check-naming check-surface check-skill-drift test-skill-drift check-bare-groups check-lint-lockstep check-smoke-coverage check-eval-patterns provenance-check tidy-check
 
 # Lint GitHub Actions workflows (requires actionlint + zizmor)
 .PHONY: lint-actions
