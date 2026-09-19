@@ -40,6 +40,9 @@ import (
 // turns it away, and HELD once it holds a slot, then waits for a second
 // line before releasing it — so a parent can hold the slot table full until
 // every other child has been refused.
+// BH_MAX_TOKENS and BH_MAX_CONCURRENT override the bucket and the slot
+// count; a parent that waits on a split has to be able to set the limit it
+// is waiting on.
 // BH_MODE=linger churns BH_OPS acquire/release pairs, prints
 // DONE, then stays alive until stdin closes so the parent can check that its
 // releases were not lost while the process still counts as a live holder.
@@ -53,6 +56,9 @@ func TestHelperProcess(t *testing.T) {
 	cfg := DefaultConfig()
 	if tokens, err := strconv.ParseFloat(os.Getenv("BH_MAX_TOKENS"), 64); err == nil {
 		cfg.RateLimiter.MaxTokens = tokens
+	}
+	if slots, err := strconv.Atoi(os.Getenv("BH_MAX_CONCURRENT")); err == nil {
+		cfg.Bulkhead.MaxConcurrent = slots
 	}
 
 	switch os.Getenv("BH_MODE") {
@@ -280,8 +286,17 @@ func runBarrieredInvocations(t *testing.T, n int, env helperEnv) invocationTally
 func runSlotOversubscription(t *testing.T, n, slots int, env helperEnv) invocationTally {
 	t.Helper()
 	require.Greater(t, n, slots, "there is no oversubscription to wait for")
-	barriered := helperEnv{"BH_BARRIER": "1", "BH_HOLD_BARRIER": "1"}
+	// The limit the parent waits on and the limit the children run under
+	// have to be the same number. Passing slots without setting it would
+	// leave this waiting for a split that cannot happen, and the failure
+	// would be a test deadline pointing nowhere near the cause.
+	barriered := helperEnv{
+		"BH_BARRIER": "1", "BH_HOLD_BARRIER": "1",
+		"BH_MAX_CONCURRENT": strconv.Itoa(slots),
+	}
 	maps.Copy(barriered, env)
+	require.Equal(t, strconv.Itoa(slots), barriered["BH_MAX_CONCURRENT"],
+		"the caller's environment must not override the slot count the wait is built on")
 
 	type child struct {
 		cmd    *exec.Cmd
@@ -484,6 +499,26 @@ func TestGateQueuesOversubscribedInvocationsWithinTheSlotLimit(t *testing.T) {
 	state, err := NewStore(dir).Load()
 	require.NoError(t, err)
 	assert.Empty(t, state.Bulkhead.ActivePIDs, "every slot released")
+}
+
+// The slot count the parent waits on is the slot count the children run
+// under. It is worth its own test because getting it wrong does not produce
+// a wrong number any more — the parent waits for a split that cannot
+// happen, and the only symptom is the test deadline, pointing nowhere near
+// the cause. Five slots for eight callers: five hold, three are refused.
+func TestGateSlotLimitIsTheOneTheTestWaitsOn(t *testing.T) {
+	dir := t.TempDir()
+	const callers, slots = 8, 5
+
+	tl := runSlotOversubscription(t, callers, slots, helperEnv{
+		"BH_STATE_DIR": dir, "BH_MODE": "ops", "BH_OPS": "1",
+		"BH_HOLD": "10ms", "BH_MAX_TOKENS": "100",
+	})
+
+	assert.Equal(t, callers, tl.ok, "every caller gets through eventually: %v", tl.rejections)
+	assert.Zero(t, tl.rejected)
+	assert.Equal(t, slots, tl.peak, "the limit that held is the one that was asked for, not the default")
+	assert.Equal(t, callers-slots, tl.slotWaits)
 }
 
 // A dozen processes churning the lock must not lose each other's releases:
