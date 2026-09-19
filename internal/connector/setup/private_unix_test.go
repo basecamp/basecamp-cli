@@ -311,3 +311,80 @@ func TestLockRefusesAnAlreadyEndedContext(t *testing.T) {
 	require.NoError(t, err)
 	free()
 }
+
+// endsWhileAcquiring is a context that is live when the wait looks before it
+// tries, and over by the time it looks again with the lock in hand. It is
+// the race a real cancellation runs — Ctrl-C landing in the microseconds
+// between the check and the flock — scheduled rather than hoped for, since
+// nothing else in a test can place a signal inside that window.
+type endsWhileAcquiring struct {
+	context.Context
+	looks int
+}
+
+func (c *endsWhileAcquiring) Err() error {
+	c.looks++
+	if c.looks == 1 {
+		return nil
+	}
+	return context.Canceled
+}
+
+// A context that ends while the lock is being acquired must not come away
+// holding it: the caller is no longer entitled to act, and a lock handed to
+// somebody who will not use it is a lock nobody else can take until the
+// process exits (Codex on #771).
+func TestLockGivesBackALockItAcquiredForAnEndedContext(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+
+	ctx := &endsWhileAcquiring{Context: context.Background()}
+	held, err := Lock(ctx, path)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, held)
+	require.Equal(t, 2, ctx.looks, "the wait looked before it tried and again once it held")
+
+	free, err := TryLock(path)
+	require.NoError(t, err, "and gave back what it had taken: nothing is left holding it")
+	free()
+}
+
+// The simpler half: a context that was already over before the call takes
+// the lock from nobody at all.
+func TestLockRefusesAnEndedContextWithoutTakingTheLock(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	held, err := Lock(ctx, path)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, held)
+
+	free, err := TryLock(path)
+	require.NoError(t, err)
+	free()
+}
+
+// A wait that runs out at the same moment its context ends reports the
+// interruption rather than the holder: "somebody else has it" sends a person
+// back to try again, and they stopped on purpose.
+func TestAnExpiredWaitOnAnEndedContextReportsTheInterruption(t *testing.T) {
+	was := LockWait
+	LockWait = 0
+	t.Cleanup(func() { LockWait = was })
+
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+	unlock, err := TryLock(path)
+	require.NoError(t, err)
+	t.Cleanup(unlock)
+
+	// Live when the wait looks before trying, over by the time the bound
+	// has run out — so the two verdicts are available at the same moment
+	// and the interruption is the one reported.
+	ctx := &endsWhileAcquiring{Context: context.Background()}
+	_, err = Lock(ctx, path)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.NotErrorIs(t, err, ErrSetupRunning, "a person who stopped the command is not told to wait for somebody else")
+}

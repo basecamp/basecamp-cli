@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -271,34 +272,58 @@ func TestARerunDecidesWithThePolicyItWasAuthorizedAgainst(t *testing.T) {
 	assert.Contains(t, fresh.Projects, kept)
 }
 
-// The redispatch's lock is held across the ledger's write and let go before
-// the rerun, which talks to Basecamp. Both halves matter and neither is
-// visible from the helper alone, so this asserts the order as a property of
-// the source, the way the dispatcher's release point is asserted in
-// connector. Released before the write and the window is open again;
-// released after the rerun and an operator's command holds a lock `connect
-// setup` waits on, across the network.
-func TestTheRedispatchReleasesAfterTheWriteAndBeforeTheRerun(t *testing.T) {
+// The lock is held across the ledger's write and let go before the caller
+// re-runs a prerequisite, on every path out. Both halves are what the shape
+// buys: a release left to the command body reads fine and still leaks the
+// lock across the network on the path somebody forgets. Asserted against a
+// real connect.json and a real ledger rather than against the source, so it
+// is the behavior and not the spelling (Codex on #771).
+func TestTheRedispatchLetsGoOfTheLockOnEveryPath(t *testing.T) {
+	f := newOperatorFixture(t)
+	ledger := f.ledger(t, false)
+	t.Cleanup(func() { _ = ledger.Close() })
+	path := connectSetupPath(t, "agent")
+	p := connectProfile{name: "agent", path: path, file: f.file}
+
+	free := func(t *testing.T, why string) {
+		t.Helper()
+		unlock, err := setup.TryLock(path)
+		require.NoError(t, err, why)
+		unlock()
+	}
+
+	// Record 2 is blocked, so this is the path that writes and then hands
+	// back a rerun for the caller to run against Basecamp.
+	authorized, res, err := authorizedRedispatch(context.Background(), p, ledger, 2)
+	require.NoError(t, err)
+	assert.True(t, res.Rerun, "a blocked record's prerequisite runs again")
+	assert.NotEmpty(t, authorized.file.Projects, "and the profile comes back carrying the reading it was authorized against")
+	free(t, "the lock is let go on the path that succeeds, before the prerequisite is re-run")
+
+	// And on the path that refuses: an event id the ledger has never seen.
+	_, _, err = authorizedRedispatch(context.Background(), p, ledger, 9999)
+	require.Error(t, err)
+	free(t, "and on the path that refuses")
+}
+
+// The command reassigns its own profile from the authorized one. Dropping
+// that binding is invisible to every other test here and puts the rerun back
+// on the file the command loaded at start-up, which is the defect this PR
+// was reviewed for (Copilot on #771), so it is pinned as a property of the
+// source.
+func TestTheRedispatchCommandKeepsNoStartUpReading(t *testing.T) {
 	source, err := os.ReadFile("connect_operator.go")
 	require.NoError(t, err)
 	body := string(source)
 	start := strings.Index(body, "func runConnectRedispatch(")
-	require.Positive(t, start, "runConnectRedispatch is where the order lives")
+	require.Positive(t, start, "runConnectRedispatch is where the binding lives")
 	body = body[start:]
 	if end := strings.Index(body, "\nfunc "); end > 0 {
 		body = body[:end]
 	}
 
-	authorize := strings.Index(body, "authorizedProfile(")
-	write := strings.Index(body, "ledger.Redispatch(")
-	release := strings.Index(body, "release()")
-	rerun := strings.Index(body, "rerunPrerequisite(")
-	require.Positive(t, authorize)
-	require.Positive(t, write)
-	require.Positive(t, release)
-	require.Positive(t, rerun)
-
-	assert.Less(t, authorize, write, "the served set is read before the decision is written")
-	assert.Less(t, write, release, "and the lock is held across that write, not merely taken before it")
-	assert.Less(t, release, rerun, "and let go before the rerun, which reads Basecamp")
+	call := regexp.MustCompile(`(\w+), \w+, \w+ :?= authorizedRedispatch\(`).FindStringSubmatch(body)
+	require.NotNil(t, call, "the command authorizes through authorizedRedispatch")
+	assert.Equal(t, "p", call[1],
+		"and binds the authorized profile back over p, so the start-up reading is out of scope rather than merely unused")
 }

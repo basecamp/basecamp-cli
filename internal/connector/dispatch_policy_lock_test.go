@@ -127,10 +127,13 @@ func TestADispatcherNeedsThePolicyUnderItsLock(t *testing.T) {
 	assert.Contains(t, err.Error(), "under its lock")
 }
 
-// The launch defers Authorize's release, so a nil one would be a panic on the
-// dispatcher's own path rather than a policy it could not read. Nothing in
-// the tree returns one; the guard is for whatever wires this next.
-func TestALaunchSurvivesAnAuthorizeThatReturnsNoRelease(t *testing.T) {
+// An Authorize that answers with a served set, no error and no lock to hold
+// authorizes nothing. This started life as a no-op release "so a wiring
+// error would not panic the dispatcher", which is the same bug this PR is
+// about wearing a different hat: no lock is held, the launch proceeds
+// anyway, and the ledger records it as authorized. On this path a broken
+// contract fails closed (Copilot on #771).
+func TestAnAuthorizeWithNoLockToHoldLaunchesNothing(t *testing.T) {
 	fake := newFakeDriver()
 	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
 		o.Authorize = func() (map[int64]admission.Project, func(), error) {
@@ -139,12 +142,26 @@ func TestALaunchSurvivesAnAuthorizeThatReturnsNoRelease(t *testing.T) {
 	})
 	admitOn(t, h.ledger, 1, "recording:1")
 	h.run(t)
+	time.Sleep(150 * time.Millisecond)
 
-	select {
-	case <-fake.made:
-	case <-time.After(5 * time.Second):
-		t.Fatal("no worker started")
-	}
+	fake.mu.Lock()
+	assert.Empty(t, fake.sessions, "a launch that holds no lock is not an authorized launch")
+	fake.mu.Unlock()
+	assert.Equal(t, StateAdmitted, getRecord(t, h.ledger, 1).State, "and the record is left for a pass that can take the lock")
+}
+
+// And it is refused as the kind of nothing it is: nobody could take the
+// lock, which is not the same as somebody holding it.
+func TestAnAuthorizeWithNoLockToHoldIsUnreadableNotBusy(t *testing.T) {
+	fake := newFakeDriver()
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.Authorize = func() (map[int64]admission.Project, func(), error) {
+			return map[int64]admission.Project{adapterBucketID: {}}, nil, nil
+		}
+	})
+	_, _, err := h.d.authorizedBuckets()
+	assert.ErrorIs(t, err, ErrPolicyUnreadable)
+	assert.NotErrorIs(t, err, ErrPolicyBusy)
 }
 
 // The lock is held ACROSS the ledger's commit, not merely taken before it.

@@ -517,27 +517,13 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 	}
 	defer done()
 
-	// The served projects as connect.json has them now, rather than the bit
-	// on the record: a record admitted while its project was served is not
-	// authorization to run it after the operator stopped serving it. Read
-	// under the setup lock and the lock held until the ledger has written,
-	// so an unserve lands wholly before the reading or wholly after the
-	// decision — not between them.
 	// p itself is reassigned, so the reading the command started with is
 	// gone rather than merely unused: everything below — the ledger's
 	// decision and the rerun's policy alike — is the file as it was when
 	// this was authorized.
-	p, served, release, err := authorizedProfile(ctx, p)
+	p, res, err := authorizedRedispatch(ctx, p, ledger, id)
 	if err != nil {
 		return err
-	}
-	res, err := ledger.Redispatch(ctx, id, operatorName(), served)
-	// Let go before the prerequisite is re-run below: that talks to
-	// Basecamp, and nothing that waits on the network is held under a lock
-	// `connect setup` waits on.
-	release()
-	if err != nil {
-		return decisionError(err)
 	}
 	report := connectRedispatchReport{RedispatchResult: res}
 	if res.Worker != nil {
@@ -557,6 +543,33 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 		}
 	}
 	return p.app.OK(report, output.WithSummary(redispatchSummary(report)))
+}
+
+// authorizedRedispatch writes the decision under connect.json's own lock,
+// against the served set read under it, and returns the profile carrying
+// that reading.
+//
+// One function, and the release deferred inside it, because both halves of
+// the claim should be structural rather than a matter of reading the command
+// carefully: the lock is held across the ledger's write on every path, and
+// it is let go before the caller re-runs a prerequisite — which talks to
+// Basecamp, and must not happen under a lock `connect setup` waits on. A
+// later edit to the command cannot leave it held, or take it early, without
+// changing this (Codex on #771).
+func authorizedRedispatch(ctx context.Context, p connectProfile, ledger *connector.Ledger, id int64) (connectProfile, connector.RedispatchResult, error) {
+	p, served, release, err := authorizedProfile(ctx, p)
+	if err != nil {
+		return p, connector.RedispatchResult{}, err
+	}
+	defer release()
+	// The served projects as connect.json has them now, rather than the bit
+	// on the record: a record admitted while its project was served is not
+	// authorization to run it after the operator stopped serving it.
+	res, err := ledger.Redispatch(ctx, id, operatorName(), served)
+	if err != nil {
+		return p, connector.RedispatchResult{}, decisionError(err)
+	}
+	return p, res, nil
 }
 
 func redispatchSummary(r connectRedispatchReport) string {

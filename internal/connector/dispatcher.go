@@ -131,12 +131,20 @@ type DispatcherOptions struct {
 	// launch, held across one SQLite transaction, and released before a
 	// worker is spawned.
 	//
-	// The release is never nil when the error is nil. A lock another
-	// process holds is reported as ErrPolicyBusy and authorizes nothing:
-	// the pass dispatches none and tries again on the next tick, rather
-	// than blocking behind a `connect setup`'s network checks. A lock or a
-	// file that could not be read at all is ErrPolicyUnreadable, which
-	// authorizes nothing either and says that something is wrong.
+	// An implementation that answers with a nil error and a nil release has
+	// broken its contract, and authorizes nothing: there is no lock to hold,
+	// so there is nothing to launch under. It is reported as
+	// ErrPolicyUnreadable rather than papered over — a no-op release
+	// substituted there would be an unlocked launch recorded as an
+	// authorized one, which is the exact thing this exists to prevent
+	// (Copilot on #771).
+	//
+	// A lock another process holds is reported as ErrPolicyBusy and
+	// authorizes nothing: the pass dispatches none and tries again on the
+	// next tick, rather than blocking behind a `connect setup`'s network
+	// checks. A lock or a file that could not be read at all is
+	// ErrPolicyUnreadable, which authorizes nothing either and says that
+	// something is wrong.
 	Authorize func() (map[int64]admission.Project, func(), error)
 	// TokenWindow is how long a task token's socket waits for the worker's
 	// MCP server; DefaultTokenWindow when zero.
@@ -475,10 +483,16 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 
 	served, servedErr := d.servedBuckets()
 	// Follow-ups first: an event on a live conversation joins its task, while
-	// connect.json still serves that task's project. The served set goes to
-	// the ledger as well as being checked here, so what joins is held to the
-	// task's own project and to the set as it is now — not to the served bit
-	// admission wrote on each record when it decided it.
+	// connect.json still served that task's project as of this pass's
+	// reading. The served set goes to the ledger as well as being checked
+	// here, so what joins is held to the task's own project and to that
+	// reading — not to the served bit admission wrote on each record when it
+	// decided it.
+	//
+	// A reading, and one that may be up to connectServedTTL old: this is not
+	// the launch, and it is not under the lock. See invariant 2, and
+	// nextFollowUp, which shares this answer and where a busy lock and "no
+	// more work" would be the same answer.
 	for _, r := range runs {
 		// The same snapshot decides and is handed to the join. Reading it
 		// again inside authorized would let the cache turn over between the
@@ -621,20 +635,28 @@ func (d *Dispatcher) servedBuckets() ([]int64, error) {
 // between the read and the release, so the launch under it is decided against
 // the file as it is at the commit, not as it was when the pass began.
 //
-// The release is never nil when the error is nil, and the caller lets go of
-// it as soon as the ledger has committed: nothing that talks to a worker,
-// a driver or the network happens under this lock.
+// A release is what makes the reading worth anything, so this returns one or
+// an error and never both-nothing: an Authorize that answers with neither is
+// refused as ErrPolicyUnreadable rather than run without a lock. The caller
+// lets go of it as soon as the ledger has committed — nothing that talks to
+// a worker, a driver or the network happens under this lock.
 func (d *Dispatcher) authorizedBuckets() ([]int64, func(), error) {
 	projects, release, err := d.opts.Authorize()
-	// Never nil either way, whatever Authorize returned: the caller defers
-	// the release, and a nil one would turn a policy that could not be read
-	// into a panic on the dispatcher's own path.
-	if release == nil {
-		release = func() {}
-	}
 	if err != nil {
-		release()
+		// Something to call before returning, whatever Authorize left: the
+		// error is already the answer, and this only avoids a nil call on
+		// the way out.
+		if release != nil {
+			release()
+		}
 		return nil, nil, err
+	}
+	if release == nil {
+		// No error and nothing to hold. Something is wired wrong, and the
+		// safe reading of "no lock" is not "the lock is fine" — a no-op
+		// here would launch a task against connect.json while nothing held
+		// it and record that as authorized. Fail closed and say so.
+		return nil, nil, fmt.Errorf("%w: it answered with no lock to hold", ErrPolicyUnreadable)
 	}
 	return d.narrow(projects), release, nil
 }
@@ -1311,8 +1333,10 @@ func (r *taskRun) promptLoop(ctx context.Context, deadline, stillRunning <-chan 
 }
 
 // nextFollowUp exposes the next event on the task not yet handed to the
-// worker, and returns it. Nothing joins or is exposed once connect.json has
-// stopped serving the task's project.
+// worker, and returns it. Nothing joins or is exposed once the reader says
+// connect.json has stopped serving the task's project: the reader, so within
+// one of its readings of the file and not instantly — invariant 2, and the
+// paragraph below.
 func (r *taskRun) nextFollowUp(ctx context.Context) (int64, bool, error) {
 	// Once, and the same set all the way down: the check, and the join it
 	// authorizes. Read twice, the cache could turn over in between and the

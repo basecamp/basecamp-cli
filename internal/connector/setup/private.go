@@ -53,9 +53,11 @@ func ensurePrivateDirs(path string) error {
 }
 
 // ErrSetupRunning reports the per-profile policy lock held by somebody else.
-// Two holders take it: `connect setup`, across its whole load-change-save,
-// and a running connector, for the moment it authorizes a launch or a
-// redispatch against the file.
+// Three callers take it, and which one is holding decides whether a wait is
+// worth anything: `connect setup` across its whole load-change-save, network
+// checks included; `connect redispatch`, a one-shot operator command, across
+// one read and one ledger write; and the running connector, for the moment
+// it authorizes a launch. See the block above LockWait.
 var ErrSetupRunning = errors.New("another command holds this profile's connector policy")
 
 // ErrLockUnavailable reports a host that cannot take the setup lock at all:
@@ -77,11 +79,12 @@ var ErrLockUnavailable = errors.New("this host cannot lock the connector's polic
 //     file read and one ledger transaction, and never waits: a pass that
 //     cannot take it dispatches nothing and asks again on its next tick.
 //
-// Nothing holds it across a network call except setup, and nothing takes any
-// other lock while holding it — the ledger's SQLite locks are taken under
-// it, never the other way about. A fourth caller that wants to wait on this
-// while holding something the connector's launch path waits on is how this
-// becomes a deadlock; there is no such caller today.
+// Setup is the only one that holds it across a network call. Other locks are
+// taken UNDER this one and never the other way about: the ledger's SQLite
+// locks on a redispatch and on a launch, and the credential key's lock on
+// setup's final write. That one order is what keeps this from deadlocking,
+// and a fourth caller that waits on this while holding something a current
+// holder waits on is how it stops being one. There is no such caller today.
 //
 // LockWait bounds Lock's wait for a holder to finish. The connector takes
 // this lock too now, and what it does under it is one file read and one
@@ -164,9 +167,23 @@ func lock(ctx context.Context, path string, wait time.Duration) (unlock func(), 
 			return nil, fmt.Errorf("%w: %s: %w", ErrLockUnavailable, lockPath, err)
 		}
 		if held {
+			// And again now it is held: a context that ended while this was
+			// acquiring must not come away holding the lock either, so it
+			// is given back rather than handed to a caller that is no
+			// longer entitled to act.
+			if err := ctx.Err(); err != nil {
+				_ = lock.Unlock()
+				return nil, err
+			}
 			return func() { _ = lock.Unlock() }, nil
 		}
 		if !time.Now().Before(deadline) {
+			// A wait that ran out at the same moment the context ended is
+			// reported as the interruption it is: the caller stopped, and
+			// "somebody else holds it" would send them back to try again.
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			return nil, fmt.Errorf("%w: %s", ErrSetupRunning, filepath.Dir(path))
 		}
 		select {
