@@ -407,6 +407,13 @@ replace-check:
 	fi
 	@echo "Replace check passed (no local replace directives)"
 
+# The race job is sharded, and the union check is what makes that safe: it
+# refuses unless the shards between them ran every test, once. A check that
+# cannot fail would be worse than no check, so it has its own tests.
+.PHONY: check-race-shards
+check-race-shards:
+	@scripts/race-shard-union-test.sh
+
 # Verify every leaf command is accounted for in smoke tests
 .PHONY: check-smoke-coverage
 check-smoke-coverage: build
@@ -429,7 +436,7 @@ check-eval-patterns:
 
 # Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet lint lint-actions test test-e2e test-sync-skills check-naming check-surface check-skill-drift test-skill-drift check-bare-groups check-lint-lockstep check-smoke-coverage check-eval-patterns provenance-check tidy-check
+check: fmt-check vet lint lint-actions test test-e2e test-sync-skills check-naming check-surface check-skill-drift test-skill-drift check-bare-groups check-lint-lockstep check-smoke-coverage check-eval-patterns check-race-shards provenance-check tidy-check
 
 # Lint GitHub Actions workflows (requires actionlint + zizmor)
 .PHONY: lint-actions
@@ -650,6 +657,7 @@ help:
 	@echo "  coverage         Run tests with coverage and open in browser"
 	@echo "  record-cassettes Record happy-path cassettes (TOKEN+TARGET+ACCOUNT+PROJECT)"
 	@echo "  smoke            Run pre-release smoke suite (BASECAMP_TOKEN=...)"
+	@echo "  check-race-shards Test the race shards' union check"
 	@echo "  qa-report        Show QA coverage report from smoke traces"
 	@echo ""
 	@echo "Performance:"
