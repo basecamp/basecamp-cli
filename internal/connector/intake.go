@@ -945,7 +945,7 @@ func (in *Intake) sweepBlockedRetries(ctx context.Context) {
 			return
 		}
 		for _, record := range records {
-			scope.AfterID = record.ID
+			scope.AfterRetryAt, scope.AfterID = *record.Decision.NextRetryAt, record.ID
 			release, claimed := in.claimBlockedRetry(record.ID, record.Revision)
 			if !claimed {
 				continue

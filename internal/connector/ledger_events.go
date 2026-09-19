@@ -222,16 +222,22 @@ type BlockedRetryScope struct {
 	Now time.Time
 	// Limit is the most records one page of the query returns.
 	Limit int
-	// AfterID pages: only records above it. The caller pages because only it
-	// knows which rows it has already claimed, and a page that came back full
-	// of claims would otherwise spend a sweep's whole budget on work nothing
-	// can do.
-	AfterID int64
+	// AfterRetryAt and AfterID are one cursor, in the order the query returns
+	// rows: the next page is what sorts after them. The caller pages because
+	// only it knows which rows it has already claimed, and a page that came
+	// back full of claims would otherwise spend a sweep's whole budget on
+	// work nothing can do.
+	//
+	// The cursor is the due time first and the id second because that is the
+	// order events_next_retry holds, and paging in any other order is what
+	// makes the query ignore it. Their zero values are before every row.
+	AfterRetryAt time.Time
+	AfterID      int64
 }
 
 // DueBlockedRetries returns one page of the blocked records whose next retry
-// has come, in scope, oldest first, at most Limit of them and all above
-// AfterID.
+// has come, in scope, the longest overdue first, at most Limit of them and
+// all sorting after the cursor.
 //
 // The schedule is not re-derived here. next_retry_at is what
 // admission.NextBlockedRetry answered when the verdict was written, so this
@@ -239,23 +245,38 @@ type BlockedRetryScope struct {
 // dates every blocked row the ledger has ever held. A record the schedule is
 // finished with has no next_retry_at and is not read at all (Copilot on
 // #770).
+//
+// That only holds if the query is ordered the way events_next_retry is.
+// Ordered by id instead, SQLite planned it against events_state_id and
+// walked every blocked row the ledger has ever held, filtering next_retry_at
+// after the fact — the index present, the schema right, the tests green, and
+// the scan the stored due time exists to remove happening anyway (Copilot on
+// #770). The plan is the thing that has to be checked, and
+// TestTheSweepsQueriesUseTheDueTimeIndex checks it.
 func (l *Ledger) DueBlockedRetries(ctx context.Context, scope BlockedRetryScope) ([]Record, error) {
 	if scope.Limit <= 0 {
 		return nil, nil
 	}
 	where, args := scheduledBlockedWhere(scope.Buckets)
-	where += ` AND next_retry_at <= ? AND id > ?`
-	args = append(args, stamp(scope.Now), scope.AfterID)
+	where += ` AND next_retry_at <= ? AND (next_retry_at, id) > (?, ?)`
+	args = append(args, stamp(scope.Now), stamp(scope.AfterRetryAt), scope.AfterID)
 	//nolint:gosec // G202: the clauses are this package's constants and placeholders, never values
-	rows, err := l.db.QueryContext(ctx, selectRecords+where+` ORDER BY id LIMIT ?`, append(args, scope.Limit)...)
+	rows, err := l.db.QueryContext(ctx, selectRecords+where+blockedRetryOrder+` LIMIT ?`, append(args, scope.Limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("connector: list blocked records due for a retry: %w", err)
 	}
 	return scanRecords(rows)
 }
 
+// blockedRetryOrder is the order events_next_retry holds, and the only order
+// either query may ask for: id is the rowid, so an index entry is
+// (state, next_retry_at, id) and this needs no sort at all. Asking for any
+// other order sends both queries to events_state_id and the whole blocked
+// history.
+const blockedRetryOrder = ` ORDER BY next_retry_at, id`
+
 // ScheduledBlockedIDs is every record in scope the retry schedule still has
-// something to do about, due now or later, oldest first.
+// something to do about, due now or later.
 //
 // It is the live bound on the sweep's claims: a claim is worth keeping only
 // while the record it names can still be offered, and a record that has been
@@ -266,10 +287,15 @@ func (l *Ledger) DueBlockedRetries(ctx context.Context, scope BlockedRetryScope)
 // the records still on the schedule" and prune the claims of the ones it left
 // out, which is the offer-twice this whole mechanism exists to prevent. The
 // set it returns is the connector's live backlog, not its history.
+//
+// It comes back in the schedule's order rather than by id, for the reason
+// DueBlockedRetries does: asked for id order, SQLite reads every blocked row
+// the ledger holds instead of only the scheduled ones. The caller reads it as
+// a set, so the order is the index's to choose.
 func (l *Ledger) ScheduledBlockedIDs(ctx context.Context, scope BlockedRetryScope) ([]int64, error) {
 	where, args := scheduledBlockedWhere(scope.Buckets)
 	//nolint:gosec // G202: the clauses are this package's constants and placeholders, never values
-	rows, err := l.db.QueryContext(ctx, `SELECT id FROM events`+where+` ORDER BY id`, args...)
+	rows, err := l.db.QueryContext(ctx, `SELECT id FROM events`+where+blockedRetryOrder, args...)
 	if err != nil {
 		return nil, fmt.Errorf("connector: list blocked records on the retry schedule: %w", err)
 	}

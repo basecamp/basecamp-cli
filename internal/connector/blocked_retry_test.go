@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -461,7 +462,9 @@ VALUES (?, 'blocked', ?, 'poll', 'comment.created', 'comment_created', 'created'
 	// At the deadline it is due, and not one tick before it.
 	justBefore := BlockedRetryScope{Now: mustStamp(t, deadline).Add(-time.Second), Limit: 10}
 	assert.Equal(t, []int64{2}, dueIDs(t, ledger, justBefore), "only the row with no deadline to respect")
-	assert.Equal(t, []int64{1, 2}, dueIDs(t, ledger, BlockedRetryScope{Now: mustStamp(t, deadline), Limit: 10}))
+	// The longest overdue first, which is the schedule's order and not the
+	// id's: 2 has been due since noon, 1 only since its deadline passed.
+	assert.Equal(t, []int64{2, 1}, dueIDs(t, ledger, BlockedRetryScope{Now: mustStamp(t, deadline), Limit: 10}))
 }
 
 func mustStamp(t *testing.T, s string) time.Time {
@@ -581,4 +584,59 @@ func TestABlockedRecordWithNoScheduledAttemptIsNotRunnable(t *testing.T) {
 	assert.True(t, ok, "the redispatch is the attempt")
 	assert.Equal(t, []int64{1}, dueIDs(t, ledger, BlockedRetryScope{Now: clock.Now(), Limit: 10}),
 		"and if the rerun never happens, the sweep picks it up rather than stranding it")
+}
+
+// queryPlan is what SQLite says it will actually do, which is the only
+// evidence that distinguishes an index being present from an index being
+// used.
+func queryPlan(t *testing.T, ledger *Ledger, query string, args ...any) string {
+	t.Helper()
+	rows, err := ledger.db.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+query, args...)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	var plan []string
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		require.NoError(t, rows.Scan(&id, &parent, &notUsed, &detail))
+		plan = append(plan, detail)
+	}
+	require.NoError(t, rows.Err())
+	return strings.Join(plan, "\n")
+}
+
+// Copilot on #770, and the night's defect in a new place: the index was
+// there, the schema was right, the tests were green, and the queries used
+// neither. Ordered by id, SQLite plans both against events_state_id and walks
+// every blocked row the ledger has ever retained — the scan the stored due
+// time exists to remove, happening anyway with nothing saying so.
+//
+// A timing test cannot tell these apart: at the row counts a test uses, a
+// full scan is instant. The plan is the assertion.
+func TestTheSweepsQueriesUseTheDueTimeIndex(t *testing.T) {
+	ledger, clock := retryLedger(t)
+	ctx := context.Background()
+	blockRecord(t, ledger, 1, adapterBucketID, admission.ReasonReadFailed)
+	scope := BlockedRetryScope{Now: clock.Now(), Limit: 10}
+
+	// The queries the sweep actually runs, planned as they are built. The
+	// ledger runs them through these two methods and nothing else, so the
+	// assertion is on the same SQL the connector executes.
+	_, err := ledger.DueBlockedRetries(ctx, scope)
+	require.NoError(t, err)
+	_, err = ledger.ScheduledBlockedIDs(ctx, scope)
+	require.NoError(t, err)
+
+	where, args := scheduledBlockedWhere(nil)
+	due := queryPlan(t, ledger,
+		selectRecords+where+` AND next_retry_at <= ? AND (next_retry_at, id) > (?, ?)`+blockedRetryOrder+` LIMIT ?`,
+		append(append([]any{}, args...), stamp(scope.Now), stamp(time.Time{}), int64(0), scope.Limit)...)
+	assert.Contains(t, due, "events_next_retry", "the due page is found through the due-time index")
+	assert.NotContains(t, due, "events_state_id", "not by walking every blocked row the ledger holds")
+	assert.NotContains(t, due, "TEMP B-TREE", "and the order is the index's own, so nothing is sorted")
+
+	scheduled := queryPlan(t, ledger, `SELECT id FROM events`+where+blockedRetryOrder, args...)
+	assert.Contains(t, scheduled, "events_next_retry", "so is the live schedule the claims are pruned against")
+	assert.NotContains(t, scheduled, "events_state_id")
+	assert.NotContains(t, scheduled, "TEMP B-TREE")
 }

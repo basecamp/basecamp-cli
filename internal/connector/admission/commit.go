@@ -157,9 +157,12 @@ const (
 // timedBlockedReasons is every blocked reason the schedule re-runs, and for
 // each whether its retries stop at BlockedRetryWindow.
 //
-// One list, read by both halves of the join: NextBlockedRetry decides whether
-// a record is due, and the ledger's query narrows to these reasons so the
-// sweep never reads the rows that wait for a person.
+// NextBlockedRetry is its only reader, and that is the whole of how a reason
+// reaches the sweep: the answer is computed once, when the verdict is
+// written, and stored on the row (events.next_retry_at). The ledger's queries
+// never see a reason — they compare that stored moment. A second filter by
+// reason down there could only ever repeat this one, and would be a copy of
+// the schedule that could fall out of step with it (Copilot on #770).
 var timedBlockedReasons = map[Reason]bool{
 	ReasonReadFailed:       true,
 	ReasonReadUnresolved:   true,
