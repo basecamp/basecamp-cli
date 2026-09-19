@@ -204,9 +204,9 @@ func TestARecordTheScheduleIsFinishedWithLeavesTheSweepEntirely(t *testing.T) {
 
 	scope := BlockedRetryScope{Now: clock.Now(), Limit: 10}
 	assert.Equal(t, []int64{2}, dueIDs(t, ledger, scope))
-	scheduled, err := ledger.ScheduledBlockedIDs(context.Background(), scope)
+	live, err := ledger.StillScheduledBlockedIDs(context.Background(), scope, []int64{1, 2})
 	require.NoError(t, err)
-	assert.Equal(t, []int64{2}, scheduled, "nothing keeps a claim for a record it can never offer")
+	assert.Equal(t, []int64{2}, live, "nothing keeps a claim for a record it can never offer")
 }
 
 // retryIntake is an intake and ledger on one clock the test moves, with
@@ -624,7 +624,7 @@ func TestTheSweepsQueriesUseTheDueTimeIndex(t *testing.T) {
 	// assertion is on the same SQL the connector executes.
 	_, err := ledger.DueBlockedRetries(ctx, scope)
 	require.NoError(t, err)
-	_, err = ledger.ScheduledBlockedIDs(ctx, scope)
+	_, err = ledger.StillScheduledBlockedIDs(ctx, scope, []int64{1})
 	require.NoError(t, err)
 
 	where, args := scheduledBlockedWhere(nil)
@@ -635,8 +635,64 @@ func TestTheSweepsQueriesUseTheDueTimeIndex(t *testing.T) {
 	assert.NotContains(t, due, "events_state_id", "not by walking every blocked row the ledger holds")
 	assert.NotContains(t, due, "TEMP B-TREE", "and the order is the index's own, so nothing is sorted")
 
-	scheduled := queryPlan(t, ledger, `SELECT id FROM events`+where+blockedRetryOrder, args...)
-	assert.Contains(t, scheduled, "events_next_retry", "so is the live schedule the claims are pruned against")
-	assert.NotContains(t, scheduled, "events_state_id")
-	assert.NotContains(t, scheduled, "TEMP B-TREE")
+	// The pruning read is by id, so the rowid finds it directly: the point of
+	// the assertion is that it visits the claims it was handed and not the
+	// blocked history behind them, whichever access path SQLite picks.
+	pruneWhere, pruneArgs := scheduledBlockedWhere(nil)
+	pruneWhere += ` AND id IN (` + placeholders(1) + `)`
+	scheduled := queryPlan(t, ledger, `SELECT id FROM events`+pruneWhere, append(append([]any{}, pruneArgs...), int64(1))...)
+	assert.NotContains(t, scheduled, "SCAN events", "the claims are looked up, never scanned for")
+	assert.NotContains(t, scheduled, "events_state_id", "and never through the whole blocked history")
+}
+
+// Copilot on #770, the fourth time this mechanism found a way to cost the
+// backlog instead of the batch. The claim map is pruned against the schedule,
+// and the read that pruned it asked for the whole live schedule: every sweep
+// materialized every scheduled record to decide the fate of a handful of
+// claims, and the very first sweep — holding no claims at all — paid for it
+// too. After an outage that is the entire outage, once a minute, in the
+// goroutine the stranded and loss repair share.
+//
+// The answer was never wrong, which is why nothing caught it: the assertion
+// has to be on the work, so the ledger counts the reads.
+func TestPruningAsksAboutTheClaimsHeldAndNotTheBacklog(t *testing.T) {
+	intake, ledger, _, clock := retryIntake(t)
+	ctx := context.Background()
+	for id := int64(1); id <= 50; id++ {
+		blockRecord(t, ledger, id, adapterBucketID, admission.ReasonReadFailed)
+	}
+	clock.Advance(admission.BlockedRetryInterval + time.Minute)
+
+	// Holding nothing, there is nothing to prune, and no reason to ask.
+	intake.sweepBlockedRetries(ctx)
+	assert.Zero(t, ledger.blockedScheduleReads.Load(),
+		"a sweep holding no claims reads no schedule")
+
+	held := intake.claimedBlockedIDs()
+	require.NotEmpty(t, held, "the sweep offered and so is holding claims")
+
+	// Holding some, it asks about those. The read is bounded by the claims,
+	// so it carries as many ids as there are claims and no more.
+	before := ledger.blockedScheduleReads.Load()
+	live, err := ledger.StillScheduledBlockedIDs(ctx, BlockedRetryScope{Now: clock.Now()}, held)
+	require.NoError(t, err)
+	assert.Equal(t, before+1, ledger.blockedScheduleReads.Load())
+	assert.LessOrEqual(t, len(live), len(held),
+		"the answer is about the claims asked about, not about the 50 records scheduled")
+}
+
+// The safety property the bound must not cost: pruning drops a claim only
+// when the ledger was asked about it and did not name it. A claim taken while
+// the read was in flight was never put to the ledger, and dropping it for not
+// coming back would offer its record a second time.
+func TestPruningNeverDropsAClaimItDidNotAskAbout(t *testing.T) {
+	intake, _, _, _ := retryIntake(t)
+	intake.retriedBlocked = map[int64]int64{7: 1, 9: 1}
+
+	// Asked about 7 alone, and told it is finished with. 9 arrived after the
+	// question and is untouched by the answer.
+	intake.pruneBlockedClaims([]int64{7}, nil)
+
+	assert.NotContains(t, intake.retriedBlocked, int64(7), "asked about, and not named: dropped")
+	assert.Contains(t, intake.retriedBlocked, int64(9), "never asked about: kept")
 }
