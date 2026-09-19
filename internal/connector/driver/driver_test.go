@@ -5,6 +5,7 @@ package driver
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -338,4 +339,102 @@ func TestALaterGroupSignalIsNotSentToAGroupTheRecordNoLongerOwns(t *testing.T) {
 	// And the worker it really is may still be ended by its group.
 	require.NoError(t, signalRecordedGroup(p, syscall.SIGKILL))
 	assert.Eventually(t, func() bool { return !GroupMembersRemain(p) }, 5*time.Second, 20*time.Millisecond)
+}
+
+// A stop does not discard what is in the pipe. Nothing closes the read end
+// under a reader, because closing throws away whatever the worker wrote that
+// nobody has parsed. Nothing here is concurrent and nothing waits: the lines
+// are in the pipe before the stop, so what is asked is only whether the stop
+// destroys them.
+func TestAStopDoesNotDiscardWhatIsInThePipe(t *testing.T) {
+	readEnd, writeEnd, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = readEnd.Close(); _ = writeEnd.Close() })
+	out := &output{f: readEnd}
+
+	_, err = writeEnd.Write([]byte("one\ntwo\n"))
+	require.NoError(t, err)
+	// Asked twice, and by two callers: a close and a cancel can both ask.
+	out.stop()
+	out.stop()
+
+	buf := make([]byte, 64)
+	n, err := out.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, "one\ntwo\n", string(buf[:n]), "what was in the pipe when the stop came")
+
+	n, err = out.Read(buf)
+	assert.Zero(t, n)
+	assert.ErrorIs(t, err, io.EOF, "and then the reader ends, rather than waiting on a pipe nobody will close")
+}
+
+// The drain budget is absolute from the asking, not a window that begins
+// again after every read. A descendant that writes a single byte just before
+// each window expires makes progress forever without ever letting the pipe
+// fall idle, and a per-read window would follow it for as long as it lived —
+// hours, for as much output as any byte count would allow.
+func TestADescendantDrippingOutputCannotHoldTheReader(t *testing.T) {
+	readEnd, writeEnd, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = readEnd.Close(); _ = writeEnd.Close() })
+	out := &output{f: readEnd}
+
+	dripping := make(chan struct{})
+	go func() {
+		defer close(dripping)
+		for {
+			// Just often enough that no window of the reader's own ever
+			// finds the pipe empty.
+			time.Sleep(drainWindow / 2)
+			if _, werr := writeEnd.Write([]byte("x")); werr != nil {
+				return
+			}
+		}
+	}()
+	t.Cleanup(func() { _ = readEnd.Close(); <-dripping })
+
+	out.stop()
+	started := time.Now()
+	ended := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 4<<10)
+		for {
+			if _, rerr := out.Read(buf); rerr != nil {
+				ended <- rerr
+				return
+			}
+		}
+	}()
+	select {
+	case rerr := <-ended:
+		assert.ErrorIs(t, rerr, io.EOF, "the reading ends, rather than following a descendant forever")
+		assert.Less(t, time.Since(started), 4*drainBudget, "and it ends on the budget, not on the descendant")
+	case <-time.After(30 * time.Second):
+		t.Fatal("a reader asked to stop never ended while a descendant dripped output into the pipe")
+	}
+}
+
+// The deadline on the pipe has one owner. Asking a reader to stop sets a
+// flag and touches nothing else, so it cannot cut short a window a read has
+// opened. That is a property of who writes what, not of a schedule, so it is
+// checked as one: a deadline set here survives any number of stops.
+func TestAStopDoesNotTouchTheReadDeadline(t *testing.T) {
+	readEnd, writeEnd, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = readEnd.Close(); _ = writeEnd.Close() })
+	out := &output{f: readEnd}
+
+	const mine = 300 * time.Millisecond
+	require.NoError(t, readEnd.SetReadDeadline(time.Now().Add(mine)))
+	out.stop()
+	out.stop()
+
+	started := time.Now()
+	buf := make([]byte, 64)
+	n, err := readEnd.Read(buf) // the file itself, not through output
+	waited := time.Since(started)
+
+	assert.Zero(t, n)
+	require.ErrorIs(t, err, os.ErrDeadlineExceeded)
+	assert.GreaterOrEqual(t, waited, mine/2, "the deadline in force is the one set here, not one a stop installed")
 }

@@ -1146,12 +1146,81 @@ func TestAnUnsafeVerdictWaitsForWhatTheWorkerPutOnItsStream(t *testing.T) {
 			got := <-answers
 			require.ErrorIs(t, got.err, driver.ErrUnsafeMode, "an unsafe session is reported as unsafe, whoever gets to the turn first")
 			require.ErrorContains(t, got.err, `Codex applied "on-request"`)
+			// The ledger is whole when the session is closed: the writes are
+			// not on the reader any more, and the turn's end is not where
+			// they are promised — the session's updates are.
+			require.NoError(t, s.Close())
 			assert.Len(t, ledger.Recorded(), 2, "both refusals reach the ledger")
 			assert.Len(t, got.result.Refusals, 2,
 				"the result carries what the ledger carries, and carries %d of the %d recorded",
 				len(got.result.Refusals), len(ledger.Recorded()))
 		})
 	}
+}
+
+// A ledger that takes its time does not cost the worker its last lines.
+//
+// Writing a refusal is allowed ten seconds. While that ran on the goroutine
+// reading the worker's output there was no bound that could be put on the
+// reading: a clock runs out inside a write and takes the pipe away with the
+// worker's next refusal still in it — recorded nowhere, not merely missing
+// from a result — and a bound that waits for the pipe to fall idle never
+// runs out at all against a descendant that keeps writing.
+//
+// The writes are a goroutine of their own now, so the reading is only ever
+// reading. The hold here outlasts every clock in this path, with a refusal
+// sitting in the pipe the whole time, and it is still read and still
+// written.
+func TestALedgerThatTakesItsTimeDoesNotCostTheWorkerItsLastLines(t *testing.T) {
+	ledger := &heldLedger{writing: make(chan struct{}, 1), release: make(chan struct{})}
+	denial := func(id string) string {
+		return `{"type":"item.completed","item":{"id":"` + id + `","type":"mcp_tool_call","server":"other","tool":"write",` +
+			`"error":{"message":"MCP tool call requires approval, but approval policy is never"},"status":"failed"}}`
+	}
+	unsafe := safeTurnContext()
+	unsafe["approval_policy"] = "on-request"
+	late := filepath.Join(t.TempDir(), "say-the-second")
+	h := newHarness(t, scenario{
+		TurnContext:            unsafe,
+		TurnContextAfterEvents: true,
+		Events:                 []string{`{"type":"turn.started"}`, denial("item_1")},
+		// Said once the ledger is holding the first, so the second is in the
+		// pipe and nowhere else: the reader cannot have taken it into its
+		// own buffer, because it was not there to take.
+		LateEvents: []string{denial("item_2")},
+		LateAfter:  late,
+		Hang:       true,
+	})
+	cfg := h.config()
+	cfg.Refusals = ledger
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	answers := make(chan driver.PromptResult, 1)
+	go func() {
+		result, _ := s.Prompt(context.Background(), "Task 1. Event 2.")
+		answers <- result
+	}()
+
+	<-ledger.writing
+	require.NoError(t, os.WriteFile(late, nil, 0o600))
+	held := make(chan struct{})
+	go func() {
+		defer close(held)
+		// Longer than the grace and the drain budget together, and well
+		// inside the ten seconds a refusal's write is allowed.
+		time.Sleep(6 * time.Second)
+		close(ledger.release)
+	}()
+
+	result := <-answers
+	<-held
+	require.NoError(t, s.Close())
+	assert.Len(t, ledger.Recorded(), 2,
+		"the refusal that arrived while the ledger was writing is still read, and the ledger holds %d", len(ledger.Recorded()))
+	assert.Len(t, result.Refusals, 2,
+		"the result carries what the ledger carries, and carries %d", len(result.Refusals))
 }
 
 // A session closed under a turn still reports the refusals that turn made.

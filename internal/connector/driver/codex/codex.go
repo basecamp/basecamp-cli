@@ -333,6 +333,11 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, resumeID s
 		updates:     make(chan driver.Update, 256),
 		readerEnd:   make(chan struct{}),
 	}
+	s.scribe = newScribe(s.writeRefusal, s.emit)
+	// The worker's output is released when this session has read it, not on
+	// a clock, and the reader promises to do nothing slow between reads —
+	// which is the scribe's whole reason for existing.
+	worker.ReadingDone(s.readerEnd)
 	go s.read() //nolint:contextcheck // the reader outlives the start's context: it runs as long as the worker does
 	return s, nil
 }
@@ -443,6 +448,7 @@ type session struct {
 
 	updates   chan driver.Update
 	readerEnd chan struct{}
+	scribe    *scribe
 
 	mu       sync.Mutex
 	id       string
@@ -591,7 +597,14 @@ func (s *session) Cancel(context.Context) error {
 	if t == nil {
 		return nil
 	}
-	go s.worker.Terminate(s.grace)
+	// The reader is asked to stop as well, as Close does. Ending the worker
+	// is not the end of its output when a descendant outside the group is
+	// holding the pipe open: the end of file never comes, and a canceled
+	// turn that only the reader can finish would never be finished at all.
+	go func() {
+		s.worker.Terminate(s.grace)
+		s.readerDone()
+	}()
 	return nil
 }
 
@@ -614,6 +627,8 @@ func (s *session) Close() error {
 	}
 	s.worker.Terminate(s.grace)
 	s.readerDone()
+	// Close says the ledger has every refusal this session read.
+	s.scribe.close()
 	return nil
 }
 
@@ -629,7 +644,14 @@ func (s *session) readerDone() {
 	select {
 	case <-s.readerEnd:
 	case <-time.After(s.grace):
-		s.worker.CloseStdout()
+		// A reader that never ends means a descendant outside the worker's
+		// group is holding the output open, so the end of file never comes.
+		// It is asked to stop, not cut off: it reads what is in the pipe
+		// first and ends within the drain budget. From here it must never
+		// be made to wait handing a refusal over, or that budget would run
+		// while it sat on a full queue.
+		s.scribe.noWaiting()
+		s.worker.StopReading()
 		<-s.readerEnd
 	}
 }
@@ -713,10 +735,14 @@ func (s *session) closeUpdates() {
 // the process closes its stdout.
 func (s *session) read() {
 	defer func() {
-		// The updates channel closes last: finishing the turn still emits
-		// (a refusal read from stderr), and an update emitted after this is
+		// The updates channel closes last, and the scribe is drained before
+		// it: the dispatcher settles what the ledger would not take once the
+		// updates are over, so every refusal the reader read has to have
+		// been written by then. Finishing the turn still emits — a refusal
+		// read from stderr — and an update emitted after the close is
 		// dropped rather than sent.
 		defer s.closeUpdates()
+		defer s.scribe.close()
 		s.mu.Lock()
 		s.ended = true
 		t := s.turn
@@ -1035,12 +1061,25 @@ func (s *session) refused(key, id, tool string, kind driver.ToolKind) {
 	if !first {
 		return
 	}
-	if s.recorder != nil {
-		// The recorder owns what happens when the ledger refuses the write;
-		// the refusal happened either way.
-		_ = s.recorder.RecordRefusal(context.Background(), refusal)
+	// The write and the update it precedes both belong to the scribe: the
+	// reader hands them over and goes back to reading, which is what lets
+	// the bound on its reading be a clock. See scribe.go.
+	s.scribe.hand(pending{
+		refusal: refusal,
+		update:  driver.Update{Kind: driver.UpdatePermission, ToolCallID: id, Tool: tool, ToolKind: kind, Allowed: false},
+	})
+}
+
+// writeRefusal is the ledger write itself, and the one slow thing this
+// driver does with a refusal.
+func (s *session) writeRefusal(refusal driver.Refusal) {
+	if s.recorder == nil {
+		return
 	}
-	s.emit(driver.Update{Kind: driver.UpdatePermission, ToolCallID: id, Tool: tool, ToolKind: kind, Allowed: false})
+	// The recorder owns what happens when the ledger refuses the write; the
+	// refusal happened either way.
+	//nolint:contextcheck // a refusal's write is not any caller's to cancel
+	_ = s.recorder.RecordRefusal(context.Background(), refusal)
 }
 
 func (s *session) turnCompleted(e event) {

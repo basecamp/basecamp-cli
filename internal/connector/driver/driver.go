@@ -65,9 +65,19 @@
 // recorded in the ledger, once, at the moment the driver answers the request
 // — or, for an agent that answers its own requests under a mode the driver
 // froze (claude -p), at the moment the driver first reads that it was
-// refused. It is never held only in a session's memory, because a worker that
-// exits before its result, a connector that crashes mid-turn, and a turn cut
-// short by a deadline all end the session that memory lives in.
+// refused.
+//
+// A driver may hand the write to a goroutine of its own rather than make it
+// where it read the refusal, and the codex driver does: a ledger write is
+// allowed ten seconds, and a reader that spends them cannot be given a bound
+// on its reading that means anything (driver/codex/scribe.go). What that
+// costs is named here rather than left to be discovered. Between the reading
+// and the write the refusal is in memory, and a connector that crashes there
+// loses it. What it does NOT cost is the rest: the queue is drained before
+// the session's updates close, so a worker that exits before its result, a
+// turn cut short by a deadline, and a session closed under a turn all still
+// find it written — and the update for it is emitted by the writer, after
+// the write, so the order below holds exactly.
 //
 //  1. The driver calls SessionConfig.Refusals.RecordRefusal before it sends
 //     its answer to the agent, or before it emits the update for a refusal
@@ -91,7 +101,10 @@
 //     recorder could not write, and the ended attempt's count is final. The
 //     session's updates are drained before the attempt is released, and the
 //     recorder is called before an update is emitted, so a worker that exits
-//     between a refusal and its result has already recorded it.
+//     between a refusal and its result has already recorded it. That holds
+//     for a driver that writes on a goroutine of its own too: it is the
+//     writer that emits, once the write has landed, and its queue is drained
+//     before the updates close.
 //
 // Once-ness is the driver's (a set of tool call ids per session), not a key in
 // the ledger: it holds for as long as a session lives, which is as long as a
