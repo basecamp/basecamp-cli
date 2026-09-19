@@ -3,11 +3,13 @@
 package setup
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -173,19 +175,71 @@ func TestLoadFollowsAnOwnAncestorSymlinkAndChecksItsTarget(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrNotPrivate), "the target's modes count: %v", err)
 }
 
+// shortLockWait keeps a test that means to see contention from sitting out
+// the whole of LockWait to see it.
+func shortLockWait(t *testing.T) {
+	t.Helper()
+	was := LockWait
+	LockWait = 20 * time.Millisecond
+	t.Cleanup(func() { LockWait = was })
+}
+
 func TestLockRefusesASecondSetup(t *testing.T) {
+	shortLockWait(t)
 	path, err := Path(configDir(t), "agent")
 	require.NoError(t, err)
-	unlock, err := Lock(path)
+	unlock, err := Lock(context.Background(), path)
 	require.NoError(t, err)
 
-	_, err = Lock(path)
-	assert.Error(t, err)
+	_, err = Lock(context.Background(), path)
+	assert.ErrorIs(t, err, ErrSetupRunning)
 
 	unlock()
-	unlockAgain, err := Lock(path)
+	unlockAgain, err := Lock(context.Background(), path)
 	require.NoError(t, err)
 	unlockAgain()
+}
+
+// The dispatcher's form: it never waits, so a pass that overlaps a setup
+// gives up its turn instead of parking on a file another process writes.
+func TestTryLockDoesNotWaitForAHolder(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+	unlock, err := TryLock(path)
+	require.NoError(t, err)
+
+	// LockWait is left long on purpose: if TryLock ever waited, this would
+	// take it rather than return inside the window asserted below.
+	start := time.Now()
+	_, err = TryLock(path)
+	assert.ErrorIs(t, err, ErrSetupRunning)
+	assert.Less(t, time.Since(start), LockWait/2, "TryLock returns rather than waits")
+
+	unlock()
+	again, err := TryLock(path)
+	require.NoError(t, err)
+	again()
+}
+
+// Lock waits for a holder that finishes inside LockWait, so a `connect
+// setup` does not fail because a dispatcher pass happened to overlap it.
+func TestLockWaitsForAHolderThatFinishes(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+	unlock, err := TryLock(path)
+	require.NoError(t, err)
+
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(5 * lockPoll)
+		unlock()
+		close(released)
+	}()
+
+	got, err := Lock(context.Background(), path)
+	require.NoError(t, err, "the wait outlasts a holder that lets go")
+	<-released
+	got()
 }
 
 func TestCheckPrivateFileCreatesNothingAndHoldsTheRules(t *testing.T) {
@@ -211,4 +265,126 @@ func TestCheckPrivateFileCreatesNothingAndHoldsTheRules(t *testing.T) {
 
 	require.NoError(t, os.Chmod(dir, 0o775))
 	require.ErrorIs(t, CheckPrivateFile(path), ErrNotPrivate, "a directory others can write")
+}
+
+// A wait that is canceled stops waiting and takes nothing. An operator who
+// presses Ctrl-C during contention should not sit out LockWait, and a
+// command whose context has already ended must not come away holding the
+// lock and act under it: "the policy could not be checked" is a refusal, not
+// permission (Copilot on #771).
+func TestLockStopsWaitingWhenTheContextEnds(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+	unlock, err := TryLock(path)
+	require.NoError(t, err)
+	t.Cleanup(unlock)
+
+	// LockWait is left at its production value on purpose: a wait that
+	// ignored the context would take it, and this would take that long.
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(5 * lockPoll)
+		cancel()
+	}()
+
+	start := time.Now()
+	held, err := Lock(ctx, path)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, held, "a canceled wait comes away with nothing to release")
+	assert.Less(t, time.Since(start), LockWait/2, "and it stops when the context does, not when the bound expires")
+}
+
+// A context that has already ended takes the lock from nobody, even when the
+// lock is free: the caller is not going to act on what it reads.
+func TestLockRefusesAnAlreadyEndedContext(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	held, err := Lock(ctx, path)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, held)
+
+	// Proof that it refused rather than failed to acquire: the lock is free.
+	free, err := TryLock(path)
+	require.NoError(t, err)
+	free()
+}
+
+// endsWhileAcquiring is a context that is live when the wait looks before it
+// tries, and over by the time it looks again with the lock in hand. It is
+// the race a real cancellation runs — Ctrl-C landing in the microseconds
+// between the check and the flock — scheduled rather than hoped for, since
+// nothing else in a test can place a signal inside that window.
+type endsWhileAcquiring struct {
+	context.Context
+	looks int
+}
+
+func (c *endsWhileAcquiring) Err() error {
+	c.looks++
+	if c.looks == 1 {
+		return nil
+	}
+	return context.Canceled
+}
+
+// A context that ends while the lock is being acquired must not come away
+// holding it: the caller is no longer entitled to act, and a lock handed to
+// somebody who will not use it is a lock nobody else can take until the
+// process exits (Codex on #771).
+func TestLockGivesBackALockItAcquiredForAnEndedContext(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+
+	ctx := &endsWhileAcquiring{Context: context.Background()}
+	held, err := Lock(ctx, path)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, held)
+	require.Equal(t, 2, ctx.looks, "the wait looked before it tried and again once it held")
+
+	free, err := TryLock(path)
+	require.NoError(t, err, "and gave back what it had taken: nothing is left holding it")
+	free()
+}
+
+// The simpler half: a context that was already over before the call takes
+// the lock from nobody at all.
+func TestLockRefusesAnEndedContextWithoutTakingTheLock(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	held, err := Lock(ctx, path)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, held)
+
+	free, err := TryLock(path)
+	require.NoError(t, err)
+	free()
+}
+
+// A wait that runs out at the same moment its context ends reports the
+// interruption rather than the holder: "somebody else has it" sends a person
+// back to try again, and they stopped on purpose.
+func TestAnExpiredWaitOnAnEndedContextReportsTheInterruption(t *testing.T) {
+	was := LockWait
+	LockWait = 0
+	t.Cleanup(func() { LockWait = was })
+
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+	unlock, err := TryLock(path)
+	require.NoError(t, err)
+	t.Cleanup(unlock)
+
+	// Live when the wait looks before trying, over by the time the bound
+	// has run out — so the two verdicts are available at the same moment
+	// and the interruption is the one reported.
+	ctx := &endsWhileAcquiring{Context: context.Background()}
+	_, err = Lock(ctx, path)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.NotErrorIs(t, err, ErrSetupRunning, "a person who stopped the command is not told to wait for somebody else")
 }

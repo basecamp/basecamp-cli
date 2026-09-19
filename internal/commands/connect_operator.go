@@ -35,14 +35,12 @@ import (
 type connectProfile struct {
 	app  *appctx.App
 	name string
+	path string
 	file setup.File
 }
 
 // servedBucketsOf is the projects a connect.json serves, as the ledger's
-// decisions want them, from the file this command loaded when it started.
-// That is a reading and not a lock: nothing stops `connect setup --unserve`
-// completing between it and the write below, and holding the setup lock
-// across both is carded rather than done here.
+// decisions want them.
 func servedBucketsOf(file setup.File) []int64 {
 	served := make([]int64, 0, len(file.Projects))
 	for bucket := range file.Projects {
@@ -50,6 +48,79 @@ func servedBucketsOf(file setup.File) []int64 {
 	}
 	slices.Sort(served)
 	return served
+}
+
+// authorizedProfile is p with connect.json as it is now — read under the
+// file's own lock — together with the projects it serves and the release to
+// hold until the decision that reading authorizes has been written. The file
+// the command loaded when it started is not that reading: a `connect setup
+// --unserve` can complete between start-up and the write, and the point here
+// is that it cannot complete between this read and the release.
+//
+// It returns the whole profile and not only the bucket ids because a
+// redispatch is not one decision. A blocked record's redispatch re-runs what
+// blocked it, and that rerun builds an admission policy from the file; a
+// rerun carrying the start-up file can re-admit a record whose project was
+// unserved in between and write a verdict that is not true of the policy as
+// it stands (Copilot on #771). The caller reassigns its own profile from
+// this, so the start-up reading is gone rather than merely unused.
+//
+// It waits for a holder rather than refusing on sight (setup.Lock, not
+// TryLock): this is an operator's command, a connector's own hold is
+// measured in milliseconds, and a person who typed a redispatch would rather
+// wait out a `connect setup` than be told to run it again. A holder that
+// outlasts the wait is reported as busy and retryable, and nothing is
+// written.
+//
+// The lock is taken before the ledger is written and released after, never
+// the other way about, so the two locks are always taken in one order.
+func authorizedProfile(ctx context.Context, p connectProfile) (connectProfile, []int64, func(), error) {
+	unlock, err := setup.Lock(ctx, p.path)
+	if err != nil {
+		return p, nil, nil, classifyDecisionLockError(p.name, err)
+	}
+	file, err := setup.Load(p.path)
+	if err != nil {
+		unlock()
+		return p, nil, nil, output.ErrUsage("connect.json cannot be used: " + setup.ErrorText(err))
+	}
+	// The same refusal the connector's own reader makes: a file that now
+	// names another agent or account is not this profile's policy, and a
+	// decision taken against it would be taken for somebody else.
+	if file.Agent != p.file.Agent || file.AccountID != p.file.AccountID {
+		unlock()
+		return p, nil, nil, output.ErrUsage("connect.json now names another agent or account, so nothing was decided")
+	}
+	p.file = file
+	return p, servedBucketsOf(file), unlock, nil
+}
+
+// classifyDecisionLockError is classifyLockError's wording for an operator's
+// decision rather than for setup. The two say the same things about the same
+// failures and name different commands to run again: telling somebody whose
+// redispatch was refused to "run setup again" sends them somewhere else at
+// the moment they are already puzzled, and saying only setup needs the lock
+// is no longer true (Copilot on #771).
+func classifyDecisionLockError(name string, err error) error {
+	profile := shellQuote(name)
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// Stopped while waiting for the lock: nothing was locked, nothing
+		// was decided, and the interruption is what to report.
+		return err
+	case errors.Is(err, setup.ErrSetupRunning):
+		return &output.Error{Code: output.CodeBusy, Retryable: true,
+			Message: fmt.Sprintf("Another command is working on profile %q right now, so nothing was decided: %s", name, setup.ErrorText(err)),
+			Hint:    "Nothing is wrong with the profile. Run the command again when it has finished: basecamp connect redispatch -P " + profile + " <event_id>"}
+	case errors.Is(err, setup.ErrLockUnavailable):
+		return &output.Error{Code: output.CodeLockUnavailable,
+			Message: fmt.Sprintf("This host cannot lock profile %q's connector policy: %s", name, setup.ErrorText(err)),
+			Hint: "Nothing was decided. A decision reads which projects are served under that lock, as setup writes them under it, so this needs a filesystem for XDG_CONFIG_HOME that supports locking " +
+				"(some network and FUSE mounts do not). Moving it hides every profile and stored file credential."}
+	case errors.Is(err, setup.ErrNotPrivate):
+		return output.ErrUsageHint(err.Error(), "A decision reads connect.json only where nobody else can change it.")
+	}
+	return output.ErrUsage(err.Error())
 }
 
 func loadConnectProfile(cmd *cobra.Command) (connectProfile, error) {
@@ -75,7 +146,7 @@ func loadConnectProfile(cmd *cobra.Command) (connectProfile, error) {
 	case err != nil:
 		return connectProfile{}, output.ErrUsage("connect.json cannot be used: " + err.Error())
 	}
-	return connectProfile{app: app, name: name, file: file}, nil
+	return connectProfile{app: app, name: name, path: path, file: file}, nil
 }
 
 // operatorName is who a decision is recorded as: the local user who ran it.
@@ -394,8 +465,14 @@ A completed or held record is admitted at once (a completed one whose task is
 still running, when that task ends). A blocked record keeps its state and
 runs what blocked it again — the read, the events lookup, the served check —
 and is admitted the moment that succeeds; if it blocks again, the record stays
-blocked with the authorization, and redispatch runs it again. While the hold
-stands the record is authorized and nothing launches until release.
+blocked with the authorization, and redispatch runs it again. That re-run
+reads Basecamp, so it cannot hold the policy lock, and it decides against the
+served projects as they were when the redispatch was authorized: an unserve
+landing while it runs is not seen by that verdict. Nothing starts on it — the
+connector reads connect.json under its lock at every launch and refuses a
+project no longer served, and basecamp connect status counts what is left
+waiting. While the hold stands the record is authorized and nothing launches
+until release.
 
 It works on the ledger's transactions, so it is safe while the connector runs;
 the running connector dispatches what it admits.`,
@@ -446,14 +523,13 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 	}
 	defer done()
 
-	// The served projects as this command read them, rather than the bit on
-	// the record: a record admitted while its project was served is not
-	// authorization to run it after the operator stopped serving it. Read at
-	// start-up and not re-read here, so an unserve landing in between is not
-	// caught — see servedBucketsOf.
-	res, err := ledger.Redispatch(ctx, id, operatorName(), servedBucketsOf(p.file))
+	// p itself is reassigned, so the reading the command started with is
+	// gone rather than merely unused: everything below — the ledger's
+	// decision and the rerun's policy alike — is the file as it was when
+	// this was authorized.
+	p, res, err := authorizedRedispatch(ctx, p, ledger, id)
 	if err != nil {
-		return decisionError(err)
+		return err
 	}
 	report := connectRedispatchReport{RedispatchResult: res}
 	if res.Worker != nil {
@@ -473,6 +549,33 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 		}
 	}
 	return p.app.OK(report, output.WithSummary(redispatchSummary(report)))
+}
+
+// authorizedRedispatch writes the decision under connect.json's own lock,
+// against the served set read under it, and returns the profile carrying
+// that reading.
+//
+// One function, and the release deferred inside it, because both halves of
+// the claim should be structural rather than a matter of reading the command
+// carefully: the lock is held across the ledger's write on every path, and
+// it is let go before the caller re-runs a prerequisite — which talks to
+// Basecamp, and must not happen under a lock `connect setup` waits on. A
+// later edit to the command cannot leave it held, or take it early, without
+// changing this (Codex on #771).
+func authorizedRedispatch(ctx context.Context, p connectProfile, ledger *connector.Ledger, id int64) (connectProfile, connector.RedispatchResult, error) {
+	p, served, release, err := authorizedProfile(ctx, p)
+	if err != nil {
+		return p, connector.RedispatchResult{}, err
+	}
+	defer release()
+	// The served projects as connect.json has them now, rather than the bit
+	// on the record: a record admitted while its project was served is not
+	// authorization to run it after the operator stopped serving it.
+	res, err := ledger.Redispatch(ctx, id, operatorName(), served)
+	if err != nil {
+		return p, connector.RedispatchResult{}, decisionError(err)
+	}
+	return p, res, nil
 }
 
 func redispatchSummary(r connectRedispatchReport) string {
@@ -500,9 +603,20 @@ func redispatchSummary(r connectRedispatchReport) string {
 	return s
 }
 
-// rerunPrerequisite decides a blocked record again, as the agent, exactly as
-// the connector's admission would: the verdict is revision-guarded, so a
-// running connector deciding it at the same time is not a second verdict.
+// rerunPrerequisite decides a blocked record again, as the agent, by the same
+// rules the connector's admission applies: the verdict is revision-guarded,
+// so a running connector deciding it at the same time is not a second
+// verdict.
+//
+// By the same rules, and not against the same reading. The connector's
+// admission asks a live reader for the served projects; this decides against
+// the file as it was when the redispatch was authorized, because deciding
+// reads Basecamp and nothing that waits on the network is done under a lock
+// `connect setup` waits on. So an unserve completing while this runs is not
+// seen here, and the verdict can admit a record whose project has just
+// stopped being served. That is the deliberate residue, and it starts
+// nothing: the launch reads connect.json under the lock and refuses it, and
+// the stranded report names what is left waiting.
 func rerunPrerequisite(ctx context.Context, p connectProfile, ledger *connector.Ledger, id int64) (string, string, error) {
 	agent, err := verifiedConnectAgent(ctx, p)
 	if err != nil {

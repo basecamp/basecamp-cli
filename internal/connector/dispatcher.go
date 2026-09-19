@@ -32,12 +32,24 @@ import (
 //     driver is asked for anything, a follow-up is exposed before its prompt
 //     is sent, and an attempt is ended in the ledger only after its worker is
 //     gone.
-//  2. The project is connect.json's. A worker runs only for a record whose
-//     project connect.json still serves, and stops being handed follow-ups
-//     the moment it stops serving it. Where the worker runs is not the
-//     record's: every task runs in the directory the connector was started
-//     in, and a task that needs a clone or a directory of its own is the
-//     agent's business to make.
+//  2. The project is connect.json's. A worker is started only for a record
+//     whose project connect.json serves when the launch commits: that set is
+//     read under the file's own lock and the lock is held across the commit,
+//     so an unserve lands wholly before the reading or wholly after the task
+//     exists.
+//
+//     Follow-ups are held to the same set as it is read rather than as it is
+//     locked, so a task whose project stops being served stops being handed
+//     instructions within one reading of the file — the reader's TTL — and
+//     not instantly. That is deliberate: a follow-up runs on the task's own
+//     goroutine, where "the lock was busy" and "there is no more work" are
+//     the same answer, so contention would end tasks early. The task was
+//     authorized at launch; what the TTL bounds is how long one already
+//     running keeps being fed.
+//
+//     Where the worker runs is not the record's: every task runs in the
+//     directory the connector was started in, and a task that needs a clone
+//     or a directory of its own is the agent's business to make.
 //  3. Nothing crosses to a worker that it does not need. The prompt names
 //     events and a recording URL, never content, and is under
 //     MaxPromptTokens at its worst case; the task token reaches only the
@@ -66,6 +78,26 @@ const (
 // tools are mcp__basecamp__*.
 const MCPServerName = "basecamp"
 
+// ErrPolicyBusy is Authorize's answer when another process holds
+// connect.json's lock — a `connect setup` mid-run, which holds it across its
+// network checks, or a `connect redispatch` writing its decision. The file is
+// not necessarily being changed; the lock is held, which is all this knows
+// and all it needs to. It authorizes nothing and means nothing is wrong: the pass
+// dispatches none and asks again on the next tick, and so does every pass
+// until that setup lets go. A dispatcher that waited here instead would park
+// its hot path on a file another process writes, which is a worse thing to
+// own than a queue that drains the moment the policy is settled.
+var ErrPolicyBusy = errors.New("connector: connect.json's lock is held by another command")
+
+// ErrPolicyUnreadable is Authorize's answer when the served set could not be
+// taken under its lock at all: a host that cannot lock, a connect.json that
+// no longer loads. It authorizes nothing, as ErrPolicyBusy does, and unlike
+// ErrPolicyBusy something is wrong — kept apart from it for the same reason
+// a failed read is kept apart from an empty served set. Every pass
+// dispatches nothing until it is fixed; the reader is what says so, once,
+// rather than once per tick.
+var ErrPolicyUnreadable = errors.New("connector: connect.json could not be read under its lock")
+
 // ReplyLister lists the agent's comments or chat lines at a reply destination,
 // for the adopted-reply rule.
 type ReplyLister interface {
@@ -87,6 +119,35 @@ type DispatcherOptions struct {
 	// is that nothing could read the file, is the same false claim the
 	// holding reply used to make on a card (Copilot on #765).
 	Served func() (map[int64]admission.Project, error)
+	// Authorize is the same served set read under connect.json's own lock —
+	// the one `connect setup` holds across its load, change and save — with
+	// the release the caller holds across the commit that reading
+	// authorizes. Nothing is cached: the read happens under the lock, so an
+	// unserve cannot complete between it and the launch it permits.
+	//
+	// It is not Served with a lock bolted on, and it does not replace
+	// Served. Served is what a pass reads to choose from and to keep a
+	// worker's follow-ups flowing — cheap, cached, called per event by
+	// admission, and a file lock per event is exactly the shape that would
+	// not survive contact with the hot path. Authorize is taken once per
+	// launch, held across one SQLite transaction, and released before a
+	// worker is spawned.
+	//
+	// An implementation that answers with a nil error and a nil release has
+	// broken its contract, and authorizes nothing: there is no lock to hold,
+	// so there is nothing to launch under. It is reported as
+	// ErrPolicyUnreadable rather than papered over — a no-op release
+	// substituted there would be an unlocked launch recorded as an
+	// authorized one, which is the exact thing this exists to prevent
+	// (Copilot on #771).
+	//
+	// A lock another process holds is reported as ErrPolicyBusy and
+	// authorizes nothing: the pass dispatches none and tries again on the
+	// next tick, rather than blocking behind a `connect setup`'s network
+	// checks. A lock or a file that could not be read at all is
+	// ErrPolicyUnreadable, which authorizes nothing either and says that
+	// something is wrong.
+	Authorize func() (map[int64]admission.Project, func(), error)
 	// TokenWindow is how long a task token's socket waits for the worker's
 	// MCP server; DefaultTokenWindow when zero.
 	TokenWindow time.Duration
@@ -207,6 +268,8 @@ func NewDispatcher(opts DispatcherOptions) (*Dispatcher, error) {
 		return nil, errors.New("connector: the dispatcher needs a driver")
 	case opts.Served == nil:
 		return nil, errors.New("connector: the dispatcher needs connect.json's served projects")
+	case opts.Authorize == nil:
+		return nil, errors.New("connector: the dispatcher needs connect.json's served projects under its lock")
 	case opts.MCP.Command == "" || opts.MCP.Profile == "" || opts.MCP.StateDir == "":
 		return nil, errors.New("connector: the dispatcher needs the worker's MCP server command, profile and state directory")
 	case opts.PrivateDir == "":
@@ -422,10 +485,16 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 
 	served, servedErr := d.servedBuckets()
 	// Follow-ups first: an event on a live conversation joins its task, while
-	// connect.json still serves that task's project. The served set goes to
-	// the ledger as well as being checked here, so what joins is held to the
-	// task's own project and to the set as it is now — not to the served bit
-	// admission wrote on each record when it decided it.
+	// connect.json still served that task's project as of this pass's
+	// reading. The served set goes to the ledger as well as being checked
+	// here, so what joins is held to the task's own project and to that
+	// reading — not to the served bit admission wrote on each record when it
+	// decided it.
+	//
+	// A reading, and one that may be up to connectServedTTL old: this is not
+	// the launch, and it is not under the lock. See invariant 2, and
+	// nextFollowUp, which shares this answer and where a busy lock and "no
+	// more work" would be the same answer.
 	for _, r := range runs {
 		// The same snapshot decides and is handed to the join. Reading it
 		// again inside authorized would let the cache turn over between the
@@ -448,7 +517,8 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	}
 	// Invariant 2, in the query: only records in a project this pass read as
 	// served, among the projects this run hears. A record the dispatcher
-	// cannot start never fills the window.
+	// cannot start never fills the window. It narrows the candidates; the
+	// launch decides, against its own locked reading.
 	records, err := d.ledger.StartableRecordsWhere(ctx, StartableFilter{
 		Served: served, Limit: d.opts.Concurrency * 4,
 	})
@@ -463,10 +533,31 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 		if d.free() <= 0 {
 			break
 		}
-		if err := d.start(ctx, record, served); err != nil {
-			if errors.Is(err, ErrNotStartable) {
-				continue
-			}
+		switch err := d.start(ctx, record); {
+		case err == nil:
+		case errors.Is(err, ErrNotStartable):
+			// Including a record whose project the launch's own reading no
+			// longer serves: the unserve won, and the next pass will not
+			// offer it again.
+			continue
+		case errors.Is(err, ErrPolicyBusy):
+			// Another command holds the policy lock — a setup changing
+			// connect.json, or a redispatch writing a decision against it.
+			// Nothing is wrong and nothing is lost: this pass authorizes
+			// nothing and the next tick asks again. Every pass for as long as that setup runs
+			// gives up the same way, so the connector starts nothing while
+			// its policy is being rewritten — which is the right thing to
+			// do with a policy somebody is in the middle of changing, and
+			// is cheaper than a dispatcher blocked on a file `connect
+			// setup` holds across its network checks.
+			d.log.Debug("connector: connect.json's lock is held by another command; nothing is dispatched this pass")
+			return nil
+		case errors.Is(err, ErrPolicyUnreadable):
+			// Something is wrong, and the reader has already said so once.
+			// Saying it again on every tick would bury it; dispatching
+			// nothing is the whole of what this pass can do about it.
+			return nil
+		default:
 			return err
 		}
 	}
@@ -524,6 +615,12 @@ func (d *Dispatcher) reportStranded(ctx context.Context, served []int64, servedE
 // or one reused within its TTL, never a lock — narrowed to the ones this run
 // hears. One pass takes it once and hands it down, so everything that pass
 // decides is decided from the same reading.
+//
+// It chooses; it does not authorize. What a pass reads here picks the records
+// worth trying and keeps a live worker's follow-ups flowing. The launch
+// itself re-reads under the lock (authorizedBuckets), so a record this
+// reading offered can still be refused a moment later, and that is the point
+// rather than a disagreement.
 func (d *Dispatcher) servedBuckets() ([]int64, error) {
 	projects, err := d.opts.Served()
 	if err != nil {
@@ -532,6 +629,44 @@ func (d *Dispatcher) servedBuckets() ([]int64, error) {
 		// which is why the empty set and the error travel together.
 		return nil, err
 	}
+	return d.narrow(projects), nil
+}
+
+// authorizedBuckets is the served projects read under connect.json's lock,
+// narrowed to the ones this run hears, with the release to hold across the
+// commit that reading authorizes. A `connect setup --unserve` cannot complete
+// between the read and the release, so the launch under it is decided against
+// the file as it is at the commit, not as it was when the pass began.
+//
+// A release is what makes the reading worth anything, so this returns one or
+// an error and never both-nothing: an Authorize that answers with neither is
+// refused as ErrPolicyUnreadable rather than run without a lock. The caller
+// lets go of it as soon as the ledger has committed — nothing that talks to
+// a worker, a driver or the network happens under this lock.
+func (d *Dispatcher) authorizedBuckets() ([]int64, func(), error) {
+	projects, release, err := d.opts.Authorize()
+	if err != nil {
+		// Something to call before returning, whatever Authorize left: the
+		// error is already the answer, and this only avoids a nil call on
+		// the way out.
+		if release != nil {
+			release()
+		}
+		return nil, nil, err
+	}
+	if release == nil {
+		// No error and nothing to hold. Something is wired wrong, and the
+		// safe reading of "no lock" is not "the lock is fine" — a no-op
+		// here would launch a task against connect.json while nothing held
+		// it and record that as authorized. Fail closed and say so.
+		return nil, nil, fmt.Errorf("%w: it answered with no lock to hold", ErrPolicyUnreadable)
+	}
+	return d.narrow(projects), release, nil
+}
+
+// narrow keeps the served projects this run hears: --project scope, or every
+// served project when the run named none.
+func (d *Dispatcher) narrow(projects map[int64]admission.Project) []int64 {
 	var served []int64
 	for bucket := range projects {
 		if len(d.opts.Buckets) == 0 || slices.Contains(d.opts.Buckets, bucket) {
@@ -539,24 +674,23 @@ func (d *Dispatcher) servedBuckets() ([]int64, error) {
 		}
 	}
 	slices.Sort(served)
-	return served, nil
+	return served
 }
 
 // start launches a task for record: the ledger first, then the driver, and
 // the release point on every path that fails after it. Capacity is the
 // caller's question (free), not this one's.
 //
-// served is the snapshot the record was chosen against, handed down rather
-// than read again: one pass of the dispatcher decides from one reading of
-// connect.json, as one verdict does (admission's policyNow).
-func (d *Dispatcher) start(ctx context.Context, record Record, served []int64) error {
+// The served set the launch is decided against is read here rather than
+// handed down from the pass, and it is read under connect.json's own lock,
+// held until the launch transaction has committed. That is what makes an
+// unserve and a launch one order rather than a race: the file the launch
+// reads is the file as it will still be when the task exists.
+func (d *Dispatcher) start(ctx context.Context, record Record) error {
 	// Nothing is prepared and nothing is resolved: the worker runs where the
 	// connector was started, and a task that needs a clone or a directory of
 	// its own is the agent's business to make.
-	launch, err := d.ledger.LaunchTask(ctx, LaunchSpec{
-		EventID: record.ID, Served: served,
-		Driver: d.opts.Driver.Name(), Deadline: d.opts.Deadline,
-	})
+	launch, err := d.launch(ctx, record)
 	if err != nil {
 		return err
 	}
@@ -627,6 +761,23 @@ func (d *Dispatcher) start(ctx context.Context, record Record, served []int64) e
 		run.supervise(ctx)
 	}()
 	return nil
+}
+
+// launch commits the ledger's side of a start, under connect.json's lock and
+// against a reading taken under it. The lock is let go the moment the
+// transaction returns — before a session directory, a token socket or a
+// worker process exists — so what is held across it is one file read and one
+// SQLite transaction, and nothing that waits on a person or the network.
+func (d *Dispatcher) launch(ctx context.Context, record Record) (Launch, error) {
+	served, release, err := d.authorizedBuckets()
+	if err != nil {
+		return Launch{}, err
+	}
+	defer release()
+	return d.ledger.LaunchTask(ctx, LaunchSpec{
+		EventID: record.ID, Served: served,
+		Driver: d.opts.Driver.Name(), Deadline: d.opts.Deadline,
+	})
 }
 
 // sessionConfig builds what the driver is given (invariant 3).
@@ -1185,12 +1336,22 @@ func (r *taskRun) promptLoop(ctx context.Context, deadline, stillRunning <-chan 
 }
 
 // nextFollowUp exposes the next event on the task not yet handed to the
-// worker, and returns it. Nothing joins or is exposed once connect.json has
-// stopped serving the task's project.
+// worker, and returns it. Nothing joins or is exposed once the reader says
+// connect.json has stopped serving the task's project: the reader, so within
+// one of its readings of the file and not instantly — invariant 2, and the
+// paragraph below.
 func (r *taskRun) nextFollowUp(ctx context.Context) (int64, bool, error) {
 	// Once, and the same set all the way down: the check, and the join it
 	// authorizes. Read twice, the cache could turn over in between and the
 	// two could disagree.
+	//
+	// The reader, not the lock the launch takes. Returning false here ends
+	// the task, so a lock another command holds for a moment would look
+	// exactly like a conversation with nothing left in it — a launch can
+	// give up its turn and try next tick, and this cannot. The task is
+	// already authorized; what is bounded here is how long one already
+	// running keeps being fed after an unserve, which is the reader's TTL
+	// (invariant 2).
 	served, err := r.d.servedBuckets()
 	switch {
 	case err != nil:

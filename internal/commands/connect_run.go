@@ -330,9 +330,17 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	// gap is seen by one and not the other (Copilot on #765). The
 	// difference from the bug this replaced is that the disagreement is
 	// bounded: one decision against a served set at most connectServedTTL
-	// old, where the startup file never caught up at all. Holding one
-	// snapshot across a whole decision needs a lock over setup, which is
-	// carded rather than done here.
+	// old, where the startup file never caught up at all. That bound is
+	// asserted, not merely described — see TestConnectServedTTLStaysSmall.
+	//
+	// One place does hold a snapshot across a whole decision, and it is the
+	// one where a stale reading would start work: served.Authorize reads
+	// connect.json under `connect setup`'s own lock and keeps the lock until
+	// the launch has committed. Admission keeps the cache: it decides once
+	// per event, a file lock per event is not a thing to put on that path,
+	// and the cost of it being a reading rather than a lock is a record
+	// admitted into a project that has just stopped being served — which
+	// dispatch then refuses and reportStranded names.
 	served := newConnectServed(path, file, logger)
 
 	reads := admission.NewSDKReads(&basecamp.Config{BaseURL: app.Config.BaseURL}, tokens, account, connectSDKOptions()...)
@@ -372,7 +380,8 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			return output.ErrUsage(err.Error())
 		}
 		options := connectDispatcherOptions(connectDispatch{
-			File: file, Buckets: buckets, Ledger: ledger, Driver: worker, Served: served.Current,
+			File: file, Buckets: buckets, Ledger: ledger, Driver: worker,
+			Served: served.Current, Authorize: served.Authorize,
 			Profile: name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
 			// Replies are listed with their words, so the connector's own
 			// notices are left out even before their receipts are known, and
@@ -576,6 +585,9 @@ type connectServed struct {
 	// safe to tell a person on a card (Copilot on #765).
 	err     error
 	failing bool
+	// lockFailing is failing's counterpart for the lock: a host that cannot
+	// take it says so once rather than once per launch.
+	lockFailing bool
 }
 
 // connectServedTTL is how long a read of connect.json is reused.
@@ -587,11 +599,14 @@ func newConnectServed(path string, file setup.File, log *slog.Logger) *connectSe
 
 // Current returns a copy of the projects connect.json serves as of the last
 // read, or the reason it could not be read. "As of the last read" is the
-// honest span: a reading is reused for connectServedTTL, and nothing holds
-// the setup lock, so a `connect setup --unserve` can complete between any
-// read and whatever the caller goes on to do with it. Dispatch treats an error as authorizing
+// honest span: a reading is reused for connectServedTTL, and no lock is
+// taken, so a `connect setup --unserve` can complete between any read and
+// whatever the caller goes on to do with it. Dispatch treats an error as authorizing
 // nothing; admission holds the record as a configuration error rather than
 // answering that the project is not served.
+//
+// A caller that must not have an unserve land between its reading and what
+// that reading authorizes wants Authorize, not this.
 func (r *connectServed) Current() (map[int64]admission.Project, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -602,6 +617,62 @@ func (r *connectServed) Current() (map[int64]admission.Project, error) {
 	if (r.projects == nil && r.err == nil) || r.now().Sub(r.loadedAt) >= connectServedTTL {
 		r.reload()
 	}
+	return r.answer()
+}
+
+// Authorize reads connect.json under the per-profile setup lock — the lock
+// `connect setup` holds across its load, change and save — and hands back
+// the release for the caller to hold until the commit that reading
+// authorizes has landed. Between the two an unserve cannot complete, so the
+// launch is decided against the file as it will still be when the task
+// exists.
+//
+// The read is fresh: the TTL is a reuse policy for callers that are only
+// choosing, and reusing a reading here would reintroduce exactly the gap the
+// lock is taken to close. It refreshes the cache on its way through, so the
+// next Current cannot be older than this read.
+//
+// A lock another command holds is connector.ErrPolicyBusy: this authorizes
+// nothing, and the dispatcher gives up its pass rather than waiting out a
+// `connect setup`'s network checks. A host that cannot lock at all
+// authorizes nothing either — the guarantee here is the lock, as it is in
+// setup.
+func (r *connectServed) Authorize() (map[int64]admission.Project, func(), error) {
+	unlock, err := setup.TryLock(r.path)
+	if err != nil {
+		if errors.Is(err, setup.ErrSetupRunning) {
+			return nil, nil, fmt.Errorf("%w: %w", connector.ErrPolicyBusy, err)
+		}
+		r.logLockFailure(err)
+		return nil, nil, fmt.Errorf("%w: %w", connector.ErrPolicyUnreadable, err)
+	}
+	r.mu.Lock()
+	r.lockFailing = false
+	r.reload()
+	projects, err := r.answer()
+	r.mu.Unlock()
+	if err != nil {
+		unlock()
+		// reload has already said why, once. This only tells the dispatcher
+		// which kind of nothing it is being handed.
+		return nil, nil, fmt.Errorf("%w: %w", connector.ErrPolicyUnreadable, err)
+	}
+	return projects, unlock, nil
+}
+
+// logLockFailure says a lock could not be taken, once per spell of failing.
+func (r *connectServed) logLockFailure(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.lockFailing {
+		r.log.Error("connector: dispatching nothing until connect.json can be locked", "error", err)
+	}
+	r.lockFailing = true
+}
+
+// answer is the reader's answer from whatever the last reload left: a copy of
+// the served projects, or the reason there is none. r.mu is held.
+func (r *connectServed) answer() (map[int64]admission.Project, error) {
 	if r.err != nil {
 		return nil, r.err
 	}
@@ -647,6 +718,9 @@ type connectDispatch struct {
 	Ledger  *connector.Ledger
 	Driver  driver.Driver
 	Served  func() (map[int64]admission.Project, error)
+	// Authorize is Served read under connect.json's lock, with the release
+	// the dispatcher holds across a launch's commit.
+	Authorize func() (map[int64]admission.Project, func(), error)
 
 	Profile     string
 	Executable  string
@@ -667,6 +741,7 @@ func connectDispatcherOptions(d connectDispatch) connector.DispatcherOptions {
 		Ledger:             d.Ledger,
 		Driver:             d.Driver,
 		Served:             d.Served,
+		Authorize:          d.Authorize,
 		Concurrency:        d.File.Concurrency,
 		Deadline:           time.Duration(d.File.Deadline),
 		Buckets:            d.Buckets,
