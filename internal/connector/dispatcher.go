@@ -32,12 +32,24 @@ import (
 //     driver is asked for anything, a follow-up is exposed before its prompt
 //     is sent, and an attempt is ended in the ledger only after its worker is
 //     gone.
-//  2. The project is connect.json's. A worker runs only for a record whose
-//     project connect.json still serves, and stops being handed follow-ups
-//     the moment it stops serving it. Where the worker runs is not the
-//     record's: every task runs in the directory the connector was started
-//     in, and a task that needs a clone or a directory of its own is the
-//     agent's business to make.
+//  2. The project is connect.json's. A worker is started only for a record
+//     whose project connect.json serves when the launch commits: that set is
+//     read under the file's own lock and the lock is held across the commit,
+//     so an unserve lands wholly before the reading or wholly after the task
+//     exists.
+//
+//     Follow-ups are held to the same set as it is read rather than as it is
+//     locked, so a task whose project stops being served stops being handed
+//     instructions within one reading of the file — the reader's TTL — and
+//     not instantly. That is deliberate: a follow-up runs on the task's own
+//     goroutine, where "the lock was busy" and "there is no more work" are
+//     the same answer, so contention would end tasks early. The task was
+//     authorized at launch; what the TTL bounds is how long one already
+//     running keeps being fed.
+//
+//     Where the worker runs is not the record's: every task runs in the
+//     directory the connector was started in, and a task that needs a clone
+//     or a directory of its own is the agent's business to make.
 //  3. Nothing crosses to a worker that it does not need. The prompt names
 //     events and a recording URL, never content, and is under
 //     MaxPromptTokens at its worst case; the task token reaches only the
@@ -1305,6 +1317,14 @@ func (r *taskRun) nextFollowUp(ctx context.Context) (int64, bool, error) {
 	// Once, and the same set all the way down: the check, and the join it
 	// authorizes. Read twice, the cache could turn over in between and the
 	// two could disagree.
+	//
+	// The reader, not the lock the launch takes. Returning false here ends
+	// the task, so a lock another command holds for a moment would look
+	// exactly like a conversation with nothing left in it — a launch can
+	// give up its turn and try next tick, and this cannot. The task is
+	// already authorized; what is bounded here is how long one already
+	// running keeps being fed after an unserve, which is the reader's TTL
+	// (invariant 2).
 	served, err := r.d.servedBuckets()
 	switch {
 	case err != nil:

@@ -3,6 +3,7 @@
 package setup
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -187,14 +188,14 @@ func TestLockRefusesASecondSetup(t *testing.T) {
 	shortLockWait(t)
 	path, err := Path(configDir(t), "agent")
 	require.NoError(t, err)
-	unlock, err := Lock(path)
+	unlock, err := Lock(context.Background(), path)
 	require.NoError(t, err)
 
-	_, err = Lock(path)
+	_, err = Lock(context.Background(), path)
 	assert.ErrorIs(t, err, ErrSetupRunning)
 
 	unlock()
-	unlockAgain, err := Lock(path)
+	unlockAgain, err := Lock(context.Background(), path)
 	require.NoError(t, err)
 	unlockAgain()
 }
@@ -235,7 +236,7 @@ func TestLockWaitsForAHolderThatFinishes(t *testing.T) {
 		close(released)
 	}()
 
-	got, err := Lock(path)
+	got, err := Lock(context.Background(), path)
 	require.NoError(t, err, "the wait outlasts a holder that lets go")
 	<-released
 	got()
@@ -264,4 +265,49 @@ func TestCheckPrivateFileCreatesNothingAndHoldsTheRules(t *testing.T) {
 
 	require.NoError(t, os.Chmod(dir, 0o775))
 	require.ErrorIs(t, CheckPrivateFile(path), ErrNotPrivate, "a directory others can write")
+}
+
+// A wait that is canceled stops waiting and takes nothing. An operator who
+// presses Ctrl-C during contention should not sit out LockWait, and a
+// command whose context has already ended must not come away holding the
+// lock and act under it: "the policy could not be checked" is a refusal, not
+// permission (Copilot on #771).
+func TestLockStopsWaitingWhenTheContextEnds(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+	unlock, err := TryLock(path)
+	require.NoError(t, err)
+	t.Cleanup(unlock)
+
+	// LockWait is left at its production value on purpose: a wait that
+	// ignored the context would take it, and this would take that long.
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(5 * lockPoll)
+		cancel()
+	}()
+
+	start := time.Now()
+	held, err := Lock(ctx, path)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, held, "a canceled wait comes away with nothing to release")
+	assert.Less(t, time.Since(start), LockWait/2, "and it stops when the context does, not when the bound expires")
+}
+
+// A context that has already ended takes the lock from nobody, even when the
+// lock is free: the caller is not going to act on what it reads.
+func TestLockRefusesAnAlreadyEndedContext(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	held, err := Lock(ctx, path)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, held)
+
+	// Proof that it refused rather than failed to acquire: the lock is free.
+	free, err := TryLock(path)
+	require.NoError(t, err)
+	free()
 }

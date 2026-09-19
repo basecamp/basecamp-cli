@@ -830,11 +830,23 @@ func TestConnectSetupOperatorProfileFollowsEnvironmentPrecedence(t *testing.T) {
 	}
 }
 
+// shortSetupLockWait keeps a test that means to see contention from sitting
+// out the production wait to see it: Lock waits for a holder now, and a test
+// that inherits that bound measures the clock rather than the refusal
+// (Copilot on #771). The bound itself is asserted where it lives, in setup.
+func shortSetupLockWait(t *testing.T) {
+	t.Helper()
+	was := setup.LockWait
+	setup.LockWait = 20 * time.Millisecond
+	t.Cleanup(func() { setup.LockWait = was })
+}
+
 // A profile another setup is working on is busy, not broken.
 func TestConnectSetupReportsAnotherSetupAsBusy(t *testing.T) {
+	shortSetupLockWait(t)
 	s := startConnectSetupServer(t)
 	connectSetupApp(t, s, "agent")
-	unlock, err := setup.Lock(connectSetupPath(t, "agent"))
+	unlock, err := setup.Lock(t.Context(), connectSetupPath(t, "agent"))
 	require.NoError(t, err)
 	t.Cleanup(unlock)
 
@@ -1174,9 +1186,10 @@ func TestConnectSetupRefusesToRebindToAnotherIdentity(t *testing.T) {
 
 // Contention is retryable, and named as busy wherever it comes from.
 func TestConnectSetupBusyIsRetryable(t *testing.T) {
+	shortSetupLockWait(t)
 	s := startConnectSetupServer(t)
 	connectSetupApp(t, s, "agent")
-	unlock, err := setup.Lock(connectSetupPath(t, "agent"))
+	unlock, err := setup.Lock(t.Context(), connectSetupPath(t, "agent"))
 	require.NoError(t, err)
 	t.Cleanup(unlock)
 

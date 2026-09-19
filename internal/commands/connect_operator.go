@@ -50,12 +50,20 @@ func servedBucketsOf(file setup.File) []int64 {
 	return served
 }
 
-// servedBucketsUnderLock is the served projects read under connect.json's own
-// lock, with the release to hold until the decision that reading authorizes
-// has been written. The file this command loaded when it started is not that
-// reading: a `connect setup --unserve` can complete between start-up and the
-// write, and the point here is that it cannot complete between this read and
-// the release.
+// authorizedProfile is p with connect.json as it is now — read under the
+// file's own lock — together with the projects it serves and the release to
+// hold until the decision that reading authorizes has been written. The file
+// the command loaded when it started is not that reading: a `connect setup
+// --unserve` can complete between start-up and the write, and the point here
+// is that it cannot complete between this read and the release.
+//
+// It returns the whole profile and not only the bucket ids because a
+// redispatch is not one decision. A blocked record's redispatch re-runs what
+// blocked it, and that rerun builds an admission policy from the file; a
+// rerun carrying the start-up file can re-admit a record whose project was
+// unserved in between and write a verdict that is not true of the policy as
+// it stands (Copilot on #771). The caller reassigns its own profile from
+// this, so the start-up reading is gone rather than merely unused.
 //
 // It waits for a holder rather than refusing on sight (setup.Lock, not
 // TryLock): this is an operator's command, a connector's own hold is
@@ -66,24 +74,53 @@ func servedBucketsOf(file setup.File) []int64 {
 //
 // The lock is taken before the ledger is written and released after, never
 // the other way about, so the two locks are always taken in one order.
-func servedBucketsUnderLock(p connectProfile) ([]int64, func(), error) {
-	unlock, err := setup.Lock(p.path)
+func authorizedProfile(ctx context.Context, p connectProfile) (connectProfile, []int64, func(), error) {
+	unlock, err := setup.Lock(ctx, p.path)
 	if err != nil {
-		return nil, nil, classifyLockError(p.name, err)
+		return p, nil, nil, classifyDecisionLockError(p.name, err)
 	}
 	file, err := setup.Load(p.path)
 	if err != nil {
 		unlock()
-		return nil, nil, output.ErrUsage("connect.json cannot be used: " + setup.ErrorText(err))
+		return p, nil, nil, output.ErrUsage("connect.json cannot be used: " + setup.ErrorText(err))
 	}
 	// The same refusal the connector's own reader makes: a file that now
 	// names another agent or account is not this profile's policy, and a
 	// decision taken against it would be taken for somebody else.
 	if file.Agent != p.file.Agent || file.AccountID != p.file.AccountID {
 		unlock()
-		return nil, nil, output.ErrUsage("connect.json now names another agent or account, so nothing was decided")
+		return p, nil, nil, output.ErrUsage("connect.json now names another agent or account, so nothing was decided")
 	}
-	return servedBucketsOf(file), unlock, nil
+	p.file = file
+	return p, servedBucketsOf(file), unlock, nil
+}
+
+// classifyDecisionLockError is classifyLockError's wording for an operator's
+// decision rather than for setup. The two say the same things about the same
+// failures and name different commands to run again: telling somebody whose
+// redispatch was refused to "run setup again" sends them somewhere else at
+// the moment they are already puzzled, and saying only setup needs the lock
+// is no longer true (Copilot on #771).
+func classifyDecisionLockError(name string, err error) error {
+	profile := shellQuote(name)
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// Stopped while waiting for the lock: nothing was locked, nothing
+		// was decided, and the interruption is what to report.
+		return err
+	case errors.Is(err, setup.ErrSetupRunning):
+		return &output.Error{Code: output.CodeBusy, Retryable: true,
+			Message: fmt.Sprintf("Another command is working on profile %q right now, so nothing was decided: %s", name, setup.ErrorText(err)),
+			Hint:    "Nothing is wrong with the profile. Run the command again when it has finished: basecamp connect redispatch -P " + profile + " <event_id>"}
+	case errors.Is(err, setup.ErrLockUnavailable):
+		return &output.Error{Code: output.CodeLockUnavailable,
+			Message: fmt.Sprintf("This host cannot lock profile %q's connector policy: %s", name, setup.ErrorText(err)),
+			Hint: "Nothing was decided. A decision reads which projects are served under that lock, as setup writes them under it, so this needs a filesystem for XDG_CONFIG_HOME that supports locking " +
+				"(some network and FUSE mounts do not). Moving it hides every profile and stored file credential."}
+	case errors.Is(err, setup.ErrNotPrivate):
+		return output.ErrUsageHint(err.Error(), "A decision reads connect.json only where nobody else can change it.")
+	}
+	return output.ErrUsage(err.Error())
 }
 
 func loadConnectProfile(cmd *cobra.Command) (connectProfile, error) {
@@ -486,7 +523,11 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 	// under the setup lock and the lock held until the ledger has written,
 	// so an unserve lands wholly before the reading or wholly after the
 	// decision — not between them.
-	served, release, err := servedBucketsUnderLock(p)
+	// p itself is reassigned, so the reading the command started with is
+	// gone rather than merely unused: everything below — the ledger's
+	// decision and the rerun's policy alike — is the file as it was when
+	// this was authorized.
+	p, served, release, err := authorizedProfile(ctx, p)
 	if err != nil {
 		return err
 	}

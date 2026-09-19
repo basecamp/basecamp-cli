@@ -121,7 +121,7 @@ the link and code while it waits; then wait for it to finish.
 |------|-------|
 | Credential | The CLI's credential store, under the profile. `basecamp auth status -P '<profile>' --json` describes it (see Inspecting). Never open it. |
 | connect.json | `$XDG_CONFIG_HOME/basecamp/connect/<profile>/connect.json`, default `~/.config/basecamp/connect/<profile>/connect.json`. Setup's JSON result gives the exact `path`. |
-| Setup lock | `.connect.lock` beside connect.json. One setup per profile at a time. A running connector takes it too, for the moment it authorizes a launch or a redispatch against the file, so setup waits briefly rather than refusing when a dispatcher pass overlaps it. |
+| Policy lock | `.connect.lock` beside connect.json. Three callers, and knowing which one holds it is how you read a `busy`. `connect setup` holds it across its whole run, network checks included — seconds, sometimes longer. `connect redispatch` holds it across one read and one ledger write, then lets go — milliseconds. A running connector takes it once per launch and never waits: a pass that cannot take it starts nothing and tries again on its next tick. Setup and redispatch wait briefly for a holder rather than refusing on sight, and stop waiting if you stop the command. |
 | Connector runtime state (ledger, checkpoint, lock) | `$XDG_STATE_HOME/basecamp/connect/<account>-<agent person id>/`, default under `~/.local/state`; a shadow run's is under `connect-shadow/` instead. Read it only through `basecamp connect status` and `basecamp connect doctor`; never open or copy the files. |
 
 The CLI's configuration, its profiles and (when it uses files) its credential
@@ -371,7 +371,7 @@ the exit status: exit 7 is shared.
 | `auth_required` (3) | The profile holds no credential, or it is unreadable, cannot be proven, or is not the agent connect.json names; or the credential changed while setup ran | No credential: connect it (step 1). Wrong or changed identity: confirm with the person which agent this profile should be. Changed mid-run: run setup again. |
 | `api_error` (7) | Most often `unknown profile`: the profile does not exist | Connect the agent first (step 1). |
 | `not_ready` (7) | A readiness check failed. `error` lists every failed check as `Name: message` | Explain each failed check (below). |
-| `busy` (5) | Another command is using this profile's credential or setup lock — another setup, or a connector authorizing a launch | Nothing is wrong. Run setup again when it has finished. |
+| `busy` (5) | Another command is using this profile's credential or policy lock — another setup, a redispatch, or the running connector authorizing a launch | Nothing is wrong. Run the command again when it has finished. |
 | `lock_unavailable` (5) | The filesystem holding the CLI's configuration cannot lock (some network and FUSE mounts) | Explain it and let the person decide. The fix is a local filesystem for `XDG_CONFIG_HOME`, and moving it hides every profile and stored file credential. After such a move do not reconnect the agent: that rotates its secret. |
 
 A setup the person stops also writes nothing.

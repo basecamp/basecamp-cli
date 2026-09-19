@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -143,5 +144,36 @@ func TestALaunchSurvivesAnAuthorizeThatReturnsNoRelease(t *testing.T) {
 	case <-fake.made:
 	case <-time.After(5 * time.Second):
 		t.Fatal("no worker started")
+	}
+}
+
+// The lock is held ACROSS the ledger's commit, not merely taken before it.
+// Released a line early and every other test here still passes while the
+// window is wide open again, so the release itself looks at the ledger: by
+// the time it runs, the record this launch was authorized for has already
+// moved to dispatched (Copilot's shape, and Codex on the same PR).
+func TestThePolicyLockIsHeldAcrossTheLedgerCommit(t *testing.T) {
+	fake := newFakeDriver()
+	var h *dispatchHarness
+	committed := make(chan RecordState, 4)
+	h = newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.Authorize = func() (map[int64]admission.Project, func(), error) {
+			return map[int64]admission.Project{adapterBucketID: {}}, func() {
+				record, ok, err := h.ledger.Get(context.Background(), 1)
+				require.NoError(t, err)
+				require.True(t, ok)
+				committed <- record.State
+			}, nil
+		}
+	})
+	admitOn(t, h.ledger, 1, "recording:1")
+	h.run(t)
+
+	select {
+	case state := <-committed:
+		assert.Equal(t, StateDispatched, state,
+			"the release runs after the launch transaction, so an unserve waiting on the lock cannot land between the reading and the task")
+	case <-time.After(5 * time.Second):
+		t.Fatal("nothing was launched")
 	}
 }

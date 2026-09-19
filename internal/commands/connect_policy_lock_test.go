@@ -1,10 +1,12 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,13 +113,14 @@ func TestAuthorizeIsBusyWhileSomebodyElseHoldsThePolicy(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(unlock)
 
-	start := time.Now()
+	// That this read does not wait is setup.TryLock's property and is
+	// asserted there (TestTryLockDoesNotWaitForAHolder), where the clock is
+	// the thing under test. Here the question is only what it answers.
 	projects, release, err := served.Authorize()
 	assert.ErrorIs(t, err, connector.ErrPolicyBusy)
 	assert.NotErrorIs(t, err, connector.ErrPolicyUnreadable, "somebody holding the lock is not the same as nothing being able to read it")
 	assert.Nil(t, projects, "a lock nobody could take is not an empty served set")
 	assert.Nil(t, release)
-	assert.Less(t, time.Since(start), setup.LockWait/2, "the dispatcher's read does not wait on a file another process writes")
 }
 
 // A connect.json that no longer loads is the other kind of nothing: it
@@ -188,10 +191,11 @@ func TestRedispatchReadsTheServedSetUnderTheLock(t *testing.T) {
 	stale.Projects = map[int64]admission.Project{48929974: {}}
 	writePolicyFile(t, path, stale)
 
-	served, release, err := servedBucketsUnderLock(p)
+	authorized, served, release, err := authorizedProfile(context.Background(), p)
 	require.NoError(t, err)
 	t.Cleanup(release)
 	assert.Equal(t, []int64{48929974}, served, "the unserved project is gone from the set the decision is written against")
+	assert.NotContains(t, authorized.file.Projects, int64(48699913), "and gone from the profile everything below decides with")
 
 	_, err = setup.TryLock(path)
 	assert.ErrorIs(t, err, setup.ErrSetupRunning, "and the lock is held until the decision has been written")
@@ -209,7 +213,7 @@ func TestRedispatchIsBusyWhileSetupHoldsThePolicy(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(unlock)
 
-	_, _, err = servedBucketsUnderLock(connectProfile{name: "agent", path: path, file: file})
+	_, _, _, err = authorizedProfile(context.Background(), connectProfile{name: "agent", path: path, file: file})
 	require.Error(t, err)
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
@@ -226,11 +230,75 @@ func TestRedispatchRefusesAPolicyThatNowNamesAnotherAgent(t *testing.T) {
 	other.Agent.PersonID = 1
 	writePolicyFile(t, path, other)
 
-	_, _, err := servedBucketsUnderLock(connectProfile{name: "agent", path: path, file: file})
+	_, _, _, err := authorizedProfile(context.Background(), connectProfile{name: "agent", path: path, file: file})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "another agent or account")
 
 	unlock, err := setup.TryLock(path)
 	require.NoError(t, err, "a refusal leaves no lock behind")
 	unlock()
+}
+
+// A blocked record's redispatch re-runs what blocked it, and that rerun
+// decides with a policy. The policy has to be the one the decision was
+// authorized against: `Ledger.Redispatch` sets Rerun for a blocked record
+// without consulting the served set at all, so a rerun carrying the file the
+// command loaded at start-up can re-admit a record whose project the
+// operator unserved in between — and write an admitted verdict that is not
+// true of the policy as it stands (Copilot on #771).
+func TestARerunDecidesWithThePolicyItWasAuthorizedAgainst(t *testing.T) {
+	const withdrawn, kept = int64(48699913), int64(48929974)
+	path, startup := policyFile(t, map[int64]admission.Project{kept: {}, withdrawn: {}})
+
+	unserved := startup
+	unserved.Projects = map[int64]admission.Project{kept: {}}
+	writePolicyFile(t, path, unserved)
+
+	// What the command loaded at start-up still serves the project.
+	stale, err := startup.Policy(startup.Agent.PersonID)
+	require.NoError(t, err)
+	require.Contains(t, stale.Projects, withdrawn, "the stale policy is what would re-admit it")
+
+	authorized, served, release, err := authorizedProfile(context.Background(), connectProfile{name: "agent", path: path, file: startup})
+	require.NoError(t, err)
+	t.Cleanup(release)
+
+	assert.Equal(t, []int64{kept}, served)
+	fresh, err := authorized.file.Policy(authorized.file.Agent.PersonID)
+	require.NoError(t, err)
+	assert.NotContains(t, fresh.Projects, withdrawn,
+		"the rerun decides against the reading the decision was authorized with, not the one the command started with")
+	assert.Contains(t, fresh.Projects, kept)
+}
+
+// The redispatch's lock is held across the ledger's write and let go before
+// the rerun, which talks to Basecamp. Both halves matter and neither is
+// visible from the helper alone, so this asserts the order as a property of
+// the source, the way the dispatcher's release point is asserted in
+// connector. Released before the write and the window is open again;
+// released after the rerun and an operator's command holds a lock `connect
+// setup` waits on, across the network.
+func TestTheRedispatchReleasesAfterTheWriteAndBeforeTheRerun(t *testing.T) {
+	source, err := os.ReadFile("connect_operator.go")
+	require.NoError(t, err)
+	body := string(source)
+	start := strings.Index(body, "func runConnectRedispatch(")
+	require.Positive(t, start, "runConnectRedispatch is where the order lives")
+	body = body[start:]
+	if end := strings.Index(body, "\nfunc "); end > 0 {
+		body = body[:end]
+	}
+
+	authorize := strings.Index(body, "authorizedProfile(")
+	write := strings.Index(body, "ledger.Redispatch(")
+	release := strings.Index(body, "release()")
+	rerun := strings.Index(body, "rerunPrerequisite(")
+	require.Positive(t, authorize)
+	require.Positive(t, write)
+	require.Positive(t, release)
+	require.Positive(t, rerun)
+
+	assert.Less(t, authorize, write, "the served set is read before the decision is written")
+	assert.Less(t, write, release, "and the lock is held across that write, not merely taken before it")
+	assert.Less(t, release, rerun, "and let go before the rerun, which reads Basecamp")
 }

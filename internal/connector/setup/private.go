@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -62,6 +63,26 @@ var ErrSetupRunning = errors.New("another command holds this profile's connector
 // guarantee is the lock, so it refuses rather than run without one.
 var ErrLockUnavailable = errors.New("this host cannot lock the connector's policy")
 
+// Who takes this lock, and for how long. Two holders, and a third form for
+// the one caller that must never wait:
+//
+//   - `connect setup` (Lock) holds it across its whole load, change and
+//     save, network checks included. Seconds, and on a slow or unreachable
+//     account longer than that.
+//   - `connect redispatch` (Lock) holds it across one file read and one
+//     ledger transaction, then lets go before it re-runs a prerequisite
+//     against Basecamp. Milliseconds. It is a one-shot operator command,
+//     not the connector.
+//   - the running connector (TryLock) takes it once per launch, across one
+//     file read and one ledger transaction, and never waits: a pass that
+//     cannot take it dispatches nothing and asks again on its next tick.
+//
+// Nothing holds it across a network call except setup, and nothing takes any
+// other lock while holding it — the ledger's SQLite locks are taken under
+// it, never the other way about. A fourth caller that wants to wait on this
+// while holding something the connector's launch path waits on is how this
+// becomes a deadlock; there is no such caller today.
+//
 // LockWait bounds Lock's wait for a holder to finish. The connector takes
 // this lock too now, and what it does under it is one file read and one
 // SQLite transaction — bounded by the ledger's own five-second busy retry —
@@ -79,12 +100,27 @@ const lockPoll = 20 * time.Millisecond
 
 // Lock takes the per-profile setup lock beside connect.json, so a load, a
 // change and a save cannot interleave with another holder's. It waits up to
-// LockWait and then reports ErrSetupRunning: the wait is for the connector's
-// brief hold, not a queue of setups, and a second setup on one profile is
-// still a mistake to report rather than to serialize — it will not have
-// finished inside LockWait.
-func Lock(path string) (unlock func(), err error) {
-	return lock(path, LockWait)
+// LockWait, or until ctx ends, and then reports ErrSetupRunning or ctx's own
+// error.
+//
+// The wait honors ctx, and a wait that ends takes nothing: a person who
+// pressed Ctrl-C during contention is not made to sit out the bound, and a
+// command whose context has expired does not go on to acquire a lock and act
+// under it (Copilot on #771). What a caller that cannot get the lock gets is
+// a refusal, never a fall-through: "the policy could not be checked" is not
+// permission to change it.
+//
+// The wait is for the connector's hold, which is milliseconds. It cannot
+// tell one holder from another, though, so a second `connect setup` that
+// finishes inside LockWait is now queued rather than refused. That is a
+// change: this used to refuse on sight, on the reasoning that a second setup
+// on one profile is a mistake to report and not a queue. It is the price of
+// not failing the first setup that happens to overlap a dispatcher pass, and
+// the reasoning survives where it matters — a setup that is actually running
+// takes far longer than LockWait, so a person who started two still gets
+// told.
+func Lock(ctx context.Context, path string) (unlock func(), err error) {
+	return lock(ctx, path, LockWait)
 }
 
 // TryLock takes the lock if it is free and reports ErrSetupRunning if it is
@@ -93,11 +129,12 @@ func Lock(path string) (unlock func(), err error) {
 // one tick of latency. Waiting instead would park the dispatcher behind a
 // `connect setup`'s network checks, and a dispatcher that blocks on a file
 // another process writes is its own hazard.
+// It takes no context because it does not wait: there is nothing to cancel.
 func TryLock(path string) (unlock func(), err error) {
-	return lock(path, 0)
+	return lock(context.Background(), path, 0)
 }
 
-func lock(path string, wait time.Duration) (unlock func(), err error) {
+func lock(ctx context.Context, path string, wait time.Duration) (unlock func(), err error) {
 	if err := ensurePrivateDirs(path); err != nil {
 		return nil, err
 	}
@@ -116,6 +153,12 @@ func lock(path string, wait time.Duration) (unlock func(), err error) {
 	lock := flock.New(lockPath, flock.SetPermissions(0o600))
 	deadline := time.Now().Add(wait)
 	for {
+		// Before the attempt, not only after it: a context that has already
+		// ended must not come away holding the lock and go on to act under
+		// it.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		held, err := lock.TryLock()
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s: %w", ErrLockUnavailable, lockPath, err)
@@ -126,7 +169,11 @@ func lock(path string, wait time.Duration) (unlock func(), err error) {
 		if !time.Now().Before(deadline) {
 			return nil, fmt.Errorf("%w: %s", ErrSetupRunning, filepath.Dir(path))
 		}
-		time.Sleep(lockPoll)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(lockPoll):
+		}
 	}
 }
 

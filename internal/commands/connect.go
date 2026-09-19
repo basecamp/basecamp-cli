@@ -397,7 +397,9 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		return output.ErrUsage(err.Error())
 	}
 	// One setup per profile at a time: load, change and save are one step.
-	unlock, err := setup.Lock(path)
+	// The wait honors ctx, so a person who stops the command during
+	// contention is not made to sit out the whole of it.
+	unlock, err := setup.Lock(ctx, path)
 	if err != nil {
 		return classifyLockError(name, err)
 	}
@@ -614,7 +616,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 
 // classifyWriteError puts the last step's failures in the command's exit
 // contract: a credential that is gone or unreadable is auth, another
-// process holding the profile's credential or setup lock is busy, a
+// process holding the profile's credential or the profile's policy lock is busy, a
 // connect.json nobody else may change is usage.
 func classifyWriteError(name string, err error) error {
 	var apiErr *output.Error
@@ -653,6 +655,11 @@ func classifyWriteError(name string, err error) error {
 // lock_unavailable, and a connect.json nobody else may change stays usage.
 func classifyLockError(name string, err error) error {
 	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// A person who stopped the command, or a deadline, while waiting for
+		// the lock: the run ended, nothing was locked, and nothing was
+		// changed. Reported as itself rather than dressed as a lock failure.
+		return err
 	case errors.Is(err, setup.ErrSetupRunning):
 		return errBusy(name, err)
 	case errors.Is(err, setup.ErrLockUnavailable):
