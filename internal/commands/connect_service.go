@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -41,6 +43,18 @@ const connectServiceUnitPrefix = "basecamp-connect-"
 // `failed` where a person can see it, rather than spinning.
 const connectServiceRestartSec = 5
 
+// connectServiceStartLimit bounds the restarting. Restart=always on its own
+// will retry a connector that can never start — a credential the service
+// cannot reach, a worker that is not installed — for as long as the machine
+// is up, and `is-active` says `activating` the whole time. That is a service
+// reporting health it does not have. Five starts inside five minutes, which
+// at RestartSec=5 takes about twenty-five seconds, puts the unit in `failed`
+// where a person and `systemctl --user is-active` both see it.
+const (
+	connectServiceStartLimitSec = 300
+	connectServiceStartLimitN   = 5
+)
+
 // connectServiceStopSec is how long systemd waits after SIGTERM before it
 // resorts to SIGKILL. The connector spends that time canceling live
 // workers and posting their `ended at shutdown` completions; killed early,
@@ -48,6 +62,11 @@ const connectServiceRestartSec = 5
 // hand. Ninety seconds is systemd's own default, stated here rather than
 // inherited so that changing it is a decision someone made.
 const connectServiceStopSec = 90
+
+// connectServiceGOOS is the platform these commands answer for. A variable
+// so the refusal on a platform the connector does not run on is testable
+// from the one platform it does.
+var connectServiceGOOS = runtime.GOOS
 
 // runSystemctl runs systemctl for the calling user. A variable so tests
 // drive install and uninstall without a session bus.
@@ -157,8 +176,8 @@ func connectServiceProfile(app *appctx.App) (string, error) {
 	if app == nil {
 		return "", fmt.Errorf("app not initialized")
 	}
-	if !connectSupportedOS(runtime.GOOS) {
-		return "", connectUnsupportedOSError(runtime.GOOS)
+	if !connectSupportedOS(connectServiceGOOS) {
+		return "", connectUnsupportedOSError(connectServiceGOOS)
 	}
 	name := app.Config.ActiveProfile
 	if name == "" {
@@ -198,7 +217,7 @@ func connectServiceUnitPath(profile string) (string, error) {
 // letters, numbers, hyphens and underscores, or a project id, which is
 // parsed as a number before it gets here. Nothing a person typed reaches
 // the file as text, so no directive can be smuggled in on a second line.
-func connectServiceUnit(exe, profile string, projects []int64, shadow, hold bool) string {
+func connectServiceUnit(exe, profile string, projects []int64, shadow, hold bool, env []string) string {
 	args := []string{"connect", "--profile", profile}
 	for _, id := range projects {
 		args = append(args, "--project", strconv.FormatInt(id, 10))
@@ -218,8 +237,17 @@ func connectServiceUnit(exe, profile string, projects []int64, shadow, hold bool
 	fmt.Fprintf(&b, "Documentation=https://github.com/basecamp/basecamp-cli\n")
 	fmt.Fprintf(&b, "After=network-online.target\n")
 	fmt.Fprintf(&b, "Wants=network-online.target\n\n")
+	fmt.Fprintf(&b, "StartLimitIntervalSec=%d\n", connectServiceStartLimitSec)
+	fmt.Fprintf(&b, "StartLimitBurst=%d\n\n", connectServiceStartLimitN)
 	fmt.Fprintf(&b, "[Service]\n")
 	fmt.Fprintf(&b, "Type=simple\n")
+	// A systemd user manager starts from its own environment, not from the
+	// shell that installed this. Without these the connector would look for
+	// another connect.json, keep its ledger somewhere else, and run a worker
+	// it could not find — active, and failing every dispatch.
+	for _, e := range env {
+		fmt.Fprintf(&b, "Environment=%s\n", systemdQuote(e))
+	}
 	fmt.Fprintf(&b, "ExecStart=%s\n", systemdExecLine(exe, args))
 	fmt.Fprintf(&b, "Restart=always\n")
 	fmt.Fprintf(&b, "RestartSec=%d\n", connectServiceRestartSec)
@@ -251,6 +279,36 @@ func systemdExecLine(exe string, args []string) string {
 func systemdQuote(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 	return `"` + r.Replace(s) + `"`
+}
+
+// connectServiceEnvKeys are the variables the unit pins. A systemd user
+// manager is started at login with an environment of its own: it does not
+// have the shell's PATH, and it computes XDG defaults itself. Left to it,
+// the connector reads a different connect.json from the one install just
+// checked, keeps its ledger somewhere else, and runs the worker by bare
+// name — `claude`, `codex` — off a PATH that does not have it. The unit
+// would be active and every dispatch would fail.
+//
+// So install records the environment it verified the setup in, and the
+// service runs in that one.
+var connectServiceEnvKeys = []string{"PATH", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "XDG_DATA_HOME"}
+
+// connectServiceEnv is the environment to pin, in unit form.
+func connectServiceEnv() ([]string, error) {
+	var env []string
+	for _, k := range connectServiceEnvKeys {
+		v, ok := os.LookupEnv(k)
+		if !ok || v == "" {
+			continue
+		}
+		if strings.ContainsAny(v, "\n\r\x00") {
+			return nil, output.ErrUsageHint(
+				fmt.Sprintf("%s holds a newline or a null byte, which cannot go into a unit file", k),
+				"Fix "+k+" in this shell, then install again. No unit was written.")
+		}
+		env = append(env, k+"="+v)
+	}
+	return env, nil
 }
 
 func runConnectServiceInstall(cmd *cobra.Command, f *connectServiceFlags) error {
@@ -287,7 +345,11 @@ func runConnectServiceInstall(cmd *cobra.Command, f *connectServiceFlags) error 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("cannot create %s: %w", richtext.SanitizeSingleLine(filepath.Dir(path)), err)
 	}
-	unit := connectServiceUnit(exe, profile, projects, f.shadow, f.hold)
+	env, err := connectServiceEnv()
+	if err != nil {
+		return err
+	}
+	unit := connectServiceUnit(exe, profile, projects, f.shadow, f.hold, env)
 	if err := os.WriteFile(path, []byte(unit), 0o600); err != nil {
 		return fmt.Errorf("cannot write %s: %w", richtext.SanitizeSingleLine(path), err)
 	}
@@ -296,13 +358,23 @@ func runConnectServiceInstall(cmd *cobra.Command, f *connectServiceFlags) error 
 	summary := fmt.Sprintf("Wrote %s", path)
 	enabled := false
 	if !f.noEnable {
-		if out, err := connectServiceEnable(name); err != nil {
+		if out, err := connectServiceEnable(name, path); err != nil {
+			// systemctl says nothing at all when it is missing, or when the
+			// failure is in running it rather than in what it was asked; the
+			// error is the only account of that, so it is not thrown away.
+			why := strings.TrimSpace(string(out))
+			if why == "" {
+				why = err.Error()
+			}
 			return output.ErrUsageHint(
-				fmt.Sprintf("Wrote %s, but could not start it: %s", richtext.SanitizeSingleLine(path), richtext.SanitizeSingleLine(strings.TrimSpace(string(out)))),
-				"Start it yourself: systemctl --user daemon-reload && systemctl --user enable --now "+name)
+				fmt.Sprintf("Wrote %s, but could not start it: %s", richtext.SanitizeSingleLine(path), richtext.SanitizeSingleLine(why)),
+				"Start it yourself: systemctl --user daemon-reload && systemctl --user enable "+name+" && systemctl --user restart "+name)
 		}
 		enabled = true
 		summary = fmt.Sprintf("Wrote %s and started %s", path, name)
+		if warning := connectServiceLingerWarning(cmd.Context()); warning != "" {
+			summary += ". " + warning
+		}
 	}
 	return app.OK(map[string]any{"unit": name, "path": path, "enabled": enabled},
 		output.WithSummary(summary))
@@ -330,16 +402,73 @@ func connectServiceRequireSetup(profile string) error {
 	return nil
 }
 
-func connectServiceEnable(unit string) ([]byte, error) {
+// connectServiceEnable reloads, enables and starts the unit.
+//
+// enable without --now, then restart. `enable --now` starts it, and a
+// restart straight after would stop that process and start another —
+// and the first one can have begun intake, or a dispatch, in between.
+// restart starts an inactive unit and refreshes a running one, so it is
+// both the first start and the way a reinstall picks up a new command
+// line.
+func connectServiceEnable(unit, wantPath string) ([]byte, error) {
 	if out, err := runSystemctl("daemon-reload"); err != nil {
 		return out, err
 	}
-	// enable --now on an already-running unit leaves it running with the
-	// old command line, so the restart is asked for explicitly.
-	if out, err := runSystemctl("enable", "--now", unit); err != nil {
+	// Before anything is started: the unit the manager found has to be the
+	// unit that was just written. A user manager computes its own search
+	// path from its own environment, so a custom XDG_CONFIG_HOME set in
+	// this shell alone puts the file somewhere it will never look — and
+	// `enable` would go on to succeed against some older unit, or fail
+	// with a message about a unit that does exist.
+	if out, err := connectServiceCheckFragment(unit, wantPath); err != nil {
+		return out, err
+	}
+	if out, err := runSystemctl("enable", unit); err != nil {
 		return out, err
 	}
 	return runSystemctl("restart", unit)
+}
+
+// connectServiceCheckFragment asks systemd which file it reads for this
+// unit, and refuses when that is not the file just written.
+func connectServiceCheckFragment(unit, wantPath string) ([]byte, error) {
+	out, err := runSystemctl("show", "-p", "FragmentPath", "--value", unit)
+	if err != nil {
+		return out, err
+	}
+	got := strings.TrimSpace(string(out))
+	if got == wantPath {
+		return nil, nil
+	}
+	where := "nowhere: the user manager does not see a unit by that name"
+	if got != "" {
+		where = got
+	}
+	return nil, fmt.Errorf("systemd reads %s for %s, not the file just written; "+
+		"the user manager's unit search path is computed from its own environment, not from this shell's XDG_CONFIG_HOME", where, unit)
+}
+
+// connectServiceLingerWarning reports when the user manager will not be
+// running after a reboot, so the unit's own "Restart" promise stops at the
+// next power cut.
+func connectServiceLingerWarning(ctx context.Context) string {
+	user := os.Getenv("USER")
+	if user == "" {
+		user = "$USER"
+	}
+	// Bounded: loginctl talks to logind, and an install must not hang on a
+	// warning it can do without.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "loginctl", "show-user", user, "-p", "Linger", "--value").Output() //nolint:gosec // fixed argv, USER read from the environment
+	if err != nil {
+		return ""
+	}
+	if strings.TrimSpace(string(out)) == "yes" {
+		return ""
+	}
+	return "This user's systemd manager starts at login, so the service will not come back after a reboot until someone logs in. " +
+		"To have it start at boot: sudo loginctl enable-linger " + user
 }
 
 func runConnectServiceUninstall(cmd *cobra.Command) error {
