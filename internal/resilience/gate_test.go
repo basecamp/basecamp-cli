@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -161,6 +162,7 @@ func runBarrieredInvocations(t *testing.T, n int, env helperEnv) invocationTally
 		cmd    *exec.Cmd
 		stdin  io.WriteCloser
 		stdout io.ReadCloser
+		stderr *bytes.Buffer
 	}
 	kids := make([]child, 0, n)
 	ready := make(chan error, n)
@@ -170,8 +172,12 @@ func runBarrieredInvocations(t *testing.T, n int, env helperEnv) invocationTally
 		require.NoError(t, err)
 		stdout, err := cmd.StdoutPipe()
 		require.NoError(t, err)
+		// Kept so that a child which dies says why: its panic or its
+		// testing output is the only account of what went wrong there.
+		stderr := &bytes.Buffer{}
+		cmd.Stderr = stderr
 		require.NoError(t, cmd.Start())
-		kids = append(kids, child{cmd, stdin, stdout})
+		kids = append(kids, child{cmd, stdin, stdout, stderr})
 	}
 
 	// Each child announces itself on its own line; nobody is released until
@@ -186,7 +192,7 @@ func runBarrieredInvocations(t *testing.T, n int, env helperEnv) invocationTally
 					return
 				}
 			}
-			ready <- errors.New("child exited before reaching the barrier")
+			ready <- errors.New("a child exited before reaching the barrier")
 		}(scanners[i])
 	}
 	for range kids {
@@ -219,7 +225,7 @@ func runBarrieredInvocations(t *testing.T, n int, env helperEnv) invocationTally
 	}
 	wg.Wait()
 	for _, k := range kids {
-		require.NoError(t, k.cmd.Wait())
+		require.NoError(t, k.cmd.Wait(), k.stderr.String())
 	}
 	return tally(all)
 }
