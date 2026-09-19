@@ -677,6 +677,9 @@ CMD basecamp connect doctor
 CMD basecamp connect import
 CMD basecamp connect redispatch
 CMD basecamp connect release
+CMD basecamp connect service
+CMD basecamp connect service install
+CMD basecamp connect service uninstall
 CMD basecamp connect setup
 CMD basecamp connect shadow
 CMD basecamp connect shadow promote
@@ -5486,6 +5489,72 @@ FLAG basecamp connect release --stats type=bool
 FLAG basecamp connect release --styled type=bool
 FLAG basecamp connect release --todolist type=string
 FLAG basecamp connect release --verbose type=count
+FLAG basecamp connect service --account type=string
+FLAG basecamp connect service --agent type=bool
+FLAG basecamp connect service --cache-dir type=string
+FLAG basecamp connect service --count type=bool
+FLAG basecamp connect service --help type=bool
+FLAG basecamp connect service --hints type=bool
+FLAG basecamp connect service --ids-only type=bool
+FLAG basecamp connect service --in type=string
+FLAG basecamp connect service --jq type=string
+FLAG basecamp connect service --json type=bool
+FLAG basecamp connect service --markdown type=bool
+FLAG basecamp connect service --md type=bool
+FLAG basecamp connect service --no-hints type=bool
+FLAG basecamp connect service --no-stats type=bool
+FLAG basecamp connect service --profile type=string
+FLAG basecamp connect service --project type=string
+FLAG basecamp connect service --quiet type=bool
+FLAG basecamp connect service --stats type=bool
+FLAG basecamp connect service --styled type=bool
+FLAG basecamp connect service --todolist type=string
+FLAG basecamp connect service --verbose type=count
+FLAG basecamp connect service install --account type=string
+FLAG basecamp connect service install --agent type=bool
+FLAG basecamp connect service install --cache-dir type=string
+FLAG basecamp connect service install --count type=bool
+FLAG basecamp connect service install --help type=bool
+FLAG basecamp connect service install --hints type=bool
+FLAG basecamp connect service install --hold type=bool
+FLAG basecamp connect service install --ids-only type=bool
+FLAG basecamp connect service install --in type=string
+FLAG basecamp connect service install --jq type=string
+FLAG basecamp connect service install --json type=bool
+FLAG basecamp connect service install --markdown type=bool
+FLAG basecamp connect service install --md type=bool
+FLAG basecamp connect service install --no-enable type=bool
+FLAG basecamp connect service install --no-hints type=bool
+FLAG basecamp connect service install --no-stats type=bool
+FLAG basecamp connect service install --profile type=string
+FLAG basecamp connect service install --project type=string
+FLAG basecamp connect service install --quiet type=bool
+FLAG basecamp connect service install --shadow type=bool
+FLAG basecamp connect service install --stats type=bool
+FLAG basecamp connect service install --styled type=bool
+FLAG basecamp connect service install --todolist type=string
+FLAG basecamp connect service install --verbose type=count
+FLAG basecamp connect service uninstall --account type=string
+FLAG basecamp connect service uninstall --agent type=bool
+FLAG basecamp connect service uninstall --cache-dir type=string
+FLAG basecamp connect service uninstall --count type=bool
+FLAG basecamp connect service uninstall --help type=bool
+FLAG basecamp connect service uninstall --hints type=bool
+FLAG basecamp connect service uninstall --ids-only type=bool
+FLAG basecamp connect service uninstall --in type=string
+FLAG basecamp connect service uninstall --jq type=string
+FLAG basecamp connect service uninstall --json type=bool
+FLAG basecamp connect service uninstall --markdown type=bool
+FLAG basecamp connect service uninstall --md type=bool
+FLAG basecamp connect service uninstall --no-hints type=bool
+FLAG basecamp connect service uninstall --no-stats type=bool
+FLAG basecamp connect service uninstall --profile type=string
+FLAG basecamp connect service uninstall --project type=string
+FLAG basecamp connect service uninstall --quiet type=bool
+FLAG basecamp connect service uninstall --stats type=bool
+FLAG basecamp connect service uninstall --styled type=bool
+FLAG basecamp connect service uninstall --todolist type=string
+FLAG basecamp connect service uninstall --verbose type=count
 FLAG basecamp connect setup --account type=string
 FLAG basecamp connect setup --agent type=bool
 FLAG basecamp connect setup --allow type=stringArray
@@ -18790,6 +18859,9 @@ SUB basecamp connect doctor
 SUB basecamp connect import
 SUB basecamp connect redispatch
 SUB basecamp connect release
+SUB basecamp connect service
+SUB basecamp connect service install
+SUB basecamp connect service uninstall
 SUB basecamp connect setup
 SUB basecamp connect shadow
 SUB basecamp connect shadow promote

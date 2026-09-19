@@ -60,7 +60,8 @@ wait for review, until basecamp connect release. Linux only.
   basecamp connect discard <id>       close a record without running it
   basecamp connect release            clear the hold
   basecamp connect shadow promote     make the shadow ledger the connector's, held
-  basecamp connect import <file>      apply a cutover reconciliation file`,
+  basecamp connect import <file>      apply a cutover reconciliation file
+  basecamp connect service install    have the OS keep it running`,
 		Example: `  basecamp connect setup -P agent --operator-profile me --serve 12345
   basecamp connect -P agent
   basecamp connect -P agent --project 12345 --shadow`,
@@ -75,7 +76,8 @@ wait for review, until basecamp connect release. Linux only.
 	}
 	addConnectRunFlags(cmd, &run)
 	cmd.AddCommand(newConnectSetupCmd(), newConnectWorkerMCPCmd(), newConnectShowCmd(), newConnectStatusCmd(), newConnectDoctorCmd(),
-		newConnectRedispatchCmd(), newConnectDiscardCmd(), newConnectReleaseCmd(), newConnectShadowCmd(), newConnectImportCmd())
+		newConnectRedispatchCmd(), newConnectDiscardCmd(), newConnectReleaseCmd(), newConnectShadowCmd(), newConnectImportCmd(),
+		newConnectServiceCmd())
 	return cmd
 }
 
