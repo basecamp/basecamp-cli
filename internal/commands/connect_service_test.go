@@ -1,4 +1,4 @@
-//go:build unix
+//go:build linux
 
 package commands
 
@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,15 @@ func connectServiceHome(t *testing.T) *[][]string {
 	prev := runSystemctl
 	runSystemctl = func(args ...string) ([]byte, error) {
 		calls = append(calls, args)
+		// A working manager reads the file that was just written, which is
+		// what the fragment check asks it.
+		if len(args) > 0 && args[0] == "show" {
+			path, err := connectServiceUnitPath("agent")
+			if err != nil {
+				return nil, err
+			}
+			return []byte(path + "\n"), nil
+		}
 		return nil, nil
 	}
 	t.Cleanup(func() { runSystemctl = prev })
@@ -95,7 +105,7 @@ func runConnectServiceCmd(t *testing.T, app *appctx.App, args ...string) (string
 // Without Restart the unit is a launcher, not a supervisor, and a killed
 // connector stays dead.
 func TestConnectServiceUnitRestartsTheConnector(t *testing.T) {
-	unit := connectServiceUnit("/usr/bin/basecamp", "agent", nil, false, false)
+	unit := connectServiceUnit("/usr/bin/basecamp", "agent", nil, false, false, nil)
 
 	assert.Contains(t, unit, "\nRestart=always\n", "a unit that does not restart supervises nothing")
 	assert.Contains(t, unit, "\nRestartSec=5\n")
@@ -107,7 +117,7 @@ func TestConnectServiceUnitRestartsTheConnector(t *testing.T) {
 // that killed it outright would leave those records needing redispatch by
 // hand, and would count its own 143 as a crash.
 func TestConnectServiceUnitLetsTheConnectorSettleItsWorkers(t *testing.T) {
-	unit := connectServiceUnit("/usr/bin/basecamp", "agent", nil, false, false)
+	unit := connectServiceUnit("/usr/bin/basecamp", "agent", nil, false, false, nil)
 
 	assert.Contains(t, unit, "\nKillSignal=SIGTERM\n")
 	assert.Contains(t, unit, "\nTimeoutStopSec=90\n")
@@ -115,7 +125,7 @@ func TestConnectServiceUnitLetsTheConnectorSettleItsWorkers(t *testing.T) {
 }
 
 func TestConnectServiceUnitRecordsTheRun(t *testing.T) {
-	unit := connectServiceUnit("/usr/bin/basecamp", "agent", []int64{12345, 67890}, true, true)
+	unit := connectServiceUnit("/usr/bin/basecamp", "agent", []int64{12345, 67890}, true, true, nil)
 
 	exec := unitDirective(t, unit, "ExecStart")
 	assert.Equal(t,
@@ -126,7 +136,7 @@ func TestConnectServiceUnitRecordsTheRun(t *testing.T) {
 // Every word in the command line is quoted, so a path with a space in it
 // stays one argument rather than becoming two.
 func TestConnectServiceUnitQuotesTheExecutablePath(t *testing.T) {
-	unit := connectServiceUnit(`/home/a b/go bin/basecamp`, "agent", nil, false, false)
+	unit := connectServiceUnit(`/home/a b/go bin/basecamp`, "agent", nil, false, false, nil)
 
 	assert.Contains(t, unitDirective(t, unit, "ExecStart"), `"/home/a b/go bin/basecamp" "connect"`)
 }
@@ -166,9 +176,10 @@ func TestConnectServiceInstallWritesAndStartsTheUnit(t *testing.T) {
 
 	assert.Equal(t, [][]string{
 		{"daemon-reload"},
-		{"enable", "--now", "basecamp-connect-agent.service"},
+		{"show", "-p", "FragmentPath", "--value", "basecamp-connect-agent.service"},
+		{"enable", "basecamp-connect-agent.service"},
 		{"restart", "basecamp-connect-agent.service"},
-	}, *calls, "the unit has to be reloaded, enabled and restarted or the new command line never runs")
+	}, *calls, "reloaded, checked to be the file systemd reads, enabled and restarted, or the new command line never runs")
 }
 
 // A unit for a profile that was never set up would start a connector that
@@ -258,6 +269,120 @@ func TestConnectServiceRefusesAProfileNameThatIsNotOne(t *testing.T) {
 		_, err := connectServiceUnitPath(name)
 		assert.Error(t, err, name)
 	}
+}
+
+// A connector that can never start — a credential the service cannot
+// reach, a worker that is not installed — must become visible rather than
+// be retried forever. Restart=always on its own reports `activating` for as
+// long as the machine is up, which is a service claiming health it has not
+// got.
+func TestConnectServiceUnitStopsRetryingAConnectorThatCannotStart(t *testing.T) {
+	unit := connectServiceUnit("/usr/bin/basecamp", "agent", nil, false, false, nil)
+
+	assert.Contains(t, unit, "\nStartLimitIntervalSec=300\n")
+	assert.Contains(t, unit, "\nStartLimitBurst=5\n")
+}
+
+// The user manager does not have the shell's PATH and computes the XDG
+// defaults itself, so a unit that pins nothing runs a connector that reads
+// another connect.json, keeps its ledger elsewhere, and looks for its
+// worker on a PATH that has not got it — active, and failing every
+// dispatch.
+func TestConnectServiceUnitPinsTheEnvironmentInstallVerified(t *testing.T) {
+	unit := connectServiceUnit("/usr/bin/basecamp", "agent", nil, false, false,
+		[]string{"PATH=/home/a/bin:/usr/bin", "XDG_CONFIG_HOME=/home/a/.config"})
+
+	assert.Contains(t, unit, `Environment="PATH=/home/a/bin:/usr/bin"`)
+	assert.Contains(t, unit, `Environment="XDG_CONFIG_HOME=/home/a/.config"`)
+}
+
+func TestConnectServiceEnvRefusesAValueThatWouldSplitTheUnitFile(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin\nExecStart=/bin/sh")
+
+	_, err := connectServiceEnv()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "PATH")
+}
+
+// enable --now starts it, and a restart straight after would stop that
+// process and start another — with intake, or a dispatch, possibly already
+// begun in between.
+func TestConnectServiceInstallStartsTheConnectorOnce(t *testing.T) {
+	calls := connectServiceHome(t)
+	writeConnectSetup(t, "agent")
+	app, _ := connectServiceApp(t, "agent")
+
+	require.NoError(t, runConnectServiceInstallForTest(t, app))
+
+	for _, c := range *calls {
+		assert.NotContains(t, c, "--now", "enable --now starts a process that the restart then kills: %v", c)
+	}
+}
+
+// systemd has to be reading the file that was just written. A custom
+// XDG_CONFIG_HOME set in this shell alone puts the unit where the user
+// manager will never look, and enable would go on to succeed against some
+// older unit.
+func TestConnectServiceInstallRefusesWhenSystemdReadsAnotherFile(t *testing.T) {
+	connectServiceHome(t)
+	writeConnectSetup(t, "agent")
+	prev := runSystemctl
+	runSystemctl = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "show" {
+			return []byte("/etc/systemd/user/basecamp-connect-agent.service\n"), nil
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { runSystemctl = prev })
+	app, _ := connectServiceApp(t, "agent")
+
+	_, err := runConnectServiceCmd(t, app, "install")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "/etc/systemd/user/basecamp-connect-agent.service")
+}
+
+// The platform gate is the run command's, so a Mac is refused before a unit
+// is written for a connector that would not start on it.
+func TestConnectServiceRefusesAPlatformTheConnectorDoesNotRunOn(t *testing.T) {
+	connectServiceHome(t)
+	writeConnectSetup(t, "agent")
+	prev := connectServiceGOOS
+	connectServiceGOOS = "darwin"
+	t.Cleanup(func() { connectServiceGOOS = prev })
+	app, _ := connectServiceApp(t, "agent")
+
+	_, err := runConnectServiceCmd(t, app, "install")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), connectLinuxOnlyReason)
+
+	path, err := connectServiceUnitPath("agent")
+	require.NoError(t, err)
+	assert.NoFileExists(t, path)
+}
+
+// When systemctl is missing, or fails in the running rather than in what it
+// was asked, its combined output is empty and the error is the only account
+// there is.
+func TestConnectServiceInstallKeepsTheReasonWhenSystemctlSaysNothing(t *testing.T) {
+	connectServiceHome(t)
+	writeConnectSetup(t, "agent")
+	prev := runSystemctl
+	runSystemctl = func(_ ...string) ([]byte, error) {
+		return nil, errors.New("exec: \"systemctl\": executable file not found in $PATH")
+	}
+	t.Cleanup(func() { runSystemctl = prev })
+	app, _ := connectServiceApp(t, "agent")
+
+	_, err := runConnectServiceCmd(t, app, "install")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "executable file not found")
+}
+
+// runConnectServiceInstallForTest runs install and returns its error.
+func runConnectServiceInstallForTest(t *testing.T, app *appctx.App) error {
+	t.Helper()
+	_, err := runConnectServiceCmd(t, app, "install")
+	return err
 }
 
 // unitDirective returns the value of a unit file's directive.
