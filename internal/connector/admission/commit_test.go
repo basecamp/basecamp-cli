@@ -260,10 +260,11 @@ func TestNextBlockedRetry(t *testing.T) {
 	assert.Equal(t, blockedAt.Add(30*24*time.Hour+10*time.Minute), next)
 }
 
-// The reasons the schedule names are one list, and the ledger's query is
-// built from it: a reason added to NextBlockedRetry and not to the list would
-// be scheduled and never read.
-func TestTimedBlockedReasonsIsEveryReasonTheScheduleRuns(t *testing.T) {
+// Which reasons automatic re-decision is turned on for, stated as a set
+// rather than read off the implementation: this is the feature, and a reason
+// joining or leaving it is a decision somebody makes, not a diff nobody
+// notices.
+func TestTheScheduleRunsExactlySixReasons(t *testing.T) {
 	every := []Reason{
 		ReasonInvalidPointer, ReasonNotInMatrix, ReasonAgentAuthored, ReasonDelegated,
 		ReasonOutOfScope, ReasonUntrustedPerformer, ReasonAssignmentNotOperator,
@@ -279,11 +280,10 @@ func TestTimedBlockedReasonsIsEveryReasonTheScheduleRuns(t *testing.T) {
 		}
 	}
 	slices.Sort(scheduled)
-	assert.Equal(t, TimedBlockedReasons(), scheduled)
 	assert.Equal(t, []Reason{
 		ReasonConfigUnreadable, ReasonDeltaUnverified, ReasonReadFailed,
 		ReasonReadUnresolved, ReasonThrottled, ReasonTrustUnverified,
-	}, TimedBlockedReasons(), "the six reasons automatic re-decision is turned on for")
+	}, scheduled, "the six reasons automatic re-decision is turned on for")
 }
 
 type sliceSource struct {

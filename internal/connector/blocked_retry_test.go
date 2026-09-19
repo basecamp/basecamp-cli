@@ -2,6 +2,8 @@ package connector
 
 import (
 	"context"
+	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -179,27 +181,31 @@ func TestDueBlockedRetriesWaitsOutTheIntervalAndTheWindow(t *testing.T) {
 	})
 }
 
-// A row the schedule has finished with stays blocked forever. Read under a
-// plain LIMIT it would hold a place in every sweep's window for good, and the
-// due rows behind it would never be reached. The query pages past them
-// instead.
-func TestDueBlockedRetriesIsNotStarvedByTheRecordsItSkips(t *testing.T) {
+// A row the schedule has finished with stays blocked forever, and the sweep
+// must not pay for it every minute for the life of the connector. It carries
+// no next_retry_at once its window has passed, so the query does not read it
+// at all — and it is not on the schedule, so it holds no claim either.
+func TestARecordTheScheduleIsFinishedWithLeavesTheSweepEntirely(t *testing.T) {
 	ledger, clock := retryLedger(t)
-	finished := int64(dueBlockedBatch + 10)
-	for id := int64(1); id <= finished; id++ {
-		blockRecord(t, ledger, id, adapterBucketID, admission.ReasonReadFailed)
-	}
-	// A page and more of rows the schedule is done with: blocked a day ago,
-	// last asked on the window's edge.
-	clock.Advance(admission.BlockedRetryWindow)
-	for id := int64(1); id <= finished; id++ {
-		reblock(t, ledger, id, admission.ReasonReadFailed)
-	}
-	blockRecord(t, ledger, finished+1, adapterBucketID, admission.ReasonReadFailed)
-	clock.Advance(admission.BlockedRetryInterval)
+	blockRecord(t, ledger, 1, adapterBucketID, admission.ReasonReadFailed)
+	blockRecord(t, ledger, 2, adapterBucketID, admission.ReasonReadFailed)
 
-	assert.Equal(t, []int64{finished + 1}, dueIDs(t, ledger, BlockedRetryScope{Now: clock.Now(), Limit: 10}),
-		"the due row is found behind a page of rows the schedule is done with")
+	// One is asked with room left in its window and stays on the schedule.
+	// The other is asked on the window's edge, so its next attempt would fall
+	// outside it and there is no next attempt.
+	clock.Advance(admission.BlockedRetryWindow - 2*admission.BlockedRetryInterval)
+	reblock(t, ledger, 2, admission.ReasonReadFailed)
+	clock.Advance(2 * admission.BlockedRetryInterval)
+	reblock(t, ledger, 1, admission.ReasonReadFailed)
+
+	assert.Nil(t, getRecord(t, ledger, 1).Decision.NextRetryAt, "its window has passed")
+	assert.NotNil(t, getRecord(t, ledger, 2).Decision.NextRetryAt)
+
+	scope := BlockedRetryScope{Now: clock.Now(), Limit: 10}
+	assert.Equal(t, []int64{2}, dueIDs(t, ledger, scope))
+	scheduled, err := ledger.ScheduledBlockedIDs(context.Background(), scope)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{2}, scheduled, "nothing keeps a claim for a record it can never offer")
 }
 
 // retryIntake is an intake and ledger on one clock the test moves, with
@@ -295,4 +301,128 @@ func TestTheRepairSweepTickerRunsTheBlockedRetrySchedule(t *testing.T) {
 
 	assert.Equal(t, int64(1), takeID(t, queue),
 		"the timer the connector actually runs is what re-offers a blocked record")
+}
+
+// Copilot on #770, the high finding, and it is reachable. blocked_at is
+// preserved across every blocked-to-blocked verdict, so a record that spent
+// a week as the unbounded config_unreadable and then blocks on a transient
+// read failure is measured against a week-old clock. read_failed promises 24
+// hours of retries and gets none: it is scheduled against a window that
+// belongs to the reason it is no longer blocked on.
+//
+// That is the retry mechanism stranding the work it exists to recover,
+// through a different door than the out_of_scope one the card named.
+func TestAReasonThatChangesGetsItsOwnWindow(t *testing.T) {
+	ledger, clock := retryLedger(t)
+	blockRecord(t, ledger, 1, adapterBucketID, admission.ReasonConfigUnreadable)
+
+	// A week of an unreadable connect.json, asked every ten minutes, which
+	// the unbounded window is there to allow.
+	clock.Advance(7 * 24 * time.Hour)
+	assert.Equal(t, []int64{1}, dueIDs(t, ledger, BlockedRetryScope{Now: clock.Now(), Limit: 10}))
+
+	// The file is repaired, the record is decided again, and this time the
+	// recording's read fails. A fresh 24 hours of read_failed retries is what
+	// that reason promises.
+	reblock(t, ledger, 1, admission.ReasonReadFailed)
+	clock.Advance(admission.BlockedRetryInterval)
+	assert.Equal(t, []int64{1}, dueIDs(t, ledger, BlockedRetryScope{Now: clock.Now(), Limit: 10}),
+		"read_failed's window starts when read_failed does, not when the record first blocked")
+}
+
+// resetRunState says nothing a previous Run decided may leak into the next.
+// A claim is a decision about a record, and a Run that was canceled between
+// the offer and the verdict leaves the record blocked at the revision it was
+// claimed at — so a claim that survived the Run would suppress that record's
+// retry for the life of the process.
+func TestAClaimDoesNotOutliveItsRun(t *testing.T) {
+	intake, ledger, queue, clock := retryIntake(t)
+	ctx := context.Background()
+	blockRecord(t, ledger, 1, adapterBucketID, admission.ReasonReadFailed)
+	clock.Advance(admission.BlockedRetryInterval)
+
+	intake.sweepBlockedRetries(ctx)
+	require.Equal(t, 1, queue.Depth())
+	assert.Equal(t, int64(1), takeID(t, queue))
+
+	// The run ended with the id taken from the queue and no verdict written:
+	// the record is still blocked, still at the revision it was claimed at.
+	intake.resetRunState()
+	intake.sweepBlockedRetries(ctx)
+	require.Equal(t, 1, queue.Depth(), "the next run offers it again; the revision guard makes a duplicate harmless")
+	assert.Equal(t, int64(1), takeID(t, queue))
+}
+
+// Copilot on #770: the claim map held one entry per record ever retried and
+// dropped none, so a connector that runs for months kept a copy of every
+// event id an outage ever blocked. The bound it needs is the live one — a
+// claim is worth keeping only while the record it names is still on the
+// schedule.
+func TestClaimsAreBoundedByTheRecordsStillOnTheSchedule(t *testing.T) {
+	intake, ledger, queue, clock := retryIntake(t)
+	ctx := context.Background()
+	const records = 60
+	for id := int64(1); id <= records; id++ {
+		blockRecord(t, ledger, id, adapterBucketID, admission.ReasonReadFailed)
+	}
+	clock.Advance(admission.BlockedRetryInterval)
+	intake.sweepBlockedRetries(ctx)
+	require.Equal(t, records, queue.Depth())
+	for range records {
+		takeID(t, queue)
+	}
+	assert.Equal(t, records, intake.claimCount(), "every record on the schedule is claimed")
+
+	// Every one of them is decided and leaves blocked. Their claims name
+	// records no sweep will ever return again.
+	for id := int64(1); id <= records; id++ {
+		_, err := ledger.Admission().Commit(ctx, admittedVerdict(id, getRecord(t, ledger, id).Revision, "recording:"+strconv.FormatInt(id, 10)))
+		require.NoError(t, err)
+	}
+	intake.sweepBlockedRetries(ctx)
+	assert.Zero(t, intake.claimCount(), "a claim outlives neither its record's block nor its window")
+
+	// And it keeps working after the prune: a record that blocks again is
+	// claimed again.
+	blockRecord(t, ledger, records+1, adapterBucketID, admission.ReasonReadFailed)
+	clock.Advance(admission.BlockedRetryInterval)
+	intake.sweepBlockedRetries(ctx)
+	require.Equal(t, 1, queue.Depth())
+	assert.Equal(t, 1, intake.claimCount())
+}
+
+// migrationsBeforeBlockedRetrySchedule is the last migration a ledger without
+// retry_since and next_retry_at had applied. Migration 14 adds them.
+const migrationsBeforeBlockedRetrySchedule = 13
+
+// A ledger written before the schedule existed carries blocked records whose
+// retry nothing ever computed. The upgrade owes them the attempt they were
+// always promised, so the backfill puts them on the schedule due now and the
+// ordinary interval takes over from their next verdict. A blocked reason the
+// schedule does not run is left alone.
+func TestTheUpgradePutsAlreadyBlockedRecordsOnTheSchedule(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "state", "connector.db")
+	old := applyMigrationsThrough(t, path, migrationsBeforeBlockedRetrySchedule)
+	for _, row := range []struct {
+		id     int64
+		reason string
+	}{{1, string(admission.ReasonReadFailed)}, {2, string(admission.ReasonNoRoute)}} {
+		_, err := old.ExecContext(ctx, `
+INSERT INTO events (id, state, reason, lane, event_type, kind, action, bucket_id, creator_id,
+                    recording_id, created_at, seen_at, updated_at, decided_at, blocked_at)
+VALUES (?, 'blocked', ?, 'poll', 'comment.created', 'comment_created', 'created', ?, ?, ?,
+        '2026-09-18T12:00:00.000000000Z', '2026-09-18T12:00:00.000000000Z',
+        '2026-09-18T12:00:00.000000000Z', '2026-09-18T12:00:00.000000000Z',
+        '2026-09-18T12:00:00.000000000Z')`,
+			row.id, row.reason, adapterBucketID, adapterOperatorID, 10304028972)
+		require.NoError(t, err)
+	}
+	require.NoError(t, old.Close())
+
+	ledger := openUpgraded(t, path)
+	assert.Equal(t, []int64{1}, dueIDs(t, ledger, BlockedRetryScope{
+		Now: time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC), Limit: 10,
+	}), "read_failed is owed the attempt nothing ever ran; no_route still waits for the operator")
+	assert.Nil(t, getRecord(t, ledger, 2).Decision.NextRetryAt)
 }

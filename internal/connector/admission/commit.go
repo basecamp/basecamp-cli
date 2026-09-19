@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"sync"
 	"time"
 )
@@ -170,17 +169,6 @@ var timedBlockedReasons = map[Reason]bool{
 	ReasonConfigUnreadable: false,
 }
 
-// TimedBlockedReasons is the blocked reasons NextBlockedRetry schedules,
-// sorted so a query built from them is the same query every time.
-func TimedBlockedReasons() []Reason {
-	out := make([]Reason, 0, len(timedBlockedReasons))
-	for reason := range timedBlockedReasons {
-		out = append(out, reason)
-	}
-	slices.Sort(out)
-	return out
-}
-
 // NextBlockedRetry returns when a blocked record should next be re-run, and
 // false when it waits for something other than time: the operator serving the
 // project (no_route), or a person's redispatch once the window has passed.
@@ -188,10 +176,18 @@ func TimedBlockedReasons() []Reason {
 // before it, and a deadline past the window hands the record to redispatch
 // rather than asking early.
 //
+// since is when the record entered the reason it is blocked on NOW, which is
+// not when it entered blocked. The reasons carry different windows, so a
+// record that spent a week as the unbounded config_unreadable and then blocks
+// read_failed must get read_failed's twenty-four hours from the moment
+// read_failed began; measured from the older stamp it would get none, which
+// is the retry stranding the work it is there to recover (Copilot on #770).
+// The ledger keeps that stamp per reason (events.retry_since).
+//
 // The returned time may be in the past — a connector that was not running
 // when a retry came due is late, not excused — so a caller asks whether next
 // is at or before now, never whether it is in the future.
-func NextBlockedRetry(reason Reason, blockedAt, lastAttempt, notBefore time.Time) (time.Time, bool) {
+func NextBlockedRetry(reason Reason, since, lastAttempt, notBefore time.Time) (time.Time, bool) {
 	bounded, timed := timedBlockedReasons[reason]
 	if !timed {
 		return time.Time{}, false
@@ -200,7 +196,7 @@ func NextBlockedRetry(reason Reason, blockedAt, lastAttempt, notBefore time.Time
 	if notBefore.After(next) {
 		next = notBefore
 	}
-	if bounded && next.After(blockedAt.Add(BlockedRetryWindow)) {
+	if bounded && next.After(since.Add(BlockedRetryWindow)) {
 		return time.Time{}, false
 	}
 	return next, true
