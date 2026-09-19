@@ -27,9 +27,13 @@ import (
 //
 // BH_MODE=ops runs BH_OPS gated operations, each held for BH_HOLD, and prints
 // OK or REJECT per operation, plus PEAK, the most live slot holders it saw
-// while holding one, and QUEUED, how many of its operations were admitted
-// out of an empty bucket and so can only have got there by waiting for a
-// refill. BH_BARRIER=1 makes it print READY and hold before its first
+// while holding one, QUEUED, how many of its operations were turned away by
+// the bucket and had to sleep for a refill, and SLOTWAIT, how many found
+// every slot taken and had to poll for one. The last two are counted by the
+// gate itself through its onWait seams, not inferred from outside: a look
+// at the bucket before the call can be overtaken by a refill landing before
+// the take, and would report a wait that never happened.
+// BH_BARRIER=1 makes it print READY and hold before its first
 // operation until the parent sends it a line, so the parent can set up the
 // condition under test with every child already running.
 // BH_MODE=linger churns BH_OPS acquire/release pairs, prints
@@ -55,22 +59,26 @@ func TestHelperProcess(t *testing.T) {
 			fmt.Println("READY")
 			_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
 		}
-		peak, queued := 0, 0
-		for range ops {
-			// Read the bucket before gating: an operation admitted when
-			// there was nothing to admit it with waited for a refill, which
-			// is the queueing this test exists to see. A gate that failed
-			// fast would have rejected that same operation instead.
-			tokens, tokensErr := hooks.rateLimiter.Tokens()
-			starved := tokensErr == nil && tokens < cfg.RateLimiter.TokensPerRequest
+		// The gate says when it waits. Each operation raises its own flag at
+		// most once, so the counts are operations that queued and not sleeps
+		// they took getting through.
+		var sleptOnBucket, sleptOnSlot bool
+		hooks.rateLimiter.onWait = func() { sleptOnBucket = true }
+		hooks.bulkhead.onWait = func() { sleptOnSlot = true }
 
+		peak, queued, slotWaits := 0, 0, 0
+		for range ops {
+			sleptOnBucket, sleptOnSlot = false, false
 			ctx, err := hooks.OnOperationGate(context.Background(), op)
 			if err != nil {
 				fmt.Printf("REJECT %v\n", err)
 				continue
 			}
-			if starved {
+			if sleptOnBucket {
 				queued++
+			}
+			if sleptOnSlot {
+				slotWaits++
 			}
 			if inUse, err := hooks.bulkhead.InUse(); err == nil {
 				peak = max(peak, inUse)
@@ -81,6 +89,7 @@ func TestHelperProcess(t *testing.T) {
 		}
 		fmt.Printf("PEAK %d\n", peak)
 		fmt.Printf("QUEUED %d\n", queued)
+		fmt.Printf("SLOTWAIT %d\n", slotWaits)
 	case "linger":
 		bh := NewBulkhead(store, cfg.Bulkhead)
 		rl := NewRateLimiter(store, cfg.RateLimiter)
@@ -98,7 +107,7 @@ func TestHelperProcess(t *testing.T) {
 // isReportLine picks the helper's tallied output out of the test binary's
 // own chatter.
 func isReportLine(l string) bool {
-	for _, prefix := range []string{"OK", "REJECT", "PEAK", "QUEUED"} {
+	for _, prefix := range []string{"OK", "REJECT", "PEAK", "QUEUED", "SLOTWAIT"} {
 		if strings.HasPrefix(l, prefix) {
 			return true
 		}
@@ -119,8 +128,8 @@ func helperCommand(t *testing.T, env helperEnv) *exec.Cmd {
 }
 
 type invocationTally struct {
-	ok, rejected, peak, queued int
-	rejections                 []string
+	ok, rejected, peak, queued, slotWaits int
+	rejections                            []string
 }
 
 func tally(lines []string) invocationTally {
@@ -138,6 +147,9 @@ func tally(lines []string) invocationTally {
 		case strings.HasPrefix(l, "QUEUED"):
 			n, _ := strconv.Atoi(strings.TrimPrefix(l, "QUEUED "))
 			tl.queued += n
+		case strings.HasPrefix(l, "SLOTWAIT"):
+			n, _ := strconv.Atoi(strings.TrimPrefix(l, "SLOTWAIT "))
+			tl.slotWaits += n
 		}
 	}
 	return tl
@@ -235,21 +247,27 @@ func runBarrieredInvocations(t *testing.T, n int, env helperEnv) invocationTally
 // bucket drained in the first half second and every later call failed with
 // "rate limit exceeded" while the server had never answered 429.
 //
-// The claim is that the gate queues, and the test now watches that happen
-// rather than inferring it from arithmetic. Each child reports how many of
-// its operations were admitted out of an empty bucket — only reachable by
-// waiting for a refill, since a gate that failed fast would have rejected
-// that same operation — and the run cannot pass with that count at zero.
-// It is a floor and not an accounting: a call that reads the bucket just
-// after a refill lands is served without waiting and is not counted, so the
-// number comes out a little under the thirty calls the starting bucket
-// cannot cover. What it rules out is the case that matters, a run where the
-// wait path was never entered and every assertion here was free.
+// The claim is that the gate queues, and the gate is what says so. Its
+// onWait seam fires when a caller is turned away by the bucket and settles
+// in to sleep for a refill, and each child counts the operations that had
+// to. Thirty of the eighty calls cannot be served from the starting bucket,
+// so thirty is what the count comes to, and the run cannot pass with it at
+// zero — which is the case that matters, a run where the wait path was
+// never entered and every assertion here was free.
+//
+// Inferring the same thing from outside does not work, and the first
+// attempt at this did: it read the bucket before each call and counted the
+// ones that found it empty. A refill landing between the look and the take
+// makes that a wait that never happened. Only the gate knows.
 //
 // The children are released from a barrier so they issue their calls at the
 // rate the test asked for rather than at the rate the machine can fork
 // processes; left to race each other in, on a slow box they arrive spread
-// out, the bucket refills between them, and nothing ever queues.
+// out, the bucket refills between them, and nothing ever queues. The
+// barrier only lines up the first of each child's eight calls, so a box
+// slow enough to pace all eighty across the three seconds of refill would
+// still see nothing queue — and would fail here on the zero count rather
+// than pass over it.
 //
 // What is deliberately not asserted is how long the whole thing took. It
 // used to require the run to finish inside DefaultMaxWait, which is one
@@ -272,9 +290,38 @@ func TestGateQueuesTenParallelWorkersThroughTheDefaults(t *testing.T) {
 
 	assert.Equal(t, workers*callsEach, tl.ok, "every call succeeds: %v", tl.rejections)
 	assert.Zero(t, tl.rejected)
-	assert.Positive(t, tl.queued,
-		"no call was ever admitted out of an empty bucket, so the wait path was never entered and this test measured nothing")
+	// Thirty calls are not covered by the starting bucket. Nearly all of
+	// them sleep; the odd one arrives in the instant after a refill lands
+	// and is served without waiting, so the count comes in a little under —
+	// 29 idle here, 28 on a saturated core. One free pickup per worker is
+	// the allowance. A zero is a run that never entered the wait path.
+	uncovered := workers*callsEach - int(cfg.RateLimiter.MaxTokens)
+	assert.GreaterOrEqual(t, tl.queued, uncovered-workers,
+		"the calls the starting bucket could not cover slept for a refill; %d of %d did", tl.queued, uncovered)
 	assert.LessOrEqual(t, tl.peak, cfg.Bulkhead.MaxConcurrent, "never more than MaxConcurrent live holders")
+}
+
+// The other side of the queue counter: with a bucket nobody can exhaust and
+// a slot for every caller, the same eighty calls go through without the
+// gate ever sleeping, and the counters say zero.
+//
+// Without this, a counter wired to fire on every call would satisfy the
+// test above and prove nothing — the witness has to be able to say no.
+func TestGateReportsNoQueueingWhenNothingHadToWait(t *testing.T) {
+	const workers, callsEach = 10, 8
+	cfg := DefaultConfig()
+	require.LessOrEqual(t, workers, cfg.Bulkhead.MaxConcurrent, "nobody may have to wait for a slot")
+
+	dir := t.TempDir()
+	tl := runBarrieredInvocations(t, workers, helperEnv{
+		"BH_STATE_DIR": dir, "BH_MODE": "ops",
+		"BH_OPS": strconv.Itoa(callsEach), "BH_HOLD": "10ms",
+		"BH_MAX_TOKENS": strconv.Itoa(workers * callsEach * 10),
+	})
+
+	assert.Equal(t, workers*callsEach, tl.ok, "every call succeeds: %v", tl.rejections)
+	assert.Zero(t, tl.queued, "the bucket never ran out, so nothing should have slept for a refill")
+	assert.Zero(t, tl.slotWaits, "there was a slot for everyone, so nobody should have polled for one")
 }
 
 // Fifteen simultaneous invocations against ten slots: nobody fails, and the
@@ -286,8 +333,8 @@ func TestGateQueuesTenParallelWorkersThroughTheDefaults(t *testing.T) {
 // one the first ten are done before the last five start — at which point
 // nothing is oversubscribed and the test passes having measured nothing. The
 // old evidence that the overflow waited was that the run took at least two
-// holds, which slow spawning satisfies all by itself; the peak says it
-// directly.
+// holds, which slow spawning satisfies all by itself. The bulkhead now says
+// it itself: five of the fifteen found every slot taken and polled for one.
 func TestGateQueuesOversubscribedInvocationsWithinTheSlotLimit(t *testing.T) {
 	dir := t.TempDir()
 	cfg := DefaultConfig()
@@ -300,7 +347,9 @@ func TestGateQueuesOversubscribedInvocationsWithinTheSlotLimit(t *testing.T) {
 	assert.Equal(t, invocations, tl.ok, "every invocation succeeds: %v", tl.rejections)
 	assert.Zero(t, tl.rejected)
 	assert.Equal(t, cfg.Bulkhead.MaxConcurrent, tl.peak,
-		"the slot table filled to exactly MaxConcurrent, so the overflow waited")
+		"the slot table filled to exactly MaxConcurrent")
+	assert.Equal(t, invocations-cfg.Bulkhead.MaxConcurrent, tl.slotWaits,
+		"the overflow — and only the overflow — found every slot taken and polled for one")
 
 	state, err := NewStore(dir).Load()
 	require.NoError(t, err)

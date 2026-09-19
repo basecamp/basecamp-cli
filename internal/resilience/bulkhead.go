@@ -14,6 +14,11 @@ import (
 type Bulkhead struct {
 	config BulkheadConfig
 	store  *Store
+	// onWait, when set, is called each time a caller finds every slot taken
+	// and settles in to poll for one. Like the rate limiter's, it is there
+	// so a test can hear the wait path from inside rather than guess at it
+	// from the slot table. Nothing in production sets it.
+	onWait func()
 }
 
 // NewBulkhead creates a new bulkhead with the given config.
@@ -117,6 +122,9 @@ func (b *Bulkhead) waitSince(ctx context.Context, start, deadline time.Time) err
 		}
 		if acquired, _ := b.Acquire(); acquired { //nolint:contextcheck // lock acquisition is context-independent by design
 			return nil
+		}
+		if b.onWait != nil {
+			b.onWait()
 		}
 		if err := pause(ctx, min(jittered(slotPoll), remaining)); err != nil {
 			return err
