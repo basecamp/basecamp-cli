@@ -627,3 +627,13 @@ jobs:
       - name: Build the flake
         if: steps.filter.outputs.nix == 'true'
         run: scripts/nix-build-check.sh
+
+      # `nix build` builds packages.default, so nothing here ever looked at the
+      # dev shell's package list — a misspelled attribute in it would land green
+      # and break `nix develop` for whoever followed CONTRIBUTING. Evaluating the
+      # derivation resolves every attribute without building any of them, which
+      # costs seconds and is the difference between a list that is checked and a
+      # list that is merely written down.
+      - name: Check the dev shell's package list resolves
+        if: steps.filter.outputs.nix == 'true'
+        run: nix eval --raw .#devShells.x86_64-linux.default.drvPath
