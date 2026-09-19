@@ -85,6 +85,11 @@ type Ledger struct {
 	closed sync.Once
 	now    func() time.Time
 	hooks  Hooks
+	// blockedScheduleReads counts the reads the retry sweep makes against the
+	// schedule to prune its claims. The sweep must make none when it holds no
+	// claims: the read it used to make was over the whole live backlog, and a
+	// test that only checks the answer cannot see the work (Copilot on #770).
+	blockedScheduleReads atomic.Int64
 }
 
 // OpenLedger opens (creating if absent) the ledger at path and brings its
