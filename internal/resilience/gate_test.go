@@ -36,6 +36,13 @@ import (
 // BH_BARRIER=1 makes it print READY and hold before its first
 // operation until the parent sends it a line, so the parent can set up the
 // condition under test with every child already running.
+// BH_HOLD_BARRIER=1 additionally prints WAITING the first time the bulkhead
+// turns it away, and HELD once it holds a slot, then waits for a second
+// line before releasing it — so a parent can hold the slot table full until
+// every other child has been refused.
+// BH_MAX_TOKENS and BH_MAX_CONCURRENT override the bucket and the slot
+// count; a parent that waits on a split has to be able to set the limit it
+// is waiting on.
 // BH_MODE=linger churns BH_OPS acquire/release pairs, prints
 // DONE, then stays alive until stdin closes so the parent can check that its
 // releases were not lost while the process still counts as a live holder.
@@ -50,6 +57,9 @@ func TestHelperProcess(t *testing.T) {
 	if tokens, err := strconv.ParseFloat(os.Getenv("BH_MAX_TOKENS"), 64); err == nil {
 		cfg.RateLimiter.MaxTokens = tokens
 	}
+	if slots, err := strconv.Atoi(os.Getenv("BH_MAX_CONCURRENT")); err == nil {
+		cfg.Bulkhead.MaxConcurrent = slots
+	}
 
 	switch os.Getenv("BH_MODE") {
 	case "ops":
@@ -62,9 +72,19 @@ func TestHelperProcess(t *testing.T) {
 		// The gate says when it waits. Each operation raises its own flag at
 		// most once, so the counts are operations that queued and not sleeps
 		// they took getting through.
+		//
+		// Under BH_HOLD_BARRIER the first refusal is announced as it
+		// happens, so the parent can wait for the contention rather than
+		// hope for it.
+		holdBarrier := os.Getenv("BH_HOLD_BARRIER") == "1"
 		var sleptOnBucket, sleptOnSlot bool
 		hooks.rateLimiter.onWait = func() { sleptOnBucket = true }
-		hooks.bulkhead.onWait = func() { sleptOnSlot = true }
+		hooks.bulkhead.onWait = func() {
+			if holdBarrier && !sleptOnSlot {
+				fmt.Println("WAITING")
+			}
+			sleptOnSlot = true
+		}
 
 		peak, queued, slotWaits := 0, 0, 0
 		for range ops {
@@ -82,6 +102,12 @@ func TestHelperProcess(t *testing.T) {
 			}
 			if inUse, err := hooks.bulkhead.InUse(); err == nil {
 				peak = max(peak, inUse)
+			}
+			// Holding until the parent says so is what makes the slot table
+			// full for as long as the test needs it full.
+			if holdBarrier {
+				fmt.Println("HELD")
+				_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
 			}
 			time.Sleep(hold)
 			hooks.OnOperationEnd(ctx, op, nil, hold)
@@ -242,6 +268,117 @@ func runBarrieredInvocations(t *testing.T, n int, env helperEnv) invocationTally
 	return tally(all)
 }
 
+// runSlotOversubscription starts n children against a bulkhead of `slots`
+// and does not let go of the slot table until the oversubscription has
+// actually happened: every child has either taken a slot or been turned away
+// from one.
+//
+// The single barrier is not enough for that. It lines up the start, but a
+// child released and then descheduled can arrive after an earlier holder has
+// finished, take the slot it freed, and never wait — which is how "exactly
+// five of fifteen waited" came out as one on a two-core runner. Holding the
+// slots until every other child has reported being refused makes the
+// contention a fact the test waited for rather than a race it hoped for.
+//
+// It waits rather than polls, so a bulkhead that stopped excluding anyone
+// fails here by never finishing, under the test's own deadline, instead of
+// passing with a smaller number.
+func runSlotOversubscription(t *testing.T, n, slots int, env helperEnv) invocationTally {
+	t.Helper()
+	require.Greater(t, n, slots, "there is no oversubscription to wait for")
+	// The limit the parent waits on and the limit the children run under
+	// have to be the same number. Passing slots without setting it would
+	// leave this waiting for a split that cannot happen, and the failure
+	// would be a test deadline pointing nowhere near the cause.
+	barriered := helperEnv{
+		"BH_BARRIER": "1", "BH_HOLD_BARRIER": "1",
+		"BH_MAX_CONCURRENT": strconv.Itoa(slots),
+	}
+	maps.Copy(barriered, env)
+	require.Equal(t, strconv.Itoa(slots), barriered["BH_MAX_CONCURRENT"],
+		"the caller's environment must not override the slot count the wait is built on")
+
+	type child struct {
+		cmd    *exec.Cmd
+		stdin  io.WriteCloser
+		stderr *bytes.Buffer
+	}
+	kids := make([]child, 0, n)
+	lines := make(chan string, 4*n)
+	var wg sync.WaitGroup
+	for range n {
+		cmd := helperCommand(t, barriered)
+		stdin, err := cmd.StdinPipe()
+		require.NoError(t, err)
+		stdout, err := cmd.StdoutPipe()
+		require.NoError(t, err)
+		stderr := &bytes.Buffer{}
+		cmd.Stderr = stderr
+		require.NoError(t, cmd.Start())
+		kids = append(kids, child{cmd, stdin, stderr})
+		wg.Add(1)
+		go func(r io.Reader) {
+			defer wg.Done()
+			sc := bufio.NewScanner(r)
+			for sc.Scan() {
+				lines <- sc.Text()
+			}
+		}(stdout)
+	}
+	go func() { wg.Wait(); close(lines) }()
+
+	// Everything the children say, tallied as it arrives; the report lines
+	// are kept for the caller.
+	var report []string
+	await := func(want map[string]int) {
+		got := map[string]int{}
+		for {
+			done := true
+			for k, n := range want {
+				if got[k] < n {
+					done = false
+				}
+			}
+			if done {
+				return
+			}
+			line, ok := <-lines
+			if !ok {
+				require.FailNowf(t, "a child stopped early",
+					"waiting for %v, saw %v; output so far: %v", want, got, report)
+			}
+			if isReportLine(line) {
+				report = append(report, line)
+			}
+			got[line]++
+		}
+	}
+
+	release := func(what string) {
+		for _, k := range kids {
+			_, err := io.WriteString(k.stdin, what+"\n")
+			require.NoError(t, err)
+		}
+	}
+
+	await(map[string]int{"READY": n})
+	release("go")
+	// Every slot taken, and every child that could not have one saying so.
+	await(map[string]int{"HELD": slots, "WAITING": n - slots})
+	release("release")
+
+	for line := range lines {
+		if isReportLine(line) {
+			report = append(report, line)
+		}
+	}
+	for _, k := range kids {
+		_ = k.stdin.Close()
+		require.NoError(t, k.cmd.Wait(), k.stderr.String())
+	}
+	return tally(report)
+}
+
 // The smoke-test shape: ten parallel workers making eighty calls between
 // them through the production defaults. Before queueing, the shared 50-token
 // bucket drained in the first half second and every later call failed with
@@ -328,21 +465,27 @@ func TestGateReportsNoQueueingWhenNothingHadToWait(t *testing.T) {
 // slot table fills to exactly ten and no further, so five of them were made
 // to wait for a second round rather than being admitted alongside the first.
 //
-// "Simultaneous" is why the children come off a barrier. Left to race each
-// other into the gate they arrive as fast as the box can fork, and on a slow
-// one the first ten are done before the last five start — at which point
-// nothing is oversubscribed and the test passes having measured nothing. The
-// old evidence that the overflow waited was that the run took at least two
-// holds, which slow spawning satisfies all by itself. The bulkhead reports
-// it directly now: five of the fifteen found every slot taken and polled
-// for one.
+// "Simultaneous" is the whole difficulty, and a barrier at the start does
+// not give it. Left to race each other into the gate the children arrive as
+// fast as the box can fork, and on a slow one the first ten are done before
+// the last five start — nothing is oversubscribed and the test passes having
+// measured nothing. Lining up the start is not enough either: a child
+// released and then descheduled can arrive after a holder has finished and
+// take the slot it freed. That is not a guess. It is what CI did to the
+// first version of this test, which asserted that five of fifteen were
+// refused and got one.
+//
+// So the parent holds the slot table full until every child that cannot
+// have a slot has said so, and only then lets the holders go. The
+// oversubscription is a fact the test waited for, and five is then exact
+// rather than likely.
 func TestGateQueuesOversubscribedInvocationsWithinTheSlotLimit(t *testing.T) {
 	dir := t.TempDir()
 	cfg := DefaultConfig()
 	const invocations = 15
-	tl := runBarrieredInvocations(t, invocations, helperEnv{
+	tl := runSlotOversubscription(t, invocations, cfg.Bulkhead.MaxConcurrent, helperEnv{
 		"BH_STATE_DIR": dir, "BH_MODE": "ops", "BH_OPS": "1",
-		"BH_HOLD": (150 * time.Millisecond).String(), "BH_MAX_TOKENS": "100",
+		"BH_HOLD": "10ms", "BH_MAX_TOKENS": "100",
 	})
 
 	assert.Equal(t, invocations, tl.ok, "every invocation succeeds: %v", tl.rejections)
@@ -351,10 +494,31 @@ func TestGateQueuesOversubscribedInvocationsWithinTheSlotLimit(t *testing.T) {
 		"the slot table filled to exactly MaxConcurrent")
 	assert.Equal(t, invocations-cfg.Bulkhead.MaxConcurrent, tl.slotWaits,
 		"the overflow — and only the overflow — found every slot taken and polled for one")
+	assert.LessOrEqual(t, tl.peak, cfg.Bulkhead.MaxConcurrent, "never more than MaxConcurrent live holders")
 
 	state, err := NewStore(dir).Load()
 	require.NoError(t, err)
 	assert.Empty(t, state.Bulkhead.ActivePIDs, "every slot released")
+}
+
+// The slot count the parent waits on is the slot count the children run
+// under. It is worth its own test because getting it wrong does not produce
+// a wrong number any more — the parent waits for a split that cannot
+// happen, and the only symptom is the test deadline, pointing nowhere near
+// the cause. Five slots for eight callers: five hold, three are refused.
+func TestGateSlotLimitIsTheOneTheTestWaitsOn(t *testing.T) {
+	dir := t.TempDir()
+	const callers, slots = 8, 5
+
+	tl := runSlotOversubscription(t, callers, slots, helperEnv{
+		"BH_STATE_DIR": dir, "BH_MODE": "ops", "BH_OPS": "1",
+		"BH_HOLD": "10ms", "BH_MAX_TOKENS": "100",
+	})
+
+	assert.Equal(t, callers, tl.ok, "every caller gets through eventually: %v", tl.rejections)
+	assert.Zero(t, tl.rejected)
+	assert.Equal(t, slots, tl.peak, "the limit that held is the one that was asked for, not the default")
+	assert.Equal(t, callers-slots, tl.slotWaits)
 }
 
 // A dozen processes churning the lock must not lose each other's releases:
