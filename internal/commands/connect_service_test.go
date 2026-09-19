@@ -18,7 +18,12 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/acp"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/claude"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver/codex"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
@@ -105,7 +110,7 @@ func runConnectServiceCmd(t *testing.T, app *appctx.App, args ...string) (string
 // Without Restart the unit is a launcher, not a supervisor, and a killed
 // connector stays dead.
 func TestConnectServiceUnitRestartsTheConnector(t *testing.T) {
-	unit := connectServiceUnit("/usr/bin/basecamp", "agent", nil, false, false, nil)
+	unit := connectServiceUnit("/usr/bin/basecamp", "agent", nil, false, false, nil, "")
 
 	assert.Contains(t, unit, "\nRestart=always\n", "a unit that does not restart supervises nothing")
 	assert.Contains(t, unit, "\nRestartSec=5\n")
@@ -117,7 +122,7 @@ func TestConnectServiceUnitRestartsTheConnector(t *testing.T) {
 // that killed it outright would leave those records needing redispatch by
 // hand, and would count its own 143 as a crash.
 func TestConnectServiceUnitLetsTheConnectorSettleItsWorkers(t *testing.T) {
-	unit := connectServiceUnit("/usr/bin/basecamp", "agent", nil, false, false, nil)
+	unit := connectServiceUnit("/usr/bin/basecamp", "agent", nil, false, false, nil, "")
 
 	assert.Contains(t, unit, "\nKillSignal=SIGTERM\n")
 	assert.Contains(t, unit, "\nTimeoutStopSec=90\n")
@@ -125,7 +130,7 @@ func TestConnectServiceUnitLetsTheConnectorSettleItsWorkers(t *testing.T) {
 }
 
 func TestConnectServiceUnitRecordsTheRun(t *testing.T) {
-	unit := connectServiceUnit("/usr/bin/basecamp", "agent", []int64{12345, 67890}, true, true, nil)
+	unit := connectServiceUnit("/usr/bin/basecamp", "agent", []int64{12345, 67890}, true, true, nil, "")
 
 	exec := unitDirective(t, unit, "ExecStart")
 	assert.Equal(t,
@@ -136,7 +141,7 @@ func TestConnectServiceUnitRecordsTheRun(t *testing.T) {
 // Every word in the command line is quoted, so a path with a space in it
 // stays one argument rather than becoming two.
 func TestConnectServiceUnitQuotesTheExecutablePath(t *testing.T) {
-	unit := connectServiceUnit(`/home/a b/go bin/basecamp`, "agent", nil, false, false, nil)
+	unit := connectServiceUnit(`/home/a b/go bin/basecamp`, "agent", nil, false, false, nil, "")
 
 	assert.Contains(t, unitDirective(t, unit, "ExecStart"), `"/home/a b/go bin/basecamp" "connect"`)
 }
@@ -265,7 +270,7 @@ func TestConnectServiceRefusesAProfileNameThatIsNotOne(t *testing.T) {
 // long as the machine is up, which is a service claiming health it has not
 // got.
 func TestConnectServiceUnitStopsRetryingAConnectorThatCannotStart(t *testing.T) {
-	unit := connectServiceUnit("/usr/bin/basecamp", "agent", nil, false, false, nil)
+	unit := connectServiceUnit("/usr/bin/basecamp", "agent", nil, false, false, nil, "")
 
 	assert.Contains(t, unit, "\nStartLimitIntervalSec=300\n")
 	assert.Contains(t, unit, "\nStartLimitBurst=5\n")
@@ -278,7 +283,7 @@ func TestConnectServiceUnitStopsRetryingAConnectorThatCannotStart(t *testing.T) 
 // dispatch.
 func TestConnectServiceUnitPinsTheEnvironmentInstallVerified(t *testing.T) {
 	unit := connectServiceUnit("/usr/bin/basecamp", "agent", nil, false, false,
-		[]string{"PATH=/home/a/bin:/usr/bin", "XDG_CONFIG_HOME=/home/a/.config"})
+		[]string{"PATH=/home/a/bin:/usr/bin", "XDG_CONFIG_HOME=/home/a/.config"}, "")
 
 	assert.Contains(t, unit, `Environment="PATH=/home/a/bin:/usr/bin"`)
 	assert.Contains(t, unit, `Environment="XDG_CONFIG_HOME=/home/a/.config"`)
@@ -379,7 +384,7 @@ func runConnectServiceInstallForTest(t *testing.T, app *appctx.App) error {
 // before the connector ever ran.
 func TestConnectServiceUnitSurvivesAPathSystemdWouldRewrite(t *testing.T) {
 	unit := connectServiceUnit(`/opt/%u/$agent/base"camp`, "agent", nil, false, false,
-		[]string{`PATH=/opt/%u/bin:/x$y`})
+		[]string{`PATH=/opt/%u/bin:/x$y`}, "")
 
 	assert.Contains(t, unitDirective(t, unit, "ExecStart"), `"/opt/%%u/$$agent/base\"camp"`,
 		"a command line expands both %% and $")
@@ -390,7 +395,7 @@ func TestConnectServiceUnitSurvivesAPathSystemdWouldRewrite(t *testing.T) {
 // A control character in a path must not end the directive and begin
 // another.
 func TestConnectServiceUnitEscapesControlCharacters(t *testing.T) {
-	unit := connectServiceUnit("/opt/a\tb/basecamp", "agent", nil, false, false, nil)
+	unit := connectServiceUnit("/opt/a\tb/basecamp", "agent", nil, false, false, nil, "")
 
 	exec := unitDirective(t, unit, "ExecStart")
 	assert.Contains(t, exec, `\t`)
@@ -552,6 +557,110 @@ func TestConnectServiceUninstallOfAnUnknownUnitSucceeds(t *testing.T) {
 	_, err := runConnectServiceCmd(t, app, "uninstall")
 	require.NoError(t, err)
 	assert.NotContains(t, said.String(), "may still be running")
+}
+
+// The default KillMode signals the workers at the same instant as the
+// connector. A worker's session ending before the connector's context is
+// canceled is read as StopLost rather than StopShutdown — a stranded
+// attempt needing redispatch by hand, which is the opposite of what the
+// stop timeout is there to buy.
+func TestConnectServiceUnitSignalsTheConnectorAndNotItsWorkers(t *testing.T) {
+	unit := connectServiceUnit("/usr/bin/basecamp", "agent", nil, false, false, nil, "")
+
+	assert.Contains(t, unit, "\nKillMode=mixed\n",
+		"control-group would SIGTERM the workers alongside the connector and strand their attempts")
+}
+
+// The unit's environment is the connector's own two lists, not a third one
+// written here: a list that drifts from them is an allowlist that reads as
+// configuration and does nothing.
+func TestConnectServiceUnitPinsTheListsTheConnectorAlreadyHas(t *testing.T) {
+	keys := connectServiceEnvKeys()
+
+	for _, name := range driver.BaseEnv {
+		assert.Contains(t, keys, name, "a worker may inherit %s, so the service has to have it", name)
+	}
+	for _, name := range connector.MCPServerEnv {
+		assert.Contains(t, keys, name, "the worker's MCP server needs %s", name)
+	}
+	assert.Contains(t, keys, "CLAUDE_CONFIG_DIR", "a driver setting the worker needs")
+	assert.NotContains(t, keys, "ANTHROPIC_API_KEY", "a credential never goes in the unit")
+	assert.NotContains(t, keys, "CODEX_API_KEY")
+	assert.NotContains(t, keys, "OPENAI_API_KEY")
+}
+
+// The drivers name the variables their agents need. This map says which of
+// those authenticate somebody, and a new one the map has not heard of would
+// otherwise stop reaching workers without anyone noticing.
+func TestConnectServiceClassifiesEveryDriverVariable(t *testing.T) {
+	named := map[string]bool{}
+	for _, name := range claude.Env {
+		named[name] = true
+	}
+	for _, name := range codex.Env {
+		named[name] = true
+	}
+	for _, adapter := range acp.Adapters() {
+		for _, name := range adapter.Env {
+			named[name] = true
+		}
+	}
+
+	for name := range named {
+		_, ok := connectServiceDriverEnv[name]
+		assert.Truef(t, ok, "a driver reads %s and the service does not know whether it is a credential", name)
+	}
+	for name := range connectServiceDriverEnv {
+		assert.Truef(t, named[name], "%s is classified here and no driver reads it", name)
+	}
+}
+
+// A credential the service will not have is said at install, not found out
+// in a dispatch that failed.
+func TestConnectServiceInstallSaysWhichCredentialsTheServiceWillNotHave(t *testing.T) {
+	connectServiceHome(t)
+	writeConnectSetup(t, "agent")
+	t.Setenv("ANTHROPIC_API_KEY", "not-a-real-key")
+	app, said := connectServiceApp(t, "agent")
+
+	_, err := runConnectServiceCmd(t, app, "install", "--no-enable")
+	require.NoError(t, err)
+
+	assert.Contains(t, said.String(), "ANTHROPIC_API_KEY")
+	assert.Contains(t, said.String(), "service.env")
+
+	path, err := connectServiceUnitPath("agent")
+	require.NoError(t, err)
+	b, err := os.ReadFile(path) //nolint:gosec // path built from a temp home
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "not-a-real-key", "the unit never carries the secret itself")
+	assert.Contains(t, string(b), "EnvironmentFile=-", "it reads the file the person owns, if there is one")
+}
+
+// systemctl says "no such file or directory" for a unit it has never heard
+// of and also for "Failed to connect to bus: No such file or directory".
+// The second leaves the connector running, so reading it as an uninstalled
+// service would report the opposite of what happened.
+func TestConnectServiceUninstallDoesNotReadALostBusAsAStoppedConnector(t *testing.T) {
+	connectServiceHome(t)
+	writeConnectSetup(t, "agent")
+	app, said := connectServiceApp(t, "agent")
+	_, err := runConnectServiceCmd(t, app, "install", "--no-enable")
+	require.NoError(t, err)
+
+	prev := runSystemctl
+	runSystemctl = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "disable" {
+			return []byte("Failed to connect to bus: No such file or directory"), errors.New("exit status 1")
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { runSystemctl = prev })
+	said.Reset()
+
+	_, err = runConnectServiceCmd(t, app, "uninstall")
+	require.NoError(t, err, "the unit file still goes")
+	assert.Contains(t, said.String(), "may still be running")
 }
 
 // unitDirective returns the value of a unit file's directive.

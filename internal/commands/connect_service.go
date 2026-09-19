@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +19,8 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/connector"
+	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
@@ -222,7 +225,7 @@ func connectServiceUnitPath(profile string) (string, error) {
 // PATH and the XDG variables as install found them. They are quoted, and
 // connectServiceEnv refuses any that holds a newline, which is the only
 // character that could end the directive and begin another.
-func connectServiceUnit(exe, profile string, projects []int64, shadow, hold bool, env []string) string {
+func connectServiceUnit(exe, profile string, projects []int64, shadow, hold bool, env []string, envFile string) string {
 	args := []string{"connect", "--profile", profile}
 	for _, id := range projects {
 		args = append(args, "--project", strconv.FormatInt(id, 10))
@@ -254,6 +257,12 @@ func connectServiceUnit(exe, profile string, projects []int64, shadow, hold bool
 	for _, e := range env {
 		fmt.Fprintf(&b, "Environment=%s\n", systemdQuote(e, false))
 	}
+	// Where a credential goes, if the driver needs one. The leading dash
+	// makes it optional, so the ordinary case has no file at all; install
+	// never writes it, because install would be writing a secret.
+	if envFile != "" {
+		fmt.Fprintf(&b, "EnvironmentFile=-%s\n", systemdQuote(envFile, false))
+	}
 	fmt.Fprintf(&b, "ExecStart=%s\n", systemdExecLine(exe, args))
 	fmt.Fprintf(&b, "Restart=always\n")
 	fmt.Fprintf(&b, "RestartSec=%d\n", connectServiceRestartSec)
@@ -261,6 +270,14 @@ func connectServiceUnit(exe, profile string, projects []int64, shadow, hold bool
 	// workers, settles them and exits 143, and 143 is therefore a clean
 	// stop rather than a failure.
 	fmt.Fprintf(&b, "KillSignal=SIGTERM\n")
+	// mixed, not the default control-group: that signals the workers at the
+	// same instant as the connector, and a worker's session ending before
+	// the connector's context is canceled is read as StopLost rather than
+	// StopShutdown — a stranded attempt needing redispatch by hand, which is
+	// the opposite of what TimeoutStopSec above is for. Only the connector
+	// gets the SIGTERM; systemd still SIGKILLs whatever is left in the
+	// cgroup once the timeout passes.
+	fmt.Fprintf(&b, "KillMode=mixed\n")
 	fmt.Fprintf(&b, "TimeoutStopSec=%d\n", connectServiceStopSec)
 	fmt.Fprintf(&b, "SuccessExitStatus=143\n\n")
 	fmt.Fprintf(&b, "[Install]\n")
@@ -326,14 +343,77 @@ func systemdQuote(s string, expandDollar bool) string {
 // name — `claude`, `codex` — off a PATH that does not have it. The unit
 // would be active and every dispatch would fail.
 //
-// So install records the environment it verified the setup in, and the
-// service runs in that one.
-var connectServiceEnvKeys = []string{"PATH", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "XDG_DATA_HOME"}
+// The list is the connector's own, not a new one: driver.BaseEnv is what a
+// worker may inherit, and connector.MCPServerEnv what the worker's MCP
+// server needs on top. A fourth list here would drift from those two, and
+// an allowlist that drifts is an allowlist that reads as configuration and
+// does nothing.
+func connectServiceEnvKeys() []string {
+	keys := append([]string{}, driver.BaseEnv...)
+	keys = append(keys, connector.MCPServerEnv...)
+	for name, secret := range connectServiceDriverEnv {
+		if !secret {
+			keys = append(keys, name)
+		}
+	}
+	slices.Sort(keys)
+	return slices.Compact(keys)
+}
+
+// connectServiceDriverEnv is what the drivers read beyond driver.BaseEnv,
+// and whether each one authenticates somebody. Half of them do, and a unit
+// file is not where a credential goes: `systemctl cat` prints it, a backup
+// copies it, and driver.BaseEnv already says the worker environment carries
+// "nothing that authenticates anyone".
+//
+// So the settings are pinned and the credentials are not. A credential the
+// service needs goes in the environment file the unit reads, which the
+// person owns and install never writes.
+//
+// TestConnectServiceClassifiesEveryDriverVariable keeps this map level with
+// the drivers' own lists, so a new one is a failing test rather than a
+// variable that quietly stops reaching a worker.
+var connectServiceDriverEnv = map[string]bool{
+	"CLAUDE_CONFIG_DIR":  false,
+	"ANTHROPIC_BASE_URL": false,
+	"ANTHROPIC_API_KEY":  true,
+	"CODEX_HOME":         false,
+	"CODEX_API_KEY":      true,
+	"OPENAI_BASE_URL":    false,
+	"OPENAI_API_KEY":     true,
+}
+
+// connectServiceMissingCredentials names the driver credentials this shell
+// has and the service will not, so a person hears it at install rather than
+// discovering it in a dispatch that failed.
+func connectServiceMissingCredentials() []string {
+	var missing []string
+	for name, secret := range connectServiceDriverEnv {
+		if !secret {
+			continue
+		}
+		if v, ok := os.LookupEnv(name); ok && v != "" {
+			missing = append(missing, name)
+		}
+	}
+	slices.Sort(missing)
+	return missing
+}
+
+// connectServiceEnvFile is where the unit reads the credentials install
+// will not copy: beside the profile's own connector state, owner-only.
+func connectServiceEnvFile(profile string) (string, error) {
+	path, err := setup.Path(config.GlobalConfigDir(), profile)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(path), "service.env"), nil
+}
 
 // connectServiceEnv is the environment to pin, in unit form.
 func connectServiceEnv() ([]string, error) {
 	var env []string
-	for _, k := range connectServiceEnvKeys {
+	for _, k := range connectServiceEnvKeys() {
 		v, ok := os.LookupEnv(k)
 		if !ok || v == "" {
 			continue
@@ -411,7 +491,11 @@ func runConnectServiceInstall(cmd *cobra.Command, f *connectServiceFlags) error 
 	if err != nil {
 		return err
 	}
-	unit := connectServiceUnit(exe, profile, projects, f.shadow, f.hold, env)
+	envFile, err := connectServiceEnvFile(profile)
+	if err != nil {
+		return err
+	}
+	unit := connectServiceUnit(exe, profile, projects, f.shadow, f.hold, env, envFile)
 	// Written whole or not at all. A direct write truncates the unit that is
 	// enabled and running now, so an install that ran out of disk would
 	// leave a half a unit: systemd keeps running from what it already loaded
@@ -442,6 +526,13 @@ func runConnectServiceInstall(cmd *cobra.Command, f *connectServiceFlags) error 
 		if warning := connectServiceLingerWarning(cmd.Context()); warning != "" {
 			summary += ". " + warning
 		}
+	}
+	if missing := connectServiceMissingCredentials(); len(missing) > 0 {
+		summary += fmt.Sprintf(". %s %s set here and will not be in the service, which never carries a credential: put %s in %s (owner-only) and the unit will read it",
+			strings.Join(missing, ", "),
+			map[bool]string{true: "is", false: "are"}[len(missing) == 1],
+			map[bool]string{true: "it", false: "them"}[len(missing) == 1],
+			envFile)
 	}
 	return app.OK(map[string]any{"unit": name, "path": path, "enabled": enabled},
 		output.WithSummary(summary))
@@ -606,12 +697,21 @@ func runConnectServiceUninstall(cmd *cobra.Command) error {
 
 // connectServiceUnknownUnit reports whether systemctl refused because it has
 // never heard of the unit, which is what uninstalling an uninstalled service
-// looks like.
+// looks like and is the one refusal that counts as success.
+//
+// "no such file or directory" is deliberately not among these. systemctl
+// says it for a missing unit and also for "Failed to connect to bus: No
+// such file or directory", which is a different thing entirely: the bus is
+// gone, nothing was stopped, and the connector may still be running.
+// Treating that as an uninstalled service would report the connector
+// stopped when it is not.
 func connectServiceUnknownUnit(out []byte) bool {
 	text := strings.ToLower(string(out))
+	if strings.Contains(text, "failed to connect to bus") || strings.Contains(text, "connection refused") {
+		return false
+	}
 	return strings.Contains(text, "not loaded") ||
-		strings.Contains(text, "does not exist") ||
-		strings.Contains(text, "no such file or directory")
+		strings.Contains(text, "does not exist")
 }
 
 // writeFileAtomic writes data to path through a temporary file in the same
