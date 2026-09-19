@@ -137,6 +137,15 @@ func TestRateLimiterSetRetryAfter(t *testing.T) {
 	assert.False(t, allowed, "expected request to be rejected during retry-after period")
 }
 
+// A Retry-After block only ever moves later: a second 429 carrying a nearer
+// deadline must not shorten the one already stored.
+//
+// This is a decision about two timestamps, so it is asserted on the stored
+// timestamp and not on a stopwatch. It used to set a 200ms block, set a 50ms
+// one, and assert that 150ms still remained — which is an assertion that
+// fewer than fifty milliseconds of real time passed between two statements.
+// Under race instrumentation on a two-core runner that is not safe, and it
+// failed on CI having said nothing about the behavior it is named after.
 func TestRateLimiterRetryAfterOnlyUpdatesIfLater(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)
@@ -146,15 +155,28 @@ func TestRateLimiterRetryAfterOnlyUpdatesIfLater(t *testing.T) {
 		TokensPerRequest: 1,
 	})
 
-	// Set initial retry-after
-	rl.SetRetryAfterDuration(200 * time.Millisecond)
+	base := time.Now()
+	later, earlier := base.Add(time.Minute), base.Add(time.Second)
 
-	// Try to set an earlier time
-	rl.SetRetryAfterDuration(50 * time.Millisecond)
+	require.NoError(t, rl.SetRetryAfter(later))
+	require.NoError(t, rl.SetRetryAfter(earlier))
 
-	// Should still have ~200ms remaining (only updated if later)
-	remaining, _ := rl.RetryAfterRemaining()
-	assert.True(t, remaining >= 150*time.Millisecond, "expected ~200ms remaining, got %v", remaining)
+	state, err := store.Load()
+	require.NoError(t, err)
+	assert.True(t, state.RateLimiter.RetryAfterUntil.Equal(later),
+		"the nearer deadline shortened the block: stored %v, want %v",
+		state.RateLimiter.RetryAfterUntil, later)
+
+	// And the other direction, so that "unchanged" is not passing for free:
+	// a deadline further out does move the block.
+	furtherOut := base.Add(2 * time.Minute)
+	require.NoError(t, rl.SetRetryAfter(furtherOut))
+
+	state, err = store.Load()
+	require.NoError(t, err)
+	assert.True(t, state.RateLimiter.RetryAfterUntil.Equal(furtherOut),
+		"a later deadline did not extend the block: stored %v, want %v",
+		state.RateLimiter.RetryAfterUntil, furtherOut)
 }
 
 func TestRateLimiterReset(t *testing.T) {

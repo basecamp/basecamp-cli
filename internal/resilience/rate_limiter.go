@@ -15,6 +15,13 @@ type RateLimiter struct {
 	// clock is the time the limiter reads. A field so that a test can put
 	// the deadline boundary where it wants it instead of racing a real one.
 	clock func() time.Time
+	// onWait, when set, is called each time a caller is turned away by the
+	// bucket and settles in to sleep for a refill or a block. A test that
+	// wants to know the wait path was taken has to hear it from in here: a
+	// look at the bucket from outside can be overtaken by a refill landing
+	// between the look and the take, and would report a wait that never
+	// happened. Nothing in production sets it.
+	onWait func()
 }
 
 // NewRateLimiter creates a new rate limiter with the given config.
@@ -165,6 +172,9 @@ func (rl *RateLimiter) waitSince(ctx context.Context, start, deadline time.Time)
 			return rl.gateError(blocked, wait, rl.now().Sub(start))
 		}
 		sleptOnServerBlock = blocked
+		if rl.onWait != nil {
+			rl.onWait()
+		}
 		if err := pause(ctx, sleepWithin(wait, remaining)); err != nil {
 			return err
 		}
