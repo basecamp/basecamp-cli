@@ -223,3 +223,60 @@ func TestAProjectEntryFailsClosedOnItsOwn(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(`{"path":"/work/app","class":"internal"}`), &p))
 	assert.Equal(t, "internal", p.Class)
 }
+
+// Copilot on #765, the fourth fail-open in this one shim: encoding/json
+// substitutes U+FFFD for malformed UTF-8 and for an unpaired surrogate
+// escape, silently, so "/work/\ud800" reaches the shape checks as
+// "/work/�" — absolute, clean, and authorizing.
+//
+// Same mechanism as the case-variant keys, a different decoder behavior:
+// there it folded a key looked up exactly, here it rewrites bytes validated
+// afterwards. The check has to ask whether the value it is about to validate
+// is the value in the file, before it validates anything.
+func TestALegacyPathTheDecoderHadToRewriteIsRefused(t *testing.T) {
+	policy := func(entry string) error {
+		_, err := ParsePolicy([]byte(`{"trust":{"mode":"operator","operator_id":26909558},"projects":{"48699913":` + entry + `}}`))
+		return err
+	}
+	for name, entry := range map[string]string{
+		"an unpaired high surrogate": `{"path":"/work/\ud800"}`,
+		"an unpaired low surrogate":  `{"path":"/work/\udc00"}`,
+		"a high surrogate then text": `{"path":"/work/\ud800app"}`,
+		"a reversed surrogate pair":  `{"path":"/work/\udc00\ud800"}`,
+		"raw malformed UTF-8":        "{\"path\":\"/work/\xff\"}",
+		"a truncated UTF-8 sequence": "{\"path\":\"/work/\xe2\x82\"}",
+		"malformed bytes alone":      "{\"path\":\"\xc3\x28\"}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Error(t, policy(entry), "the decoder replaced this with U+FFFD, so the checks ran on a value no writer wrote")
+		})
+	}
+
+	// A well-formed pair is not lossy, and neither is a path that really
+	// holds U+FFFD. Reject the lossy input, not the character.
+	require.NoError(t, policy(`{"path":"/work/😀"}`), "a well-formed surrogate pair is an emoji, not a replacement")
+	require.NoError(t, policy(`{"path":"/work/�"}`), "U+FFFD written as an escape is a path a writer could hold")
+	require.NoError(t, policy("{\"path\":\"/work/\\u00e9\"}"), "an ordinary escaped rune")
+	require.NoError(t, policy("{\"path\":\"/work/�\"}"), "and U+FFFD as its own literal bytes")
+
+	// The reason this is a losslessness test and not a comparison against
+	// json.Marshal of the decoded value. json.Marshal HTML-escapes & < and
+	// >, so it spells these three with &, < and > and a
+	// canonical comparison would refuse every one of them — ordinary
+	// directory names, in a file this code is only reading in order to throw
+	// the field away. Refusing a legitimate path is the mistake, not the
+	// miss.
+	require.NoError(t, policy(`{"path":"/work/r&d"}`), "an ampersand is an ordinary character in a directory name")
+	require.NoError(t, policy(`{"path":"/work/a<b"}`))
+	require.NoError(t, policy(`{"path":"/work/x>y"}`))
+	// And the same three as the writer itself spells them, which is the
+	// other half of why the comparison has two answers.
+	require.NoError(t, policy(`{"path":"/work/r&d"}`), "the spelling json.Marshal produces parses too")
+	require.NoError(t, policy(`{"path":"/work/a<b"}`))
+
+	// An escaped backslash is two bytes and not the start of an escape: a
+	// path ending in one must not make the scan read the closing quote as
+	// part of a \u.
+	require.NoError(t, policy(`{"path":"/work/a\\b"}`), "an escaped backslash is a literal backslash")
+	require.NoError(t, policy(`{"path":"/work/a\\"}`))
+}

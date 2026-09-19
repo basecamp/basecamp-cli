@@ -70,6 +70,11 @@ reject:
   - 'connect setup .*--serve[ =][''"]?[0-9]{19}'
   # And the flag that no longer exists, in any spelling.
   - 'connect setup .*--(route|remove-route)\b'
+  # --unserve has no place in either of these scenarios: nothing is served
+  # yet to withdraw. Paired with --serve in one run it is worse than useless,
+  # because setup.Apply refuses the run outright ("project %d is both served
+  # and removed in one run"), so the agent would have done nothing at all.
+  - 'connect setup .*--unserve\b'
   - '--with-token'
   - '--with-client-credentials'
   # Every machine-output mode the interactive connection refuses.

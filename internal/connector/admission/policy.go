@@ -8,6 +8,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // TrustMode names who, besides the operator, may drive the agent.
@@ -153,6 +154,20 @@ func checkLegacyPathValue(raw json.RawMessage) error {
 	if err := json.Unmarshal(raw, &legacy); err != nil {
 		return fmt.Errorf(`the "path" of a connector that routed projects is not a string: %w`, err)
 	}
+	// Before any check of the value: is this the value that is in the file?
+	// encoding/json substitutes U+FFFD for malformed UTF-8 and for an
+	// unpaired surrogate escape, silently and without an error, so
+	// "/work/\ud800" arrives here as "/work/\ufffd" — absolute, clean, and
+	// nothing the old writer could have produced (Copilot on #765).
+	//
+	// This is the second time on this branch that the decoder handed this
+	// check a different value from the one on disk. The first was
+	// case-folding a key looked up exactly; this is rewriting bytes
+	// validated afterwards. Both times the validation was right about the
+	// value it saw, and the value it saw was not the one in the file.
+	if lossyJSONString(bytes.TrimSpace(raw)) {
+		return errors.New(`the "path" of a connector that routed projects is not encoded the way it was written: it holds malformed UTF-8 or an unpaired surrogate escape, which encoding/json silently replaces with U+FFFD, so the value read back is not the value in the file`)
+	}
 	// POSIX, not this host's rules. The connector runs on Linux only, so the
 	// writer of this key wrote a POSIX path — and path.IsAbs answers for
 	// that format on every platform, where filepath.IsAbs answers for
@@ -282,4 +297,91 @@ func (p Policy) inScope(bucket int64) bool {
 func (p Policy) served(bucket int64) (Project, bool) {
 	r, ok := p.Projects[bucket]
 	return r, ok
+}
+
+// lossyJSONString reports whether encoding/json had to alter raw, a JSON
+// string token, to decode it — which it does by substituting U+FFFD, with no
+// error, for exactly two things: bytes that are not valid UTF-8, and a
+// \uD800-\uDFFF escape that is not half of a well-formed pair. Those are the
+// whole of what it rewrites in a string, so testing for them is a test of
+// losslessness and not a list of characters to dislike.
+//
+// Comparing raw against json.Marshal of the decoded value is the tempting
+// general form, and it is wrong here. json.Marshal HTML-escapes & < and >,
+// so it spells /work/r&d as "/work/r&d": a hand-edited connect.json
+// with a literal ampersand — an ordinary thing in a directory name — would
+// fail a canonical comparison and take the whole file down with it, over a
+// field this code exists to discard. Whether the canonical form even has the
+// escape depends on the encoder's SetEscapeHTML, which makes "canonical" two
+// different answers. Refusing a legitimate path is the new-strictness
+// mistake this branch has already made once; the lossy encoding is the
+// actual complaint, so that is what this asks about.
+//
+// A path that genuinely contains U+FFFD still parses, written either as its
+// literal UTF-8 bytes or as �, because neither is something the decoder
+// had to replace.
+func lossyJSONString(raw []byte) bool {
+	if !utf8.Valid(raw) {
+		return true
+	}
+	for i := 0; i < len(raw); {
+		if raw[i] != '\\' {
+			i++
+			continue
+		}
+		if i+1 >= len(raw) {
+			// Malformed, and not this check's to report: the decode above
+			// already refused it.
+			return false
+		}
+		if raw[i+1] != 'u' {
+			i += 2 // \" \\ \/ \b \f \n \r \t: two bytes, neither a surrogate.
+			continue
+		}
+		r, ok := hex4(raw[i+2:])
+		if !ok {
+			return false
+		}
+		i += 6
+		if r < 0xD800 || r > 0xDFFF {
+			continue
+		}
+		if r >= 0xDC00 {
+			return true // a low surrogate with no high half before it
+		}
+		if i+5 < len(raw) && raw[i] == '\\' && raw[i+1] == 'u' {
+			if lo, ok := hex4(raw[i+2:]); ok && lo >= 0xDC00 && lo <= 0xDFFF {
+				i += 6 // a well-formed pair
+				continue
+			}
+		}
+		return true // a high surrogate its low half never follows
+	}
+	return false
+}
+
+// hex4 reads the four hex digits of a \u escape. Decoded by hand rather than
+// through strconv: JSON's escape grammar is exactly four hex digits, where
+// ParseUint would take spellings that grammar does not, and four digits
+// cannot exceed 0xFFFF so there is no width to lose.
+func hex4(b []byte) (rune, bool) {
+	if len(b) < 4 {
+		return 0, false
+	}
+	var r rune
+	for _, c := range b[:4] {
+		var d rune
+		switch {
+		case c >= '0' && c <= '9':
+			d = rune(c - '0')
+		case c >= 'a' && c <= 'f':
+			d = rune(c-'a') + 10
+		case c >= 'A' && c <= 'F':
+			d = rune(c-'A') + 10
+		default:
+			return 0, false
+		}
+		r = r<<4 | d
+	}
+	return r, true
 }
