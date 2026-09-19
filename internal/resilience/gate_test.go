@@ -151,15 +151,28 @@ func runWorkers(t *testing.T, workers, calls int, env helperEnv) invocationTally
 // through the production defaults. Before queueing, the shared 50-token
 // bucket drained in the first half second and every later call failed with
 // "rate limit exceeded" while the server had never answered 429.
+//
+// Eighty calls against a fifty-token bucket is what makes this a test of
+// queueing: thirty of them cannot be served from the starting bucket at all,
+// so "every call succeeded" is only reachable by waiting for refills. The
+// run is therefore bounded below by the refill, never above: it used to
+// assert that the whole thing — eighty process spawns and three seconds of
+// deliberate refill — finished inside DefaultMaxWait, which is one
+// operation's queueing budget and no statement about this run. On a
+// contended box that margin is spent on the machine, and it failed on CI at
+// 10.73s and again at 10.97s with the gate having behaved perfectly.
 func TestGateQueuesTenParallelWorkersThroughTheDefaults(t *testing.T) {
-	dir := t.TempDir()
-	start := time.Now()
-	tl := runWorkers(t, 10, 8, helperEnv{"BH_STATE_DIR": dir, "BH_MODE": "ops", "BH_OPS": "1", "BH_HOLD": "10ms"})
+	const workers, calls = 10, 8
+	cfg := DefaultConfig()
+	require.Greater(t, float64(workers*calls), cfg.RateLimiter.MaxTokens,
+		"the run has to outlast the bucket or nothing queues")
 
-	assert.Equal(t, 80, tl.ok, "every call succeeds: %v", tl.rejections)
+	dir := t.TempDir()
+	tl := runWorkers(t, workers, calls, helperEnv{"BH_STATE_DIR": dir, "BH_MODE": "ops", "BH_OPS": "1", "BH_HOLD": "10ms"})
+
+	assert.Equal(t, workers*calls, tl.ok, "every call succeeds: %v", tl.rejections)
 	assert.Zero(t, tl.rejected)
-	assert.LessOrEqual(t, tl.peak, 10, "never more than MaxConcurrent live holders")
-	assert.Less(t, time.Since(start), DefaultMaxWait)
+	assert.LessOrEqual(t, tl.peak, cfg.Bulkhead.MaxConcurrent, "never more than MaxConcurrent live holders")
 }
 
 // Fifteen simultaneous invocations against ten slots: nobody fails, nobody
@@ -178,7 +191,6 @@ func TestGateQueuesOversubscribedInvocationsWithinTheSlotLimit(t *testing.T) {
 	assert.Equal(t, 15, tl.ok, "every invocation succeeds: %v", tl.rejections)
 	assert.LessOrEqual(t, tl.peak, 10, "never more than MaxConcurrent live holders")
 	assert.GreaterOrEqual(t, elapsed, 2*hold, "the overflow waited for a slot")
-	assert.Less(t, elapsed, DefaultMaxWait)
 
 	state, err := NewStore(dir).Load()
 	require.NoError(t, err)
