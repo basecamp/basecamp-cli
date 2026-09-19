@@ -1,6 +1,7 @@
 package admission
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -136,4 +137,89 @@ func TestAMalformedLegacyPathIsRefusedBeforeItIsDiscarded(t *testing.T) {
 	// And a new file, which carries no path at all, is unaffected.
 	require.NoError(t, policy(`{"class":"internal"}`))
 	require.NoError(t, policy(`{}`))
+}
+
+// Copilot on #765: encoding/json matches a struct tag case-insensitively, so
+// a value under "Path" lands in LegacyPath while checkLegacyPath, which looks
+// the key up exactly, sees nothing to check. The reported case is one of six.
+//
+// This goes through ParsePolicy on purpose. The same documents were already
+// covered through setup.Parse, which has the key walk and refused every one
+// of them — and that coverage is what hid the gap, because the reader that
+// authorizes is the other one. A test of the strict reader says nothing
+// about the permissive one.
+func TestParsePolicyRefusesKeysTheDecoderWouldMatchAnyway(t *testing.T) {
+	const trust = `"trust":{"mode":"operator","operator_id":26909558}`
+	for name, tc := range map[string]struct {
+		doc   string
+		would string
+	}{
+		"trust under a case variant": {
+			doc:   `{` + trust + `,"Trust":{"mode":"allowlist","allowlist_ids":[999]},"projects":{"1":{}}}`,
+			would: "escalate the trust mode to allowlist and trust person 999",
+		},
+		"projects under a case variant": {
+			doc:   `{` + trust + `,"projects":{"1":{}},"Projects":{"2":{}}}`,
+			would: "serve project 2, which the projects key does not name",
+		},
+		"project id with a leading zero": {
+			doc:   `{` + trust + `,"projects":{"01":{}}}`,
+			would: "serve project 1 under a key setup refuses",
+		},
+		"legacy path under a case variant": {
+			doc:   `{` + trust + `,"projects":{"1":{"Path":null}}}`,
+			would: "serve project 1 with the legacy-path check skipped entirely",
+		},
+		"legacy path under an upper-case variant": {
+			doc:   `{` + trust + `,"projects":{"1":{"PATH":"../elsewhere"}}}`,
+			would: "serve project 1 carrying a relative path no routing connector wrote",
+		},
+		"a key given twice": {
+			doc:   `{` + trust + `,"projects":{"1":{}},"projects":{"2":{}}}`,
+			would: "serve project 2 while the file appears to say project 1",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p, err := ParsePolicy([]byte(tc.doc))
+			require.Error(t, err, "accepted; it would %s", tc.would)
+			assert.Equal(t, Policy{}, p, "a refused document yields no policy")
+		})
+	}
+
+	// The control. Every document above is one key's spelling away from a
+	// document that parses, so the refusals are the spelling and not some
+	// other thing wrong with them — without this the table would pass just
+	// as well against a ParsePolicy that refused everything.
+	p, err := ParsePolicy([]byte(`{` + trust + `,"projects":{"1":{},"2":{"path":"/srv/app"}}}`))
+	require.NoError(t, err)
+	assert.Len(t, p.Projects, 2)
+	assert.Equal(t, TrustOperator, p.Trust.Mode)
+}
+
+// The second layer, and the one CheckCanonicalKeys does not stand in for.
+// Project is exported and its UnmarshalJSON runs wherever a caller decodes
+// an entry — setup's own refuseMalformedProjects does exactly that — so it
+// has to fail closed on a document nobody walked first. A guarantee that
+// holds only because two functions happen to run in one order is one a later
+// edit removes without touching either of them.
+func TestAProjectEntryFailsClosedOnItsOwn(t *testing.T) {
+	for name, entry := range map[string]string{
+		"a case variant of path":       `{"Path":null}`,
+		"an upper-case variant":        `{"PATH":"../elsewhere"}`,
+		"a mixed-case variant":         `{"pAtH":"work/app"}`,
+		"the canonical spelling still": `{"path":""}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var p Project
+			assert.Error(t, json.Unmarshal([]byte(entry), &p),
+				"the decoder fills LegacyPath from this key, so the check has to find it there")
+		})
+	}
+
+	// Unchanged for everything that was already right: the value check reads
+	// the value, and a well-formed one under any spelling is still a
+	// well-formed value. What refuses the spelling is the document walk.
+	var p Project
+	require.NoError(t, json.Unmarshal([]byte(`{"path":"/work/app","class":"internal"}`), &p))
+	assert.Equal(t, "internal", p.Class)
 }

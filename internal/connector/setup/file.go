@@ -283,7 +283,9 @@ func (f File) WorkerName() string {
 // (only the last would count, so the file would not say what it reads as),
 // and anything after the object.
 func Parse(data []byte) (File, error) {
-	if err := refuseDuplicateKeys(data); err != nil {
+	// admission's, not setup's own: one walk, so the reader that authorizes
+	// and the reader that refuses cannot disagree about what a key says.
+	if err := admission.CheckCanonicalKeys(data); err != nil {
 		return File{}, fmt.Errorf("parse connect.json: %w", err)
 	}
 	// admission.Project refuses a malformed entry itself, so both readers
@@ -354,75 +356,6 @@ func refuseMalformedProjects(data []byte) error {
 		}
 	}
 	return nil
-}
-
-// canonicalKey reports whether a key is in its one canonical spelling:
-// lowercase letters, digits and underscores for names, plain decimal for
-// project ids.
-func canonicalKey(key string) bool {
-	if n, err := strconv.ParseInt(key, 10, 64); err == nil {
-		return strconv.FormatInt(n, 10) == key
-	}
-	if key == "" {
-		return false
-	}
-	for _, r := range key {
-		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
-			return false
-		}
-	}
-	return true
-}
-
-// refuseDuplicateKeys walks the JSON document and refuses any object that
-// names a key twice. encoding/json matches field names case-insensitively
-// and parses project ids as numbers, so "Trust" is "trust" and "048699913"
-// is 48699913 to it; every key must therefore be in its one canonical
-// spelling, which makes an exact comparison a complete one.
-func refuseDuplicateKeys(data []byte) error {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-	var walk func() error
-	walk = func() error {
-		tok, err := dec.Token()
-		if err != nil {
-			return err
-		}
-		delim, ok := tok.(json.Delim)
-		if !ok {
-			return nil
-		}
-		switch delim {
-		case '{':
-			seen := map[string]bool{}
-			for dec.More() {
-				keyTok, err := dec.Token()
-				if err != nil {
-					return err
-				}
-				key, _ := keyTok.(string)
-				if !canonicalKey(key) {
-					return fmt.Errorf("key %q is not spelled canonically: names are lowercase, project ids plain decimal", key)
-				}
-				if seen[key] {
-					return fmt.Errorf("key %q appears twice in one object", key)
-				}
-				seen[key] = true
-				if err := walk(); err != nil {
-					return err
-				}
-			}
-		case '[':
-			for dec.More() {
-				if err := walk(); err != nil {
-					return err
-				}
-			}
-		}
-		_, err = dec.Token() // the closing delimiter
-		return err
-	}
-	return walk()
 }
 
 // VerifyAgent refuses a connect.json that does not describe the identity a

@@ -111,15 +111,41 @@ func (p *Project) UnmarshalJSON(data []byte) error {
 //
 // A key that is absent is a file written since the paths went, and is left
 // alone.
+//
+// The key is found case-insensitively, the way encoding/json found it. An
+// exact lookup of "path" is not the same question as "did a value reach
+// LegacyPath": the decoder matches a struct tag without regard to case, so
+// {"Path": "../x"} fills the field while an exact lookup sees an absent key
+// and validates nothing (Copilot on #765). CheckCanonicalKeys refuses that
+// spelling for every document either reader parses, so this is the second
+// of two; it is here because Project is exported and its UnmarshalJSON has
+// to fail closed for whoever calls it, not only for callers that walked the
+// document first. A guarantee that depends on the order two functions run
+// in is one a later edit can take away without touching either.
 func checkLegacyPath(data []byte) error {
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return err
 	}
-	raw, ok := probe["path"]
-	if !ok {
-		return nil
+	keys := make([]string, 0, len(probe))
+	for key := range probe {
+		if strings.EqualFold(key, "path") {
+			keys = append(keys, key)
+		}
 	}
+	// Sorted: a map ranges in a random order, and an error message that
+	// varies run to run is one a test cannot assert and a person cannot
+	// report. Only an unwalked document can hold two of these at once.
+	slices.Sort(keys)
+	for _, key := range keys {
+		if err := checkLegacyPathValue(probe[key]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkLegacyPathValue(raw json.RawMessage) error {
 	if string(bytes.TrimSpace(raw)) == "null" {
 		return errors.New(`the "path" of a connector that routed projects is null; no such connector wrote that`)
 	}
@@ -184,9 +210,20 @@ type Policy struct {
 }
 
 // ParsePolicy decodes the admission part of connect.json. Unknown keys are
-// ignored: the file carries settings that belong to other steps. The caller
-// sets AgentID and Buckets, then calls Validate.
+// ignored: the file carries settings that belong to other steps, and this
+// reader has no business refusing a file over the driver's half of it. The
+// caller sets AgentID and Buckets, then calls Validate.
+//
+// Noncanonical and repeated keys are refused, which is not the same
+// laxness. An unknown key cannot reach anything this decides from; a key
+// spelled "Trust" or "PATH" reaches exactly that, because encoding/json
+// matches it. Ignoring one and refusing the other is the difference between
+// tolerating a setting that is not ours and accepting an authorization we
+// cannot see. See CheckCanonicalKeys.
 func ParsePolicy(data []byte) (Policy, error) {
+	if err := CheckCanonicalKeys(data); err != nil {
+		return Policy{}, fmt.Errorf("admission: parse connect.json: %w", err)
+	}
 	var p Policy
 	if err := json.Unmarshal(data, &p); err != nil {
 		return Policy{}, fmt.Errorf("admission: parse connect.json: %w", err)
