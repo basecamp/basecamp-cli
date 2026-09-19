@@ -251,9 +251,9 @@ func runBarrieredInvocations(t *testing.T, n int, env helperEnv) invocationTally
 // onWait seam fires when a caller is turned away by the bucket and settles
 // in to sleep for a refill, and each child counts the operations that had
 // to. Thirty of the eighty calls cannot be served from the starting bucket,
-// so thirty is what the count comes to, and the run cannot pass with it at
-// zero — which is the case that matters, a run where the wait path was
-// never entered and every assertion here was free.
+// so that is roughly what the count comes to, and the run cannot pass with
+// it at zero — which is the case that matters, a run where the wait path
+// was never entered and every assertion here was free.
 //
 // Inferring the same thing from outside does not work, and the first
 // attempt at this did: it read the bucket before each call and counted the
@@ -333,8 +333,9 @@ func TestGateReportsNoQueueingWhenNothingHadToWait(t *testing.T) {
 // one the first ten are done before the last five start — at which point
 // nothing is oversubscribed and the test passes having measured nothing. The
 // old evidence that the overflow waited was that the run took at least two
-// holds, which slow spawning satisfies all by itself. The bulkhead now says
-// it itself: five of the fifteen found every slot taken and polled for one.
+// holds, which slow spawning satisfies all by itself. The bulkhead reports
+// it directly now: five of the fifteen found every slot taken and polled
+// for one.
 func TestGateQueuesOversubscribedInvocationsWithinTheSlotLimit(t *testing.T) {
 	dir := t.TempDir()
 	cfg := DefaultConfig()
