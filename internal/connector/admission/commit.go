@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 )
@@ -135,15 +136,50 @@ func (k *keyedMutex) lock(ctx context.Context, key string) (func(), error) {
 // unverified assignment delta is retried every ten minutes for a day after it
 // was first blocked, and on redispatch at any time after that. A throttled
 // record (throttled) is on the same schedule, never before the server's
-// deadline. bucket_mismatch
-// and unroutable are not timed: the pointer's bucket and type never change, so
-// only a person's redispatch re-runs them. A blocked record is never
-// discarded for having failed: the checkpoint may already be past the event,
-// and a tombstone would turn an outage into a permanent loss.
+// deadline. A record blocked because connect.json could not be read
+// (config_unreadable) is on the same interval with no window at all: that is
+// a local file a person repairs, and an operator away for a week is
+// ordinary, where a day of a failing server means the server is not coming
+// back on its own. bucket_mismatch and unroutable are not timed: the
+// pointer's bucket and type never change, so only a person's redispatch
+// re-runs them. no_route is not timed either — it waits for the operator to
+// serve the project, which is a decision, not a delay. A blocked record is
+// never discarded for having failed: the checkpoint may already be past the
+// event, and a tombstone would turn an outage into a permanent loss.
+//
+// The intake sweep is what runs this schedule (internal/connector,
+// Intake.sweepBlockedRetries): it asks the ledger for the records this
+// function calls due and offers them back to admission.
 const (
 	BlockedRetryInterval = 10 * time.Minute
 	BlockedRetryWindow   = 24 * time.Hour
 )
+
+// timedBlockedReasons is every blocked reason the schedule re-runs, and for
+// each whether its retries stop at BlockedRetryWindow.
+//
+// One list, read by both halves of the join: NextBlockedRetry decides whether
+// a record is due, and the ledger's query narrows to these reasons so the
+// sweep never reads the rows that wait for a person.
+var timedBlockedReasons = map[Reason]bool{
+	ReasonReadFailed:       true,
+	ReasonReadUnresolved:   true,
+	ReasonDeltaUnverified:  true,
+	ReasonTrustUnverified:  true,
+	ReasonThrottled:        true,
+	ReasonConfigUnreadable: false,
+}
+
+// TimedBlockedReasons is the blocked reasons NextBlockedRetry schedules,
+// sorted so a query built from them is the same query every time.
+func TimedBlockedReasons() []Reason {
+	out := make([]Reason, 0, len(timedBlockedReasons))
+	for reason := range timedBlockedReasons {
+		out = append(out, reason)
+	}
+	slices.Sort(out)
+	return out
+}
 
 // NextBlockedRetry returns when a blocked record should next be re-run, and
 // false when it waits for something other than time: the operator serving the
@@ -151,17 +187,20 @@ const (
 // notBefore is a throttled record's Verdict.RetryAt; no retry is scheduled
 // before it, and a deadline past the window hands the record to redispatch
 // rather than asking early.
+//
+// The returned time may be in the past — a connector that was not running
+// when a retry came due is late, not excused — so a caller asks whether next
+// is at or before now, never whether it is in the future.
 func NextBlockedRetry(reason Reason, blockedAt, lastAttempt, notBefore time.Time) (time.Time, bool) {
-	switch reason {
-	case ReasonReadFailed, ReasonReadUnresolved, ReasonDeltaUnverified, ReasonTrustUnverified, ReasonThrottled:
-	default:
+	bounded, timed := timedBlockedReasons[reason]
+	if !timed {
 		return time.Time{}, false
 	}
 	next := lastAttempt.Add(BlockedRetryInterval)
 	if notBefore.After(next) {
 		next = notBefore
 	}
-	if next.After(blockedAt.Add(BlockedRetryWindow)) {
+	if bounded && next.After(blockedAt.Add(BlockedRetryWindow)) {
 		return time.Time{}, false
 	}
 	return next, true

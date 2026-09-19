@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
 
 // Record is one row of the events table.
@@ -192,6 +194,106 @@ func (l *Ledger) CountInState(ctx context.Context, state RecordState) (int, erro
 	return n, nil
 }
 
+// BlockedRetryScope narrows DueBlockedRetries to what this run may decide.
+type BlockedRetryScope struct {
+	// Buckets is the run's --project scope — the same slice admission's
+	// policy gates on, with the same meaning: empty is a run restricted to no
+	// project, which is every project the agent can see, NOT no project at
+	// all.
+	//
+	// It is not optional, and it is not a detail. out_of_scope is a terminal
+	// discard, and the projects a run leaves out are another run's to
+	// dispatch: a sweep that offered a record from outside its scope would
+	// cause the permanent loss the retry exists to prevent. Every other
+	// terminal verdict a re-offered record can reach — stale, not_addressed,
+	// untrusted_performer, agent_authored — is the verdict a fresh event
+	// would get, and is correct.
+	Buckets []int64
+	// Now is the moment the sweep is asking about.
+	Now time.Time
+	// Limit is the most records one sweep takes.
+	Limit int
+}
+
+// dueBlockedBatch is how many blocked rows one page of the query reads.
+const dueBlockedBatch = 200
+
+// DueBlockedRetries returns the blocked records whose next retry has come, in
+// scope, oldest first, at most Limit of them.
+//
+// Due is admission.NextBlockedRetry's answer, not this query's: the schedule
+// is described in one place, and the SQL only narrows to the rows it could
+// possibly say yes about — blocked, in scope, and blocked for a reason the
+// schedule names. The rest is paged through rather than cut off with a LIMIT,
+// because a row the schedule has finished with (its window passed) stays
+// blocked and would otherwise take a place in the window forever, starving
+// everything behind it.
+func (l *Ledger) DueBlockedRetries(ctx context.Context, scope BlockedRetryScope) ([]Record, error) {
+	if scope.Limit <= 0 {
+		return nil, nil
+	}
+	reasons := admission.TimedBlockedReasons()
+	args := make([]any, 0, len(reasons)+len(scope.Buckets)+2)
+	args = append(args, string(StateBlocked))
+	for _, reason := range reasons {
+		args = append(args, string(reason))
+	}
+	where := ` WHERE state = ? AND reason IN (` + placeholders(len(reasons)) + `)`
+	if len(scope.Buckets) > 0 {
+		buckets := slices.Compact(slices.Sorted(slices.Values(scope.Buckets)))
+		where += ` AND bucket_id IN (` + placeholders(len(buckets)) + `)`
+		for _, bucket := range buckets {
+			args = append(args, bucket)
+		}
+	}
+	//nolint:gosec // G202: the clauses are this package's constants and placeholders, never values
+	query := selectRecords + where + ` AND id > ? ORDER BY id LIMIT ?`
+
+	var (
+		due   []Record
+		after int64
+	)
+	for {
+		rows, err := l.db.QueryContext(ctx, query, append(slices.Clone(args), after, dueBlockedBatch)...)
+		if err != nil {
+			return nil, fmt.Errorf("connector: list blocked records due for a retry: %w", err)
+		}
+		records, err := scanRecords(rows)
+		if err != nil {
+			return nil, err
+		}
+		for _, record := range records {
+			after = record.ID
+			if !blockedRetryDue(record, scope.Now) {
+				continue
+			}
+			due = append(due, record)
+			if len(due) == scope.Limit {
+				return due, nil
+			}
+		}
+		if len(records) < dueBlockedBatch {
+			return due, nil
+		}
+	}
+}
+
+// blockedRetryDue reports whether record's next scheduled retry is at or
+// before now. A record with no blocked_at or decided_at is not one this
+// schedule can date, so it waits for a person.
+func blockedRetryDue(record Record, now time.Time) bool {
+	d := record.Decision
+	if d.BlockedAt == nil || d.DecidedAt == nil {
+		return false
+	}
+	var notBefore time.Time
+	if d.RetryAt != nil {
+		notBefore = *d.RetryAt
+	}
+	next, ok := admission.NextBlockedRetry(admission.Reason(record.Reason), *d.BlockedAt, *d.DecidedAt, notBefore)
+	return ok && !next.After(now)
+}
+
 // lifecycle is the ledger's state machine: for each state, the states a record
 // may move to from it.
 //
@@ -202,7 +304,8 @@ func (l *Ledger) CountInState(ctx context.Context, state RecordState) (int, erro
 // twice, or where a tombstone whose payload has been dropped is picked up as
 // work with nothing in it.
 //
-// Blocked is not terminal on purpose: it is retained and retried, so it has
+// Blocked is not terminal on purpose: it is retained and retried — on the
+// timer DueBlockedRetries feeds, and on a person's redispatch — so it has
 // edges back into the working states. Completed and discarded have none.
 var lifecycle = map[RecordState][]RecordState{
 	// seen to queued is one edge, not two: admission commits an admitted

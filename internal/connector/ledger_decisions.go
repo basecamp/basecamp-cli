@@ -465,9 +465,12 @@ WHERE event_id = ? AND state = 'pending' AND kind IN ('guard_ack', 'holding_repl
 // AuthorizedBlocked lists blocked records a person authorized, oldest first:
 // authorized since the record entered its current run of blocked states, so
 // an authorization that answered an earlier outcome does not count.
-// The redispatch command runs the prerequisite itself; this is for the
-// blocked-record recovery schedule to run it again when that did not settle
-// it (the schedule is plan step 22's, and nothing calls this yet).
+// The redispatch command runs the prerequisite itself; this would be for
+// running it again when that did not settle it. Nothing calls it. The timed
+// retry that now runs (Intake.sweepBlockedRetries) is not it: that schedule
+// is keyed on the reason, not on who authorized the record, and the reasons
+// it leaves alone — no_route, unroutable, bucket_mismatch — are the ones a
+// re-run on a timer could only repeat the same answer for.
 func (l *Ledger) AuthorizedBlocked(ctx context.Context, limit int) ([]int64, error) {
 	rows, err := l.db.QueryContext(ctx, `SELECT id FROM events WHERE state = 'blocked' AND authorized_at >= blocked_at ORDER BY id LIMIT ?`, limit)
 	if err != nil {

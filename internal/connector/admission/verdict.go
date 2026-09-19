@@ -263,9 +263,9 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 			// could read which projects are served. Held rather than
 			// discarded: a discard is the one outcome repairing the file
 			// cannot reverse, and a blocked record can still be run. It
-			// waits for a person — `basecamp connect redispatch <id>` once
-			// the file is back — as every blocked record does. Nothing
-			// re-offers one on a timer.
+			// comes round on the blocked schedule until the file is back,
+			// with no window (NextBlockedRetry), and a person may run
+			// `basecamp connect redispatch <id>` sooner.
 			return v.end(StateBlocked, ReasonConfigUnreadable), nil
 		}
 		// Every other gate discard turns on the trust set, the matrix or the

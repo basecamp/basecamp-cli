@@ -1138,7 +1138,8 @@ func TestTheGateReadsTheLiveServedSetToo(t *testing.T) {
 // and post the public holding reply — telling the person on the card that
 // their project is not served, when the project is there and the file is
 // what is broken. no_route also has no timed retry, so repairing the file
-// would not reconsider those records.
+// would not reconsider those records — where config_unreadable is retried on
+// a timer with no window at all, so it does.
 func TestAnUnreadableConfigIsHeldAsOneRatherThanAnsweredAsUnserved(t *testing.T) {
 	broken := errors.New("connect.json cannot be read")
 	fail := true
@@ -1157,14 +1158,17 @@ func TestAnUnreadableConfigIsHeldAsOneRatherThanAnsweredAsUnserved(t *testing.T)
 	assert.Equal(t, ReasonConfigUnreadable, v.Reason, "not no_route: nothing read the file, so nothing can say the project is unserved")
 	assert.False(t, v.Served)
 
-	// It waits for a person, as every blocked record does. An automatic
-	// sweep was built for this and taken back out: offering due blocked
-	// rows is a scheduler with its own claiming, and it re-decided five
-	// other blocked reasons besides this one. Carded, so that nothing here
-	// promises a timer that does not run.
+	// It comes round on its own, every ten minutes, for as long as the file
+	// is unreadable. The window the other blocked reasons stop at is right
+	// for a server that has failed for a day; it is wrong for a local file,
+	// where an operator away for a week is ordinary and giving up would
+	// strand the work silently.
 	blockedAt := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
-	_, retried := NextBlockedRetry(ReasonConfigUnreadable, blockedAt, blockedAt, time.Time{})
-	assert.False(t, retried, "no schedule claims this record, and nothing would act on one if it did")
+	next, retried := NextBlockedRetry(ReasonConfigUnreadable, blockedAt, blockedAt, time.Time{})
+	require.True(t, retried, "the sweep re-offers this one without anybody asking")
+	assert.Equal(t, blockedAt.Add(BlockedRetryInterval), next)
+	_, retried = NextBlockedRetry(ReasonConfigUnreadable, blockedAt, blockedAt.Add(8*24*time.Hour), time.Time{})
+	assert.True(t, retried, "a week of it is an operator on holiday, not a verdict")
 
 	// And once the file is readable the record decides normally.
 	fail = false

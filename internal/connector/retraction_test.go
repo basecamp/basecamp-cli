@@ -286,7 +286,8 @@ func TestAskStillOpenReadsWhatTheRecordIsWaitingFor(t *testing.T) {
 		require.True(t, open(t, ctx, ledger, holding, 1))
 
 		// The person ran the redispatch and the rerun blocked on something
-		// that retries by itself (admission.NextBlockedRetry): nobody is
+		// that retries by itself — admission.NextBlockedRetry's schedule,
+		// which the intake sweep runs (Intake.sweepBlockedRetries): nobody is
 		// being asked for a redispatch any more.
 		v := obNoRouteVerdict(1, getRecord(t, ledger, 1).Revision, obCommentReply)
 		v.Reason = admission.ReasonReadFailed

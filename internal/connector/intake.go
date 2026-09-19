@@ -178,6 +178,30 @@ type Intake struct {
 	// duplicate, and without this the id would wait for a restart.
 	stranded map[int64]struct{}
 
+	// retriedBlocked is the revision each blocked record was last offered a
+	// timed retry at. It is the claim the sweep takes before it offers:
+	// Queue.Offer does not deduplicate, so without one the same due rows
+	// would be offered again on every tick — starving the rows behind them
+	// in the window, and letting a second copy decide a record the moment
+	// the first re-blocked it, which is the interval bypassed.
+	//
+	// One entry per record rather than one per (id, revision): a verdict
+	// bumps the revision, so the record's own next decision retires the
+	// claim, and nothing accumulates per attempt.
+	//
+	// In memory is enough. AcquireInstanceLock is a flock the kernel drops
+	// on process death, so exactly one connector ever sweeps a ledger: there
+	// is no second writer to race and no stale claim to reap. A crash loses
+	// the map, which costs at most one extra decision — and admission's
+	// revision guard already makes a second decision at the same revision
+	// harmless.
+	//
+	// It is never pruned. It holds one small entry per record this process
+	// has ever retried, which for a connector that runs for months is the
+	// records that blocked in those months, not the events that passed
+	// through it.
+	retriedBlocked map[int64]int64
+
 	repairs     sync.WaitGroup
 	repairQueue chan Loss
 	// repairQueueSize and repairSweep override the pool's defaults in tests.
@@ -849,6 +873,77 @@ func (in *Intake) sweepStranded(ctx context.Context) {
 	}
 }
 
+// blockedRetryBatch is how many due blocked records one sweep offers. The
+// sweep runs every defaultRepairSweep and the schedule's own interval is ten
+// minutes, so this is a ceiling on a burst — an outage ending, or a repaired
+// connect.json — not a rate the ordinary case reaches.
+const blockedRetryBatch = 100
+
+// sweepBlockedRetries offers the blocked records whose retry has come due.
+//
+// This is the whole of the blocked-record recovery schedule that
+// admission.NextBlockedRetry describes: without it that function computes a
+// time nothing acts on, and a read that failed during an outage, a throttle,
+// or an unreadable connect.json waits for somebody to notice and run
+// `basecamp connect redispatch <id>` on each one.
+//
+// The scope is the run's --project buckets, passed down rather than assumed.
+// A connector restricted to project A that offered a blocked record from
+// project B would send it to a terminal discarded(out_of_scope) — the retry
+// causing the permanent loss it exists to prevent.
+//
+// It claims before it offers, and gives the claim back when the offer fails,
+// so a record is never left claimed and unoffered.
+func (in *Intake) sweepBlockedRetries(ctx context.Context) {
+	records, err := in.ledger.DueBlockedRetries(ctx, BlockedRetryScope{
+		Buckets: in.opts.Filters.Buckets,
+		Now:     in.now(),
+		Limit:   blockedRetryBatch,
+	})
+	if err != nil {
+		in.log.Warn("could not read the blocked records due for a retry", "error", err)
+		return
+	}
+	for _, record := range records {
+		release, claimed := in.claimBlockedRetry(record.ID, record.Revision)
+		if !claimed {
+			continue
+		}
+		if err := in.queue.Offer(ctx, record.ID); err != nil {
+			release()
+			in.log.Warn("a blocked record due for a retry could not be offered; it stays for the next sweep",
+				"event_id", record.ID, "reason", record.Reason, "error", err)
+			return
+		}
+		in.log.Debug("a blocked record was offered for its timed retry", "event_id", record.ID, "reason", record.Reason)
+	}
+}
+
+// claimBlockedRetry claims one offer of a record at one revision, and returns
+// the undo for an offer that then failed. It is false when this revision was
+// already offered.
+func (in *Intake) claimBlockedRetry(id, revision int64) (release func(), claimed bool) {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if in.retriedBlocked == nil {
+		in.retriedBlocked = map[int64]int64{}
+	}
+	previous, held := in.retriedBlocked[id]
+	if held && previous == revision {
+		return nil, false
+	}
+	in.retriedBlocked[id] = revision
+	return func() {
+		in.mu.Lock()
+		defer in.mu.Unlock()
+		if held {
+			in.retriedBlocked[id] = previous
+			return
+		}
+		delete(in.retriedBlocked, id)
+	}, true
+}
+
 // requeueSeen hands every record still in seen to the queue.
 //
 // The ledger row is written before the pointer line and before the hand-off,
@@ -984,14 +1079,14 @@ func (in *Intake) startRepairWorkers(ctx context.Context) {
 	go in.sweepLosses(ctx)
 }
 
-// sweepLosses is the periodic repair of both things that can be left behind:
-// an event committed but never handed over, and an open loss nothing is
-// walking.
+// sweepLosses is the periodic repair of the three things that can be left
+// behind: an event committed but never handed over, a blocked record whose
+// timed retry has come due, and an open loss nothing is walking.
 //
-// One goroutine does both, so a handover that waits at the pause threshold
-// also holds up the re-offering of open losses. That is the right way round:
-// the backlog is full, the pipeline is stopped, and starting more repair
-// walks would only make the backlog worse.
+// One goroutine does all three, so a handover that waits at the pause
+// threshold also holds up the blocked retries and the re-offering of open
+// losses. That is the right way round: the backlog is full, the pipeline is
+// stopped, and adding to it would only make the backlog worse.
 //
 // The queue is bounded, so an overloaded connector can turn one away; and a
 // walk can end early, leaving its loss open. Neither may leave a loss with
@@ -1012,6 +1107,7 @@ func (in *Intake) sweepLosses(ctx context.Context) {
 			return
 		case <-ticker.C:
 			in.sweepStranded(ctx)
+			in.sweepBlockedRetries(ctx)
 			losses, err := in.ledger.OpenLosses(ctx)
 			if err != nil {
 				in.log.Warn("could not read the open losses", "error", err)
