@@ -68,6 +68,17 @@ reject:
   # carry 9223372036854775807 either, which the CLI would take. That
   # narrowing is declared in the guard's corpus rather than left here.
   - 'connect setup .*--serve[ =][''"]?[0-9]{19}'
+  # Form is not identity. Every rule above asks whether a --serve value is a
+  # value the CLI would take; none asks whether it is the project this case
+  # is about, so a trace could serve 2223, or 111, and then serve 222 and
+  # pass — the broad setup mock reports success for both (Copilot on #765).
+  # This is the last axis of these patterns that nothing was checking.
+  #
+  # A well-formed id that is not 222: shorter, longer, or three digits
+  # differing in one place. Written out rather than as a negative lookahead,
+  # which RE2 does not have, so Go's guard reads the same pattern the Ruby
+  # runner does.
+  - 'connect setup .*--serve[ =][''"]?([0-9]{1,2}|[0-9]{4,}|[013-9][0-9]{2}|[0-9][013-9][0-9]|[0-9][0-9][013-9])[''"]?(\s|$)'
   # And the flag that no longer exists, in any spelling.
   - 'connect setup .*--(route|remove-route)\b'
   # --unserve has no place in either of these scenarios: nothing is served
@@ -80,7 +91,6 @@ reject:
   # Every machine-output mode the interactive connection refuses.
   - 'auth agent connect.*(--json|--agent|--quiet|--ids-only|--count|--jq|-j\b|-q\b)'
   - 'connect setup .*--operator[ =]'
-  - 'connect setup .*--serve[ =]''?333\b'
   - 'connect setup .*--(trust[ =]''?(allowlist|project)|allow[ =])'
   - '--expect-identity'
   - 'connect (run|start|service)'
