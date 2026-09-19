@@ -348,6 +348,34 @@ func connectServiceEnv() ([]string, error) {
 	return env, nil
 }
 
+// connectServiceExecutable is the path the unit should run, which is the
+// stable one rather than the resolved one.
+//
+// os.Executable reads /proc/self/exe, which the kernel has already followed
+// to the real file. On a mise or Nix installation that is a versioned store
+// path behind a shim: baking it into a unit means the service keeps running
+// the version installed today after an upgrade, and fails to start at all
+// once that version is collected. So the name the caller was invoked by is
+// resolved through PATH and made absolute, without following the last
+// symlink — the shim is the point.
+//
+// The resolved path is the fallback, for a binary invoked by a name that no
+// longer finds it.
+func connectServiceExecutable() (string, error) {
+	if len(os.Args) > 0 && os.Args[0] != "" {
+		if found, err := exec.LookPath(os.Args[0]); err == nil {
+			if abs, err := filepath.Abs(found); err == nil {
+				return abs, nil
+			}
+		}
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("cannot find this program's own path, which the unit has to name: %w", err)
+	}
+	return exe, nil
+}
+
 func runConnectServiceInstall(cmd *cobra.Command, f *connectServiceFlags) error {
 	app := appctx.FromContext(cmd.Context())
 	profile, err := connectServiceProfile(app)
@@ -367,12 +395,9 @@ func runConnectServiceInstall(cmd *cobra.Command, f *connectServiceFlags) error 
 		return err
 	}
 
-	exe, err := os.Executable()
+	exe, err := connectServiceExecutable()
 	if err != nil {
-		return fmt.Errorf("cannot find this program's own path, which the unit has to name: %w", err)
-	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
+		return err
 	}
 
 	path, err := connectServiceUnitPath(profile)
@@ -387,7 +412,12 @@ func runConnectServiceInstall(cmd *cobra.Command, f *connectServiceFlags) error 
 		return err
 	}
 	unit := connectServiceUnit(exe, profile, projects, f.shadow, f.hold, env)
-	if err := os.WriteFile(path, []byte(unit), 0o600); err != nil {
+	// Written whole or not at all. A direct write truncates the unit that is
+	// enabled and running now, so an install that ran out of disk would
+	// leave a half a unit: systemd keeps running from what it already loaded
+	// and then refuses to load it at the next boot, which is a failure a
+	// reboot away from whoever caused it.
+	if err := writeFileAtomic(path, []byte(unit), 0o600); err != nil {
 		return fmt.Errorf("cannot write %s: %w", richtext.SanitizeSingleLine(path), err)
 	}
 
@@ -534,10 +564,13 @@ func runConnectServiceUninstall(cmd *cobra.Command) error {
 	}
 	name := connectServiceUnitName(profile)
 
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return app.OK(map[string]any{"unit": name, "path": path, "removed": false},
-			output.WithSummary(fmt.Sprintf("No unit at %s; nothing to remove", path)))
-	}
+	// A missing file does not mean a stopped connector: systemd goes on
+	// running a unit it has already loaded after its file is removed by
+	// hand. Returning "nothing to remove" here would report the opposite of
+	// what uninstall promises, so the stop is attempted either way and only
+	// the wording changes.
+	_, statErr := os.Stat(path)
+	hadFile := statErr == nil
 
 	// Stopping is best effort: the unit file must go even when there is no
 	// session bus to talk to, or an uninstall on a machine without a user
@@ -552,8 +585,13 @@ func runConnectServiceUninstall(cmd *cobra.Command) error {
 	_, _ = runSystemctl("daemon-reload")
 
 	summary := fmt.Sprintf("Stopped %s and removed %s", name, path)
+	if !hadFile {
+		summary = fmt.Sprintf("No unit file at %s; stopped %s in case it was still loaded", path, name)
+	}
 	stopped := true
-	if stopErr != nil {
+	// A unit systemd has never heard of is the idempotent case, not a
+	// failure: uninstalling twice must succeed.
+	if stopErr != nil && !connectServiceUnknownUnit(stopOut) {
 		stopped = false
 		why := strings.TrimSpace(string(stopOut))
 		if why == "" {
@@ -562,6 +600,46 @@ func runConnectServiceUninstall(cmd *cobra.Command) error {
 		summary = fmt.Sprintf("Removed %s, but could not stop %s, which may still be running: %s",
 			path, name, richtext.SanitizeSingleLine(why))
 	}
-	return app.OK(map[string]any{"unit": name, "path": path, "removed": true, "stopped": stopped},
+	return app.OK(map[string]any{"unit": name, "path": path, "removed": hadFile, "stopped": stopped},
 		output.WithSummary(summary))
+}
+
+// connectServiceUnknownUnit reports whether systemctl refused because it has
+// never heard of the unit, which is what uninstalling an uninstalled service
+// looks like.
+func connectServiceUnknownUnit(out []byte) bool {
+	text := strings.ToLower(string(out))
+	return strings.Contains(text, "not loaded") ||
+		strings.Contains(text, "does not exist") ||
+		strings.Contains(text, "no such file or directory")
+}
+
+// writeFileAtomic writes data to path through a temporary file in the same
+// directory, so a reader never sees a partial file and a failed write leaves
+// whatever was there before.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
