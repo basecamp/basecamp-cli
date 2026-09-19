@@ -163,7 +163,7 @@ started.
 | `trust.mode` | Who may drive the agent: `operator`, `allowlist` or `project` | `--trust` |
 | `trust.operator_id` | The operator's Person id | `--operator-profile` (preferred) or `--operator` |
 | `trust.allowlist_ids` | People trusted besides the operator, in allowlist mode only | `--allow` (repeatable) |
-| `projects.<id>` | A Basecamp project this agent serves; a project it does not serve gets a holding reply and no work | `--serve <id>`, `--unserve <id>` |
+| `projects.<id>` | A Basecamp project this agent serves. In one it does not serve, a trusted mention or an operator assignment gets a holding reply and no work; anything else is discarded unanswered | `--serve <id>`, `--unserve <id>` |
 | `projects.<id>.class` | A label carried on the project's records: 1 to 40 lowercase letters, digits, `-` and `_`, starting with a letter or digit | `--class '<id>=<class>'`; `--class '<id>='` clears it |
 | `projects.<id>.watch_completions` | Every trusted completion in the project reaches the agent, without assigning it | `--watch-completions <id>`, `--no-watch-completions <id>` |
 | `driver` | How workers are run: `spawn` (default) or `acp` | `--driver` |
@@ -335,8 +335,10 @@ earlier one. A project cannot be served and removed in one run.
 **Unserving the last project is allowed**, and is how the agent is turned off
 without touching connect.json by hand: `--unserve <id>` on the only served
 project writes an empty list, and setup reports a warning rather than an
-error — the connector will start and do nothing, and every mention gets a
-holding reply. Say that back to the person before running it, and say it
+error — the connector will start and do nothing. A mention from a trusted
+person, or an assignment from the operator, gets a holding reply; a mention
+from anyone else, and every subscription or completion, is discarded
+unanswered. Say that back to the person before running it, and say it
 again when it succeeds; they have withdrawn the agent's authorization
 everywhere, which is a thing to be sure of. Serving one again is
 `--serve <id>`. A *first* setup still has to serve at least one project:

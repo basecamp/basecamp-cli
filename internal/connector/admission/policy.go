@@ -175,7 +175,7 @@ func checkLegacyPathValue(raw json.RawMessage) error {
 		// and those are bytes a connector really could have written —
 		// refusing them would be new strictness rather than a restored
 		// check, which is a mistake this branch has already been shown once.
-		return errors.New(`the "path" of a connector that routed projects contains a NUL, which no filesystem path can`)
+		return errors.New(`the "path" of a connector that routed projects contains a NUL, written \u0000 in JSON, which no filesystem path can hold`)
 	}
 	if legacy == "" || !path.IsAbs(legacy) || path.Clean(legacy) != legacy {
 		return fmt.Errorf(`the "path" of a connector that routed projects is %q, which is not the clean absolute POSIX path such a connector wrote`, legacy)

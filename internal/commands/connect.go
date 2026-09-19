@@ -301,8 +301,9 @@ member of the event's project. Assignments are the operator's alone in every
 mode.
 
 Projects. connect.json is the local list of Basecamp projects this agent
-serves: --serve <project-id>, --unserve <project-id>. A project it does not
-serve gets a holding reply and no work. --watch-completions <project-id>
+serves: --serve <project-id>, --unserve <project-id>. In a project it does
+not serve, a mention from a trusted person or an assignment from the operator
+gets a holding reply and no work; anything else is discarded unanswered. --watch-completions <project-id>
 makes the agent hear every trusted completion in that project without being
 assigned.
 

@@ -1133,7 +1133,8 @@ func TestTheGateReadsTheLiveServedSetToo(t *testing.T) {
 // projects", and must not be answered as if it were.
 //
 // The served set feeds admission now, so a parse, permission or read failure
-// that came back as an empty map would make every mention blocked(no_route)
+// that came back as an empty map would make every trusted mention
+// blocked(no_route)
 // and post the public holding reply — telling the person on the card that
 // their project is not served, when the project is there and the file is
 // what is broken. no_route also has no timed retry, so repairing the file
