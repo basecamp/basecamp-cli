@@ -42,12 +42,24 @@ var undecided = []RecordState{StateSeen, StateBlocked}
 // LoadUndecided loads a seen or blocked record as the event admission decides,
 // with the revision it was loaded at. An unknown id, or a record past
 // deciding, is not ok and is skipped.
+//
+// A blocked record is skipped until its own schedule says so, whoever handed
+// the id over. The queue carries an id and not the revision it was claimed
+// at, and `basecamp connect redispatch` runs beside a live connector, so a
+// person can re-decide a record between the sweep's offer and admission
+// taking it; without this, admission would load the newer revision and decide
+// it at once, inside the interval that re-decision had just written (Copilot
+// on #770). A redispatch does not wait on the timer: it marks the record due
+// as it authorizes it (authorizeBlocked).
 func (a Admission) LoadUndecided(ctx context.Context, id int64) (admission.Event, bool, error) {
 	record, ok, err := a.ledger.Get(ctx, id)
 	if err != nil || !ok {
 		return admission.Event{}, false, err
 	}
 	if record.State != StateSeen && record.State != StateBlocked {
+		return admission.Event{}, false, nil
+	}
+	if next := record.Decision.NextRetryAt; record.State == StateBlocked && next != nil && next.After(a.ledger.now()) {
 		return admission.Event{}, false, nil
 	}
 	return admission.Event{

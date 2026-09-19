@@ -426,3 +426,105 @@ VALUES (?, 'blocked', ?, 'poll', 'comment.created', 'comment_created', 'created'
 	}), "read_failed is owed the attempt nothing ever ran; no_route still waits for the operator")
 	assert.Nil(t, getRecord(t, ledger, 2).Decision.NextRetryAt)
 }
+
+// Copilot on #770: a backfill runs once against a real ledger and leaves
+// state behind, so a throttle it ignores is wrong from then on and no later
+// fix reaches those rows. throttled means a server told us to wait; retrying
+// into an active throttle is how a rate limit becomes a harder one.
+func TestTheUpgradeNeverSchedulesAThrottledRowBeforeItsDeadline(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "state", "connector.db")
+	old := applyMigrationsThrough(t, path, migrationsBeforeBlockedRetrySchedule)
+	blockedAt := "2026-09-18T12:00:00.000000000Z"
+	deadline := "2026-09-18T12:45:00.000000000Z"
+	for _, row := range []struct {
+		id      int64
+		reason  string
+		retryAt any
+	}{{1, string(admission.ReasonThrottled), deadline}, {2, string(admission.ReasonReadFailed), nil}} {
+		_, err := old.ExecContext(ctx, `
+INSERT INTO events (id, state, reason, lane, event_type, kind, action, bucket_id, creator_id,
+                    recording_id, created_at, seen_at, updated_at, decided_at, blocked_at, retry_at)
+VALUES (?, 'blocked', ?, 'poll', 'comment.created', 'comment_created', 'created', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			row.id, row.reason, adapterBucketID, adapterOperatorID, 10304028972,
+			blockedAt, blockedAt, blockedAt, blockedAt, blockedAt, row.retryAt)
+		require.NoError(t, err)
+	}
+	require.NoError(t, old.Close())
+
+	ledger := openUpgraded(t, path)
+	throttled := getRecord(t, ledger, 1)
+	require.NotNil(t, throttled.Decision.NextRetryAt)
+	assert.Equal(t, mustStamp(t, deadline), throttled.Decision.NextRetryAt.UTC(),
+		"the server named the moment; the upgrade does not ask sooner")
+
+	// At the deadline it is due, and not one tick before it.
+	justBefore := BlockedRetryScope{Now: mustStamp(t, deadline).Add(-time.Second), Limit: 10}
+	assert.Equal(t, []int64{2}, dueIDs(t, ledger, justBefore), "only the row with no deadline to respect")
+	assert.Equal(t, []int64{1, 2}, dueIDs(t, ledger, BlockedRetryScope{Now: mustStamp(t, deadline), Limit: 10}))
+}
+
+func mustStamp(t *testing.T, s string) time.Time {
+	t.Helper()
+	at, err := parseStamp(s)
+	require.NoError(t, err)
+	return at.UTC()
+}
+
+// Copilot on #770, in code the first round did not change: the queue carries
+// an id, not the revision it was claimed at. `basecamp connect redispatch`
+// runs beside a live connector (openConnectLedger takes the instance lock
+// only for an import), so a person can re-decide the record after the sweep
+// offered it and before admission took it. Admission would then load the
+// newer revision and decide it at once, inside the interval the re-decision
+// just wrote.
+//
+// Nothing decides a blocked record before its own schedule says so, whoever
+// offered it — so the stale hand-off is dropped where it is loaded.
+func TestAStaleRetryHandoffIsNotDecidedInsideTheInterval(t *testing.T) {
+	ledger, clock := retryLedger(t)
+	ctx := context.Background()
+	blockRecord(t, ledger, 1, adapterBucketID, admission.ReasonReadFailed)
+	clock.Advance(admission.BlockedRetryInterval)
+
+	// The sweep reads it as due and offers the id.
+	require.Equal(t, []int64{1}, dueIDs(t, ledger, BlockedRetryScope{Now: clock.Now(), Limit: 10}))
+
+	// Before admission takes it, something else decides the record and it
+	// blocks again: a fresh interval starts now.
+	reblock(t, ledger, 1, admission.ReasonReadFailed)
+
+	_, ok, err := ledger.Admission().LoadUndecided(ctx, 1)
+	require.NoError(t, err)
+	assert.False(t, ok, "its next attempt is ten minutes away; this hand-off is stale")
+
+	clock.Advance(admission.BlockedRetryInterval)
+	_, ok, err = ledger.Admission().LoadUndecided(ctx, 1)
+	require.NoError(t, err)
+	assert.True(t, ok, "and at the moment the schedule names, it loads")
+}
+
+// A person's redispatch is not a timer, and does not wait for one. It marks
+// the record due, so the rerun it asks for runs at once — and so a rerun that
+// never happened (the command died between the authorization and the
+// admission run) is picked up by the next sweep rather than stranded.
+func TestARedispatchMakesABlockedRecordDueAtOnce(t *testing.T) {
+	ledger, clock := retryLedger(t)
+	ctx := context.Background()
+	ledger.SetHooks(LifecycleHooks(ledger, LifecycleOptions{}))
+	blockRecord(t, ledger, 1, adapterBucketID, admission.ReasonReadFailed)
+
+	_, ok, err := ledger.Admission().LoadUndecided(ctx, 1)
+	require.NoError(t, err)
+	require.False(t, ok, "nine minutes early, on the timer's account")
+
+	out, err := ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
+	require.NoError(t, err)
+	require.True(t, out.Rerun)
+
+	_, ok, err = ledger.Admission().LoadUndecided(ctx, 1)
+	require.NoError(t, err)
+	assert.True(t, ok, "a person asked for it now")
+	assert.Equal(t, []int64{1}, dueIDs(t, ledger, BlockedRetryScope{Now: clock.Now(), Limit: 10}),
+		"and if the rerun never happens, the sweep picks it up")
+}

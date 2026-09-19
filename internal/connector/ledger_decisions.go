@@ -510,10 +510,17 @@ func pendingNote(task eventTask) string {
 // authorization counts for that block only when it is not older than it
 // (AuthorizedBlocked), and neither a move's own later stamp nor a clock that
 // stepped back may make a fresh one look stale.
+// It also makes the record due now. A person asking for a rerun is not a
+// timer and does not wait for one: the redispatch command runs admission
+// itself straight after this, which the blocked schedule would otherwise
+// refuse as early (LoadUndecided). Writing "due now" rather than clearing the
+// schedule is what keeps a rerun that never happened — the command died
+// between the two — on the sweep's list instead of stranding it.
 func authorizeBlocked(ctx context.Context, tx *sql.Tx, eventID int64, now, by string) error {
 	if _, err := tx.ExecContext(ctx, `
-UPDATE events SET authorized_at = MAX(?, COALESCE(blocked_at, '')), authorized_by = ?
-WHERE id = ? AND state = 'blocked'`, now, by, eventID); err != nil {
+UPDATE events SET authorized_at = MAX(?, COALESCE(blocked_at, '')), authorized_by = ?,
+                  next_retry_at = CASE WHEN next_retry_at IS NULL THEN NULL ELSE ? END
+WHERE id = ? AND state = 'blocked'`, now, by, now, eventID); err != nil {
 		return fmt.Errorf("connector: authorize event %d: %w", eventID, err)
 	}
 	return nil

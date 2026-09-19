@@ -917,10 +917,29 @@ END;
 	// blocked row in the ledger from the beginning of its history.
 	//
 	// The backfill gives every blocked record on a timed reason one attempt
-	// now, and the ordinary schedule takes over from its verdict. The reason
-	// list is written out here rather than shared with the Go one: a
-	// migration says what was true at its own version, and it must keep
-	// saying that after the code moves on.
+	// now, and the ordinary schedule takes over from its verdict — except
+	// that it never asks before a deadline a server already named.
+	// MAX(decided_at, retry_at) is what "one attempt now, and not before the
+	// throttle is over" means as one expression; a throttled row whose
+	// retry_at has passed is due like any other, and a row with no retry_at
+	// at all — every reason but throttled, and any throttled row written
+	// before the column existed — is due at the next sweep, which is the
+	// attempt nothing had computed for it. Copying decided_at alone would
+	// have retried into an active throttle, which is how a rate limit
+	// becomes a harder one (Copilot on #770).
+	//
+	// The reason list is written out here rather than shared with the Go
+	// one: a migration says what was true at its own version, and it must
+	// keep saying that after the code moves on.
+	//
+	// It is not reversible and does not try to be. A ledger newer than the
+	// running build is refused at open (ErrLedgerSchema), so a downgrade
+	// never reads these rows rather than reading them wrongly; the columns
+	// are additive, so an older build that did open it would ignore them.
+	// It is run-once rather than idempotent: the migration runner applies it
+	// inside a transaction only when schema_migrations is short of 14, and
+	// its ALTER TABLE would refuse a second run outright rather than
+	// backfill twice.
 	migrationBlockedRetrySchedule,
 }
 
@@ -928,7 +947,8 @@ END;
 const migrationBlockedRetrySchedule = `
 ALTER TABLE events ADD COLUMN retry_since   TEXT;
 ALTER TABLE events ADD COLUMN next_retry_at TEXT;
-UPDATE events SET retry_since = blocked_at, next_retry_at = decided_at
+UPDATE events SET retry_since = blocked_at,
+                 next_retry_at = MAX(decided_at, COALESCE(retry_at, decided_at))
 WHERE state = 'blocked' AND decided_at IS NOT NULL AND reason IN (
   'read_failed', 'read_unresolved', 'delta_unverified',
   'trust_unverified', 'throttled', 'config_unreadable'
