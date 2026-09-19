@@ -136,6 +136,20 @@ var serveValues = []struct {
 	{arg: "2223", value: "2223", traceOK: true},
 	{arg: `"2223"`, value: "2223", traceOK: true},
 
+	// The right project, spelled with a leading zero. The CLI reads 222 and
+	// the identity rule refuses it, through the same {4,} branch that
+	// catches 2223 — so it is a narrowing, and one the identity rule
+	// created the moment it existed. The guard found it the way it found
+	// +222 and MaxInt64: by being asked (Copilot on #765).
+	//
+	// Declared rather than allowed. Letting 0*222 through means the rule
+	// has to say "222 with any number of leading zeros" in every case file,
+	// which is more pattern for a spelling nobody writes — and this branch
+	// already refuses a leading-zero project id in connect.json itself, in
+	// admission.canonicalKey, for the same reason.
+	{arg: "0222", value: "0222", why: "a leading zero is not how an id is written, and canonicalKey refuses the same spelling in connect.json"},
+	{arg: `"0222"`, value: "0222", why: "same, quoted"},
+
 	// The narrowings. The CLI takes all four; a trace may not.
 	{arg: "+222", value: "+222", why: "a leading plus is not how an id is written"},
 	{arg: "'22''2'", value: "222", why: "fragments the shell joins are not a spelling to teach"},

@@ -85,6 +85,23 @@ func (p *Project) UnmarshalJSON(data []byte) error {
 	if string(bytes.TrimSpace(data)) == "null" {
 		return errors.New("a served project's entry is null; an entry is an object, {} for one with no settings")
 	}
+	// The entry's own keys, before anything reads one. DisallowUnknownFields
+	// below refuses a name this type does not have; it does not refuse a
+	// name it does have spelled differently or given twice, because the
+	// decoder matches case-insensitively and takes the last of a repeated
+	// key. So {"WATCH_COMPLETIONS":true} sets WatchCompletions, and
+	// {"class":"a","CLASS":"b"} silently keeps "b" — an entry that does not
+	// say what it reads as (Copilot on #765).
+	//
+	// Here rather than only in the two readers because Project is exported:
+	// whoever decodes an entry gets this, including setup's own
+	// refuseMalformedProjects, which unmarshals a raw entry into this type
+	// precisely to name the project behind a refusal. A component that can
+	// only be trusted when its caller did something first is one a later
+	// edit breaks without touching it.
+	if err := CheckCanonicalKeys(data); err != nil {
+		return err
+	}
 	// A local type to shed this method, or decoding recurses.
 	type project Project
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -113,37 +130,28 @@ func (p *Project) UnmarshalJSON(data []byte) error {
 // A key that is absent is a file written since the paths went, and is left
 // alone.
 //
-// The key is found case-insensitively, the way encoding/json found it. An
-// exact lookup of "path" is not the same question as "did a value reach
-// LegacyPath": the decoder matches a struct tag without regard to case, so
-// {"Path": "../x"} fills the field while an exact lookup sees an absent key
-// and validates nothing (Copilot on #765). CheckCanonicalKeys refuses that
-// spelling for every document either reader parses, so this is the second
-// of two; it is here because Project is exported and its UnmarshalJSON has
-// to fail closed for whoever calls it, not only for callers that walked the
-// document first. A guarantee that depends on the order two functions run
-// in is one a later edit can take away without touching either.
+// The exact lookup is the complete one, and only because UnmarshalJSON walks
+// the entry's keys a few lines above this: encoding/json matches a struct tag
+// without regard to case, so {"Path": "../x"} fills LegacyPath while a lookup
+// of "path" sees an absent key and validates nothing (Copilot on #765). The
+// walk refuses every spelling but this one, so by here there is one.
+//
+// That precondition is established inside the same function that calls this,
+// not in another package's call order, and TestAProjectEntryFailsClosedOnItsOwn
+// decodes a bare {"Path":null} to hold it. Scanning case-insensitively here
+// as well was tried and taken back out: after the walk the branch cannot run,
+// and unreachable code with a comment claiming it is load-bearing is the
+// stale description this branch spent a third of its rounds deleting.
 func checkLegacyPath(data []byte) error {
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return err
 	}
-	keys := make([]string, 0, len(probe))
-	for key := range probe {
-		if strings.EqualFold(key, "path") {
-			keys = append(keys, key)
-		}
+	raw, ok := probe["path"]
+	if !ok {
+		return nil
 	}
-	// Sorted: a map ranges in a random order, and an error message that
-	// varies run to run is one a test cannot assert and a person cannot
-	// report. Only an unwalked document can hold two of these at once.
-	slices.Sort(keys)
-	for _, key := range keys {
-		if err := checkLegacyPathValue(probe[key]); err != nil {
-			return err
-		}
-	}
-	return nil
+	return checkLegacyPathValue(raw)
 }
 
 func checkLegacyPathValue(raw json.RawMessage) error {
@@ -236,6 +244,11 @@ type Policy struct {
 // tolerating a setting that is not ours and accepting an authorization we
 // cannot see. See CheckCanonicalKeys.
 func ParsePolicy(data []byte) (Policy, error) {
+	// Not made redundant by the one in Project.UnmarshalJSON, which sees a
+	// single entry. This walks the whole document, and everything that
+	// authorizes outside an entry is only here: "Trust" beside "trust",
+	// "Projects" beside "projects", a project id written "01", any of those
+	// keys given twice. An entry-level walk cannot see one of them.
 	if err := CheckCanonicalKeys(data); err != nil {
 		return Policy{}, fmt.Errorf("admission: parse connect.json: %w", err)
 	}

@@ -196,23 +196,39 @@ func TestParsePolicyRefusesKeysTheDecoderWouldMatchAnyway(t *testing.T) {
 	assert.Equal(t, TrustOperator, p.Trust.Mode)
 }
 
-// The second layer, and the one CheckCanonicalKeys does not stand in for.
 // Project is exported and its UnmarshalJSON runs wherever a caller decodes
 // an entry — setup's own refuseMalformedProjects does exactly that — so it
-// has to fail closed on a document nobody walked first. A guarantee that
-// holds only because two functions happen to run in one order is one a later
-// edit removes without touching either of them.
+// has to fail closed on an entry nobody walked first. A guarantee that holds
+// only because two functions happen to run in one order is one a later edit
+// removes without touching either of them, which is why the walk is inside
+// the component and this test decodes bare entries rather than documents.
+//
+// It covers the whole entry, not the legacy path alone. DisallowUnknownFields
+// refuses a name this type does not have and nothing else: a name it does
+// have, spelled in another case or given twice, decodes quietly and the last
+// one wins (Copilot on #765).
 func TestAProjectEntryFailsClosedOnItsOwn(t *testing.T) {
 	for name, entry := range map[string]string{
 		"a case variant of path":       `{"Path":null}`,
 		"an upper-case variant":        `{"PATH":"../elsewhere"}`,
 		"a mixed-case variant":         `{"pAtH":"work/app"}`,
 		"the canonical spelling still": `{"path":""}`,
+
+		// DisallowUnknownFields refuses a name this type does not have. It
+		// does not refuse a name it does have, spelled differently or given
+		// twice: the decoder matches case-insensitively and keeps the last
+		// of a repeated key, so each of these decoded cleanly and the entry
+		// did not say what it read as (Copilot on #765).
+		"a known field in another case":    `{"WATCH_COMPLETIONS":true}`,
+		"a known field capitalized":        `{"Class":"internal"}`,
+		"a field given twice":              `{"watch_completions":true,"watch_completions":false}`,
+		"a field given twice by case":      `{"class":"a","CLASS":"b"}`,
+		"a legacy path beside its variant": `{"path":"/work/app","Path":"/work/app"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			var p Project
 			assert.Error(t, json.Unmarshal([]byte(entry), &p),
-				"the decoder fills LegacyPath from this key, so the check has to find it there")
+				"the decoder reads this entry as settings a check never sees under that spelling, so the entry does not say what it reads as")
 		})
 	}
 
@@ -222,6 +238,14 @@ func TestAProjectEntryFailsClosedOnItsOwn(t *testing.T) {
 	var p Project
 	require.NoError(t, json.Unmarshal([]byte(`{"path":"/work/app","class":"internal"}`), &p))
 	assert.Equal(t, "internal", p.Class)
+
+	// And the settings an entry really carries still decode, each once, in
+	// their own spelling. This is the control: without it the table above
+	// would pass just as well against an UnmarshalJSON that refused every
+	// entry it was given.
+	var q Project
+	require.NoError(t, json.Unmarshal([]byte(`{"class":"internal","watch_completions":true}`), &q))
+	assert.Equal(t, Project{Class: "internal", WatchCompletions: true}, q)
 }
 
 // Copilot on #765, the fourth fail-open in this one shim: encoding/json
