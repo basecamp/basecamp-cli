@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -18,6 +19,146 @@ import (
 // pipeWaitDelay bounds how long a worker that has exited is waited on for
 // pipes a stray descendant still holds.
 const pipeWaitDelay = 2 * time.Second
+
+// drainWindow is how long a reader that has been asked to stop gives the
+// pipe to produce what is already on its way, idleWindow is how often a
+// reader with nothing looks up to see whether it has been asked, and
+// drainBudget is the longest it goes on reading after being asked. The
+// windows are opened by the reader for itself: a read that finds nothing in
+// one is a pipe with nothing in it.
+//
+// The two bound different things, and both are needed.
+//
+// drainWindow bounds WAITING: how long a reader sits with nothing arriving
+// before it calls the pipe empty. That is how a stop ordinarily ends, within
+// tens of milliseconds, and it needs no clock beyond itself.
+//
+// drainBudget bounds FOLLOWING: how long a reader goes on taking output that
+// keeps arriving. Only one thing produces that after a worker is dead — a
+// descendant outside its group writing without stop — and it is the one case
+// with no other ending, so a window that begins again after every read is no
+// bound at all: a descendant writing a byte before each one expires would
+// hold a session open for hours. This one is absolute from the asking.
+//
+// Absolute is only honest because a reader registered here does nothing slow
+// between reads, so the clock cannot run while the reader is working rather
+// than waiting. That is a promise, and it is the whole reason this package's
+// drivers write to the ledger on a goroutine of their own: a reader that
+// wrote to a database here would be inside a write when the clock ran out,
+// and would come back to find its own pipe closed with the worker's next
+// line still in it. See Worker.ReadingDone.
+//
+// A count of bytes cannot stand in for either. It is too permissive on time,
+// because a descendant can drip them out forever, and too strict on volume,
+// because a worker inherits the pipe descriptor and may enlarge it beyond
+// any size assumed here.
+const (
+	drainWindow = 50 * time.Millisecond
+	idleWindow  = 500 * time.Millisecond
+	drainBudget = 2 * time.Second
+)
+
+// output is the read end of a worker's pipe, and it belongs to whoever reads
+// it for as long as they are reading. Nothing closes it underneath them:
+// closing discards whatever the worker wrote that nobody has parsed yet, and
+// there is no size that could be assumed safe — a worker inherits the
+// descriptor and may enlarge the pipe itself, up to the host's
+// pipe-max-size.
+//
+// So a reader is asked to stop rather than cut off, and asking touches
+// nothing but a flag. The deadline on the pipe has one owner, the reader,
+// which is what makes a window mean what it says: nobody else can shorten
+// one, and there is no moment in which a deadline is in force whose reason
+// is not yet visible.
+//
+// A worker is ended before its reader is asked, so everything the worker
+// wrote is in the pipe by then. What is given up, past the budget, is only
+// what a descendant outside the worker's group goes on writing — which the
+// connector had already decided not to wait for, and which is the one case
+// that has no other ending.
+type output struct {
+	f *os.File
+	// stopped is whether the reader has been asked to stop. One field,
+	// written by one call, so there is no moment in which half the state is
+	// visible.
+	stopped atomic.Bool
+	// stopAt is when the stop was asked for, written by stop before the flag
+	// that publishes it. The reader takes it from here rather than from when
+	// it next looks, so the budget runs from the asking as it says it does —
+	// a reader inside an idle window when the asking comes would otherwise
+	// start the clock up to that window late.
+	//
+	// It is kept as a time.Time under a mutex rather than as nanoseconds in
+	// an atomic, because a time.Time carries a monotonic reading and a
+	// number does not. Rebuilt from nanoseconds, the wall clock decides the
+	// budget: a forward jump ends a drain early with the worker's output
+	// still buffered, and a backward one holds the session open past it.
+	stopMu sync.Mutex
+	stopAt time.Time
+}
+
+func (o *output) Read(p []byte) (int, error) {
+	for {
+		stopped := o.stopped.Load()
+		window := idleWindow
+		if stopped {
+			left := drainBudget - time.Since(o.askedAt())
+			if left <= 0 {
+				// Still arriving, and no longer waited for.
+				return 0, io.EOF
+			}
+			// Never past the budget: the last window is whatever is left of
+			// it, not a whole one begun at the end.
+			window = min(drainWindow, left)
+		}
+		if err := o.f.SetReadDeadline(time.Now().Add(window)); err != nil {
+			return 0, err
+		}
+		if !stopped && o.stopped.Load() {
+			// Asked between the sample and the deadline. The idle window
+			// just installed would hide that until it expired, and the
+			// budget would be most of the way gone by then, so the window
+			// is opened again as a drain's.
+			continue
+		}
+		n, err := o.f.Read(p)
+		switch {
+		case n > 0:
+			return n, nil
+		case !errors.Is(err, os.ErrDeadlineExceeded):
+			return n, err
+		case stopped:
+			// A window this read opened, and nothing came.
+			return 0, io.EOF
+		}
+		// Nothing yet, and nobody has asked. Look again.
+	}
+}
+
+// stop asks the reader to end once it has what is there, and no later than
+// the drain budget. It writes one field and nothing else — in particular it
+// does not reach for the deadline, so it cannot cut short a window a read
+// has opened — and it says the same thing however many times it is called.
+func (o *output) stop() {
+	// The time before the flag, so a reader that sees the flag always finds
+	// a time to measure from, and the budget runs from the asking. The first
+	// asking is the one that counts.
+	o.stopMu.Lock()
+	if o.stopAt.IsZero() {
+		o.stopAt = time.Now()
+	}
+	o.stopMu.Unlock()
+	o.stopped.Store(true)
+}
+
+// askedAt is when the stop was asked for, monotonic.
+func (o *output) askedAt() time.Time {
+	o.stopMu.Lock()
+	defer o.stopMu.Unlock()
+	return o.stopAt
+}
+
+func (o *output) close() { _ = o.f.Close() }
 
 // # One owner, one release point
 //
@@ -178,13 +319,16 @@ type Worker struct {
 	cmd     *exec.Cmd
 	process Process
 	stdin   io.WriteCloser
-	stdout  *os.File
+	stdout  *output
 	stderr  *tailBuffer
 
 	done        chan struct{}
 	exit        Exit
 	killOnce    sync.Once
 	releaseOnce sync.Once
+
+	readingMu sync.Mutex
+	reading   <-chan struct{}
 }
 
 // StartWorker launches cmd through cfg's launcher, in cfg's scope, as a new
@@ -244,7 +388,7 @@ func StartWorker(ctx context.Context, cfg SessionConfig, cmd Command) (*Worker, 
 		return nil, fmt.Errorf("%w: %w", ErrNotStarted, err)
 	}
 	ec.Stdout = writeEnd
-	w.stdout = readEnd
+	w.stdout = &output{f: readEnd}
 	if err := ec.Start(); err != nil {
 		// exec.Cmd.Start returns an error only when no process was created:
 		// a missing binary, a bad directory, a failed fork.
@@ -308,11 +452,46 @@ func (w *Worker) Stdin() io.WriteCloser { return w.stdin }
 // Stdout is the worker's standard output. Read it to end of file.
 func (w *Worker) Stdout() io.Reader { return w.stdout }
 
-// CloseStdout closes the worker's output: a reader blocked on it returns, and
-// the descriptor is released.
-// For a worker that is gone while a descendant that left its group still
-// holds the pipe.
-func (w *Worker) CloseStdout() { _ = w.stdout.Close() }
+// ReadingDone hands the Worker the signal that its output has been read to
+// the end, so the read end of the pipe is released with the reading rather
+// than on a clock.
+//
+// The descriptor is the Worker's to release; whether the reading is over is
+// the reader's to say. Without this the Worker has to guess, and a guess is
+// destructive: closing the read end discards whatever the worker wrote that
+// nobody has parsed yet.
+//
+// A Worker with no reader registered keeps the clock, because nothing else
+// would release it.
+//
+// Registering is two promises about the goroutine that reads: that it closes
+// the channel, and that it does nothing slow between reads. The second is
+// what lets the drain budget be a clock — see drainBudget — and it is why a
+// driver's ledger writes belong on a goroutine of their own.
+func (w *Worker) ReadingDone(done <-chan struct{}) {
+	w.readingMu.Lock()
+	defer w.readingMu.Unlock()
+	w.reading = done
+}
+
+func (w *Worker) readingSignal() <-chan struct{} {
+	w.readingMu.Lock()
+	defer w.readingMu.Unlock()
+	return w.reading
+}
+
+// StopReading asks the worker's reader to end once it has read what is in
+// the pipe, and no later than the drain budget. For a worker that is gone
+// while a descendant that left its group still holds the output open, so the
+// end of file never comes: the reader is asked rather than having the pipe
+// taken from under it, which would discard what the worker wrote and nobody
+// has parsed. It says the same thing however many times it is called.
+func (w *Worker) StopReading() { w.stdout.stop() }
+
+// CloseStdout closes the worker's output at once, discarding whatever is in
+// the pipe: for releasing the descriptor once nobody is reading it. A reader
+// that is still reading is asked to stop instead.
+func (w *Worker) CloseStdout() { w.stdout.close() }
 
 // Done is closed once the process has exited and been reaped.
 func (w *Worker) Done() <-chan struct{} { return w.done }
@@ -360,12 +539,28 @@ func (w *Worker) Terminate(grace time.Duration) {
 		_ = w.cmd.Process.Kill()
 	})
 	<-w.done
-	// The output pipe is the Worker's to release as well. Its reader gets the
-	// same bound Wait gives a stray descendant to finish draining what the
-	// worker wrote before it went, and then the descriptor is closed whether
-	// or not the reader closed it.
+	// The output pipe is the Worker's to release as well, once its reader is
+	// through it: a reader that says when it is done is waited for, because
+	// closing the descriptor under it would discard what the worker wrote
+	// and nobody has parsed. A worker nobody reads this way gets the same
+	// bound Wait gives a stray descendant, and then the descriptor is closed
+	// regardless — nothing else would release it.
 	w.releaseOnce.Do(func() {
-		time.AfterFunc(pipeWaitDelay, w.CloseStdout)
+		reading := w.readingSignal()
+		if reading == nil {
+			time.AfterFunc(pipeWaitDelay, w.CloseStdout)
+			return
+		}
+		// Asked before it is waited for: a descendant outside the group can
+		// hold the write end open, so the end of file never comes and a
+		// reader left to itself never ends — which would hold this
+		// worker's descriptor, and everything waiting on the reading, for
+		// as long as that descendant lived.
+		w.stdout.stop()
+		go func() {
+			<-reading
+			w.CloseStdout()
+		}()
 	})
 }
 
