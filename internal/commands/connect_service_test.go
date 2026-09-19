@@ -234,19 +234,6 @@ func TestConnectServiceUninstallStopsAndRemoves(t *testing.T) {
 	}, *calls)
 }
 
-// Removing what is not there is not an error: an uninstall that failed
-// because it had already run would be repeated by hand until someone
-// checked why.
-func TestConnectServiceUninstallOfNothingSucceeds(t *testing.T) {
-	calls := connectServiceHome(t)
-	app, said := connectServiceApp(t, "agent")
-
-	_, err := runConnectServiceCmd(t, app, "uninstall")
-	require.NoError(t, err)
-	assert.Contains(t, said.String(), "nothing to remove")
-	assert.Empty(t, *calls)
-}
-
 // One unit per profile, so a machine can supervise several agents without
 // one install standing on another's.
 func TestConnectServiceUnitIsNamedPerProfile(t *testing.T) {
@@ -469,6 +456,102 @@ func indexOfCall(order []string, want string) int {
 		}
 	}
 	return -1
+}
+
+// os.Executable reads /proc/self/exe, which the kernel has already followed
+// to the real file — on a mise or Nix install, a versioned store path behind
+// a shim. Baking that into a unit means the service keeps running today's
+// version after an upgrade, and stops starting at all once it is collected.
+func TestConnectServiceInstallNamesTheStablePathNotTheResolvedOne(t *testing.T) {
+	connectServiceHome(t)
+	writeConnectSetup(t, "agent")
+
+	// A shim on PATH pointing at a versioned target, as mise lays it out.
+	bin := t.TempDir()
+	store := filepath.Join(bin, "basecamp-1.2.3")
+	require.NoError(t, os.WriteFile(store, []byte("#!/bin/sh\n"), 0o700))
+	shim := filepath.Join(bin, "basecamp-shim")
+	require.NoError(t, os.Symlink(store, shim))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	prev := os.Args
+	os.Args = []string{"basecamp-shim"}
+	t.Cleanup(func() { os.Args = prev })
+
+	app, _ := connectServiceApp(t, "agent")
+	_, err := runConnectServiceCmd(t, app, "install", "--no-enable")
+	require.NoError(t, err)
+
+	path, err := connectServiceUnitPath("agent")
+	require.NoError(t, err)
+	b, err := os.ReadFile(path) //nolint:gosec // path built from a temp home
+	require.NoError(t, err)
+	assert.Contains(t, string(b), shim, "the unit runs the stable name")
+	assert.NotContains(t, string(b), store, "not the version behind it, which an upgrade replaces")
+}
+
+// A direct write truncates the unit that is enabled and running now, so an
+// install that ran out of disk would leave half a unit: systemd keeps going
+// from what it loaded, then refuses to load it at the next boot.
+func TestConnectServiceInstallLeavesTheOldUnitWhenItCannotWriteTheNew(t *testing.T) {
+	connectServiceHome(t)
+	writeConnectSetup(t, "agent")
+	app, _ := connectServiceApp(t, "agent")
+	_, err := runConnectServiceCmd(t, app, "install", "--no-enable")
+	require.NoError(t, err)
+
+	path, err := connectServiceUnitPath("agent")
+	require.NoError(t, err)
+	before, err := os.ReadFile(path) //nolint:gosec // path built from a temp home
+	require.NoError(t, err)
+
+	// No new file can be created in the directory, so the write fails.
+	require.NoError(t, os.Chmod(filepath.Dir(path), 0o500))
+	t.Cleanup(func() { _ = os.Chmod(filepath.Dir(path), 0o700) })
+
+	_, err = runConnectServiceCmd(t, app, "install", "--no-enable", "--project", "999")
+	require.Error(t, err)
+
+	after, err := os.ReadFile(path) //nolint:gosec // path built from a temp home
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "the unit that was there is still whole")
+}
+
+// systemd keeps running a unit it has already loaded after the file is
+// removed by hand, so "no file" is not "not running". Saying nothing to
+// remove there would report the opposite of what uninstall promises.
+func TestConnectServiceUninstallStopsALoadedUnitWithNoFile(t *testing.T) {
+	calls := connectServiceHome(t)
+	app, said := connectServiceApp(t, "agent")
+
+	_, err := runConnectServiceCmd(t, app, "uninstall")
+	require.NoError(t, err)
+
+	asked := make([]string, 0, len(*calls))
+	for _, c := range *calls {
+		asked = append(asked, c[0])
+	}
+	assert.Contains(t, asked, "disable", "the connector may still be loaded and running")
+	assert.Contains(t, said.String(), "in case it was still loaded")
+}
+
+// Uninstalling twice succeeds: a unit systemd has never heard of is the
+// idempotent case, not a failure.
+func TestConnectServiceUninstallOfAnUnknownUnitSucceeds(t *testing.T) {
+	connectServiceHome(t)
+	prev := runSystemctl
+	runSystemctl = func(args ...string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "disable" {
+			return []byte("Failed to disable unit: Unit file basecamp-connect-agent.service does not exist."), errors.New("exit status 1")
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { runSystemctl = prev })
+	app, said := connectServiceApp(t, "agent")
+
+	_, err := runConnectServiceCmd(t, app, "uninstall")
+	require.NoError(t, err)
+	assert.NotContains(t, said.String(), "may still be running")
 }
 
 // unitDirective returns the value of a unit file's directive.
