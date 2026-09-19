@@ -14,18 +14,26 @@ import (
 )
 
 // The connector's skill evals are checked here, against this package's own
-// parser, because nothing else checks them at all: CI's Skill Evals job exits
-// 0 without running a case when ANTHROPIC_API_KEY is unset, which it is on
-// this repository.
+// parser, because CI does not run a case: the Skill Evals job needs
+// ANTHROPIC_API_KEY, which this repository does not have, and the job now
+// reports Skipped rather than success so nobody reads a green tick as an eval
+// that ran.
 //
 // # What this holds, and what it does not
 //
 // The accept and reject patterns, and only for the shape of a --serve value
-// and the removed --route flags. The mock, expect_sequence and
-// accept_response patterns are read by the Ruby runner under its own regex
-// semantics and are not modeled here, so a malformed one of those can still
-// land without CI noticing (Copilot on #765). This is a guard on one
-// invariant, not on the eval files.
+// and the removed --route flags. This is a guard on one invariant, not on the
+// eval files.
+//
+// The mock, expect_sequence and accept_response patterns are read by the Ruby
+// runner under its own regex semantics, and this test models none of them —
+// it compiles patterns with Go's regexp, which is RE2 and not Onigmo, so it
+// cannot speak for them even where it reads them. That gap used to be the end
+// of the sentence (Copilot on #765). It is now covered from the other side:
+// scripts/check-eval-patterns.rb compiles every pattern in every case file
+// under Onigmo itself, and make check and the Integration Tests job run it.
+// A pattern that does not compile is caught there; what it means is still
+// only caught by running the evals.
 //
 // One of the patterns is a blunt instrument and says so: a value of all
 // digits can still be too large for an int64, and no shape can see a numeric

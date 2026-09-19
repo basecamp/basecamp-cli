@@ -41,6 +41,8 @@ The `go.work` file is gitignored - your local setup won't affect the repo.
 - [bats-core](https://github.com/bats-core/bats-core) for integration tests
 - [golangci-lint](https://golangci-lint.run/) for linting
 - [jq](https://jqlang.github.io/jq/) for CLI surface checks
+- Ruby 3.3 for the skill-eval pattern check, which compiles those patterns
+  under the same engine the eval runner uses
 
 ## Pull Request Process
 

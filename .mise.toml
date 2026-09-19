@@ -13,3 +13,8 @@ powershell = "7.6.5"
 # Keep in sync with the zizmor-action `version:` input in
 # .github/workflows/test.yml so local bin/ci runs the same release CI does.
 zizmor = "1.30.0"
+# Keep in sync with the ruby/setup-ruby `ruby-version:` inputs in
+# .github/workflows/test.yml. make check compiles the skill-eval patterns under
+# Ruby's own regex engine, so bin/ci needs the same Ruby CI uses — a different
+# engine would answer a different question.
+ruby = "3.3"
