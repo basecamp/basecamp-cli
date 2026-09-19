@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -173,19 +174,71 @@ func TestLoadFollowsAnOwnAncestorSymlinkAndChecksItsTarget(t *testing.T) {
 	assert.True(t, errors.Is(err, ErrNotPrivate), "the target's modes count: %v", err)
 }
 
+// shortLockWait keeps a test that means to see contention from sitting out
+// the whole of LockWait to see it.
+func shortLockWait(t *testing.T) {
+	t.Helper()
+	was := LockWait
+	LockWait = 20 * time.Millisecond
+	t.Cleanup(func() { LockWait = was })
+}
+
 func TestLockRefusesASecondSetup(t *testing.T) {
+	shortLockWait(t)
 	path, err := Path(configDir(t), "agent")
 	require.NoError(t, err)
 	unlock, err := Lock(path)
 	require.NoError(t, err)
 
 	_, err = Lock(path)
-	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrSetupRunning)
 
 	unlock()
 	unlockAgain, err := Lock(path)
 	require.NoError(t, err)
 	unlockAgain()
+}
+
+// The dispatcher's form: it never waits, so a pass that overlaps a setup
+// gives up its turn instead of parking on a file another process writes.
+func TestTryLockDoesNotWaitForAHolder(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+	unlock, err := TryLock(path)
+	require.NoError(t, err)
+
+	// LockWait is left long on purpose: if TryLock ever waited, this would
+	// take it rather than return inside the window asserted below.
+	start := time.Now()
+	_, err = TryLock(path)
+	assert.ErrorIs(t, err, ErrSetupRunning)
+	assert.Less(t, time.Since(start), LockWait/2, "TryLock returns rather than waits")
+
+	unlock()
+	again, err := TryLock(path)
+	require.NoError(t, err)
+	again()
+}
+
+// Lock waits for a holder that finishes inside LockWait, so a `connect
+// setup` does not fail because a dispatcher pass happened to overlap it.
+func TestLockWaitsForAHolderThatFinishes(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+	unlock, err := TryLock(path)
+	require.NoError(t, err)
+
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(5 * lockPoll)
+		unlock()
+		close(released)
+	}()
+
+	got, err := Lock(path)
+	require.NoError(t, err, "the wait outlasts a holder that lets go")
+	<-released
+	got()
 }
 
 func TestCheckPrivateFileCreatesNothingAndHoldsTheRules(t *testing.T) {

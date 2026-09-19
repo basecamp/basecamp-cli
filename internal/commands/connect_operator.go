@@ -35,14 +35,12 @@ import (
 type connectProfile struct {
 	app  *appctx.App
 	name string
+	path string
 	file setup.File
 }
 
 // servedBucketsOf is the projects a connect.json serves, as the ledger's
-// decisions want them, from the file this command loaded when it started.
-// That is a reading and not a lock: nothing stops `connect setup --unserve`
-// completing between it and the write below, and holding the setup lock
-// across both is carded rather than done here.
+// decisions want them.
 func servedBucketsOf(file setup.File) []int64 {
 	served := make([]int64, 0, len(file.Projects))
 	for bucket := range file.Projects {
@@ -50,6 +48,42 @@ func servedBucketsOf(file setup.File) []int64 {
 	}
 	slices.Sort(served)
 	return served
+}
+
+// servedBucketsUnderLock is the served projects read under connect.json's own
+// lock, with the release to hold until the decision that reading authorizes
+// has been written. The file this command loaded when it started is not that
+// reading: a `connect setup --unserve` can complete between start-up and the
+// write, and the point here is that it cannot complete between this read and
+// the release.
+//
+// It waits for a holder rather than refusing on sight (setup.Lock, not
+// TryLock): this is an operator's command, a connector's own hold is
+// measured in milliseconds, and a person who typed a redispatch would rather
+// wait out a `connect setup` than be told to run it again. A holder that
+// outlasts the wait is reported as busy and retryable, and nothing is
+// written.
+//
+// The lock is taken before the ledger is written and released after, never
+// the other way about, so the two locks are always taken in one order.
+func servedBucketsUnderLock(p connectProfile) ([]int64, func(), error) {
+	unlock, err := setup.Lock(p.path)
+	if err != nil {
+		return nil, nil, classifyLockError(p.name, err)
+	}
+	file, err := setup.Load(p.path)
+	if err != nil {
+		unlock()
+		return nil, nil, output.ErrUsage("connect.json cannot be used: " + setup.ErrorText(err))
+	}
+	// The same refusal the connector's own reader makes: a file that now
+	// names another agent or account is not this profile's policy, and a
+	// decision taken against it would be taken for somebody else.
+	if file.Agent != p.file.Agent || file.AccountID != p.file.AccountID {
+		unlock()
+		return nil, nil, output.ErrUsage("connect.json now names another agent or account, so nothing was decided")
+	}
+	return servedBucketsOf(file), unlock, nil
 }
 
 func loadConnectProfile(cmd *cobra.Command) (connectProfile, error) {
@@ -75,7 +109,7 @@ func loadConnectProfile(cmd *cobra.Command) (connectProfile, error) {
 	case err != nil:
 		return connectProfile{}, output.ErrUsage("connect.json cannot be used: " + err.Error())
 	}
-	return connectProfile{app: app, name: name, file: file}, nil
+	return connectProfile{app: app, name: name, path: path, file: file}, nil
 }
 
 // operatorName is who a decision is recorded as: the local user who ran it.
@@ -446,12 +480,21 @@ func runConnectRedispatch(cmd *cobra.Command, raw string) error {
 	}
 	defer done()
 
-	// The served projects as this command read them, rather than the bit on
-	// the record: a record admitted while its project was served is not
-	// authorization to run it after the operator stopped serving it. Read at
-	// start-up and not re-read here, so an unserve landing in between is not
-	// caught — see servedBucketsOf.
-	res, err := ledger.Redispatch(ctx, id, operatorName(), servedBucketsOf(p.file))
+	// The served projects as connect.json has them now, rather than the bit
+	// on the record: a record admitted while its project was served is not
+	// authorization to run it after the operator stopped serving it. Read
+	// under the setup lock and the lock held until the ledger has written,
+	// so an unserve lands wholly before the reading or wholly after the
+	// decision — not between them.
+	served, release, err := servedBucketsUnderLock(p)
+	if err != nil {
+		return err
+	}
+	res, err := ledger.Redispatch(ctx, id, operatorName(), served)
+	// Let go before the prerequisite is re-run below: that talks to
+	// Basecamp, and nothing that waits on the network is held under a lock
+	// `connect setup` waits on.
+	release()
 	if err != nil {
 		return decisionError(err)
 	}

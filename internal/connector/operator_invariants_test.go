@@ -66,8 +66,9 @@ func unknownOutcome(t *testing.T, l *Ledger, id int64) Launch {
 
 // Copilot on #765: a redispatch is authorized by the served projects its
 // caller read from connect.json, not by the bit admission wrote when it
-// decided the record. A reading, not a lock — an unserve landing between
-// that read and this write is not caught, and is carded.
+// decided the record. The caller reads that set under connect.json's lock
+// and holds the lock until this write, so an unserve cannot land between
+// the two (TestRedispatchReadsTheServedSetUnderTheLock, in commands).
 //
 // Without this the command reported success and admitted the record, and the
 // dispatcher then refused to launch it — so the person was told their

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/gofrs/flock"
 )
@@ -50,24 +51,59 @@ func ensurePrivateDirs(path string) error {
 	return nil
 }
 
-// ErrSetupRunning reports another setup already running for this profile.
-var ErrSetupRunning = errors.New("another connect setup is running for this profile")
+// ErrSetupRunning reports the per-profile policy lock held by somebody else.
+// Two holders take it: `connect setup`, across its whole load-change-save,
+// and a running connector, for the moment it authorizes a launch or a
+// redispatch against the file.
+var ErrSetupRunning = errors.New("another command holds this profile's connector policy")
 
 // ErrLockUnavailable reports a host that cannot take the setup lock at all:
 // a filesystem without flock, a lock file this user does not own. Setup's
 // guarantee is the lock, so it refuses rather than run without one.
 var ErrLockUnavailable = errors.New("this host cannot lock the connector's policy")
 
-// Lock takes the per-profile setup lock beside connect.json, so two setups
-// cannot interleave a load, a change and a save. It refuses rather than
-// waits: a second setup on one profile is a mistake to report, not a queue.
+// LockWait bounds Lock's wait for a holder to finish. The connector takes
+// this lock too now, and what it does under it is one file read and one
+// SQLite transaction — bounded by the ledger's own five-second busy retry —
+// so a setup that refused the instant a dispatcher pass overlapped it would
+// fail for no reason a person could act on. Ten seconds is that worst case
+// with room, and a setup that waits it out reports a real holder.
+//
+// A variable so tests can shorten it.
+var LockWait = 10 * time.Second
+
+// lockPoll is how often a waiter re-tries. flock has no blocking-with-timeout
+// form through this library, so the wait is a poll — the same shape, and for
+// the same reason, as the credential lock's (internal/auth/lock.go).
+const lockPoll = 20 * time.Millisecond
+
+// Lock takes the per-profile setup lock beside connect.json, so a load, a
+// change and a save cannot interleave with another holder's. It waits up to
+// LockWait and then reports ErrSetupRunning: the wait is for the connector's
+// brief hold, not a queue of setups, and a second setup on one profile is
+// still a mistake to report rather than to serialize — it will not have
+// finished inside LockWait.
 func Lock(path string) (unlock func(), err error) {
+	return lock(path, LockWait)
+}
+
+// TryLock takes the lock if it is free and reports ErrSetupRunning if it is
+// not, without waiting. It is the dispatcher's form: a pass that cannot take
+// the lock authorizes nothing and tries again on its next tick, which costs
+// one tick of latency. Waiting instead would park the dispatcher behind a
+// `connect setup`'s network checks, and a dispatcher that blocks on a file
+// another process writes is its own hazard.
+func TryLock(path string) (unlock func(), err error) {
+	return lock(path, 0)
+}
+
+func lock(path string, wait time.Duration) (unlock func(), err error) {
 	if err := ensurePrivateDirs(path); err != nil {
 		return nil, err
 	}
 	lockPath := filepath.Join(filepath.Dir(path), ".connect.lock")
 	// The lock is only a lock if it is this user's own file: a symlink or a
-	// foreign file left in the directory could point two setups at
+	// foreign file left in the directory could point two holders at
 	// different inodes, and they would not exclude each other.
 	if err := checkPrivateLockFile(lockPath); err != nil {
 		if errors.Is(err, ErrNotPrivate) {
@@ -78,14 +114,20 @@ func Lock(path string) (unlock func(), err error) {
 		return nil, fmt.Errorf("%w: %s: %w", ErrLockUnavailable, lockPath, err)
 	}
 	lock := flock.New(lockPath, flock.SetPermissions(0o600))
-	held, err := lock.TryLock()
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %w", ErrLockUnavailable, lockPath, err)
+	deadline := time.Now().Add(wait)
+	for {
+		held, err := lock.TryLock()
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s: %w", ErrLockUnavailable, lockPath, err)
+		}
+		if held {
+			return func() { _ = lock.Unlock() }, nil
+		}
+		if !time.Now().Before(deadline) {
+			return nil, fmt.Errorf("%w: %s", ErrSetupRunning, filepath.Dir(path))
+		}
+		time.Sleep(lockPoll)
 	}
-	if !held {
-		return nil, fmt.Errorf("%w: %s", ErrSetupRunning, filepath.Dir(path))
-	}
-	return func() { _ = lock.Unlock() }, nil
 }
 
 // checkPrivateLockFile refuses a lock file this user does not solely own. A

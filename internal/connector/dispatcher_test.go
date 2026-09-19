@@ -167,7 +167,18 @@ type dispatchHarness struct {
 	served map[int64]admission.Project
 	// servedErr stands in for a connect.json that cannot be read.
 	servedErr error
-	mu        sync.Mutex
+	// authorized, when non-nil, is what Authorize answers instead of served:
+	// the launch's own reading of connect.json under its lock, which a test
+	// makes differ from the reading the pass chose with to stand for a
+	// `connect setup --unserve` landing between the two.
+	authorized map[int64]admission.Project
+	// authorizeErr stands in for a policy lock this process could not take —
+	// a `connect setup` holding it, or a host that cannot lock at all.
+	authorizeErr error
+	// policyHeld is true while the dispatcher holds what Authorize handed
+	// it, so a test can see where the lock is let go.
+	policyHeld bool
+	mu         sync.Mutex
 }
 
 func newDispatchHarness(t *testing.T, fake *fakeDriver, tweak func(*DispatcherOptions)) *dispatchHarness {
@@ -193,6 +204,33 @@ func newDispatchHarness(t *testing.T, fake *fakeDriver, tweak func(*DispatcherOp
 				out[k] = v
 			}
 			return out, nil
+		},
+		// The launch's own reading, under the lock. It answers from served
+		// unless a test has set authorized, so a test that does not care
+		// about the difference sees one connect.json.
+		Authorize: func() (map[int64]admission.Project, func(), error) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if h.authorizeErr != nil {
+				return nil, nil, h.authorizeErr
+			}
+			source, err := h.authorized, error(nil)
+			if source == nil {
+				source, err = h.served, h.servedErr
+			}
+			if err != nil {
+				return nil, nil, err
+			}
+			out := map[int64]admission.Project{}
+			for k, v := range source {
+				out[k] = v
+			}
+			h.policyHeld = true
+			return out, func() {
+				h.mu.Lock()
+				defer h.mu.Unlock()
+				h.policyHeld = false
+			}, nil
 		},
 		WorkDir:     testWorkDir,
 		Concurrency: 2,

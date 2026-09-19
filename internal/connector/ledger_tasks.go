@@ -324,18 +324,19 @@ func (l *Ledger) launchTask(ctx context.Context, spec LaunchSpec, attemptID stri
 		// spec.Served is the set its caller decided this launch from.
 		//
 		// What this buys, said plainly, because the comment here used to
-		// claim more. For the dispatcher it is redundant with the startable
-		// query, which filtered on the same slice — belt and braces at the
-		// ledger's own boundary, so a launch that names a set not covering
-		// its record is refused rather than trusted, and one that names no
-		// set authorizes nothing rather than defaulting open.
+		// claim more. It is a check on the set its caller named, not a read
+		// of the file: a launch that names a set not covering its record is
+		// refused rather than trusted, and one that names no set authorizes
+		// nothing rather than defaulting open. That is what makes a
+		// non-dispatcher caller fail closed.
 		//
-		// What it does NOT do is close the window between reading
-		// connect.json and committing this transaction. An unserve landing
-		// in that window still launches this one task; a follow-up is
-		// stopped at the next tick by taskRun.authorized. That race is
-		// pre-existing in kind — the route had it too — and holding the
-		// setup lock across selection and commit is carded, not done here.
+		// What closes the window between reading connect.json and
+		// committing this transaction is the caller's, and it is now held:
+		// Dispatcher.launch and `connect redispatch` read the served set
+		// under connect.json's own lock and keep the lock until this
+		// commits, so an unserve lands wholly before the reading or wholly
+		// after the task exists. This check is what that reading is spent
+		// on.
 		return Launch{}, fmt.Errorf("connector: launch event %d in project %d, which is not served: %w", spec.EventID, record.BucketID, ErrNotStartable)
 	}
 	var busy bool
