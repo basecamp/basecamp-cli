@@ -449,6 +449,9 @@ type session struct {
 	updates   chan driver.Update
 	readerEnd chan struct{}
 	scribe    *scribe
+	// endings counts the turn endings running off the reader. Only the
+	// reader adds to it, and only the reader's own ending waits on it.
+	endings sync.WaitGroup
 
 	mu       sync.Mutex
 	id       string
@@ -743,6 +746,13 @@ func (s *session) read() {
 		// dropped rather than sent.
 		defer s.closeUpdates()
 		defer s.scribe.close()
+		// An ending already running off the reader is the one that finishes
+		// its turn, and it reads the worker's last word on its way. Waiting
+		// for it here is what keeps this from finishing the same turn as
+		// ended, and what keeps the scribe open until it has handed over
+		// whatever it read. Every ending is bounded — the policy check's
+		// verdict and the worker's exit both are — so this is too.
+		s.endings.Wait()
 		s.mu.Lock()
 		s.ended = true
 		t := s.turn
@@ -782,10 +792,12 @@ func (s *session) read() {
 	for scanner.Scan() {
 		s.handle(scanner.Bytes())
 		if s.scribe.enough() {
-			// A drain that has heard more refusals than it can hold. What
-			// was read is written; what was not is abandoned, which is what
-			// the drain's own clock was about to do.
-			break
+			// A drain that has heard as many refusals as it can hold. The
+			// pipe stops being read, which is what its own clock was about
+			// to do; the scanner's bufferful is still parsed, because
+			// breaking out here would drop lines that are no longer in the
+			// pipe for anyone else to find.
+			s.worker.StopReading()
 		}
 	}
 	// Drain what a scanner error left, so the process never blocks writing.
@@ -1054,10 +1066,23 @@ func refusedByApproval(message string) bool {
 // time its tool call id is seen (driver's "Refusals"). A refusal Codex logs
 // and gives no id gets the key the caller passes.
 func (s *session) refused(key, id, tool string, kind driver.ToolKind) {
-	refusal := driver.Refusal{ToolCallID: s.red.Sanitize(id), Tool: s.red.Sanitize(tool)}
+	// The id is the agent's, and the redactor takes things out of a string
+	// without making it shorter: an agent that names a tool call a megabyte
+	// long would otherwise have that megabyte kept on the turn, in the
+	// queue, and in what this session remembers having refused.
+	refusal := driver.Refusal{ToolCallID: cut(s.red.Sanitize(id), maxToolCallID), Tool: s.red.Sanitize(tool)}
+	key = cut(key, maxToolCallID+len("stderr:000:"))
 	s.mu.Lock()
 	first := !s.recorded[key]
 	if first {
+		if len(s.recorded) >= maxRecorded {
+			// Past what a session can remember, a repeat cannot be told from
+			// a first, and recording one twice is worse than this: the
+			// session ends rather than go on guessing.
+			s.mu.Unlock()
+			s.endedOverfull()
+			return
+		}
 		s.recorded[key] = true
 		if s.turn != nil {
 			s.turn.refusals = append(s.turn.refusals, refusal)
@@ -1100,33 +1125,56 @@ func (s *session) turnCompleted(e event) {
 	s.mu.Unlock()
 	if canceled {
 		// A cancel that won does not wait out the policy check either.
-		s.finishCanceled(t)
+		s.endTurn(func() { s.finishCanceled(t) })
 		return
 	}
-	if err := s.verified(); err != nil {
-		s.finishUnsafe(t, err)
-		return
-	}
-	// Codex exits right after the turn it completed, and its stderr is whole
-	// only once it has: a refusal it logged and did not put on the stream is
-	// in the tail by then.
-	select {
-	case <-s.worker.Done():
-	case <-time.After(s.grace):
-	}
-	s.stderrRefusals()
-	s.mu.Lock()
-	result := driver.PromptResult{Stop: driver.TurnEndTurn, Refusals: slices.Clone(t.refusals)}
-	if t.canceled {
-		// Only a cancel the connector asked for reads as canceled.
-		result.Stop = driver.TurnCanceled
-	}
-	s.mu.Unlock()
-	if e.Usage != nil {
-		result.Usage = driver.Usage{InputTokens: e.Usage.InputTokens, OutputTokens: e.Usage.OutputTokens}
-		s.emit(driver.Update{Kind: driver.UpdateUsage, Usage: &result.Usage})
-	}
-	s.finish(t, result, nil)
+	s.endTurn(func() {
+		if err := s.verified(); err != nil {
+			s.finishUnsafe(t, err)
+			return
+		}
+		// Codex exits right after the turn it completed, and its stderr is
+		// whole only once it has: a refusal it logged and did not put on the
+		// stream is in the tail by then.
+		select {
+		case <-s.worker.Done():
+		case <-time.After(s.grace):
+		}
+		s.stderrRefusals()
+		s.mu.Lock()
+		result := driver.PromptResult{Stop: driver.TurnEndTurn, Refusals: slices.Clone(t.refusals)}
+		if t.canceled {
+			// Only a cancel the connector asked for reads as canceled.
+			result.Stop = driver.TurnCanceled
+		}
+		s.mu.Unlock()
+		if e.Usage != nil {
+			result.Usage = driver.Usage{InputTokens: e.Usage.InputTokens, OutputTokens: e.Usage.OutputTokens}
+			s.emit(driver.Update{Kind: driver.UpdateUsage, Usage: &result.Usage})
+		}
+		s.finish(t, result, nil)
+	})
+}
+
+// endTurn runs a turn's ending away from the reader, and remembers it so the
+// reader's own ending waits for it.
+//
+// A turn ends by waiting: for the policy check's verdict, and for the worker
+// to be gone so its stderr is whole. Neither is reading, and neither belongs
+// on the goroutine whose job is to keep a pipe empty — a reader that waits
+// is a reader that is not draining, and every bound on its reading is then a
+// bound on something else. This is what lets the drain budget be a clock and
+// the queue's cap be a count.
+//
+// The count is taken here, on the reader, before the ending starts, and
+// waited for from the reader's own ending: one goroutine adds, the same one
+// waits.
+func (s *session) endTurn(ending func()) {
+	s.endings.Add(1)
+	go func() {
+		defer s.endings.Done()
+		ending()
+	}()
 }
 
 func (s *session) turnFailed() {
@@ -1140,21 +1188,51 @@ func (s *session) turnFailed() {
 	canceled := t.canceled
 	s.mu.Unlock()
 	if canceled {
-		s.finishCanceled(t)
+		s.endTurn(func() { s.finishCanceled(t) })
 		return
 	}
-	// As after a completed turn: the stderr tail is whole once Codex exits.
-	select {
-	case <-s.worker.Done():
-	case <-time.After(s.grace):
+	s.endTurn(func() {
+		// As after a completed turn: the stderr tail is whole once Codex
+		// exits.
+		select {
+		case <-s.worker.Done():
+		case <-time.After(s.grace):
+		}
+		s.stderrRefusals()
+		refusals := s.refusalsOf(t)
+		if err := s.failedVerification(); err != nil {
+			s.finishUnsafe(t, err)
+			return
+		}
+		s.finish(t, driver.PromptResult{Refusals: refusals}, errors.New("codex: the turn failed"))
+	})
+}
+
+// maxToolCallID is how much of a tool call id a refusal keeps, and
+// maxRecorded how many refusals a session remembers having recorded. The
+// agent writes both, and neither is a session's to grow without end — the
+// acp driver bounds the same two for the same reason.
+//
+// Reaching maxRecorded is not a bound that can be applied quietly: past it a
+// repeat cannot be told from a first, and recording the same refusal twice
+// would be worse than stopping. The session ends instead.
+const (
+	maxToolCallID = 256
+	maxRecorded   = 4096
+)
+
+// cut shortens a string the agent wrote to what this driver keeps of it.
+func cut(s string, keep int) string {
+	if len(s) <= keep {
+		return s
 	}
-	s.stderrRefusals()
-	refusals := s.refusalsOf(t)
-	if err := s.failedVerification(); err != nil {
-		s.finishUnsafe(t, err)
-		return
-	}
-	s.finish(t, driver.PromptResult{Refusals: refusals}, errors.New("codex: the turn failed"))
+	return s[:keep]
+}
+
+// endedOverfull ends a session that has refused more distinct tool calls
+// than it can remember having refused.
+func (s *session) endedOverfull() {
+	s.worker.Terminate(0)
 }
 
 // refusalsOf is a turn's refusals so far.

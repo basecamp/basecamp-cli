@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -791,10 +792,12 @@ func TestACompletedTurnThatWasCanceledDoesNotWaitForTheCheck(t *testing.T) {
 	s := &session{verifyDone: make(chan struct{}), verifyAfter: time.Hour}
 	turn := &turn{done: make(chan struct{}), canceled: true}
 	s.turn = turn
-	done := make(chan struct{})
-	go func() { s.turnCompleted(event{}); close(done) }()
+	// The turn's own end is what is waited for. A turn ends away from the
+	// reader now, so the call returning says nothing about whether the
+	// ending waited on anything.
+	s.turnCompleted(event{})
 	select {
-	case <-done:
+	case <-turn.done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("a canceled turn waited for the policy check")
 	}
@@ -1444,4 +1447,66 @@ func TestACanceledTurnRecordsItsRefusals(t *testing.T) {
 		t.Fatal("the canceled turn did not end")
 	}
 	assert.Len(t, recorder.Recorded(), 1, "the refusal Codex logged is recorded, not lost with the cancel")
+}
+
+// What a refusal keeps of a tool call id is bounded, and so is how many the
+// session remembers having refused. The agent writes both, and the redactor
+// takes things out of a string without making it shorter — so an agent that
+// names a tool call a megabyte long would otherwise have that megabyte kept
+// on the turn, in the queue, and in the session's memory of what it refused.
+func TestWhatARefusalKeepsOfWhatTheAgentWroteIsBounded(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t, scenario{TurnContext: safeTurnContext()})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	session := s.(*session)
+	tr := &turn{done: make(chan struct{})}
+	session.mu.Lock()
+	session.turn = tr
+	session.mu.Unlock()
+
+	// Separators, so the redactor reads it as an id rather than as a
+	// credential and replaces the whole thing — which is what a long run of
+	// one character gets, and would prove nothing about the cut.
+	long := strings.Repeat("tool.call-", 8*maxToolCallID/10)
+	session.refused("item:"+long, long, "mcp__other__write", driver.ToolOther)
+	require.NoError(t, s.Close())
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	require.Len(t, tr.refusals, 1)
+	assert.LessOrEqual(t, len(tr.refusals[0].ToolCallID), maxToolCallID,
+		"an id is cut to what this driver keeps of it, and kept %d", len(tr.refusals[0].ToolCallID))
+	for key := range session.recorded {
+		assert.LessOrEqual(t, len(key), maxToolCallID+len("stderr:000:"),
+			"and what the session remembers is cut too")
+	}
+	assert.Len(t, recorder.Recorded(), 1)
+}
+
+// A session that has refused more distinct tool calls than it can remember
+// ends, rather than go on unable to tell a repeat from a first — recording
+// the same refusal twice would be worse. The acp driver bounds the same
+// memory for the same reason.
+func TestASessionRemembersSoManyRefusalsAndNoMore(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t, scenario{TurnContext: safeTurnContext(), Hang: true})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	session := s.(*session)
+
+	for i := range maxRecorded + 10 {
+		session.refused(fmt.Sprintf("item:call-%d", i), fmt.Sprintf("call-%d", i), "exec", driver.ToolExecute)
+	}
+	session.mu.Lock()
+	remembered := len(session.recorded)
+	session.mu.Unlock()
+	assert.LessOrEqual(t, remembered, maxRecorded, "a session remembers so many and no more, and remembered %d", remembered)
+	waitDone(t, s)
 }

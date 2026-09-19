@@ -251,3 +251,46 @@ func TestADrainThatFillsTheQueueTellsTheReaderToStop(t *testing.T) {
 	close(release)
 	s.close()
 }
+
+// The recorder is never called concurrently with itself, which driver.go
+// promises an implementation it may rely on. A late write runs on its
+// reader's goroutine rather than the scribe's, and two endings that are not
+// the reader's can make one each, so the promise needs a lock rather than a
+// single goroutine to keep it.
+func TestTheRecorderIsNeverCalledTwiceAtOnce(t *testing.T) {
+	var mu sync.Mutex
+	inside, peak := 0, 0
+	held := make(chan struct{})
+	var once sync.Once
+	s := newScribe(
+		func(driver.Refusal) {
+			mu.Lock()
+			inside++
+			peak = max(peak, inside)
+			mu.Unlock()
+			once.Do(func() { close(held) })
+			time.Sleep(20 * time.Millisecond)
+			mu.Lock()
+			inside--
+			mu.Unlock()
+		},
+		func(driver.Update) {},
+	)
+	s.close() // every write from here is a late one, on its caller's goroutine
+
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.hand(pending{refusal: driver.Refusal{ToolCallID: string(rune('a' + i))}})
+		}()
+	}
+	<-held
+	wg.Wait()
+	s.close()
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, peak, "the recorder saw one call at a time, and %d at once", peak)
+}

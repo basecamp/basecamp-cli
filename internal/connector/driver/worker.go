@@ -82,12 +82,19 @@ type output struct {
 	// written by one call, so there is no moment in which half the state is
 	// visible.
 	stopped atomic.Bool
-	// stopAt is when the stop was asked for, in Unix nanoseconds, written by
-	// stop before the flag that publishes it. The reader takes it from here
-	// rather than from when it next looks, so the budget runs from the
-	// asking as it says it does — a reader inside an idle window when the
-	// asking comes would otherwise start the clock up to that window late.
-	stopAt atomic.Int64
+	// stopAt is when the stop was asked for, written by stop before the flag
+	// that publishes it. The reader takes it from here rather than from when
+	// it next looks, so the budget runs from the asking as it says it does —
+	// a reader inside an idle window when the asking comes would otherwise
+	// start the clock up to that window late.
+	//
+	// It is kept as a time.Time under a mutex rather than as nanoseconds in
+	// an atomic, because a time.Time carries a monotonic reading and a
+	// number does not. Rebuilt from nanoseconds, the wall clock decides the
+	// budget: a forward jump ends a drain early with the worker's output
+	// still buffered, and a backward one holds the session open past it.
+	stopMu sync.Mutex
+	stopAt time.Time
 }
 
 func (o *output) Read(p []byte) (int, error) {
@@ -95,7 +102,7 @@ func (o *output) Read(p []byte) (int, error) {
 		stopped := o.stopped.Load()
 		window := idleWindow
 		if stopped {
-			left := drainBudget - time.Since(time.Unix(0, o.stopAt.Load()))
+			left := drainBudget - time.Since(o.askedAt())
 			if left <= 0 {
 				// Still arriving, and no longer waited for.
 				return 0, io.EOF
@@ -127,9 +134,21 @@ func (o *output) Read(p []byte) (int, error) {
 // has opened — and it says the same thing however many times it is called.
 func (o *output) stop() {
 	// The time before the flag, so a reader that sees the flag always finds
-	// a time to measure from, and the budget runs from the asking.
-	o.stopAt.CompareAndSwap(0, time.Now().UnixNano())
+	// a time to measure from, and the budget runs from the asking. The first
+	// asking is the one that counts.
+	o.stopMu.Lock()
+	if o.stopAt.IsZero() {
+		o.stopAt = time.Now()
+	}
+	o.stopMu.Unlock()
 	o.stopped.Store(true)
+}
+
+// askedAt is when the stop was asked for, monotonic.
+func (o *output) askedAt() time.Time {
+	o.stopMu.Lock()
+	defer o.stopMu.Unlock()
+	return o.stopAt
 }
 
 func (o *output) close() { _ = o.f.Close() }
@@ -525,6 +544,12 @@ func (w *Worker) Terminate(grace time.Duration) {
 			time.AfterFunc(pipeWaitDelay, w.CloseStdout)
 			return
 		}
+		// Asked before it is waited for: a descendant outside the group can
+		// hold the write end open, so the end of file never comes and a
+		// reader left to itself never ends — which would hold this
+		// worker's descriptor, and everything waiting on the reading, for
+		// as long as that descendant lived.
+		w.stdout.stop()
 		go func() {
 			<-reading
 			w.CloseStdout()

@@ -456,18 +456,22 @@ func TestTheDrainBudgetRunsFromTheAsking(t *testing.T) {
 	t.Cleanup(func() { _ = readEnd.Close(); _ = writeEnd.Close() })
 	out := &output{f: readEnd}
 
-	require.Zero(t, out.stopAt.Load(), "nothing has been asked yet")
+	require.True(t, out.askedAt().IsZero(), "nothing has been asked yet")
 	before := time.Now()
 	out.stop()
 	after := time.Now()
 
-	asked := out.stopAt.Load()
-	require.NotZero(t, asked, "the budget's clock is taken when the stop is asked for, not when a read next looks")
-	assert.False(t, time.Unix(0, asked).Before(before), "and it is taken then")
-	assert.False(t, time.Unix(0, asked).After(after))
+	asked := out.askedAt()
+	require.False(t, asked.IsZero(), "the budget's clock is taken when the stop is asked for, not when a read next looks")
+	assert.False(t, asked.Before(before), "and it is taken then")
+	assert.False(t, asked.After(after))
+
+	// It carries a monotonic reading, so the budget is not at the mercy of
+	// the wall clock moving under it.
+	assert.NotEqual(t, asked, asked.Round(0), "the time kept is monotonic, not a wall clock rebuilt from a number")
 
 	// And it is the first asking that counts, so a second does not hand the
 	// reader a fresh budget.
 	out.stop()
-	assert.Equal(t, asked, out.stopAt.Load(), "a later stop does not restart the budget")
+	assert.Equal(t, asked, out.askedAt(), "a later stop does not restart the budget")
 }

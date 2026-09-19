@@ -58,9 +58,9 @@ import (
 // refusalCap is where the growing stops. A drain bounded only by its clock
 // is not bounded in memory: two seconds of reading from a descendant that
 // refuses as fast as it can write is as much as the machine will take. At
-// the cap the reader stops reading instead, which loses nothing that was
-// read and abandons what was not — exactly what the clock would have done a
-// moment later.
+// the cap the reader stops taking more FROM THE PIPE, and goes on parsing
+// what it has already taken — a scanner holds a bufferful that the pipe no
+// longer does, and abandoning that would drop lines nobody had seen.
 const (
 	refusalMark = 256
 	refusalCap  = 4096
@@ -92,7 +92,13 @@ type scribe struct {
 	// written are a single decision rather than two that can cross.
 	late  int
 	quiet *sync.Cond
-	done  chan struct{}
+	// writing is held across every call to record, wherever it is made
+	// from. The recorder is promised it is never called concurrently with
+	// itself (driver.go), and a late write runs on its reader's goroutine
+	// rather than the scribe's, so the promise needs a lock rather than a
+	// single goroutine to keep it.
+	writing sync.Mutex
+	done    chan struct{}
 }
 
 func newScribe(record func(driver.Refusal), emit func(driver.Update)) *scribe {
@@ -206,9 +212,11 @@ func (s *scribe) run() {
 		s.room.Signal()
 		s.mu.Unlock()
 
-		// Outside the lock: the write is the slow thing, and the reader goes
-		// on reading while it happens.
+		// Outside the queue's lock: the write is the slow thing, and the
+		// reader goes on reading while it happens.
+		s.writing.Lock()
 		s.record(next.refusal)
+		s.writing.Unlock()
 		// The update comes after the write, which is the contract's own
 		// order: a refusal is recorded before the update for it is emitted.
 		s.emit(next.update)
@@ -216,8 +224,12 @@ func (s *scribe) run() {
 }
 
 // writeNow writes a refusal on the caller's own goroutine, for one read
-// after the scribe has gone.
+// after the scribe has gone. Two of these can be in flight at once — two
+// endings that are not the reader's — so they take the same lock the scribe
+// writes under.
 func (s *scribe) writeNow(p pending) {
+	s.writing.Lock()
 	s.record(p.refusal)
+	s.writing.Unlock()
 	s.emit(p.update)
 }
