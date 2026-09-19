@@ -329,8 +329,14 @@ type Refusal struct {
 }
 
 // RefusalRecorder records a refusal at the moment a driver makes or observes
-// it (see "Refusals" above). RecordRefusal must not block for long: a driver
-// calls it on the goroutine that reads the agent's stream.
+// it (see "Refusals" above).
+//
+// It is called once per refusal, never concurrently with itself, and an
+// implementation needs no locking of its own for that. Which goroutine calls
+// it is the driver's: most call it on the one reading the agent's stream, so
+// it must not block for long — a driver that cannot afford that hands the
+// write to a goroutine of its own, as codex does, and then emits the update
+// for the refusal only once this has returned.
 type RefusalRecorder interface {
 	RecordRefusal(ctx context.Context, r Refusal) error
 }

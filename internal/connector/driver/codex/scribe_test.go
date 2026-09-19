@@ -172,3 +172,82 @@ func TestClosingTheScribeWritesEverythingHandedOver(t *testing.T) {
 	defer mu.Unlock()
 	require.Equal(t, handed, count, "the close is what makes the ledger whole")
 }
+
+// The close waits for a late write that has already begun. A refusal read
+// by an ending that is not the reader's can arrive after the scribe has
+// drained and gone; whoever read it writes it, and the close either waits
+// for that write or has not started — never decides the ledger is whole
+// while one is running.
+func TestClosingWaitsForALateWriteAlreadyBegun(t *testing.T) {
+	var mu sync.Mutex
+	var done []string
+	writing := make(chan struct{})
+	release := make(chan struct{})
+	s := newScribe(
+		func(r driver.Refusal) {
+			if r.ToolCallID == "late" {
+				close(writing)
+				<-release
+			}
+			mu.Lock()
+			done = append(done, r.ToolCallID)
+			mu.Unlock()
+		},
+		func(driver.Update) {},
+	)
+	s.close() // the scribe has drained and gone
+
+	handed := make(chan struct{})
+	go func() {
+		defer close(handed)
+		s.hand(pending{refusal: driver.Refusal{ToolCallID: "late"}})
+	}()
+	<-writing // the late write has begun
+
+	closed := make(chan struct{})
+	go func() {
+		defer close(closed)
+		s.close()
+	}()
+	select {
+	case <-closed:
+		t.Fatal("the close decided the ledger was whole while a late write was running")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(release)
+	<-closed
+	<-handed
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{"late"}, done, "and the write it waited for did happen")
+}
+
+// A drain that hears more refusals than it can hold tells the reader to stop
+// reading, rather than growing without limit. Nothing that was read is lost;
+// what was not read is abandoned, which is what the drain's clock was about
+// to do anyway.
+func TestADrainThatFillsTheQueueTellsTheReaderToStop(t *testing.T) {
+	release := make(chan struct{})
+	first := make(chan struct{})
+	var once sync.Once
+	s := newScribe(
+		func(driver.Refusal) {
+			once.Do(func() { close(first) })
+			<-release
+		},
+		func(driver.Update) {},
+	)
+	s.hand(pending{refusal: driver.Refusal{ToolCallID: "stuck"}})
+	<-first
+	s.noWaiting()
+
+	require.False(t, s.enough(), "nothing has been heard yet")
+	for range refusalCap {
+		s.hand(pending{refusal: driver.Refusal{ToolCallID: "more"}})
+	}
+	assert.True(t, s.enough(), "the reader is told to stop once the queue is full")
+
+	close(release)
+	s.close()
+}

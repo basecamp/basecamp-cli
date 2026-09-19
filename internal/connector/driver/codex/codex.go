@@ -781,6 +781,12 @@ func (s *session) read() {
 	scanner.Buffer(make([]byte, 64<<10), 64<<20)
 	for scanner.Scan() {
 		s.handle(scanner.Bytes())
+		if s.scribe.enough() {
+			// A drain that has heard more refusals than it can hold. What
+			// was read is written; what was not is abandoned, which is what
+			// the drain's own clock was about to do.
+			break
+		}
 	}
 	// Drain what a scanner error left, so the process never blocks writing.
 	_, _ = io.Copy(io.Discard, s.worker.Stdout())

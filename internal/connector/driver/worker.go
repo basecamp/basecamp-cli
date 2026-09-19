@@ -82,9 +82,12 @@ type output struct {
 	// written by one call, so there is no moment in which half the state is
 	// visible.
 	stopped atomic.Bool
-	// stopAt is when this reader first saw that it had been asked, set by
-	// the reader itself. Only Read touches it, and a pipe has one reader.
-	stopAt time.Time
+	// stopAt is when the stop was asked for, in Unix nanoseconds, written by
+	// stop before the flag that publishes it. The reader takes it from here
+	// rather than from when it next looks, so the budget runs from the
+	// asking as it says it does — a reader inside an idle window when the
+	// asking comes would otherwise start the clock up to that window late.
+	stopAt atomic.Int64
 }
 
 func (o *output) Read(p []byte) (int, error) {
@@ -92,14 +95,14 @@ func (o *output) Read(p []byte) (int, error) {
 		stopped := o.stopped.Load()
 		window := idleWindow
 		if stopped {
-			if o.stopAt.IsZero() {
-				o.stopAt = time.Now()
-			}
-			if time.Since(o.stopAt) >= drainBudget {
+			left := drainBudget - time.Since(time.Unix(0, o.stopAt.Load()))
+			if left <= 0 {
 				// Still arriving, and no longer waited for.
 				return 0, io.EOF
 			}
-			window = drainWindow
+			// Never past the budget: the last window is whatever is left of
+			// it, not a whole one begun at the end.
+			window = min(drainWindow, left)
 		}
 		if err := o.f.SetReadDeadline(time.Now().Add(window)); err != nil {
 			return 0, err
@@ -122,7 +125,12 @@ func (o *output) Read(p []byte) (int, error) {
 // the drain budget. It writes one field and nothing else — in particular it
 // does not reach for the deadline, so it cannot cut short a window a read
 // has opened — and it says the same thing however many times it is called.
-func (o *output) stop() { o.stopped.Store(true) }
+func (o *output) stop() {
+	// The time before the flag, so a reader that sees the flag always finds
+	// a time to measure from, and the budget runs from the asking.
+	o.stopAt.CompareAndSwap(0, time.Now().UnixNano())
+	o.stopped.Store(true)
+}
 
 func (o *output) close() { _ = o.f.Close() }
 

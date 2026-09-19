@@ -1351,8 +1351,10 @@ type refusalRecorder struct {
 	pending int
 }
 
-// refusalWriteTimeout bounds a refusal's write, which runs on the goroutine
-// reading the agent's stream.
+// refusalWriteTimeout bounds a refusal's write. Which goroutine it runs on is
+// the driver's: on most it is the one reading the agent's stream, and the
+// codex driver writes on a goroutine of its own precisely because ten
+// seconds is more than a reader can afford to spend.
 const refusalWriteTimeout = 10 * time.Second
 
 // RecordRefusal implements driver.RefusalRecorder.

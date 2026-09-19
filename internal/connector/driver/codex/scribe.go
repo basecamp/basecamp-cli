@@ -54,7 +54,17 @@ import (
 // may enlarge it up to the host's pipe-max-size, and the scanner is allowed
 // to grow to 64 MiB. It is simply how many refusals are worth holding before
 // a live worker is told to slow down.
-const refusalMark = 256
+//
+// refusalCap is where the growing stops. A drain bounded only by its clock
+// is not bounded in memory: two seconds of reading from a descendant that
+// refuses as fast as it can write is as much as the machine will take. At
+// the cap the reader stops reading instead, which loses nothing that was
+// read and abandons what was not — exactly what the clock would have done a
+// moment later.
+const (
+	refusalMark = 256
+	refusalCap  = 4096
+)
 
 // pending is a refusal the reader has read and the scribe has not yet
 // written, with the update that is emitted once it has.
@@ -75,16 +85,21 @@ type scribe struct {
 	nowait   bool // the reader has been asked to stop: never make it wait
 	closing  bool
 	finished bool // the scribe has drained and gone
-	done     chan struct{}
-	// inflight counts the writes being made on a caller's own goroutine,
-	// after the scribe has gone.
-	inflight sync.WaitGroup
+	heard    bool // the queue reached its cap during a drain
+	// late counts the writes being made on a caller's own goroutine because
+	// the scribe had already gone. It lives under the same lock that
+	// publishes finished, so admitting one and deciding everything is
+	// written are a single decision rather than two that can cross.
+	late  int
+	quiet *sync.Cond
+	done  chan struct{}
 }
 
 func newScribe(record func(driver.Refusal), emit func(driver.Update)) *scribe {
 	s := &scribe{record: record, emit: emit, done: make(chan struct{})}
 	s.room = sync.NewCond(&s.mu)
 	s.work = sync.NewCond(&s.mu)
+	s.quiet = sync.NewCond(&s.mu)
 	go s.run()
 	return s
 }
@@ -99,18 +114,36 @@ func (s *scribe) hand(p pending) {
 	if s.finished {
 		// The tail: a refusal read from the worker's last word by an ending
 		// that is not the reader's, after the scribe has drained and gone.
-		// Written here rather than lost. The count is taken under the same
-		// lock that publishes finished, so a close cannot decide everything
-		// is written while this one is starting.
-		s.inflight.Add(1)
+		// It is written here rather than lost, and counted under the same
+		// lock that published finished — so a close either waits for this
+		// one or has not begun, never decides the ledger is whole while it
+		// is starting.
+		s.late++
 		s.mu.Unlock()
-		defer s.inflight.Done()
 		s.writeNow(p)
+		s.mu.Lock()
+		s.late--
+		s.quiet.Broadcast()
+		s.mu.Unlock()
 		return
 	}
 	s.queue = append(s.queue, p)
+	if s.nowait && len(s.queue) >= refusalCap {
+		// A drain that has heard as much as it can hold. Nothing read is
+		// lost; the reader is told to stop reading, which is what its own
+		// clock was about to do.
+		s.heard = true
+	}
 	s.work.Signal()
 	s.mu.Unlock()
+}
+
+// enough reports that a drain filled the queue to its cap, so the reader
+// should stop reading. Nothing that was read is dropped.
+func (s *scribe) enough() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.heard
 }
 
 // noWaiting says the reader has been asked to stop, so it must not be held
@@ -133,11 +166,24 @@ func (s *scribe) close() {
 	}
 	s.mu.Unlock()
 	<-s.done
-	// A refusal handed over after the scribe had gone is written by whoever
-	// read it, and this waits for those. One discovered after this returns
-	// is still written, on its reader's goroutine — the same window in which
-	// an update emitted then is dropped.
-	s.inflight.Wait()
+	// # What this barrier promises
+	//
+	// When it returns, every refusal handed over so far has been written:
+	// the ones the scribe took, and the ones a caller wrote itself because
+	// the scribe had already gone. Neither is dropped and neither races
+	// this, because admitting a late write and counting it down happen
+	// under the lock this waits on.
+	//
+	// It promises nothing about a refusal handed over AFTER it returns. One
+	// can be: an ending that is not the reader's may read the worker's last
+	// word later still. That refusal is written too, by whoever read it, on
+	// that goroutine — it is simply not waited for here, in the same window
+	// where an update emitted then is dropped rather than sent.
+	s.mu.Lock()
+	for s.late > 0 {
+		s.quiet.Wait()
+	}
+	s.mu.Unlock()
 }
 
 func (s *scribe) run() {

@@ -438,3 +438,36 @@ func TestAStopDoesNotTouchTheReadDeadline(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrDeadlineExceeded)
 	assert.GreaterOrEqual(t, waited, mine/2, "the deadline in force is the one set here, not one a stop installed")
 }
+
+// The drain budget runs from the asking, not from when the reader next
+// notices it. A reader with nothing arriving sits in an idle window, and a
+// stop landing inside one is not seen until that window is out; a budget
+// begun at the noticing would outlast what it promises by that much.
+//
+// This is a question about when the clock is taken, not about how long
+// anything runs, so it is asked that way: after the asking, the time to
+// measure from exists. Timing it would be a knife-edge — the reader notices
+// as soon as anything arrives, so the gap only opens when output begins just
+// as a window expires — and a test on a knife-edge proves nothing either
+// way.
+func TestTheDrainBudgetRunsFromTheAsking(t *testing.T) {
+	readEnd, writeEnd, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = readEnd.Close(); _ = writeEnd.Close() })
+	out := &output{f: readEnd}
+
+	require.Zero(t, out.stopAt.Load(), "nothing has been asked yet")
+	before := time.Now()
+	out.stop()
+	after := time.Now()
+
+	asked := out.stopAt.Load()
+	require.NotZero(t, asked, "the budget's clock is taken when the stop is asked for, not when a read next looks")
+	assert.False(t, time.Unix(0, asked).Before(before), "and it is taken then")
+	assert.False(t, time.Unix(0, asked).After(after))
+
+	// And it is the first asking that counts, so a second does not hand the
+	// reader a fresh budget.
+	out.stop()
+	assert.Equal(t, asked, out.stopAt.Load(), "a later stop does not restart the budget")
+}
