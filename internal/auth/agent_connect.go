@@ -579,11 +579,15 @@ func (m *Manager) pollAgentConnection(ctx context.Context, client *http.Client, 
 // URL path later, so a malformed one is refused here rather than persisted.
 func parseAgentConnection(answer *agentConnectAnswer) (*AgentConnection, error) {
 	status := answer.status
+	// The account id is the account's public id, which the server renders
+	// as a JSON number — Rails serializes the integer as it is — while the
+	// contract describes it as an id. json.Number takes either spelling, and
+	// the digits rule below judges what was said either way.
 	var handover struct {
-		ClientID     string `json:"client_id"`
-		ClientSecret string `json:"client_secret"`
-		AccountID    string `json:"account_id"`
-		Scope        string `json:"scope"`
+		ClientID     string      `json:"client_id"`
+		ClientSecret string      `json:"client_secret"`
+		AccountID    json.Number `json:"account_id"`
+		Scope        string      `json:"scope"`
 	}
 	if err := json.Unmarshal(answer.body, &handover); err != nil {
 		return nil, output.ErrAPI(status, agentConnectPollOp+": the response could not be parsed")
@@ -592,7 +596,7 @@ func parseAgentConnection(answer *agentConnectAnswer) (*AgentConnection, error) 
 	conn := &AgentConnection{
 		ClientID:     handover.ClientID,
 		ClientSecret: handover.ClientSecret,
-		AccountID:    handover.AccountID,
+		AccountID:    handover.AccountID.String(),
 		Scope:        handover.Scope,
 	}
 	switch {
