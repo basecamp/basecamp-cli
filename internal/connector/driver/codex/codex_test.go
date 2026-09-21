@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -791,10 +792,12 @@ func TestACompletedTurnThatWasCanceledDoesNotWaitForTheCheck(t *testing.T) {
 	s := &session{verifyDone: make(chan struct{}), verifyAfter: time.Hour}
 	turn := &turn{done: make(chan struct{}), canceled: true}
 	s.turn = turn
-	done := make(chan struct{})
-	go func() { s.turnCompleted(event{}); close(done) }()
+	// The turn's own end is what is waited for. A turn ends away from the
+	// reader now, so the call returning says nothing about whether the
+	// ending waited on anything.
+	s.turnCompleted(event{})
 	select {
-	case <-done:
+	case <-turn.done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("a canceled turn waited for the policy check")
 	}
@@ -1146,12 +1149,81 @@ func TestAnUnsafeVerdictWaitsForWhatTheWorkerPutOnItsStream(t *testing.T) {
 			got := <-answers
 			require.ErrorIs(t, got.err, driver.ErrUnsafeMode, "an unsafe session is reported as unsafe, whoever gets to the turn first")
 			require.ErrorContains(t, got.err, `Codex applied "on-request"`)
+			// The ledger is whole when the session is closed: the writes are
+			// not on the reader any more, and the turn's end is not where
+			// they are promised — the session's updates are.
+			require.NoError(t, s.Close())
 			assert.Len(t, ledger.Recorded(), 2, "both refusals reach the ledger")
 			assert.Len(t, got.result.Refusals, 2,
 				"the result carries what the ledger carries, and carries %d of the %d recorded",
 				len(got.result.Refusals), len(ledger.Recorded()))
 		})
 	}
+}
+
+// A ledger that takes its time does not cost the worker its last lines.
+//
+// Writing a refusal is allowed ten seconds. While that ran on the goroutine
+// reading the worker's output there was no bound that could be put on the
+// reading: a clock runs out inside a write and takes the pipe away with the
+// worker's next refusal still in it — recorded nowhere, not merely missing
+// from a result — and a bound that waits for the pipe to fall idle never
+// runs out at all against a descendant that keeps writing.
+//
+// The writes are a goroutine of their own now, so the reading is only ever
+// reading. The hold here outlasts every clock in this path, with a refusal
+// sitting in the pipe the whole time, and it is still read and still
+// written.
+func TestALedgerThatTakesItsTimeDoesNotCostTheWorkerItsLastLines(t *testing.T) {
+	ledger := &heldLedger{writing: make(chan struct{}, 1), release: make(chan struct{})}
+	denial := func(id string) string {
+		return `{"type":"item.completed","item":{"id":"` + id + `","type":"mcp_tool_call","server":"other","tool":"write",` +
+			`"error":{"message":"MCP tool call requires approval, but approval policy is never"},"status":"failed"}}`
+	}
+	unsafe := safeTurnContext()
+	unsafe["approval_policy"] = "on-request"
+	late := filepath.Join(t.TempDir(), "say-the-second")
+	h := newHarness(t, scenario{
+		TurnContext:            unsafe,
+		TurnContextAfterEvents: true,
+		Events:                 []string{`{"type":"turn.started"}`, denial("item_1")},
+		// Said once the ledger is holding the first, so the second is in the
+		// pipe and nowhere else: the reader cannot have taken it into its
+		// own buffer, because it was not there to take.
+		LateEvents: []string{denial("item_2")},
+		LateAfter:  late,
+		Hang:       true,
+	})
+	cfg := h.config()
+	cfg.Refusals = ledger
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	answers := make(chan driver.PromptResult, 1)
+	go func() {
+		result, _ := s.Prompt(context.Background(), "Task 1. Event 2.")
+		answers <- result
+	}()
+
+	<-ledger.writing
+	require.NoError(t, os.WriteFile(late, nil, 0o600))
+	held := make(chan struct{})
+	go func() {
+		defer close(held)
+		// Longer than the grace and the drain budget together, and well
+		// inside the ten seconds a refusal's write is allowed.
+		time.Sleep(6 * time.Second)
+		close(ledger.release)
+	}()
+
+	result := <-answers
+	<-held
+	require.NoError(t, s.Close())
+	assert.Len(t, ledger.Recorded(), 2,
+		"the refusal that arrived while the ledger was writing is still read, and the ledger holds %d", len(ledger.Recorded()))
+	assert.Len(t, result.Refusals, 2,
+		"the result carries what the ledger carries, and carries %d", len(result.Refusals))
 }
 
 // A session closed under a turn still reports the refusals that turn made.
@@ -1276,7 +1348,7 @@ func TestARefusalReadAfterTheUpdatesCloseIsNotAPanic(t *testing.T) {
 	require.NoError(t, s.Close())
 	require.Eventually(t, func() bool { return strings.Contains(session.StderrTail(), "rejected") },
 		10*time.Second, 20*time.Millisecond, "the worker logged its refusal on its way out")
-	session.stderrRefusals()
+	session.stderrRefusals(nil)
 
 	assert.Len(t, recorder.Recorded(), 1,
 		"the refusal is recorded, and the update it carries is dropped rather than sent on a closed channel")
@@ -1375,4 +1447,118 @@ func TestACanceledTurnRecordsItsRefusals(t *testing.T) {
 		t.Fatal("the canceled turn did not end")
 	}
 	assert.Len(t, recorder.Recorded(), 1, "the refusal Codex logged is recorded, not lost with the cancel")
+}
+
+// What a refusal keeps of a tool call id is bounded, and so is how many the
+// session remembers having refused. The agent writes both, and the redactor
+// takes things out of a string without making it shorter — so an agent that
+// names a tool call a megabyte long would otherwise have that megabyte kept
+// on the turn, in the queue, and in the session's memory of what it refused.
+func TestWhatARefusalKeepsOfWhatTheAgentWroteIsBounded(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t, scenario{TurnContext: safeTurnContext()})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	session := s.(*session)
+	tr := &turn{done: make(chan struct{})}
+	session.mu.Lock()
+	session.turn = tr
+	session.mu.Unlock()
+
+	// Separators, so the redactor reads it as an id rather than as a
+	// credential and replaces the whole thing — which is what a long run of
+	// one character gets, and would prove nothing about the cut.
+	long := strings.Repeat("tool.call-", 8*maxToolCallID/10)
+	session.refused(nil, "item:"+long, long, "mcp__other__write", driver.ToolOther)
+	require.NoError(t, s.Close())
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	require.Len(t, tr.refusals, 1)
+	assert.LessOrEqual(t, len(tr.refusals[0].ToolCallID), maxToolCallID,
+		"an id is cut to what this driver keeps of it, and kept %d", len(tr.refusals[0].ToolCallID))
+	for key := range session.recorded {
+		assert.LessOrEqual(t, len(key), maxToolCallID+len("stderr:000:"),
+			"and what the session remembers is cut too")
+	}
+	assert.Len(t, recorder.Recorded(), 1)
+}
+
+// A session that has refused more distinct tool calls than it can remember
+// ends, rather than go on unable to tell a repeat from a first — recording
+// the same refusal twice would be worse. The acp driver bounds the same
+// memory for the same reason.
+func TestASessionRemembersSoManyRefusalsAndNoMore(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t, scenario{TurnContext: safeTurnContext(), Hang: true})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	session := s.(*session)
+
+	for i := range maxRecorded + 10 {
+		session.refused(nil, fmt.Sprintf("item:call-%d", i), fmt.Sprintf("call-%d", i), "exec", driver.ToolExecute)
+	}
+	session.mu.Lock()
+	remembered := len(session.recorded)
+	session.mu.Unlock()
+	assert.Equal(t, maxRecorded, remembered, "a session remembers so many and no more, and remembered %d", remembered)
+	waitDone(t, s)
+}
+
+// Two tool call ids that begin alike are two refusals. What a session
+// remembers a refusal by is bounded, because the agent writes it — but
+// bounding it by cutting would make a prefix the identity, and every later
+// refusal sharing that start would be taken for a repeat and recorded
+// nowhere.
+func TestTwoIdsThatBeginAlikeAreTwoRefusals(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t, scenario{TurnContext: safeTurnContext(), Hang: true})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	session := s.(*session)
+	tr := &turn{done: make(chan struct{})}
+	session.mu.Lock()
+	session.turn = tr
+	session.mu.Unlock()
+
+	same := strings.Repeat("tool.call-", 4*maxToolCallID/10)
+	session.refused(tr, "item:"+same+"-one", same+"-one", "exec", driver.ToolExecute)
+	session.refused(tr, "item:"+same+"-two", same+"-two", "exec", driver.ToolExecute)
+	require.NoError(t, s.Close())
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	assert.Len(t, tr.refusals, 2, "two ids alike for longer than a session keeps are still two refusals")
+	assert.Len(t, recorder.Recorded(), 2, "and the ledger has both")
+}
+
+// The refusal that fills a session's memory is recorded like any other. The
+// session ends on it — past it a repeat cannot be told from a first — but it
+// ends after taking that refusal, not instead of it.
+func TestTheRefusalThatFillsTheMemoryIsStillRecorded(t *testing.T) {
+	recorder := &drivertest.Refusals{}
+	h := newHarness(t, scenario{TurnContext: safeTurnContext(), Hang: true})
+	cfg := h.config()
+	cfg.Refusals = recorder
+	s, err := h.drv.NewSession(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	session := s.(*session)
+
+	for i := range maxRecorded {
+		session.refused(nil, fmt.Sprintf("item:call-%d", i), fmt.Sprintf("call-%d", i), "exec", driver.ToolExecute)
+	}
+	require.NoError(t, s.Close())
+	assert.Len(t, recorder.Recorded(), maxRecorded,
+		"every refusal up to and including the one that filled the memory, and the ledger has %d", len(recorder.Recorded()))
+	waitDone(t, s)
 }
