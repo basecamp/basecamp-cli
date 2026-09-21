@@ -143,9 +143,10 @@ func (as *connectAS) calls(which *[]url.Values) []url.Values {
 }
 
 // connectionJSON is a successful poll: the agent's own client, its account,
-// and the scope the operator approved.
+// and the scope the operator approved. The account id is a bare number, as
+// bc3 renders an account's public id.
 func connectionJSON(scope string) string {
-	return fmt.Sprintf(`{"client_id":"agent-client","client_secret":%q,"account_id":"999","scope":%q}`, fakeAgentSecret, scope)
+	return fmt.Sprintf(`{"client_id":"agent-client","client_secret":%q,"account_id":999,"scope":%q}`, fakeAgentSecret, scope)
 }
 
 func oauthErrorJSON(code string) (int, string) {
@@ -486,6 +487,36 @@ func TestConnectAgentLetsTheStatusDecideBeforeTheBody(t *testing.T) {
 	_, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, clock))
 	require.NoError(t, err)
 	assert.Equal(t, []time.Duration{time.Second, 30 * time.Second}, clock.waits())
+}
+
+// TestConnectAgentTakesAQuotedAccountID: the contract calls account_id an
+// id and the server renders it as a number; a server spelling it as a
+// string is read the same way, and one naming something that is not a
+// number is refused rather than stored.
+func TestConnectAgentTakesAQuotedAccountID(t *testing.T) {
+	as := startConnectAS(t)
+	as.poll = func(int) (int, string) {
+		return http.StatusOK, fmt.Sprintf(`{"client_id":"agent-client","client_secret":%q,"account_id":"999","scope":"full"}`, fakeAgentSecret)
+	}
+	m := connectManager(t, as)
+
+	result, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, newTestClock()))
+	require.NoError(t, err)
+	assert.Equal(t, "999", result.AccountID)
+}
+
+func TestConnectAgentRefusesAnAccountIDThatIsNotANumber(t *testing.T) {
+	as := startConnectAS(t)
+	as.poll = func(int) (int, string) {
+		return http.StatusOK, fmt.Sprintf(`{"client_id":"agent-client","client_secret":%q,"account_id":"9.5e2","scope":"full"}`, fakeAgentSecret)
+	}
+	m := connectManager(t, as)
+
+	_, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, newTestClock()))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "account_id that is not a number")
+	assert.Empty(t, as.calls(&as.tokenForms), "nothing was minted for an account that cannot be named")
+	assertNoAgentCredential(t, m)
 }
 
 // TestConnectAgentRefusesAScopeItCannotStore: the CLI can represent read
