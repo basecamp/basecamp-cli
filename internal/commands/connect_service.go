@@ -343,7 +343,7 @@ func systemdQuote(s string, expandDollar bool) string {
 // relative path beginning with a quote, which systemd ignores, and \x20 is
 // four literal characters. Spaces need nothing. Specifiers are still
 // expanded, so % is doubled. A line break cannot be written at all, and
-// connectServiceEnvFile refuses a path that holds one.
+// connectServiceEnvFile refuses a path that holds one, or a glob character.
 func systemdPath(s string) string {
 	return strings.ReplaceAll(s, "%", "%%")
 }
@@ -428,9 +428,12 @@ func connectServiceEnvFile(profile string) (string, error) {
 			fmt.Sprintf("%s is not an absolute path, and systemd ignores a relative environment file", richtext.SanitizeSingleLine(envFile)),
 			"Set XDG_CONFIG_HOME to an absolute path in this shell, or unset it, then install again. No unit was written.")
 	}
-	if strings.ContainsAny(envFile, "\n\r\x00") {
+	// systemd also reads the path as a glob, so * ? [ and \ would name
+	// other files or none; refused rather than escaped, as no real config
+	// directory needs them.
+	if strings.ContainsAny(envFile, "\n\r\x00*?[\\") {
 		return "", output.ErrUsageHint(
-			fmt.Sprintf("%s holds a newline or a null byte, which cannot go into a unit file", richtext.SanitizeSingleLine(envFile)),
+			fmt.Sprintf("%s holds a line break, a null byte, or one of * ? [ \\, which an EnvironmentFile= line cannot carry", richtext.SanitizeSingleLine(envFile)),
 			"Fix XDG_CONFIG_HOME in this shell, then install again. No unit was written.")
 	}
 	return envFile, nil

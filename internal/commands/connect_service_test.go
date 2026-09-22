@@ -406,14 +406,17 @@ func TestConnectServiceUnitWritesTheEnvironmentFileAsABarePath(t *testing.T) {
 	}
 }
 
-// The environment file's line has no escape for a line break, so a config
-// directory holding one is refused rather than written as two directives.
-func TestConnectServiceEnvFileRefusesALineBreak(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir()+"/a\nb")
+// The environment file's line has no escape for a line break, and systemd
+// reads it as a glob, so a config directory holding either kind of
+// character is refused rather than written as two directives or a pattern.
+func TestConnectServiceEnvFileRefusesWhatTheLineCannotCarry(t *testing.T) {
+	for _, dir := range []string{"a\nb", "a*b", "a?b", "a[b]", `a\b`} {
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir()+"/"+dir)
 
-	_, err := connectServiceEnvFile("agent")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "newline")
+		_, err := connectServiceEnvFile("agent")
+		require.Error(t, err, dir)
+		assert.Contains(t, err.Error(), "cannot carry", dir)
+	}
 }
 
 // systemd ignores a relative EnvironmentFile=, and a relative
