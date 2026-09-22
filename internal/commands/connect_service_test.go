@@ -392,6 +392,49 @@ func TestConnectServiceUnitSurvivesAPathSystemdWouldRewrite(t *testing.T) {
 		"Environment expands %% but takes $ literally, so doubling it there would corrupt the value")
 }
 
+// EnvironmentFile= takes the rest of the line as one path, with no
+// unquoting and no C escapes, so a quoted path is a relative one and systemd
+// ignores it: "EnvironmentFile= path is not absolute, ignoring". A space
+// needs nothing; a percent is still a specifier and is doubled.
+func TestConnectServiceUnitWritesTheEnvironmentFileAsABarePath(t *testing.T) {
+	for _, tc := range []struct{ path, want string }{
+		{"/home/agent/.config/basecamp/connect/agent/service.env", "EnvironmentFile=-/home/agent/.config/basecamp/connect/agent/service.env"},
+		{"/home/a b/50%off/service.env", "EnvironmentFile=-/home/a b/50%%off/service.env"},
+	} {
+		unit := connectServiceUnit("/usr/bin/basecamp", "agent", nil, false, false, nil, tc.path)
+		assert.Contains(t, strings.Split(unit, "\n"), tc.want, "unit:\n%s", unit)
+	}
+}
+
+// The environment file's line has no escape for a line break, so a config
+// directory holding one is refused rather than written as two directives.
+func TestConnectServiceEnvFileRefusesALineBreak(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()+"/a\nb")
+
+	_, err := connectServiceEnvFile("agent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "newline")
+}
+
+// A binary inside a version manager's install directory is deleted by the
+// upgrade that replaces it, and the unit then fails to start.
+func TestConnectServiceWarnsWhenTheUnitRunsAVersionedBinary(t *testing.T) {
+	for _, exe := range []string{
+		"/home/agent/.local/share/mise/installs/go/1.25.1/bin/basecamp",
+		"/home/agent/.asdf/installs/golang/1.25.1/packages/bin/basecamp",
+		"/nix/store/abc123-basecamp-0.9.0/bin/basecamp",
+	} {
+		assert.Contains(t, connectServiceExecutableWarning(exe), "version manager", exe)
+	}
+	for _, exe := range []string{
+		"/usr/bin/basecamp",
+		"/home/agent/.local/share/mise/shims/basecamp",
+		"/home/agent/go/bin/basecamp",
+	} {
+		assert.Empty(t, connectServiceExecutableWarning(exe), exe)
+	}
+}
+
 // A control character in a path must not end the directive and begin
 // another.
 func TestConnectServiceUnitEscapesControlCharacters(t *testing.T) {
