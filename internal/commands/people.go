@@ -24,8 +24,10 @@ import (
 
 // MeOutput represents the output for the me command
 type MeOutput struct {
-	Identity basecamp.Identity `json:"identity"`
-	Accounts []AccountInfo     `json:"accounts"`
+	// Identity is omitted for an agent profile: an agent has no identity,
+	// only a person in the one account its credential is bound to.
+	Identity *basecamp.Identity `json:"identity,omitempty"`
+	Accounts []AccountInfo      `json:"accounts"`
 	// Person is the account-scoped person record, looked up when the
 	// authorization document names no one (an in-house bc3 token reports
 	// only the identity id) and an account is configured to ask.
@@ -68,6 +70,14 @@ func runMe(cmd *cobra.Command, args []string) error {
 	}
 	if !authenticated {
 		return output.ErrAuth("Not authenticated. Run: basecamp auth login")
+	}
+
+	// An agent's self-token has no identity behind it, so the authorization
+	// document refuses it; the agent's person record is where it is named.
+	// BASECAMP_TOKEN is sent ahead of any stored credential, so the stored
+	// type says nothing about it.
+	if os.Getenv("BASECAMP_TOKEN") == "" && app.Auth.GetOAuthType() == "agent" {
+		return runMeAgent(cmd, app)
 	}
 
 	endpoint, err := app.Auth.AuthorizationEndpoint(cmd.Context())
@@ -137,7 +147,7 @@ func runMe(cmd *cobra.Command, args []string) error {
 	}
 
 	result := MeOutput{
-		Identity: authInfo.Identity,
+		Identity: &authInfo.Identity,
 		Accounts: accounts,
 		Person:   person,
 	}
@@ -172,6 +182,41 @@ func runMe(cmd *cobra.Command, args []string) error {
 	return app.OK(result,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
+	)
+}
+
+// runMeAgent shows the agent an agent profile authenticates as: its person
+// record in the account its credential is bound to, which is the only
+// account it can reach.
+func runMeAgent(cmd *cobra.Command, app *appctx.App) error {
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+	p, err := app.Account().People().Me(cmd.Context())
+	if err != nil {
+		return convertSDKError(err)
+	}
+	accountID, err := strconv.ParseInt(app.Config.AccountID, 10, 64)
+	if err != nil {
+		return output.ErrUsage(fmt.Sprintf("Invalid account ID %q", app.Config.AccountID))
+	}
+
+	result := MeOutput{
+		Accounts: []AccountInfo{{ID: accountID, Current: true}},
+		Person:   &MePerson{ID: p.ID, Name: p.Name, Email: p.EmailAddress},
+	}
+	label := meLabel(0, p.Name, p.EmailAddress)
+	if p.Name == "" && p.EmailAddress == "" {
+		label = fmt.Sprintf("person %d", p.ID)
+	}
+	summary := fmt.Sprintf("%s - agent in Basecamp account %d", label, accountID)
+
+	return app.OK(result,
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{Action: "projects", Cmd: "basecamp projects list", Description: "List your projects"},
+			output.Breadcrumb{Action: "auth", Cmd: "basecamp auth status", Description: "Auth status"},
+		),
 	)
 }
 

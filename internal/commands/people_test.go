@@ -1341,3 +1341,64 @@ func TestMeKeepsTheIdentityEmailOverThePersons(t *testing.T) {
 	assert.Equal(t, "51177542", creds.UserID)
 	assert.Equal(t, "identity@example.com", creds.UserEmail, "the merged email is what gets stored")
 }
+
+// TestMeOnAnAgentProfileReadsTheAgentsPerson: an agent's self-token has no
+// identity behind it, so /authorization.json refuses it. `me` names the
+// agent from its person record in the account it is bound to instead, and
+// never asks the authorization document.
+func TestMeOnAnAgentProfileReadsTheAgentsPerson(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/555/my/profile.json":
+			json.NewEncoder(w).Encode(map[string]any{"id": 777, "name": "Triage Bot", "email_address": "bot@example.com"})
+		default:
+			// What /authorization.json answers an agent self-token.
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	t.Setenv("BASECAMP_TOKEN", "")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{AccountID: "555", BaseURL: server.URL, CacheDir: t.TempDir()}
+	authMgr := auth.NewManager(cfg, nil)
+	authMgr.SetStore(auth.NewStore(filepath.Join(tmpDir, "basecamp")))
+	require.NoError(t, authMgr.GetStore().Save(config.NormalizeBaseURL(server.URL), &auth.Credentials{
+		AccessToken:   "bc_at_agent",
+		OAuthType:     "agent",
+		ClientID:      "agent-client",
+		ClientSecret:  "agent-secret",
+		TokenEndpoint: server.URL + "/oauth/tokens",
+		ExpiresAt:     9999999999,
+	}))
+
+	buf := &bytes.Buffer{}
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: server.URL}, &peopleTestTokenProvider{}, basecamp.WithMaxRetries(1))
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{Format: output.FormatJSON, Writer: buf}),
+		Flags:  appctx.GlobalFlags{Hints: true},
+	}
+
+	require.NoError(t, executePeopleCommand(NewMeCmd(), app))
+	assert.Equal(t, []string{"/555/my/profile.json"}, paths)
+
+	var envelope struct {
+		Summary string                     `json:"summary"`
+		Data    map[string]json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, "Triage Bot <bot@example.com> - agent in Basecamp account 555", envelope.Summary)
+	assert.NotContains(t, envelope.Data, "identity", "an agent has no identity to report")
+	assert.JSONEq(t, `{"id":777,"name":"Triage Bot","email":"bot@example.com"}`, string(envelope.Data["person"]))
+	assert.JSONEq(t, `[{"id":555,"name":"","href":"","app_href":"","current":true}]`, string(envelope.Data["accounts"]))
+}
