@@ -261,7 +261,7 @@ func connectServiceUnit(exe, profile string, projects []int64, shadow, hold bool
 	// makes it optional, so the ordinary case has no file at all; install
 	// never writes it, because install would be writing a secret.
 	if envFile != "" {
-		fmt.Fprintf(&b, "EnvironmentFile=-%s\n", systemdQuote(envFile, false))
+		fmt.Fprintf(&b, "EnvironmentFile=-%s\n", systemdPath(envFile))
 	}
 	fmt.Fprintf(&b, "ExecStart=%s\n", systemdExecLine(exe, args))
 	fmt.Fprintf(&b, "Restart=always\n")
@@ -333,6 +333,19 @@ func systemdQuote(s string, expandDollar bool) string {
 	}
 	b.WriteByte('"')
 	return b.String()
+}
+
+// systemdPath writes a path for a directive that takes the rest of the
+// line as one path, such as EnvironmentFile=.
+//
+// Unlike ExecStart= and Environment=, these are not split into words, so
+// systemd neither removes quotes nor decodes C escapes: a quoted path is a
+// relative path beginning with a quote, which systemd ignores, and \x20 is
+// four literal characters. Spaces need nothing. Specifiers are still
+// expanded, so % is doubled. A line break cannot be written at all, and
+// connectServiceEnvFile refuses a path that holds one, or a glob character.
+func systemdPath(s string) string {
+	return strings.ReplaceAll(s, "%", "%%")
 }
 
 // connectServiceEnvKeys are the variables the unit pins. A systemd user
@@ -407,7 +420,23 @@ func connectServiceEnvFile(profile string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(filepath.Dir(path), "service.env"), nil
+	envFile := filepath.Join(filepath.Dir(path), "service.env")
+	// systemd ignores a relative EnvironmentFile=, and GlobalConfigDir keeps
+	// a relative XDG_CONFIG_HOME as it is.
+	if !filepath.IsAbs(envFile) {
+		return "", output.ErrUsageHint(
+			fmt.Sprintf("%s is not an absolute path, and systemd ignores a relative environment file", richtext.SanitizeSingleLine(envFile)),
+			"Set XDG_CONFIG_HOME to an absolute path in this shell, or unset it, then install again. No unit was written.")
+	}
+	// systemd also reads the path as a glob, so * ? [ and \ would name
+	// other files or none; refused rather than escaped, as no real config
+	// directory needs them.
+	if strings.ContainsAny(envFile, "\n\r\x00*?[\\") {
+		return "", output.ErrUsageHint(
+			fmt.Sprintf("%s holds a line break, a null byte, or one of * ? [ \\, which an EnvironmentFile= line cannot carry", richtext.SanitizeSingleLine(envFile)),
+			"Fix XDG_CONFIG_HOME in this shell, then install again. No unit was written.")
+	}
+	return envFile, nil
 }
 
 // connectServiceEnv is the environment to pin, in unit form.
@@ -454,6 +483,26 @@ func connectServiceExecutable() (string, error) {
 		return "", fmt.Errorf("cannot find this program's own path, which the unit has to name: %w", err)
 	}
 	return exe, nil
+}
+
+// connectServiceVersionedDirs are path fragments that mark a directory a
+// version manager removes when that version is uninstalled or upgraded
+// away. A shim is stable and PATH usually finds one, but a shell that has
+// the versioned bin directory on PATH itself — mise activate, a Go binary
+// installed with mise's Go — makes that the path the unit runs.
+var connectServiceVersionedDirs = []string{"/mise/installs/", "/.asdf/installs/", "/nix/store/"}
+
+// connectServiceExecutableWarning says when the unit runs a binary that an
+// upgrade will delete: the service keeps running until its next restart,
+// then fails to start at all, which is a failure a long way from its cause.
+func connectServiceExecutableWarning(exe string) string {
+	for _, dir := range connectServiceVersionedDirs {
+		if strings.Contains(exe, dir) {
+			return "The unit runs " + richtext.SanitizeSingleLine(exe) + ", which is inside a version manager's install directory and goes away when that version does. " +
+				"Install the service again after upgrading, or run install from a basecamp on a path that does not change"
+		}
+	}
+	return ""
 }
 
 func runConnectServiceInstall(cmd *cobra.Command, f *connectServiceFlags) error {
@@ -526,6 +575,9 @@ func runConnectServiceInstall(cmd *cobra.Command, f *connectServiceFlags) error 
 		if warning := connectServiceLingerWarning(cmd.Context()); warning != "" {
 			summary += ". " + warning
 		}
+	}
+	if warning := connectServiceExecutableWarning(exe); warning != "" {
+		summary += ". " + warning
 	}
 	if missing := connectServiceMissingCredentials(); len(missing) > 0 {
 		summary += fmt.Sprintf(". %s %s set here and will not be in the service, which never carries a credential: put %s in %s (owner-only) and the unit will read it",
