@@ -334,6 +334,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewUnassignCmd())
 	cmd.AddCommand(commands.NewMessagesCmd())
 	cmd.AddCommand(commands.NewCardsCmd())
+	cmd.AddCommand(commands.NewCardTablesCmd())
 	cmd.AddCommand(commands.NewURLCmd())
 	cmd.AddCommand(commands.NewSearchCmd())
 	cmd.AddCommand(commands.NewRecordingsCmd())

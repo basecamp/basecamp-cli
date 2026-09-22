@@ -65,10 +65,10 @@ func decodeTemplateEnvelope(t *testing.T, buf *bytes.Buffer) struct {
 	return envelope
 }
 
-func TestTemplatesLibraryUsesSDKLibraryEndpoint(t *testing.T) {
+func TestTemplatesLibraryUsesCanonicalTodolistsEndpoint(t *testing.T) {
 	app, transport := setupRecordingTestApp(t, stubRoute{
 		method: http.MethodGet,
-		path:   "/99999/template_library.json",
+		path:   "/99999/template_library/todolists.json",
 		status: http.StatusOK,
 		body:   templateLibraryJSON,
 	})
@@ -76,39 +76,38 @@ func TestTemplatesLibraryUsesSDKLibraryEndpoint(t *testing.T) {
 	app.Config.ActiveProfile = "work profile"
 	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "library")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "list")
 	require.NoError(t, err)
 
 	request := transport.last(t)
 	assert.Equal(t, http.MethodGet, request.Method)
-	assert.Equal(t, "/99999/template_library.json", request.Path)
+	assert.Equal(t, "/99999/template_library/todolists.json", request.Path)
 	envelope := decodeTemplateEnvelope(t, buf)
 	assert.Equal(t, "1 active to-do list templates", envelope.Summary)
 	require.Len(t, envelope.Breadcrumbs, 1)
-	assert.Equal(t, "basecamp templates copy <template-id> --in <project> --profile 'work profile' --account 99999", envelope.Breadcrumbs[0].Cmd)
+	assert.Equal(t, "basecamp templates todolists duplicate <template-id> --in <project> --profile 'work profile' --account 99999", envelope.Breadcrumbs[0].Cmd)
 }
 
 func TestTemplatesLibraryHumanOutputShowsCopyableID(t *testing.T) {
 	app, _ := setupRecordingTestApp(t, stubRoute{
 		method: http.MethodGet,
-		path:   "/99999/template_library.json",
+		path:   "/99999/template_library/todolists.json",
 		status: http.StatusOK,
 		body:   templateLibraryJSON,
 	})
 	buf := &bytes.Buffer{}
 	app.Output = output.New(output.Options{Format: output.FormatStyled, Writer: buf})
 
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "library")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "list")
 	require.NoError(t, err)
 
 	assert.Contains(t, buf.String(), "Project kickoff")
 	assert.Contains(t, buf.String(), "3")
 }
 
-func TestTemplatesCopyResolvesProjectAndTodosTool(t *testing.T) {
+func TestTemplatesCopyNamesTheProjectAndLetsBasecampPickTheContainer(t *testing.T) {
 	app, transport := setupRecordingTestApp(t,
 		projectsRoute(),
-		templateCopyProjectRoute(),
 		stubRoute{
 			method: http.MethodPost,
 			path:   "/99999/template_library/copies.json",
@@ -120,21 +119,20 @@ func TestTemplatesCopyResolvesProjectAndTodosTool(t *testing.T) {
 	app.Config.ActiveProfile = "work profile"
 	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "copy", "3", "--in", "Test Project")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "duplicate", "3", "--in", "Test Project")
 	require.NoError(t, err)
 
 	requests := transport.recorded()
-	require.Len(t, requests, 3)
+	require.Len(t, requests, 2, "no container lookup: Basecamp resolves it from the project")
 	assert.Equal(t, "/99999/projects.json", requests[0].Path)
-	assert.Equal(t, "/99999/projects/123.json", requests[1].Path)
-	assert.Equal(t, http.MethodPost, requests[2].Method)
-	assert.Equal(t, "/99999/template_library/copies.json", requests[2].Path)
-	assert.JSONEq(t, `{"template_recording_id":3,"destination_parent_id":9}`, requests[2].Body)
+	assert.Equal(t, http.MethodPost, requests[1].Method)
+	assert.Equal(t, "/99999/template_library/copies.json", requests[1].Path)
+	assert.JSONEq(t, `{"template_recording_id":3,"destination_project_id":123}`, requests[1].Body)
 
 	envelope := decodeTemplateEnvelope(t, buf)
-	assert.Equal(t, "Started template copy #5 (pending)", envelope.Summary)
+	assert.Equal(t, "Started template duplication #5 (pending)", envelope.Summary)
 	require.Len(t, envelope.Breadcrumbs, 1)
-	assert.Equal(t, "basecamp templates copy-status 5 --profile 'work profile' --account 99999", envelope.Breadcrumbs[0].Cmd)
+	assert.Equal(t, "basecamp templates todolists duplication 5 --profile 'work profile' --account 99999", envelope.Breadcrumbs[0].Cmd)
 }
 
 func TestTemplatesCopySendsExplicitPeopleConfirmation(t *testing.T) {
@@ -151,7 +149,7 @@ func TestTemplatesCopySendsExplicitPeopleConfirmation(t *testing.T) {
 	)
 
 	err := executeRecordingCommand(NewTemplatesCmd(), app,
-		"copy", "3", "--project", "123", "--todoset", "9", "--confirm-adding-people")
+		"todolists", "duplicate", "3", "--project", "123", "--todoset", "9", "--confirm-adding-people")
 	require.NoError(t, err)
 
 	requests := transport.recorded()
@@ -169,7 +167,7 @@ func TestTemplatesCopyRejectsTodosetFromAnotherProject(t *testing.T) {
 	app, transport := setupRecordingTestApp(t, projectsRoute(), templateCopyTodosetRoute(456))
 
 	err := executeRecordingCommand(NewTemplatesCmd(), app,
-		"copy", "3", "--project", "123", "--todoset", "9")
+		"todolists", "duplicate", "3", "--project", "123", "--todoset", "9")
 	require.Error(t, err)
 
 	var outputErr *output.Error
@@ -191,7 +189,7 @@ func TestTemplatesCopyRejectsDisabledTodoset(t *testing.T) {
 	)
 
 	err := executeRecordingCommand(NewTemplatesCmd(), app,
-		"copy", "3", "--project", "123", "--todoset", "9")
+		"todolists", "duplicate", "3", "--project", "123", "--todoset", "9")
 	require.Error(t, err)
 
 	var outputErr *output.Error
@@ -215,7 +213,7 @@ func TestTemplatesCopyExplainsPeopleConfirmation(t *testing.T) {
 	app.Config.ActiveProfile = "work profile; echo unsafe"
 	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "copy", "3", "--in", "123")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "duplicate", "3", "--in", "123")
 	require.Error(t, err)
 
 	var outputErr *output.Error
@@ -223,7 +221,7 @@ func TestTemplatesCopyExplainsPeopleConfirmation(t *testing.T) {
 	assert.Equal(t, output.CodeValidation, outputErr.Code)
 	assert.Contains(t, outputErr.Message, "Victor (#4)")
 	assert.Contains(t, outputErr.Message, "Georgia (#7)")
-	assert.Contains(t, outputErr.Hint, "basecamp templates copy 3 --in 123 --todoset 9 --profile 'work profile; echo unsafe' --account 99999 --confirm-adding-people")
+	assert.Contains(t, outputErr.Hint, "basecamp templates todolists duplicate 3 --in 123 --profile 'work profile; echo unsafe' --account 99999 --confirm-adding-people")
 
 	var confirmationErr *basecamp.PeopleConfirmationRequiredError
 	assert.True(t, errors.As(err, &confirmationErr), "typed SDK error should remain available")
@@ -241,7 +239,7 @@ func TestTemplatesConstructSendsStartDateUnderProjectEnvelope(t *testing.T) {
 	buf := captureTemplateOutput(app)
 
 	err := executeRecordingCommand(NewTemplatesCmd(), app,
-		"construct", "2085958507", "--name", "Marketing Campaign",
+		"projects", "construct", "2085958507", "--name", "Marketing Campaign",
 		"--description", "For Client: Xyz Corp Conference", "--start-date", "2026-09-01")
 	require.NoError(t, err)
 
@@ -256,7 +254,7 @@ func TestTemplatesConstructSendsStartDateUnderProjectEnvelope(t *testing.T) {
 	envelope := decodeTemplateEnvelope(t, buf)
 	assert.Equal(t, "Started project construction #598194962 (pending)", envelope.Summary)
 	require.Len(t, envelope.Breadcrumbs, 1)
-	assert.Equal(t, "basecamp templates construction 2085958507 598194962", envelope.Breadcrumbs[0].Cmd)
+	assert.Equal(t, "basecamp templates projects construction 2085958507 598194962", envelope.Breadcrumbs[0].Cmd)
 }
 
 func TestTemplatesConstructOmitsStartDateWhenUnset(t *testing.T) {
@@ -270,7 +268,7 @@ func TestTemplatesConstructOmitsStartDateWhenUnset(t *testing.T) {
 	)
 	captureTemplateOutput(app)
 
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "construct", "2085958507", "--name", "Marketing Campaign")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "projects", "construct", "2085958507", "--name", "Marketing Campaign")
 	require.NoError(t, err)
 
 	requests := transport.recorded()
@@ -290,7 +288,7 @@ func TestTemplatesConstructParsesNaturalStartDate(t *testing.T) {
 	captureTemplateOutput(app)
 
 	before := time.Now()
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "tomorrow")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "projects", "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "tomorrow")
 	after := time.Now()
 	require.NoError(t, err)
 
@@ -310,7 +308,7 @@ func TestTemplatesConstructRejectsBlankStartDate(t *testing.T) {
 	app, transport := setupRecordingTestApp(t)
 	captureTemplateOutput(app)
 
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "projects", "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "")
 	outErr := requireUsageErr(t, err)
 	assert.Contains(t, outErr.Message, "Invalid start date")
 	assert.Empty(t, transport.recorded())
@@ -320,7 +318,7 @@ func TestTemplatesConstructRejectsMalformedStartDateBeforeAnyRequest(t *testing.
 	app, transport := setupRecordingTestApp(t)
 	captureTemplateOutput(app)
 
-	err := executeRecordingCommand(NewTemplatesCmd(), app, "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "someday")
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "projects", "construct", "2085958507", "--name", "Marketing Campaign", "--start-date", "someday")
 	outErr := requireUsageErr(t, err)
 	assert.Contains(t, outErr.Message, "Invalid start date")
 	assert.Empty(t, transport.recorded())
@@ -338,10 +336,10 @@ func TestTemplatesCopyStatusStates(t *testing.T) {
 		summary    string
 		breadcrumb string
 	}{
-		{name: "pending", body: templateCopyPendingJSON, summary: "Template copy #5 is pending", breadcrumb: "basecamp templates copy-status 5"},
-		{name: "processing", body: `{"id":5,"status":"processing","source_recording_id":3,"destination_parent_id":9,"url":"https://example.test/copies/5.json"}`, summary: "Template copy #5 is processing", breadcrumb: "basecamp templates copy-status 5"},
-		{name: "completed", body: completed, summary: "Template copy complete: Project kickoff (to-do list #10)", breadcrumb: "basecamp todolists show 10 --in 123"},
-		{name: "failed", body: `{"id":5,"status":"failed","source_recording_id":3,"destination_parent_id":9,"url":"https://example.test/copies/5.json"}`, summary: "Template copy #5 failed", breadcrumb: "basecamp templates library"},
+		{name: "pending", body: templateCopyPendingJSON, summary: "Template duplication #5 is pending", breadcrumb: "basecamp templates todolists duplication 5"},
+		{name: "processing", body: `{"id":5,"status":"processing","source_recording_id":3,"destination_parent_id":9,"url":"https://example.test/copies/5.json"}`, summary: "Template duplication #5 is processing", breadcrumb: "basecamp templates todolists duplication 5"},
+		{name: "completed", body: completed, summary: "Template duplication complete: Project kickoff (to-do list #10)", breadcrumb: "basecamp todolists show 10 --in 123"},
+		{name: "failed", body: `{"id":5,"status":"failed","source_recording_id":3,"destination_parent_id":9,"url":"https://example.test/copies/5.json"}`, summary: "Template duplication #5 failed", breadcrumb: "basecamp templates todolists list"},
 	}
 
 	for _, test := range tests {
@@ -356,7 +354,7 @@ func TestTemplatesCopyStatusStates(t *testing.T) {
 			app.Config.ActiveProfile = "work profile"
 			app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
-			err := executeRecordingCommand(NewTemplatesCmd(), app, "copy-status", "5")
+			err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "duplication", "5")
 			require.NoError(t, err)
 
 			request := transport.last(t)
@@ -368,4 +366,246 @@ func TestTemplatesCopyStatusStates(t *testing.T) {
 			assert.Equal(t, test.breadcrumb+" --profile 'work profile' --account 99999", envelope.Breadcrumbs[0].Cmd)
 		})
 	}
+}
+
+func TestTemplatesCardTablesListUsesCardTablesEndpoint(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, stubRoute{
+		method: http.MethodGet,
+		path:   "/99999/template_library/card_tables.json",
+		status: http.StatusOK,
+		body:   `{"bucket":{"id":1,"name":"Templates","type":"TemplateLibrary"},"kanban_boardset":{"id":8,"title":"Boards","type":"Kanban::Boardset","url":"https://example.test/boardset.json","app_url":"https://example.test/boardset"},"card_tables":[{"id":12,"title":"Launch board","type":"Kanban::Board"}]}`,
+	})
+	buf := captureTemplateOutput(app)
+	app.Config.ActiveProfile = "work profile"
+	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "card-tables", "list")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/99999/template_library/card_tables.json", transport.last(t).Path)
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "1 active card table templates", envelope.Summary)
+	require.Len(t, envelope.Breadcrumbs, 1)
+	assert.Equal(t, "basecamp templates card-tables duplicate <template-id> --in <project> --profile 'work profile' --account 99999", envelope.Breadcrumbs[0].Cmd)
+}
+
+func TestTemplatesCardTablesDuplicateNamesTheProject(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{
+			method: http.MethodPost,
+			path:   "/99999/template_library/copies.json",
+			status: http.StatusCreated,
+			body:   templateCopyPendingJSON,
+		},
+	)
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "card-tables", "duplicate", "3", "--in", "Test Project")
+	require.NoError(t, err)
+
+	requests := transport.recorded()
+	post := requests[len(requests)-1]
+	assert.Equal(t, "/99999/template_library/copies.json", post.Path)
+	assert.JSONEq(t, `{"template_recording_id":3,"destination_project_id":123}`, post.Body)
+
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "Started template duplication #5 (pending)", envelope.Summary)
+	require.Len(t, envelope.Breadcrumbs, 1)
+	assert.Equal(t, "basecamp templates card-tables duplication 5", envelope.Breadcrumbs[0].Cmd)
+}
+
+func TestTemplatesCardTablesDuplicateHasNoTodosetFlag(t *testing.T) {
+	cmd, _, err := NewTemplatesCmd().Find([]string{"card-tables", "duplicate"})
+	require.NoError(t, err)
+	assert.Nil(t, cmd.Flags().Lookup("todoset"), "a project has one dock, so there is nothing to pin")
+	assert.NotNil(t, cmd.Flags().Lookup("in"))
+}
+
+func TestTemplatifySendsEmptyBodyWithoutFlags(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{
+			method: http.MethodPost,
+			path:   "/99999/buckets/123/recordings/55/templatifications.json",
+			status: http.StatusCreated,
+			body:   `{"id":9,"status":"pending","source_recording_id":55,"url":"https://example.test/t/9.json"}`,
+		},
+	)
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTodolistsCmd(), app, "templatify", "55", "--in", "123")
+	require.NoError(t, err)
+
+	post := transport.recorded()[len(transport.recorded())-1]
+	assert.JSONEq(t, `{}`, post.Body, "every attribute defaults server-side, so no flags means no body")
+
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "Started saving to-do list #55 as a template (pending)", envelope.Summary)
+}
+
+func TestTemplatifyOffersTriageOnlyForCardTables(t *testing.T) {
+	todolist, _, err := NewTodolistsCmd().Find([]string{"templatify"})
+	require.NoError(t, err)
+	assert.Nil(t, todolist.Flags().Lookup("move-cards-to-triage"), "bc3 never reads it for a to-do list")
+
+	cardTable, _, err := NewCardTablesCmd().Find([]string{"templatify"})
+	require.NoError(t, err)
+	assert.NotNil(t, cardTable.Flags().Lookup("move-cards-to-triage"))
+}
+
+func TestTemplatificationReportsTheTemplateItMade(t *testing.T) {
+	app, _ := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{
+			method: http.MethodGet,
+			path:   "/99999/buckets/123/recordings/55/templatifications/9",
+			status: http.StatusOK,
+			body:   `{"id":9,"status":"completed","source_recording_id":55,"url":"https://example.test/t/9.json","destination_todolist":{"id":70,"name":"Client onboarding","title":"Client onboarding","bucket":{"id":1,"name":"Templates","type":"TemplateLibrary"}}}`,
+		},
+	)
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTodolistsCmd(), app, "templatification", "55", "9", "--in", "123")
+	require.NoError(t, err)
+
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "Saved as template: Client onboarding (to-do list template #70)", envelope.Summary)
+	require.Len(t, envelope.Breadcrumbs, 1)
+	assert.Equal(t, "basecamp templates todolists list", envelope.Breadcrumbs[0].Cmd)
+}
+
+func TestTemplatesTodolistsCreateSendsNameAndDescription(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, stubRoute{
+		method: http.MethodPost,
+		path:   "/99999/template_library/todolists.json",
+		status: http.StatusCreated,
+		body:   `{"id":71,"name":"New hire setup","title":"New hire setup"}`,
+	})
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "create", "New hire setup", "--description", "Day one")
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{"name":"New hire setup","description":"Day one"}`, transport.last(t).Body)
+	assert.Equal(t, "Created to-do list template #71: New hire setup", decodeTemplateEnvelope(t, buf).Summary)
+}
+
+func TestCardTablesTemplatifySendsMoveCardsToTriage(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{
+			method: http.MethodPost,
+			path:   "/99999/buckets/123/recordings/55/templatifications.json",
+			status: http.StatusCreated,
+			body:   `{"id":9,"status":"pending","source_recording_id":55,"url":"https://example.test/t/9.json"}`,
+		},
+	)
+
+	err := executeRecordingCommand(NewCardTablesCmd(), app,
+		"templatify", "55", "--in", "123", "--move-cards-to-triage")
+	require.NoError(t, err)
+
+	post := transport.recorded()[len(transport.recorded())-1]
+	assert.JSONEq(t, `{"move_cards_to_triage":true}`, post.Body)
+}
+
+func TestCardTablesTemplatifyOmitsFlagsLeftUnset(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{
+			method: http.MethodPost,
+			path:   "/99999/buckets/123/recordings/55/templatifications.json",
+			status: http.StatusCreated,
+			body:   `{"id":9,"status":"pending","source_recording_id":55,"url":"https://example.test/t/9.json"}`,
+		},
+	)
+
+	err := executeRecordingCommand(NewCardTablesCmd(), app, "templatify", "55", "--in", "123")
+	require.NoError(t, err)
+
+	post := transport.recorded()[len(transport.recorded())-1]
+	assert.JSONEq(t, `{}`, post.Body, "an unset flag stays off the wire so the server default applies")
+}
+
+func TestCardTablesTemplatificationReportsTheBoardItMade(t *testing.T) {
+	app, _ := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{
+			method: http.MethodGet,
+			path:   "/99999/buckets/123/recordings/55/templatifications/9",
+			status: http.StatusOK,
+			body:   `{"id":9,"status":"completed","source_recording_id":55,"url":"https://example.test/t/9.json","destination_card_table":{"id":70,"title":"Launch board","type":"Kanban::Board"}}`,
+		},
+	)
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewCardTablesCmd(), app, "templatification", "55", "9", "--in", "123")
+	require.NoError(t, err)
+
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "Saved as template: Launch board (card table template #70)", envelope.Summary,
+		"a nil destination would fall through to the generic completion line")
+	require.Len(t, envelope.Breadcrumbs, 1)
+	assert.Equal(t, "basecamp templates card-tables list", envelope.Breadcrumbs[0].Cmd)
+}
+
+func templateStatusRoute(status string) stubRoute {
+	return stubRoute{
+		method: http.MethodPut,
+		path:   fmt.Sprintf("/99999/recordings/3/status/%s.json", status),
+		status: http.StatusNoContent,
+	}
+}
+
+func TestTemplatesCardTablesArchiveGoesThroughTheRecordingsEndpoint(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, templateStatusRoute("archived"))
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "card-tables", "archive", "3")
+	require.NoError(t, err)
+
+	request := transport.last(t)
+	assert.Equal(t, http.MethodPut, request.Method)
+	assert.Equal(t, "/99999/recordings/3/status/archived.json", request.Path,
+		"the project-template routes serve project templates only and 404 for a library template")
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "Archived card table template #3", envelope.Summary)
+	require.Len(t, envelope.Breadcrumbs, 2)
+	assert.Equal(t, "basecamp templates card-tables restore 3", envelope.Breadcrumbs[1].Cmd)
+}
+
+func TestTemplatesTodolistsTrashGoesThroughTheRecordingsEndpoint(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, templateStatusRoute("trashed"))
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "trash", "3")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/99999/recordings/3/status/trashed.json", transport.last(t).Path)
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "Trashed to-do list template #3", envelope.Summary)
+	assert.Equal(t, "basecamp templates todolists restore 3", envelope.Breadcrumbs[1].Cmd)
+}
+
+func TestTemplatesRestorePointsBackAtDuplicating(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, templateStatusRoute("active"))
+	buf := captureTemplateOutput(app)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "todolists", "restore", "3")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/99999/recordings/3/status/active.json", transport.last(t).Path)
+	envelope := decodeTemplateEnvelope(t, buf)
+	assert.Equal(t, "Restored to-do list template #3", envelope.Summary)
+	assert.Equal(t, "basecamp templates todolists duplicate 3 --in <project>", envelope.Breadcrumbs[1].Cmd)
+}
+
+func TestTemplatesArchiveRejectsANonNumericID(t *testing.T) {
+	app, transport := setupRecordingTestApp(t)
+
+	err := executeRecordingCommand(NewTemplatesCmd(), app, "card-tables", "archive", "kickoff")
+	require.Error(t, err)
+
+	assert.Empty(t, transport.recorded(), "a bad ID is caught before any request goes out")
 }
