@@ -34,7 +34,9 @@ func setupAgentProbeApp(t *testing.T) (*appctx.App, *bytes.Buffer, func() []stri
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
-		if r.URL.Path == "/555/my/profile.json" {
+		// Only the agent's own token is answered, so a probe that sent
+		// some other credential fails the same way a refused one would.
+		if r.URL.Path == "/555/my/profile.json" && r.Header.Get("Authorization") == "Bearer bc_at_agent" {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{"id": 777, "name": "Triage Bot"})
 			return
@@ -89,6 +91,24 @@ func TestAuthStatusCheckAcceptsAValidAgentToken(t *testing.T) {
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
 	assert.Equal(t, true, envelope.Data["valid"], buf.String())
 	assert.Equal(t, []string{"/555/my/profile.json"}, paths())
+}
+
+// TestAuthStatusCheckOnAnAgentWithoutAnAccountAsksForOne: an agent is probed
+// in its account, so without one there is no request to make, and nothing
+// is sent before that is said.
+func TestAuthStatusCheckOnAnAgentWithoutAnAccountAsksForOne(t *testing.T) {
+	app, _, paths := setupAgentProbeApp(t)
+	app.Config.AccountID = ""
+	// Expired, so producing a token would mint one at the token endpoint.
+	creds, err := app.Auth.GetStore().Load("profile:bot")
+	require.NoError(t, err)
+	creds.ExpiresAt = time.Now().Add(-time.Minute).Unix()
+	require.NoError(t, app.Auth.GetStore().Save("profile:bot", creds))
+
+	_, err = checkWithServer(context.Background(), app)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Account ID required")
+	assert.Empty(t, paths())
 }
 
 // TestDoctorAPIConnectivityPassesForAValidAgentToken: the same probe in

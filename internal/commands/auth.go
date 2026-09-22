@@ -68,7 +68,9 @@ account it addresses, its access level and source, when the token expires,
 and where it is stored.
 
 Nothing is fetched unless --check is given, which makes one authenticated
-request (the same authorization lookup "basecamp me" makes) and reports
+request (the same lookup "basecamp me" makes: the authorization document,
+or for an agent profile its person record in the account it is bound to)
+and reports
 whether the server accepts the token the CLI would send — BASECAMP_TOKEN
 when it is set, otherwise the stored login: "valid" in the JSON data.
 
@@ -185,6 +187,14 @@ func checkWithServer(ctx context.Context, app *appctx.App) (*checkVerdict, error
 	if err != nil {
 		return nil, err
 	}
+	// An agent is probed in its account, so a missing one is reported
+	// before any token is produced for a request that cannot be made.
+	agent := agentProfile(app)
+	if agent {
+		if err := app.RequireAccount(); err != nil {
+			return nil, err
+		}
+	}
 	// The token is produced first, so a refusal that never reaches the
 	// authorization server — no refresh token inside the refresh window, a
 	// refresh the token endpoint turned down — is reported as that, not as
@@ -202,10 +212,7 @@ func checkWithServer(ctx context.Context, app *appctx.App) (*checkVerdict, error
 	// boundary between the two could fail there, locally, and be reported
 	// as the server's refusal.
 	client := app.SDKClientFor(&basecamp.StaticTokenProvider{Token: token})
-	if agentProfile(app) {
-		if err := app.RequireAccount(); err != nil {
-			return nil, err
-		}
+	if agent {
 		_, err = client.ForAccount(app.Config.AccountID).People().Me(ctx)
 	} else {
 		_, err = client.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{Endpoint: endpoint, FilterProduct: "bc3"})
