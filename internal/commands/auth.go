@@ -202,7 +202,14 @@ func checkWithServer(ctx context.Context, app *appctx.App) (*checkVerdict, error
 	// boundary between the two could fail there, locally, and be reported
 	// as the server's refusal.
 	client := app.SDKClientFor(&basecamp.StaticTokenProvider{Token: token})
-	_, err = client.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{Endpoint: endpoint, FilterProduct: "bc3"})
+	if agentProfile(app) {
+		if err := app.RequireAccount(); err != nil {
+			return nil, err
+		}
+		_, err = client.ForAccount(app.Config.AccountID).People().Me(ctx)
+	} else {
+		_, err = client.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{Endpoint: endpoint, FilterProduct: "bc3"})
+	}
 	switch {
 	case err == nil:
 		return &checkVerdict{valid: true, sent: true}, nil

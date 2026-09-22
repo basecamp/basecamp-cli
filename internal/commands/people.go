@@ -72,11 +72,7 @@ func runMe(cmd *cobra.Command, args []string) error {
 		return output.ErrAuth("Not authenticated. Run: basecamp auth login")
 	}
 
-	// An agent's self-token has no identity behind it, so the authorization
-	// document refuses it; the agent's person record is where it is named.
-	// BASECAMP_TOKEN is sent ahead of any stored credential, so the stored
-	// type says nothing about it.
-	if os.Getenv("BASECAMP_TOKEN") == "" && app.Auth.GetOAuthType() == "agent" {
+	if agentProfile(app) {
 		return runMeAgent(cmd, app)
 	}
 
@@ -183,6 +179,15 @@ func runMe(cmd *cobra.Command, args []string) error {
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
 	)
+}
+
+// agentProfile reports whether requests go out on a stored agent
+// credential. An agent's self-token has no identity behind it, so
+// /authorization.json refuses it; the agent's person record in the one
+// account it is bound to is what answers for it. BASECAMP_TOKEN is sent
+// ahead of any stored credential, so the stored type says nothing about it.
+func agentProfile(app *appctx.App) bool {
+	return os.Getenv("BASECAMP_TOKEN") == "" && app.Auth.GetOAuthType() == "agent"
 }
 
 // runMeAgent shows the agent an agent profile authenticates as: its person
