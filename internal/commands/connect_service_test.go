@@ -416,6 +416,17 @@ func TestConnectServiceEnvFileRefusesALineBreak(t *testing.T) {
 	assert.Contains(t, err.Error(), "newline")
 }
 
+// systemd ignores a relative EnvironmentFile=, and a relative
+// XDG_CONFIG_HOME is kept as it is, so install refuses it rather than
+// writing a line systemd will skip.
+func TestConnectServiceEnvFileRefusesARelativePath(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "relative/config")
+
+	_, err := connectServiceEnvFile("agent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not an absolute path")
+}
+
 // A binary inside a version manager's install directory is deleted by the
 // upgrade that replaces it, and the unit then fails to start.
 func TestConnectServiceWarnsWhenTheUnitRunsAVersionedBinary(t *testing.T) {

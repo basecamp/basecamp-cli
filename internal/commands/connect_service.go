@@ -421,6 +421,13 @@ func connectServiceEnvFile(profile string) (string, error) {
 		return "", err
 	}
 	envFile := filepath.Join(filepath.Dir(path), "service.env")
+	// systemd ignores a relative EnvironmentFile=, and GlobalConfigDir keeps
+	// a relative XDG_CONFIG_HOME as it is.
+	if !filepath.IsAbs(envFile) {
+		return "", output.ErrUsageHint(
+			fmt.Sprintf("%s is not an absolute path, and systemd ignores a relative environment file", richtext.SanitizeSingleLine(envFile)),
+			"Set XDG_CONFIG_HOME to an absolute path in this shell, or unset it, then install again. No unit was written.")
+	}
 	if strings.ContainsAny(envFile, "\n\r\x00") {
 		return "", output.ErrUsageHint(
 			fmt.Sprintf("%s holds a newline or a null byte, which cannot go into a unit file", richtext.SanitizeSingleLine(envFile)),
