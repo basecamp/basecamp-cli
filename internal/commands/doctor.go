@@ -826,7 +826,8 @@ func checkAuthentication(ctx context.Context, app *appctx.App, verbose bool) Che
 	return check
 }
 
-// checkAPIConnectivity tests API connectivity via the authorization endpoint.
+// checkAPIConnectivity tests API connectivity via the authorization endpoint,
+// or for an agent profile via its person record (see agentProfile).
 func checkAPIConnectivity(ctx context.Context, app *appctx.App, verbose bool) Check {
 	check := Check{
 		Name: "API Connectivity",
@@ -841,9 +842,16 @@ func checkAPIConnectivity(ctx context.Context, app *appctx.App, verbose bool) Ch
 	}
 
 	start := time.Now()
-	_, err := app.SDK.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{
-		Endpoint: endpoint,
-	})
+	var err error
+	if agentProfile(app) {
+		if err = app.RequireAccount(); err == nil {
+			_, err = app.Account().People().Me(ctx)
+		}
+	} else {
+		_, err = app.SDK.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{
+			Endpoint: endpoint,
+		})
+	}
 	latency := time.Since(start)
 
 	if err != nil {
