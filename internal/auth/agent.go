@@ -31,6 +31,13 @@ import (
 // produce, in the OS keyring wherever one is available — the same place
 // every other profile's refresh token lives.
 //
+// Because every renewal presents the secret again, a secret the server has
+// stopped accepting would be presented again by every command after it —
+// and by every poll of anything automated that runs one. The token
+// endpoint's refusals are therefore remembered with the credential and
+// answered locally until the secret changes, or for as long as the server
+// asked; see mintAgentCredential and agent_hold.go.
+//
 // The tokens come back bound to the agent with an RFC 8707 resource
 // indicator of the form urn:bc:agent:<id>. Nothing here parses or requires
 // that shape: whatever the server binds the token to is stored and echoed
@@ -103,6 +110,13 @@ func (m *Manager) resolveAgentMint(creds *Credentials) (*agentMint, error) {
 		return nil, output.ErrAuth("Agent credentials are missing their token endpoint and cannot mint a token")
 	}
 
+	// A verdict the token endpoint already gave on these client
+	// credentials is answered here, before anything is resolved or sent —
+	// which is also what lets a report say the next command will not ask.
+	if err := m.heldMint(creds); err != nil {
+		return nil, err
+	}
+
 	// The token endpoint is a persisted value and receives the client
 	// secret, so it passes the same strict check every other stored OAuth
 	// endpoint does before a byte goes out.
@@ -131,24 +145,48 @@ func (m *Manager) resolveAgentMint(creds *Credentials) (*agentMint, error) {
 // mintAgentCredential replaces creds' access token with a freshly minted
 // one and stores the result.
 //
-// Nothing is written unless the mint succeeded, and nothing is ever
-// deleted: a mint that fails — the network is down, the server is having a
-// bad minute, the secret was rotated out from under us — leaves the stored
-// credential exactly as it was, so the next command tries again with the
-// same client credentials rather than finding an empty store and an
-// instruction to log in. There is no invalid_grant equivalent to forget
-// here: a refused client_credentials request says the CLIENT is wrong, and
-// the operator's remedy is to re-run the login with a good secret, which
-// overwrites the credential anyway.
+// Nothing is ever deleted: a mint that fails leaves the client credentials
+// where they are, rather than an empty store and an instruction to log in.
+// There is no invalid_grant equivalent to forget here — a refused
+// client_credentials request says the CLIENT is wrong, and the operator's
+// remedy is to re-run the login with a good secret, which overwrites the
+// credential anyway.
 //
-// The caller holds m.mu and the credential key's cross-process lock.
+// But a refusal is not forgotten either. The token endpoint's verdict is
+// remembered on the stored credential (MintHold, agent_hold.go), and the
+// next mint answers it locally, before any network I/O:
+//
+//   - invalid_client refuses the secret, and no later state of the server
+//     makes that secret good again. Held until a login stores another.
+//   - invalid_grant, or a 401/403 that names no reason, can reverse. Held
+//     an hour, then tried once more.
+//   - 429 is held until its Retry-After (a minute when it gives none, at
+//     most an hour), and answered in the meantime as a rate limit.
+//   - Anything else — a 5xx, the network, a response this cannot read —
+//     holds nothing, and the next command tries again as it always has.
+//
+// It is remembered because nothing else would stop the asking. Every
+// process mints for itself, so an automated caller — a connector polling
+// through the CLI, or `basecamp connect` — would present a dead secret to
+// the token endpoint on every poll, indefinitely, each attempt charged to
+// the abuse tracker that then rate-limits the address.
+//
+// A successful mint clears the hold along with everything else it
+// replaces, and a login writes a credential that never had one.
+//
+// The caller holds m.mu and the credential key's cross-process lock, which
+// is what makes the hold's write safe against a concurrent login (see
+// rememberMintHold).
 func (m *Manager) mintAgentCredential(ctx context.Context, origin string, creds *Credentials) error {
 	mint, err := m.prepareAgentMint(creds)
 	if err != nil {
 		return err
 	}
-	token, err := m.mintAgentToken(ctx, mint)
+	token, hold, err := m.mintAgentToken(ctx, mint)
 	if err != nil {
+		if hold != nil {
+			m.rememberMintHold(origin, hold)
+		}
 		return err
 	}
 	applyAgentToken(creds, token)
@@ -165,6 +203,8 @@ func (m *Manager) mintAgentCredential(ctx context.Context, origin string, creds 
 func applyAgentToken(creds *Credentials, token *oauth.Token) {
 	creds.AccessToken = token.AccessToken
 	creds.RefreshToken = ""
+	// The client was just accepted, so whatever was held against it is over.
+	creds.MintHold = nil
 	if token.Resource != "" {
 		creds.Resource = token.Resource
 	}
@@ -254,14 +294,16 @@ func agentTokenExpiry(token *oauth.Token) time.Time {
 }
 
 // mintAgentToken POSTs one client_credentials grant and returns the token
-// it was answered with.
+// it was answered with — or, on a refusal worth remembering, the hold it
+// leaves (see mintHoldFor), which is the caller's to store or not: a login
+// proving a secret it has not stored yet has nothing to store it on.
 //
 // The SDK's Exchanger has no client_credentials form, so the request is
 // made here — but to the same rules its token requests follow, because the
 // body carries a client secret: a bounded response read, a refusal to treat
 // a redirect as a hop, and RFC 6749 §5.2 error rendering in the shape the
 // rest of this package already matches on ("token error: <code> - <text>").
-func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.Token, error) {
+func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.Token, *MintHold, error) {
 	form := url.Values{
 		"grant_type":    {"client_credentials"},
 		"client_id":     {mint.clientID},
@@ -281,14 +323,14 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, mint.tokenEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, wrapOAuthError("minting an agent token", err)
+		return nil, nil, wrapOAuthError("minting an agent token", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := mint.client.Do(req)
 	if err != nil {
-		return nil, wrapOAuthError("minting an agent token", err)
+		return nil, nil, wrapOAuthError("minting an agent token", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -297,30 +339,31 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	// body read, as the SDK does: a 3xx that never finishes streaming must
 	// surface as this, not as a timeout halfway through a read.
 	if isRedirect(resp.StatusCode) {
-		return nil, output.ErrAPI(resp.StatusCode,
+		return nil, nil, output.ErrAPI(resp.StatusCode,
 			fmt.Sprintf("minting an agent token: redirect %d on the token endpoint is not followed", resp.StatusCode))
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxAgentTokenBytes+1))
 	if err != nil {
-		return nil, wrapOAuthError("minting an agent token", err)
+		return nil, nil, wrapOAuthError("minting an agent token", err)
 	}
 	if int64(len(body)) > maxAgentTokenBytes {
-		return nil, output.ErrAPI(resp.StatusCode,
+		return nil, nil, output.ErrAPI(resp.StatusCode,
 			fmt.Sprintf("minting an agent token: response body exceeds %d bytes", maxAgentTokenBytes))
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, m.agentMintRefusal(resp, body, mint)
+		hold, err := m.agentMintRefusal(resp, body, mint)
+		return nil, hold, err
 	}
 
 	var token oauth.Token
 	if err := json.Unmarshal(body, &token); err != nil {
 		// Not even the parser's complaint: it quotes a byte of the body.
-		return nil, output.ErrAPI(resp.StatusCode, "minting an agent token: the token response could not be parsed")
+		return nil, nil, output.ErrAPI(resp.StatusCode, "minting an agent token: the token response could not be parsed")
 	}
 	if token.AccessToken == "" {
-		return nil, output.ErrAPI(resp.StatusCode, "minting an agent token: the token response carries no access_token")
+		return nil, nil, output.ErrAPI(resp.StatusCode, "minting an agent token: the token response carries no access_token")
 	}
 	// The CLI can only represent read and full, and this value is stored
 	// with the credential, written into the profile entry, and printed.
@@ -330,7 +373,7 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 		// The value is not repeated, for the reason oauthErrorCodes gives:
 		// it is another field the server chose on a request that carried
 		// the secret.
-		return nil, output.ErrAPI(resp.StatusCode,
+		return nil, nil, output.ErrAPI(resp.StatusCode,
 			"minting an agent token: the server reported a scope other than read or full, and only those can be stored")
 	}
 	// Every request this CLI makes sends the token as a Bearer credential,
@@ -346,11 +389,11 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	// approved scope is the operator's decision on a connection, and a
 	// server contradicting it is not a token to spend.
 	if widensScope(mint.scope, token.Scope) {
-		return nil, output.ErrAPI(resp.StatusCode,
+		return nil, nil, output.ErrAPI(resp.StatusCode,
 			"minting an agent token: the server issued a token wider than the scope the credential was approved for, and a credential is not widened past what was approved")
 	}
 	if token.TokenType != "" && !strings.EqualFold(token.TokenType, "bearer") {
-		return nil, output.ErrAPI(resp.StatusCode,
+		return nil, nil, output.ErrAPI(resp.StatusCode,
 			"minting an agent token: the server issued a token of a type this CLI cannot send; it only sends Bearer credentials")
 	}
 	if token.RefreshToken != "" {
@@ -360,9 +403,9 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 		m.warnf("warning: the agent token response carried a refresh token; agent credentials re-mint instead and it will not be stored")
 	}
 	if err := applyTokenLifetime(&token, body); err != nil {
-		return nil, output.ErrAPI(resp.StatusCode, "minting an agent token: "+err.Error())
+		return nil, nil, output.ErrAPI(resp.StatusCode, "minting an agent token: "+err.Error())
 	}
-	return &token, nil
+	return &token, nil, nil
 }
 
 // oauthErrorCodes are the RFC 6749 §5.2 token-endpoint error codes (and
@@ -396,7 +439,11 @@ var oauthErrorCodes = map[string]bool{
 // agentMintRefusal renders a non-200 token response: the RFC 6749 §5.2
 // error code when the body carries one this package knows, and the HTTP
 // status otherwise. See oauthErrorCodes for why nothing else is repeated.
-func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agentMint) error {
+//
+// It also returns the hold the refusal leaves, if it leaves one — the
+// verdict the next mint will answer locally rather than ask for again (see
+// mintHoldFor, and mintAgentCredential for what is held and for how long).
+func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agentMint) (*MintHold, error) {
 	detail := fmt.Sprintf("the server answered HTTP %d", resp.StatusCode)
 	var errResp struct {
 		Error string `json:"error"`
@@ -414,7 +461,7 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 	// makes it a server saying two things at once, of which the status is
 	// the one that says what to do next.
 	if resp.StatusCode < 400 || resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
-		return statusFailure("minting an agent token: "+detail, resp)
+		return mintHoldFor(mint, resp, detail, code, false, m.now()), statusFailure("minting an agent token: "+detail, resp)
 	}
 
 	// Among the remaining 4xx: when the server NAMED its reason, that name
@@ -430,9 +477,10 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 	// fetch its secret again for one is advice that cannot help.
 	bareUnauthorized := code == "" && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden)
 	if clientRefusalCodes[code] || bareUnauthorized {
-		return m.agentRemedy(output.ErrAuth("Minting an agent token was refused ("+detail+")"), mint.clientID, mint.scope)
+		return mintHoldFor(mint, resp, detail, code, true, m.now()),
+			m.agentRemedy(output.ErrAuth("Minting an agent token was refused ("+detail+")"), mint.clientID, mint.scope)
 	}
-	return statusFailure("minting an agent token: "+detail, resp)
+	return nil, statusFailure("minting an agent token: "+detail, resp)
 }
 
 // clientRefusalCodes are the RFC 6749 §5.2 codes that say THE CREDENTIALS
@@ -638,7 +686,9 @@ func (m *Manager) adoptAgentGrant(ctx context.Context, disc *discovery, opts Cli
 	if err != nil {
 		return nil, err
 	}
-	token, err := m.mintAgentToken(ctx, mint)
+	// A refusal here leaves no hold: nothing is stored yet to hold it on,
+	// and a login is a person's one attempt, not a loop.
+	token, _, err := m.mintAgentToken(ctx, mint)
 	if err != nil {
 		return nil, err
 	}

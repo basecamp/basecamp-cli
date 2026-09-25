@@ -369,6 +369,12 @@ func authStatusReport(ctx context.Context, app *appctx.App) (*authStatus, error)
 	report.data["source"] = source
 	report.data["oauth_type"] = creds.OAuthType
 	report.data["refreshable"] = refreshable
+	if refusal != nil && creds.OAuthType == "agent" {
+		// Why an agent cannot renew — above all a refusal the token
+		// endpoint gave that is being remembered, and until when — for a
+		// caller reading the JSON rather than the token line.
+		report.data["renewal_refused"] = output.AsError(refusal).Message
+	}
 	report.data["storage"] = storage
 	if scope != "" {
 		report.data["scope"] = scope
@@ -421,6 +427,13 @@ func authStatusReport(ctx context.Context, app *appctx.App) (*authStatus, error)
 			report.refreshPromise, report.refreshFailed = expiry, "expired, and the refresh failed"
 		case expiresIn >= 0:
 			expiry = "expired (" + coarseDuration(expiresIn) + " left, inside the " + coarseDuration(auth.RefreshWindow) + " the CLI keeps clear of expiry, and the refresh would be refused: " + output.AsError(refusal).Message + ")"
+			report.hint = remedyFor(app, refusal)
+		case creds.OAuthType == "agent":
+			// An agent's renewal can be refused by a verdict the token
+			// endpoint already gave — a secret it refused, a rate limit
+			// still running — and that says why, and until when, where
+			// "expired" alone would not.
+			expiry = "expired, and the renewal would be refused: " + output.AsError(refusal).Message
 			report.hint = remedyFor(app, refusal)
 		default:
 			expiry = "expired"

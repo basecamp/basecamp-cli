@@ -188,6 +188,9 @@ func TestRefusedMintIsAnAuthErrorAndAServerFaultIsNot(t *testing.T) {
 	assert.Equal(t, output.CodeAuth, output.AsError(err).Code)
 	assert.Contains(t, err.Error(), "invalid_client")
 
+	// The refusal is remembered now, so the server fault needs a
+	// credential the server has not already refused.
+	storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute)))
 	as.token = func(int) (int, string) { return http.StatusBadGateway, `no json here` }
 	_, err = m.AccessToken(context.Background())
 	require.Error(t, err)
