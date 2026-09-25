@@ -41,6 +41,13 @@ type Credentials struct {
 	// today except a minted agent self-token — means the default.
 	RenewAfter int64 `json:"renew_after,omitempty"`
 
+	// MintHold is the token endpoint's last refusal of an agent
+	// credential's client — a refused secret, or a rate limit — kept so
+	// the next mint answers it locally instead of asking again (see
+	// agent_hold.go). Nil for every other kind of credential, and for an
+	// agent's whose last mint succeeded.
+	MintHold *MintHold `json:"mint_hold,omitempty"`
+
 	// Issuer is the RFC 8414 issuer of the authorization server that minted
 	// a BC5 credential — where its metadata, and so its revocation endpoint,
 	// is found at logout. Credentials stored before it was recorded derive
