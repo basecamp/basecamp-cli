@@ -103,6 +103,10 @@ type Manager struct {
 	// traffic, a malformed opt-out value). Test seam; nil means stderr.
 	Warnf func(format string, args ...any)
 
+	// clock is the time a remembered mint verdict is read and written
+	// against (agent_hold.go). Test seam; nil means time.Now.
+	clock func() time.Time
+
 	mu sync.Mutex
 
 	// kindMu guards kind, which is read while building an error's remedy

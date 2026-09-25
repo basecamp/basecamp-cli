@@ -79,6 +79,72 @@ func TestAuthStatusOnABrokenAgentOffersTheAgentLogin(t *testing.T) {
 	assert.NotContains(t, envelope.Notice, "Run: basecamp auth login -P")
 }
 
+// TestAuthStatusSaysARefusalIsRemembered: an agent whose secret the token
+// endpoint refused holds that verdict, and the next command will not ask
+// again. The report is where someone looks to find out why the agent went
+// quiet, so it says so — and what replaces the secret.
+func TestAuthStatusSaysARefusalIsRemembered(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_TOKEN", "")
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
+	}))
+	defer srv.Close()
+
+	cfg := &config.Config{BaseURL: srv.URL, ActiveProfile: "clawdito", Sources: map[string]string{}}
+	authMgr := auth.NewManager(cfg, srv.Client())
+	store := auth.NewStore(config.GlobalConfigDir())
+	authMgr.SetStore(store)
+	require.NoError(t, store.Save("profile:clawdito", &auth.Credentials{
+		AccessToken:   "spent",
+		OAuthType:     "agent",
+		ClientID:      "agent-client",
+		ClientSecret:  "rotated-away",
+		TokenEndpoint: srv.URL + "/oauth/tokens",
+		ExpiresAt:     time.Now().Add(-time.Minute).Unix(),
+	}))
+
+	// The refusal that is remembered.
+	_, err := authMgr.AccessToken(context.Background())
+	require.Error(t, err)
+	require.Equal(t, 1, calls)
+
+	buf := &bytes.Buffer{}
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		Output: output.New(output.Options{Format: output.FormatJSON, Writer: buf}),
+	}
+	app.Flags.JSON = true
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"status"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	require.NoError(t, cmd.Execute())
+
+	assert.Equal(t, 1, calls, "the report asked the token endpoint")
+	assert.Contains(t, buf.String(), "the refusal is remembered")
+	assert.Contains(t, buf.String(), "invalid_client")
+
+	var envelope struct {
+		Notice string `json:"notice"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Contains(t, envelope.Notice, "--with-client-credentials")
+	assert.NotContains(t, buf.String(), "rotated-away")
+}
+
 // TestDoctorOffersTheAgentLoginForABrokenAgent: doctor is the diagnostic
 // people (and agents) read for exactly the command to run, in its check
 // hints and its breadcrumbs. Naming the interactive login there would have
