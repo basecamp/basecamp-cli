@@ -574,18 +574,22 @@ func subtaskParentID(arg string) (int64, error) {
 }
 
 // subtaskIDArg resolves the <id|url> positional the per-subtask verbs take: a
-// bare id, a subtask's app URL — its parent's URL with a #__recording_<id>
-// fragment, where the fragment names the subtask — or a subtask or card-step
-// URL, which names it in the path. Any other URL names the parent or something
-// else entirely, and is refused rather than read as a subtask id: `subtasks
-// delete <todo-url>` must not aim a delete at the to-do's own id.
+// bare id, a subtask's app URL — its to-do's or card's URL ending in
+// #__recording_<id>, where the fragment names the subtask — or a single
+// subtask or card-step URL, which names it in the path. Anything else is
+// refused rather than read as a subtask id: a parent URL without the fragment,
+// a fragment on any other kind of recording, and a subtasks or steps
+// collection URL all carry an id that is not the subtask's, and `subtasks
+// delete` must never aim at one of those.
 func subtaskIDArg(arg string) (int64, error) {
 	raw := arg
 	if parsed := urlarg.Parse(arg); parsed != nil {
+		parentType := parsed.Type == "todos" || parsed.Type == "cards"
+		subtaskType := parsed.Type == "subtasks" || parsed.Type == "steps"
 		switch {
-		case parsed.CommentID != "":
+		case parentType && parsed.CommentID != "" && strings.HasSuffix(arg, "#__recording_"+parsed.CommentID):
 			raw = parsed.CommentID
-		case parsed.Type == "subtasks" || parsed.Type == "steps":
+		case subtaskType && parsed.CommentID == "" && !parsed.IsCollection:
 			raw = parsed.RecordingID
 		default:
 			return 0, output.ErrUsageHint(

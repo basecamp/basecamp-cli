@@ -327,6 +327,13 @@ func TestSubtasksPerSubtaskVerbsRefuseAParentURL(t *testing.T) {
 		{"complete", parentURL},
 		{"delete", parentURL, "--force"},
 		{"show", "https://example.com/not/basecamp"},
+		// Collection URLs carry the parent's id, not a subtask's.
+		{"delete", "https://3.basecampapi.com/99999/recordings/123/subtasks.json", "--force"},
+		{"delete", "https://3.basecampapi.com/99999/buckets/89/card_tables/cards/123/steps.json", "--force"},
+		// A fragment names a subtask only on a to-do or card, and only as #__recording_<id>.
+		{"show", "https://3.basecamp.com/99999/buckets/89/messages/123#__recording_456"},
+		{"show", "https://3.basecamp.com/99999/buckets/89/todos/123#456"},
+		{"show", "https://3.basecampapi.com/99999/subtasks/789#__recording_456"},
 	} {
 		app, transport, _ := setupPersonalFeedApp(t)
 
@@ -343,6 +350,17 @@ func TestSubtasksShowAcceptsTheSubtaskAPIURL(t *testing.T) {
 
 	require.NoError(t, executeRecordingCommand(NewSubtasksCmd(), app, "show",
 		"https://3.basecampapi.com/99999/buckets/89/subtasks/456.json"))
+
+	assert.Equal(t, subtaskPath(456), transport.last(t).Path)
+}
+
+// A card's URL carries its subtasks' fragments the same way a to-do's does.
+func TestSubtasksShowAcceptsACardSubtaskURL(t *testing.T) {
+	app, transport, _ := setupPersonalFeedApp(t,
+		subtaskRoute(http.MethodGet, subtaskPath(456), http.StatusOK, subtaskFixture))
+
+	require.NoError(t, executeRecordingCommand(NewSubtasksCmd(), app, "show",
+		"https://3.basecamp.com/99999/buckets/89/card_tables/cards/123#__recording_456"))
 
 	assert.Equal(t, subtaskPath(456), transport.last(t).Path)
 }
