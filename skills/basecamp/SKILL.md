@@ -4,7 +4,7 @@ description: |
   Interact with Basecamp via the Basecamp CLI. Full API coverage: projects, todos, cards,
   messages, files, schedule, check-ins, timeline, recordings, templates, webhooks,
   subscriptions, lineup, chat, pings, gauges, assignments, notifications, bookmarks,
-  bubble-up, drafts, notes, calendars, and accounts.
+  bubble-up, drafts, notes, calendars, subtasks, and accounts.
   Use for ANY Basecamp question or action.
 triggers:
   # Direct invocations
@@ -12,6 +12,7 @@ triggers:
   - /basecamp
   # Resource actions
   - basecamp todos
+  - basecamp subtasks
   - basecamp project
   - basecamp cards
   - basecamp chat
@@ -143,7 +144,7 @@ Full CLI coverage: 195 tracked in-scope endpoints across todos, cards, messages,
     renders as an empty bullet list. When the CLI version is unknown, check
     `basecamp --version` first, or pass the content portably as
     `"$(cat file.md)"` and verify the posted `content` when it matters.
-6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp assignments` for structured assignment views, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type, `basecamp notifications` for notifications, `basecamp gauges list` for account-wide gauges, `basecamp events poll` and `basecamp inbox` for the account event feed, and the seven list commands covered in item 7.
+6. **Project scope is mandatory for most commands** — via `--in <project>` or `.basecamp/config.json`. Cross-project exceptions: `basecamp reports assigned` for assigned work, `basecamp assignments` for structured assignment views, `basecamp reports overdue` for overdue todos, `basecamp reports schedule` for upcoming schedule across all projects, `basecamp recordings <type>` for browsing by type, `basecamp subtasks` for subtasks on a to-do or card, `basecamp notifications` for notifications, `basecamp gauges list` for account-wide gauges, `basecamp events poll` and `basecamp inbox` for the account event feed, and the seven list commands covered in item 7.
 7. **Account-wide listing.** `basecamp todos list --all-projects --json` lists across every project; the same flag does the same on `cards list`, `messages list`, `comments list`, `files list`, `forwards list`, and `checkins answers`. It overrides a configured project, and with no project in scope those commands already list account-wide rather than prompting. Flags that name something inside a single project are rejected there rather than silently ignored.
    Account-wide listings return **the first 100 items by default** — account-wide "all" is the whole account, not one project's worth. Use `--limit N` to raise the cap (it walks pages until N are collected) or `--all` for everything. `--page N` fetches exactly one page, but only on the paginated listings.
    The two overdue variants — `basecamp todos list --all-projects --overdue` and `basecamp cards list --all-projects --overdue` — come from unpaginated endpoints. They accept `--limit` and `--all` but **reject `--page`**, so do not generate `--page` against them.
@@ -205,7 +206,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 
 ## Quick Reference
 
-> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). Cross-project exceptions: `basecamp reports assigned`, `basecamp assignments`, `basecamp reports overdue`, `basecamp reports schedule`, `basecamp recordings <type>`, `basecamp notifications`, `basecamp gauges list`, `basecamp events poll`, `basecamp inbox`.
+> **Note:** Most queries require project scope (via `--in <project>` or `.basecamp/config.json`). Cross-project exceptions: `basecamp reports assigned`, `basecamp assignments`, `basecamp reports overdue`, `basecamp reports schedule`, `basecamp recordings <type>`, `basecamp subtasks`, `basecamp notifications`, `basecamp gauges list`, `basecamp events poll`, `basecamp inbox`.
 >
 > Seven list commands also list account-wide: `basecamp todos list --all-projects --json`, and likewise `cards list`, `messages list`, `comments list`, `files list`, `forwards list`, and `checkins answers`.
 
@@ -242,6 +243,9 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Create todo | `basecamp todos create "Task" --in <project> --list <list> --json` |
 | Create todolist | `basecamp todolists create "Name" --in <project> --json` |
 | Complete todo | `basecamp todos complete <id> --json` |
+| List a to-do's or card's subtasks | `basecamp subtasks list <todo-or-card-id> --json` |
+| Add a subtask | `basecamp subtasks create <todo-or-card-id> "Title" --json` |
+| Complete a subtask | `basecamp subtasks complete <subtask-id> --json` |
 | List cards | `basecamp cards list --in <project> --json` |
 | Create card | `basecamp cards create "Title" --in <project> --json` |
 | Complete card | `basecamp cards done <id|url> --in <project> --json` |
@@ -568,89 +572,31 @@ basecamp todos update <id> --no-notify-on-completion      # Clear completion not
 `todos update`; clear with `--no-notify-on-completion` on `todos update`.
 Plain updates (title, due date, etc.) preserve existing completion subscribers.
 
-**Todo Subtasks (checklist steps):** Basecamp to-do subtasks are stored as
-`Kanban::Step` records, even when their parent is a normal `Todo`. The regular
-`basecamp todos show` response may not include them; use
-`basecamp recordings list --in <project> --type Kanban::Step` and filter by
-`parent.id` to list/check subtasks for a todo.
+**Subtasks (checklist items on to-dos and cards):** use `basecamp subtasks`.
+Subtasks are account-scoped — no `--in <project>` — and address the parent
+to-do or card by id or URL. They are the same `Kanban::Step` records
+`cards steps` reads, so `subtasks` covers card steps too.
 
 ```bash
-# Create a subtask under a todo.
-# Use the numeric project ID and todo ID in this card-style path.
-basecamp api post /buckets/<project_id>/card_tables/cards/<parent_todo_id>/steps.json \
-  --data '{"title":"Subtask title"}' \
-  --json
-
-# Read or edit a subtask
-basecamp api get /buckets/<project_id>/card_tables/steps/<step_id>.json --json
-basecamp api put /buckets/<project_id>/card_tables/steps/<step_id>.json \
-  --data '{"title":"Updated subtask title"}' \
-  --json
-
-# List subtasks for a todo
-PARENT_TODO_ID=<parent_todo_id> \
-basecamp recordings list --in <project> --type Kanban::Step --all \
-  --jq '.data[] | select(.parent.id==(env.PARENT_TODO_ID | tonumber)) | {id,title,status,parent:.parent.id,url}'
-
-# Assign or set a due date. Send only what you're changing — omitted fields are
-# left alone. `assignee_ids` replaces the whole list, so name everyone who stays.
-basecamp api put /buckets/<project_id>/card_tables/steps/<step_id>.json \
-  --data '{"assignee_ids":[<person_id>,<existing_person_id>],"due_on":"<YYYY-MM-DD>"}' \
-  --json
-
-# Complete or reopen a subtask
-basecamp api put /buckets/<project_id>/card_tables/steps/<step_id>/completions.json \
-  --data '{"completion":"on"}' \
-  --json
-basecamp api put /buckets/<project_id>/card_tables/steps/<step_id>/completions.json \
-  --data '{"completion":"off"}' \
-  --json
-
-# Trash a subtask from the todo UI by trashing the step record (Kanban::Step)
-basecamp recordings trash <step_id> --in <project> --json
+basecamp subtasks list <todo-or-card-id|url> --json        # In position order (--all past 100)
+basecamp subtasks show <subtask-id|url> --json             # URL: parent URL ending in #__recording_<id>
+basecamp subtasks create <todo-or-card-id|url> "Title" --due tomorrow --assignees me --json
+basecamp subtasks update <subtask-id> "New title" --json   # Partial: only what you pass changes
+basecamp subtasks update <subtask-id> --due 2026-10-02 --assignees "Ann,Bob" --json
+basecamp subtasks update <subtask-id> --no-due --no-assignees --json
+basecamp subtasks complete <subtask-id> --json
+basecamp subtasks uncomplete <subtask-id> --json
+basecamp subtasks move <subtask-id> --position 1 --json     # 1-based (1 = top)
+basecamp subtasks delete <subtask-id> --json                # Permanent
 ```
 
-Key points: replace numeric placeholders such as `<project_id>`,
-`<parent_todo_id>`, and `<person_id>` before running the examples. Bucket-scoped
-API paths require a numeric project/bucket ID; `--in <project>` can still accept
-a project name where CLI commands support name resolution. For creating todo
-subtasks, Basecamp accepts the parent todo ID in the
-`/buckets/<project_id>/card_tables/cards/<parent_todo_id>/steps.json` path. To
-list subtasks under a todo, use
-`basecamp recordings list --in <project> --type Kanban::Step` with the
-`parent.id` filter shown above.
-
-Completed subtasks have `completed: true` and a `completion` object with
-`created_at` and `creator`. Open subtasks have `completed: false` and no
-`completion` object. Trashed subtasks may still be readable directly with
-`status: "trashed"` and `inherits_status: false`, but they no longer appear in
-the todo UI.
-
-In testing with todo-backed steps, these bucket-scoped direct `GET` requests
-returned `not_found`:
-`/buckets/<project_id>/card_tables/cards/<parent_todo_id>/steps.json`,
-`/buckets/<project_id>/card_tables/cards/<parent_todo_id>.json`, and
-`/buckets/<project_id>/todos/<parent_todo_id>/steps.json`. To inspect trashed
-subtasks, add `--status trashed`; archived parents may require
-`--status archived`.
-
-**Raw step updates are partial.** `PUT .../card_tables/steps/<id>.json` leaves
-every parameter you omit unchanged, so send only the fields you are changing.
-Echoing back a `title` you did not mean to change is not merely redundant — it
-reverts anyone who edited the title between your read and your write. To clear a
-value, say so explicitly: `"due_on": null` clears the due date, `"assignee_ids":
-[]` removes everyone. `assignee_ids` always replaces the whole list rather than
-adding to it, so name every person who should remain assigned.
-
-(This is bc3#12521. Before it, an omitted field *was* cleared and a title-less
-update was rejected, which is why older guidance said to resend the title. Todo
-subtasks and card steps share one endpoint and one contract — `PUT
-card_tables/steps/:id` routes to the same controller for both.)
-
-The generic
-`basecamp assign <step_id> --step ...` command is intended for card steps and
-may fail with `Bad Request` for todo-backed steps, so prefer `assignee_ids` on
-the raw step update endpoint for todo subtasks.
+Key points: only to-dos and cards hold subtasks; any other parent is refused
+with 403. `update` is partial — omitted fields are left alone, so there is no
+need to resend the title. `--assignees` replaces the whole list, so name
+everyone who should stay assigned; `--no-assignees` removes everyone and
+`--no-due` clears the due date. A to-do or card embeds at most 100 subtasks
+under `steps` and reports the real total as `subtasks_count` (with
+`subtasks_completed_count`); `subtasks list --all` reads every one.
 
 ### Todolists
 
@@ -720,12 +666,15 @@ records an `adopted` event for every column move, and a card crossing into or
 out of a Done column pairs that with `completed`/`uncompleted`. See
 [Events](#events-change-history).
 
-**Card Steps (checklists):**
+**Card Steps (checklists):** card steps are subtasks; `basecamp subtasks`
+(see [Todos](#todos)) covers them without a project. The card-scoped forms
+remain:
 ```bash
 basecamp cards steps <card_id> --in <project>     # List steps
 basecamp cards step create "Step" --card <id> --in <project>
 basecamp cards step complete <step_id> --in <project>
 basecamp cards step uncomplete <step_id>
+basecamp cards step move <step_id> --card <id> --position 1   # 1-based
 ```
 
 **Column management:**

@@ -321,7 +321,7 @@ func TestCardsStepMoveRequiresPosition(t *testing.T) {
 
 	var e *output.Error
 	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "--position is required (0-indexed)", e.Message)
+		assert.Equal(t, "--position is required (1-based)", e.Message)
 	}
 }
 

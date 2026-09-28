@@ -6,12 +6,15 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 51 | 195 |
+| ✅ Implemented | 52 | 203 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **55** | **207** |
+| **Total tracked** | **56** | **215** |
 
-**195 of 195 tracked in-scope endpoints.** The client-admission endpoints
+**203 of 203 tracked in-scope endpoints.** The eight subtask endpoints bc3
+#12659 documented — the flat `/recordings/:id/subtasks.json` and
+`/subtasks/:id` routes, modelled by basecamp/basecamp-sdk#883 — land as
+`subtasks`. The client-admission endpoints
 basecamp/bc3#13098 added — `PUT /projects/:id/people/client_users.json` and
 `POST`/`DELETE /projects/:id/client_enablement.json` — land as `people clients`.
 SDK v0.16.0 adds the three to-do
@@ -50,7 +53,9 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 **SDK version:** the pin in `go.mod`, with
 `internal/version/sdk-provenance.json` authoritative for the exact commit. That
-pin is basecamp-sdk v0.19.0, the release that ships the event-feed operations.
+pin is basecamp-sdk `main` at 8216dd62c329 (a pseudo-version past v0.20.0), for the
+Subtasks service basecamp/basecamp-sdk#883 adds ahead of a release — to be swapped
+for the release that ships it. v0.19.0 shipped the event-feed operations.
 The command surface below largely dates to the v0.12.0 bump, which added 20 exported
 Go methods over 13 new backend operations; the extra seven wrapped endpoints
 that already existed but were reachable only through the raw generated client,
@@ -187,7 +192,8 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 |---------|-----------|-------------|--------|-------|----------|-------|
 | **Core** |
 | projects | 9 | `projects` | ✅ | BC4 | - | list, show, create, update, delete |
-| todos | 12 | `todos`, `todo`, `done`, `reopen` | ✅ | BC4 | - | list, show, create, update, complete, uncomplete, position (BC5: `steps` shown on `todos show`; edit via `cards step`). `todos create --loose` creates on the to-do set, outside any list |
+| todos | 12 | `todos`, `todo`, `done`, `reopen` | ✅ | BC4 | - | list, show, create, update, complete, uncomplete, position (BC5: `steps` shown on `todos show`, plus `subtasks_count`/`subtasks_completed_count`/`subtasks_url`; edit via `subtasks`). `todos create --loose` creates on the to-do set, outside any list |
+| subtasks | 8 | `subtasks` | ✅ | BC5 | - | list (`GET /recordings/:id/subtasks.json`, paginated), show, create (`POST` on the same list route), update (partial; `--no-due`/`--no-assignees` clear), complete/uncomplete (`POST`/`DELETE /subtasks/:id/completion.json`), move (`PUT /subtasks/:id/position.json`, 1-based), delete. Account-scoped flat routes (bc3#12659), so no `--in`. Parents are to-dos and cards only. Same `Kanban::Step` records as `card_table_steps` |
 | todolists | 9 | `todolists` | ✅ | BC4 | - | list, show, create, update, position |
 | todosets | 3 | `todosets` | ✅ | BC4 | - | Container for todolists, accessed via project dock (BC5: `todos_count`, `completed_loose_todos_count`, `todos_url`, `app_todos_url`) |
 | todolist_groups | 8 | `todolistgroups` | ✅ | BC4 | - | list, show, create, update, position |
@@ -208,7 +214,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | card_tables | 3 | `cards` | ✅ | BC4 | - | Accessed via project dock |
 | card_table_cards | 9 | `cards` | ✅ | BC4 | - | list, show, create, update, move |
 | card_table_columns | 11 | `cards columns` | ✅ | BC4 | - | list columns. SDK v0.12.0 added `Subscribe`/`Unsubscribe`; `cards column watch\|unwatch` already performs the same action through the generic recording-subscription endpoint and returns the resulting subscription details the specific endpoint does not, so the CLI keeps one spelling |
-| card_table_steps | 4 | `cards steps` | ✅ | BC4 | - | Workflow steps on cards |
+| card_table_steps | 4 | `cards steps` | ✅ | BC4 | - | Workflow steps on cards. The card-scoped aliases of `subtasks`, which bc3 keeps serving; `cards step move --position` is 1-based (the SDK refuses 0 since basecamp/basecamp-sdk#883) |
 | card_table_wormholes | 3 | `cards wormholes` | ✅ | BC5 | - | list (via `wormholes[]` on card table), create, update, delete; `cards move --to-wormhole` teleports a card across projects (async, new id) |
 | **Personal (My)** |
 | my_bookmarks | 4 | `bookmarks` | ✅ | BC5 | - | list, check, add, remove. Private to the authenticated user; `add`/`remove` are idempotent, and `check` returns a bool reported in the payload rather than through the exit code. Bounded like the account-wide listings |

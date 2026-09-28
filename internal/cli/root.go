@@ -367,6 +367,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewAssignmentsCmd())
 	cmd.AddCommand(commands.NewBookmarksCmd())
 	cmd.AddCommand(commands.NewBubbleUpCmd())
+	cmd.AddCommand(commands.NewSubtasksCmd())
 	cmd.AddCommand(commands.NewDraftsCmd())
 	cmd.AddCommand(commands.NewNotesCmd())
 	cmd.AddCommand(commands.NewCalendarsCmd())
