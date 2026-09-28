@@ -572,46 +572,29 @@ func (r *Renderer) renderTable(b *strings.Builder, data []map[string]any) {
 }
 
 func (r *Renderer) detectColumns(data []map[string]any) []column {
-	return detectTableColumns(data, func(key string) bool { return skipColumns[key] }, true)
-}
-
-// detectTableColumns derives table columns from every row, not just the
-// first: rows built as maps may carry a field only when it applies (a
-// profile's "default" flag, say), so the first row is not a schema. A column
-// exists when any row has the key; its kind (scalar vs nested) is judged by
-// the first non-nil value seen. Columns sort by priority, then by key, so the
-// order is deterministic rather than following map iteration — which matters
-// for the styled renderer, whose width fitting drops the rightmost column.
-func detectTableColumns(data []map[string]any, skip func(string) bool, withMuted bool) []column {
 	if len(data) == 0 {
 		return nil
 	}
 
-	// kind: true = renderable, false = nested/skipped. Absent = undecided
-	// (only nil values seen so far).
-	kind := map[string]bool{}
-	seen := map[string]bool{}
-	var keys []string
-	for _, row := range data {
-		for key, val := range row {
-			if skip(key) {
-				continue
-			}
-			if !seen[key] {
-				seen[key] = true
-				keys = append(keys, key)
-			}
-			if _, decided := kind[key]; decided || val == nil {
-				continue
-			}
-			kind[key] = isTableCellValue(key, val)
-		}
-	}
-
+	first := firstValues(data)
 	var cols []column
-	for _, key := range keys {
-		if renderable, decided := kind[key]; decided && !renderable {
+
+	for key, val := range first {
+		if skipColumns[key] {
 			continue
+		}
+
+		// Skip nested objects
+		switch val.(type) {
+		case map[string]any:
+			continue
+		case []map[string]any:
+			continue
+		case []any:
+			// Allow assignees, skip other arrays
+			if key != "assignees" {
+				continue
+			}
 		}
 
 		priority := columnPriority[key]
@@ -623,10 +606,11 @@ func detectTableColumns(data []map[string]any, skip func(string) bool, withMuted
 			key:      key,
 			header:   formatHeader(key),
 			priority: priority,
-			muted:    withMuted && mutedColumns[key],
+			muted:    mutedColumns[key],
 		})
 	}
 
+	// Sort by priority
 	sort.Slice(cols, func(i, j int) bool {
 		if cols[i].priority != cols[j].priority {
 			return cols[i].priority < cols[j].priority
@@ -637,16 +621,19 @@ func detectTableColumns(data []map[string]any, skip func(string) bool, withMuted
 	return cols
 }
 
-// isTableCellValue reports whether a value renders as a table cell. Nested
-// objects and arrays are skipped, except assignees.
-func isTableCellValue(key string, val any) bool {
-	switch val.(type) {
-	case map[string]any, []map[string]any:
-		return false
-	case []any:
-		return key == "assignees"
+// firstValues maps every key in any row to its first non-nil value. Rows may
+// carry a field only when it applies (a profile's "default" flag), so the
+// first row alone is not the schema.
+func firstValues(data []map[string]any) map[string]any {
+	vals := map[string]any{}
+	for _, row := range data {
+		for key, val := range row {
+			if vals[key] == nil {
+				vals[key] = val
+			}
+		}
 	}
-	return true
+	return vals
 }
 
 func (r *Renderer) selectColumns(cols []column, data []map[string]any) []column {
@@ -675,17 +662,15 @@ func (r *Renderer) selectColumns(cols []column, data []map[string]any) []column 
 		}
 	}
 
-	// Remove columns until we fit. The table's hidden border draws one
-	// cell on each side and one between columns, and cells carry no
-	// padding, so n columns render at their widths plus n+1. (Charging two
-	// per column dropped a column from tables that fit with room to spare.)
+	// Remove columns until we fit
+	padding := 2
 	selected := make([]column, len(cols))
 	copy(selected, cols)
 
 	for len(selected) > 1 {
-		total := len(selected) + 1
+		total := 0
 		for _, col := range selected {
-			total += col.width
+			total += col.width + padding
 		}
 		if total <= r.width {
 			break
@@ -1390,7 +1375,47 @@ func (r *MarkdownRenderer) renderTable(b *strings.Builder, data []map[string]any
 }
 
 func (r *MarkdownRenderer) detectColumns(data []map[string]any) []column {
-	return detectTableColumns(data, skipMarkdownColumn, false)
+	if len(data) == 0 {
+		return nil
+	}
+
+	first := firstValues(data)
+	var cols []column
+
+	for key, val := range first {
+		if skipMarkdownColumn(key) {
+			continue
+		}
+
+		switch val.(type) {
+		case map[string]any, []map[string]any:
+			continue
+		case []any:
+			if key != "assignees" {
+				continue
+			}
+		}
+
+		priority := columnPriority[key]
+		if priority == 0 {
+			priority = 50
+		}
+
+		cols = append(cols, column{
+			key:      key,
+			header:   formatHeader(key),
+			priority: priority,
+		})
+	}
+
+	sort.Slice(cols, func(i, j int) bool {
+		if cols[i].priority != cols[j].priority {
+			return cols[i].priority < cols[j].priority
+		}
+		return cols[i].key < cols[j].key
+	})
+
+	return cols
 }
 
 func (r *MarkdownRenderer) renderCommentsSection(b *strings.Builder, comments []map[string]any) {
