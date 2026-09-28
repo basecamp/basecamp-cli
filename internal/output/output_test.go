@@ -3324,7 +3324,7 @@ func TestSelectColumnsExemptsURLColumnsForSuffixFields(t *testing.T) {
 
 func TestSelectColumnsPreservesURLColumnsWhenOverflowing(t *testing.T) {
 	url := "https://3.basecampapi.com/1234567/buckets/12345678/people/9999999.json"
-	r := &Renderer{width: 60} // URL (70) + name (5) + padding (4) = 79 > 60
+	r := &Renderer{width: 60} // URL (70) + name (5) + borders (3) = 78 > 60
 	cols := []column{
 		{key: "name", header: "Name", priority: 2},
 		{key: "href", header: "Href", priority: 5},
@@ -4671,4 +4671,99 @@ func TestAttachmentMetaSinksSanitized(t *testing.T) {
 
 	assertSinkNeutralized(t, render(FormatStyled), "styled attachment meta", true)
 	assertSinkNeutralized(t, render(FormatMarkdown), "markdown attachment meta", false)
+}
+
+// =============================================================================
+// Columns From Every Row
+// =============================================================================
+
+// profileRows mirrors `basecamp profile list`: default and active are set only
+// on the row they apply to, and that row is not the first.
+func profileRows() []any {
+	return []any{
+		map[string]any{"name": "clawdito", "base_url": "https://3.basecampapi.com", "authenticated": true, "account_id": "2914079"},
+		map[string]any{"name": "marie", "base_url": "https://3.basecampapi.com", "authenticated": true, "account_id": "2914079"},
+		map[string]any{"name": "zach", "base_url": "https://3.basecampapi.com", "authenticated": true, "account_id": "2914079", "default": true, "active": true},
+	}
+}
+
+func tableHeaderLine(t *testing.T, output string) string {
+	t.Helper()
+	for _, line := range strings.Split(ansi.Strip(output), "\n") {
+		if strings.Contains(line, "Name") {
+			return line
+		}
+	}
+	t.Fatalf("no header line in output:\n%s", output)
+	return ""
+}
+
+func TestMarkdownTableTakesColumnsFromLaterRows(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatMarkdown, Writer: &buf})
+	require.NoError(t, w.OK(profileRows()))
+
+	header := tableHeaderLine(t, buf.String())
+	assert.Equal(t, "| Name | Account Id | Active | Authenticated | Base Url | Default |", header)
+	assert.Contains(t, buf.String(), "| zach | 2914079 | yes | yes | https://3.basecampapi.com | yes |")
+	assert.Contains(t, buf.String(), "| clawdito | 2914079 |  | yes | https://3.basecampapi.com |  |")
+}
+
+func TestStyledTableTakesColumnsFromLaterRows(t *testing.T) {
+	var buf bytes.Buffer
+	w := New(Options{Format: FormatStyled, Writer: &buf})
+	require.NoError(t, w.OK(profileRows()))
+
+	// The buffer reports the default 80-column width; the six columns render
+	// in 76, so none may be dropped.
+	header := tableHeaderLine(t, buf.String())
+	for _, h := range []string{"Name", "Account Id", "Active", "Authenticated", "Base Url", "Default"} {
+		assert.Contains(t, header, h)
+	}
+	for _, line := range strings.Split(ansi.Strip(buf.String()), "\n") {
+		assert.LessOrEqual(t, ansi.StringWidth(line), 80, "table line overflows: %q", line)
+	}
+}
+
+func columnKeys(cols []column) []string {
+	keys := make([]string, 0, len(cols))
+	for _, c := range cols {
+		keys = append(keys, c.key)
+	}
+	return keys
+}
+
+func TestDetectColumnsOrderIsDeterministic(t *testing.T) {
+	rows := []map[string]any{
+		{"name": "a", "zeta": 1, "alpha": 2, "mid": 3},
+		{"name": "b", "beta": 4},
+	}
+	want := []string{"name", "alpha", "beta", "mid", "zeta"}
+	r := &Renderer{width: 200}
+	m := &MarkdownRenderer{}
+	for range 50 {
+		require.Equal(t, want, columnKeys(r.detectColumns(rows)))
+		require.Equal(t, want, columnKeys(m.detectColumns(rows)))
+	}
+}
+
+func TestDetectColumnsJudgesKindByFirstNonNilValue(t *testing.T) {
+	rows := []map[string]any{
+		{"name": "a", "owner": nil, "note": nil},
+		{"name": "b", "owner": map[string]any{"id": 1}, "note": "hi"},
+	}
+	keys := columnKeys((&Renderer{width: 200}).detectColumns(rows))
+	assert.Equal(t, []string{"name", "note"}, keys, "a nested value on a later row still marks the column as nested")
+}
+
+func TestSelectColumnsKeepsTableThatFitsExactly(t *testing.T) {
+	// Two columns of 10 render in 10+10+3 = 23 cells (border, separator, border).
+	cols := []column{
+		{key: "name", header: "Name", priority: 2},
+		{key: "note", header: "Note", priority: 50},
+	}
+	data := []map[string]any{{"name": "abcdefghij", "note": "0123456789"}}
+
+	assert.Len(t, (&Renderer{width: 23}).selectColumns(cols, data), 2)
+	assert.Len(t, (&Renderer{width: 22}).selectColumns(cols, data), 1)
 }
