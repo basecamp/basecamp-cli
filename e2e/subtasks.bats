@@ -163,3 +163,23 @@ load test_helper
   assert_failure
   assert_output_contains "ID required"
 }
+
+@test "subtasks delete in JSON mode needs --force" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp subtasks delete 456 --json
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_output_contains "--force"
+}
+
+@test "subtasks delete refuses a parent URL" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp subtasks delete https://3.basecamp.com/99999/buckets/89/todos/123 --force
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_output_contains "does not name a subtask"
+}

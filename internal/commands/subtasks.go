@@ -1,8 +1,10 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -10,6 +12,8 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/tui"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // NewSubtasksCmd creates the subtasks command group: checklist items under a
@@ -74,6 +78,9 @@ func newSubtasksListCmd() *cobra.Command {
 			}
 			if len(args) > 1 {
 				return output.ErrUsage("subtasks list takes one parent id or URL")
+			}
+			if limit < 0 {
+				return output.ErrUsage("--limit must be zero or positive")
 			}
 			if all && limit > 0 {
 				return output.ErrUsage("--all and --limit are mutually exclusive")
@@ -467,13 +474,18 @@ func newSubtasksMoveCmd() *cobra.Command {
 }
 
 func newSubtasksDeleteCmd() *cobra.Command {
-	return &cobra.Command{
+	var force bool
+
+	cmd := &cobra.Command{
 		Use:   "delete <id|url>",
 		Short: "Delete a subtask",
-		Long: `Permanently delete a subtask. On accounts that limit deleting to admins and
-the creator, everyone else is refused.
+		Long: `Permanently delete a subtask. It is not trashed and cannot be undone, so
+this asks for confirmation; machine-output modes and non-interactive sessions
+cannot answer one and need --force instead. On accounts that limit deleting to
+admins and the creator, everyone else is refused.
 
-  basecamp subtasks delete 456`,
+  basecamp subtasks delete 456
+  basecamp subtasks delete 456 --json --force`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			subtaskID, err := subtaskIDArg(args[0])
@@ -481,9 +493,29 @@ the creator, everyone else is refused.
 				return err
 			}
 
+			// Permanent, so only with --force or a confirmation somebody can
+			// answer — refused before any account lookup or request.
+			if err := ensureDeleteConfirmable(cmd, force); err != nil {
+				return err
+			}
+
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
+			}
+
+			// ensureDeleteConfirmable established that without --force a
+			// prompt will be shown and can be answered.
+			if !force {
+				confirmed, err := tui.ConfirmDangerous("Permanently delete this subtask?")
+				switch {
+				case errors.Is(err, tui.ErrCanceled):
+					return nil
+				case err != nil:
+					return fmt.Errorf("confirming the delete: %w", err)
+				case !confirmed:
+					return nil
+				}
 			}
 
 			if err := app.Account().Subtasks().Delete(cmd.Context(), subtaskID); err != nil {
@@ -495,6 +527,10 @@ the creator, everyone else is refused.
 			)
 		},
 	}
+
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation prompt")
+
+	return cmd
 }
 
 // subtaskBreadcrumbs are the follow-ups for a single subtask: toggle its
@@ -537,11 +573,30 @@ func subtaskParentID(arg string) (int64, error) {
 	return id, nil
 }
 
-// subtaskIDArg resolves the <id|url> positional the per-subtask verbs take. A
-// subtask's app URL is its parent's URL with a #__recording_<id> fragment, so
-// the fragment wins over the parent id in the path.
+// subtaskIDArg resolves the <id|url> positional the per-subtask verbs take: a
+// bare id, a subtask's app URL — its parent's URL with a #__recording_<id>
+// fragment, where the fragment names the subtask — or a subtask or card-step
+// URL, which names it in the path. Any other URL names the parent or something
+// else entirely, and is refused rather than read as a subtask id: `subtasks
+// delete <todo-url>` must not aim a delete at the to-do's own id.
 func subtaskIDArg(arg string) (int64, error) {
-	raw, _ := extractCommentWithProject(arg)
+	raw := arg
+	if parsed := urlarg.Parse(arg); parsed != nil {
+		switch {
+		case parsed.CommentID != "":
+			raw = parsed.CommentID
+		case parsed.Type == "subtasks" || parsed.Type == "steps":
+			raw = parsed.RecordingID
+		default:
+			return 0, output.ErrUsageHint(
+				fmt.Sprintf("%q does not name a subtask", arg),
+				"A to-do or card URL names the parent. Pass the subtask id, or its URL ending in #__recording_<id> "+
+					"(basecamp subtasks list <parent> shows the ids)",
+			)
+		}
+	} else if strings.Contains(arg, "://") {
+		raw = ""
+	}
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id <= 0 {
 		return 0, output.ErrUsageHint(

@@ -109,6 +109,7 @@ func TestSubtasksListRejectsConflictingPagination(t *testing.T) {
 		{"list", "123", "--all", "--limit", "5"},
 		{"list", "123", "--page", "2", "--all"},
 		{"list", "123", "--page", "0"},
+		{"list", "123", "--limit", "-1"},
 	} {
 		app, transport, _ := setupPersonalFeedApp(t)
 
@@ -278,7 +279,7 @@ func TestSubtasksDeleteDeletesTheSubtask(t *testing.T) {
 	app, transport, out := setupPersonalFeedApp(t,
 		subtaskRoute(http.MethodDelete, subtaskPath(456), http.StatusNoContent, ""))
 
-	require.NoError(t, executeRecordingCommand(NewSubtasksCmd(), app, "delete", "456"))
+	require.NoError(t, executeRecordingCommand(NewSubtasksCmd(), app, "delete", "456", "--force"))
 
 	call := transport.last(t)
 	assert.Equal(t, http.MethodDelete, call.Method)
@@ -304,4 +305,44 @@ func TestSubtasksVerbsRejectANonID(t *testing.T) {
 		requireBookmarksUsageError(t, err)
 		assert.Empty(t, transport.recorded(), "no request for %v", args)
 	}
+}
+
+// A permanent delete in machine-output mode has nobody to confirm it, so it
+// needs --force and is refused before any request without it.
+func TestSubtasksDeleteNeedsForceWhenNothingCanConfirm(t *testing.T) {
+	app, transport, _ := setupPersonalFeedApp(t)
+
+	err := executeRecordingCommand(NewSubtasksCmd(), app, "delete", "456")
+	outErr := requireBookmarksUsageError(t, err)
+	assert.Contains(t, outErr.Message, "--force")
+	assert.Empty(t, transport.recorded())
+}
+
+// A to-do or card URL without a #__recording_ fragment names the parent, not a
+// subtask, so it must not be read as a subtask id — least of all by delete.
+func TestSubtasksPerSubtaskVerbsRefuseAParentURL(t *testing.T) {
+	parentURL := "https://3.basecamp.com/99999/buckets/89/todos/123"
+	for _, args := range [][]string{
+		{"show", parentURL},
+		{"complete", parentURL},
+		{"delete", parentURL, "--force"},
+		{"show", "https://example.com/not/basecamp"},
+	} {
+		app, transport, _ := setupPersonalFeedApp(t)
+
+		err := executeRecordingCommand(NewSubtasksCmd(), app, args...)
+		requireBookmarksUsageError(t, err)
+		assert.Empty(t, transport.recorded(), "no request for %v", args)
+	}
+}
+
+// The API URL a subtask payload carries names the subtask in its path.
+func TestSubtasksShowAcceptsTheSubtaskAPIURL(t *testing.T) {
+	app, transport, _ := setupPersonalFeedApp(t,
+		subtaskRoute(http.MethodGet, subtaskPath(456), http.StatusOK, subtaskFixture))
+
+	require.NoError(t, executeRecordingCommand(NewSubtasksCmd(), app, "show",
+		"https://3.basecampapi.com/99999/buckets/89/subtasks/456.json"))
+
+	assert.Equal(t, subtaskPath(456), transport.last(t).Path)
 }

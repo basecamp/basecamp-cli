@@ -13677,6 +13677,7 @@ FLAG basecamp subtasks delete --account type=string
 FLAG basecamp subtasks delete --agent type=bool
 FLAG basecamp subtasks delete --cache-dir type=string
 FLAG basecamp subtasks delete --count type=bool
+FLAG basecamp subtasks delete --force type=bool
 FLAG basecamp subtasks delete --help type=bool
 FLAG basecamp subtasks delete --hints type=bool
 FLAG basecamp subtasks delete --ids-only type=bool

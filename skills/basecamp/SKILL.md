@@ -82,7 +82,7 @@ argument-hint: "[action] [args...]"
 
 # /basecamp - Basecamp Workflow Command
 
-Full CLI coverage: 195 tracked in-scope endpoints across todos, cards, messages, files, schedule, check-ins, timeline, recordings, templates, webhooks, subscriptions, lineup, chat, pings, gauges, assignments, notifications, the account event feed, and accounts.
+Full CLI coverage: 203 tracked in-scope endpoints across todos, subtasks, cards, messages, files, schedule, check-ins, timeline, recordings, templates, webhooks, subscriptions, lineup, chat, pings, gauges, assignments, notifications, the account event feed, and accounts.
 
 ## Agent Invariants
 
@@ -587,7 +587,7 @@ basecamp subtasks update <subtask-id> --no-due --no-assignees --json
 basecamp subtasks complete <subtask-id> --json
 basecamp subtasks uncomplete <subtask-id> --json
 basecamp subtasks move <subtask-id> --position 1 --json     # 1-based (1 = top)
-basecamp subtasks delete <subtask-id> --json                # Permanent
+basecamp subtasks delete <subtask-id> --force --json        # Permanent; --force where nothing can confirm
 ```
 
 Key points: only to-dos and cards hold subtasks; any other parent is refused

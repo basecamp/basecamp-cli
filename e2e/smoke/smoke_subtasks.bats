@@ -86,7 +86,7 @@ setup_file() {
   local subtask_id
   subtask_id=$(<"$id_file")
 
-  run_smoke basecamp subtasks delete "$subtask_id" --json
+  run_smoke basecamp subtasks delete "$subtask_id" --force --json
   assert_success
   assert_json_value '.ok' 'true'
 }
