@@ -1,7 +1,7 @@
 charm.land/bubbles/v2 v2.2.1 h1:Fq1+qm5hV6GkvzLQDhCBpXXE5tLgvh1PRriCLwSvIQU=
 charm.land/bubbles/v2 v2.2.1/go.mod h1:wdMgn+sje1KNXdwFizIWjbf328fIUBxqEmJ/vYPo8yc=
-charm.land/bubbletea/v2 v2.0.9 h1:DpJCMWKgzQK8SJv4zbKKFHAI10ymWy/evClPFk0k0f8=
-charm.land/bubbletea/v2 v2.0.9/go.mod h1:2SkdgoTXluXJHOUwAoRlRXF/28vklb1rFl6GcgV1/ss=
+charm.land/bubbletea/v2 v2.0.10 h1:oolvo20VBpI0PfqE7iFjkZ1bx0WpmXGfnKz5Yldjq5o=
+charm.land/bubbletea/v2 v2.0.10/go.mod h1:QOatcnhOjYIfxzUSTz6raF7Ex4R/rIuHa3SnBdCCpMc=
 charm.land/lipgloss/v2 v2.0.6 h1:EaGKeuA8FvF+v2BT5VmZd2LoYLaMZJXA5n34th8nCIQ=
 charm.land/lipgloss/v2 v2.0.6/go.mod h1:ipDDJNSGa1hlwDtSfW1s2/xR8Vdhbut4PXh2zEKZd0Q=
 cloud.google.com/go v0.123.0 h1:2NAUJwPR47q+E35uaJeYoNhuNEM9kM8SjgRgdeOJUSE=
@@ -87,8 +87,8 @@ github.com/aymanbagabas/go-udiff v0.4.1 h1:OEIrQ8maEeDBXQDoGCbbTTXYJMYRCRO1fnodZ
 github.com/aymanbagabas/go-udiff v0.4.1/go.mod h1:0L9PGwj20lrtmEMeyw4WKJ/TMyDtvAoK9bf2u/mNo3w=
 github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuPk=
 github.com/aymerick/douceur v0.2.0/go.mod h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=
-github.com/basecamp/basecamp-sdk/go v0.19.0 h1:byygVVbJnWCZsyBNeAlztlUAV23ytLEhPx98WakNy+c=
-github.com/basecamp/basecamp-sdk/go v0.19.0/go.mod h1:kIBDYwPMMD59PadNGxpH0YTQuI+blFPZ8MelGI0RK5Q=
+github.com/basecamp/basecamp-sdk/go v0.20.0 h1:5h6I2U11LFaBKfXqoIiNqSrf6TCu4Xoq+iMKfeRISN8=
+github.com/basecamp/basecamp-sdk/go v0.20.0/go.mod h1:kIBDYwPMMD59PadNGxpH0YTQuI+blFPZ8MelGI0RK5Q=
 github.com/basecamp/cli v0.2.2-0.20260828230226-767413fc712d h1:jAzDrCCzDpIwhbFT1xVVs0z2xpXoDEkomHfKB2bUUp8=
 github.com/basecamp/cli v0.2.2-0.20260828230226-767413fc712d/go.mod h1:iTBTaWvsPEFIcZfkxQHEfISyJ6sZ7036K6bNx0RY3EE=
 github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d h1:zEQVGq1x1nhKMZ2TudFAcSJ32CHT8richI1vQakIKz4=
