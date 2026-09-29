@@ -254,7 +254,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Post to chat | `basecamp chat post "Message" --in <project> --json` |
 | List pings | `basecamp notifications --json --jq '.data.reads[]? | select(.section == "pings")'` |
 | Read ping thread | `basecamp api get "/buckets/<circle_id>/chats/<chat_id>/lines.json" --agent` |
-| Post to ping thread | `basecamp api post "/buckets/<circle_id>/chats/<chat_id>/lines.json" --data '{"content":"<p>message</p>","content_type":"text/html"}' --json` |
+| Post to ping thread | `basecamp api post "/buckets/<circle_id>/chats/<chat_id>/lines.json" --data '{"content":"<div>message</div>","content_type":"text/html"}' --json` |
 | Add comment | `basecamp comments create <recording_id> "Text" --in <project> --json` |
 | Inspect comment / reply atoms | `basecamp comments show <url> --json` → `reply_target` + `mention` in `.data` |
 | List attachments | `basecamp attachments list <id\|url> --json` |
@@ -1276,7 +1276,7 @@ basecamp api get "/buckets/<circle_id>/chats/<chat_id>/lines.json" --agent
 
 # Post a ping line.
 basecamp api post "/buckets/<circle_id>/chats/<chat_id>/lines.json" \
-  --data '{"content":"<p>Hey, quick question.</p>","content_type":"text/html"}' --json
+  --data '{"content":"<div>Hey, quick question.</div>","content_type":"text/html"}' --json
 ```
 
 Always send `"content_type": "text/html"` with formatted content. Without it the line is stored as plain text: HTML tags are shown escaped, Markdown is shown literally, multiline text renders with the quote border, and a later edit does not convert it. Lines accept `div`, `h1`, `br`, `strong`, `em`, `strike`, `a href`, `pre`, `ol`, `ul`, `li`, `blockquote` and `<bc-attachment sgid>`; use `<br>` for line breaks.
