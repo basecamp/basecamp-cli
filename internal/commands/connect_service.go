@@ -96,6 +96,13 @@ type connectServiceFlags struct {
 	shadow   bool
 	hold     bool
 	noEnable bool
+
+	// guided is the guided setup installing the service: it says itself
+	// whether the agent is running, so a started service adds only what
+	// the person has to do. The linger warning is left out too: the guided
+	// question offered to start the agent whenever the person logs in,
+	// which is what a user unit without lingering does.
+	guided bool
 }
 
 // newConnectServiceCmd is the service group.
@@ -572,19 +579,29 @@ func runConnectServiceInstall(cmd *cobra.Command, f *connectServiceFlags) error 
 		}
 		enabled = true
 		summary = fmt.Sprintf("Wrote %s and started %s", path, name)
-		if warning := connectServiceLingerWarning(cmd.Context()); warning != "" {
-			summary += ". " + warning
+		if !f.guided {
+			if warning := connectServiceLingerWarning(cmd.Context()); warning != "" {
+				summary += ". " + warning
+			}
 		}
 	}
 	if warning := connectServiceExecutableWarning(exe); warning != "" {
 		summary += ". " + warning
 	}
+	var missingNote string
 	if missing := connectServiceMissingCredentials(); len(missing) > 0 {
-		summary += fmt.Sprintf(". %s %s set here and will not be in the service, which never carries a credential: put %s in %s (owner-only) and the unit will read it",
+		missingNote = fmt.Sprintf("%s %s set here and will not be in the service, which never carries a credential: put %s in %s (owner-only) and the unit will read it",
 			strings.Join(missing, ", "),
 			map[bool]string{true: "is", false: "are"}[len(missing) == 1],
 			map[bool]string{true: "it", false: "them"}[len(missing) == 1],
 			envFile)
+		summary += ". " + missingNote
+	}
+	if f.guided {
+		if missingNote != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), missingNote)
+		}
+		return nil
 	}
 	return app.OK(map[string]any{"unit": name, "path": path, "enabled": enabled},
 		output.WithSummary(summary))

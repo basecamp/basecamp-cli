@@ -430,10 +430,17 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 	// fetch its secret again for one is advice that cannot help.
 	bareUnauthorized := code == "" && (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden)
 	if clientRefusalCodes[code] || bareUnauthorized {
-		return m.agentRemedy(output.ErrAuth("Minting an agent token was refused ("+detail+")"), mint.clientID, mint.scope)
+		refused := output.ErrAuth("Minting an agent token was refused (" + detail + ")")
+		refused.Cause = ErrAgentCredentialRefused
+		return m.agentRemedy(refused, mint.clientID, mint.scope)
 	}
 	return statusFailure("minting an agent token: "+detail, resp)
 }
+
+// ErrAgentCredentialRefused is the cause of a mint the token endpoint
+// refused for the credentials themselves: the agent was disconnected in
+// Basecamp, or connected on another computer, which replaced its secret.
+var ErrAgentCredentialRefused = errors.New("the agent's credential was refused")
 
 // clientRefusalCodes are the RFC 6749 §5.2 codes that say THE CREDENTIALS
 // PRESENTED are wrong, which is the only thing piping the secret in again

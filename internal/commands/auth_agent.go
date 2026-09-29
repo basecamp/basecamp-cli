@@ -88,49 +88,9 @@ client secret this holds. Drop the local copy with ` + "`basecamp auth logout -P
 				return output.ErrUsage("Invalid scope. Use 'read' or 'full'")
 			}
 
-			target, err := resolveAgentConnectProfile(app)
-			if err != nil {
-				return err
-			}
-
-			w := cmd.OutOrStdout()
-			r := output.NewRendererWithTheme(w, false, tui.ResolveTheme(tui.DetectDark()))
-
-			var isDefault bool
-			ctx, stop := loginContext(cmd)
-			result, err := app.Auth.ConnectAgent(ctx, auth.AgentConnectOptions{
-				DeviceName:   connectDeviceName(deviceName),
-				SoftwareName: softwareName,
-				Scope:        scope,
-				NoBrowser:    noBrowser,
-				Local:        local,
-				Logger:       func(msg string) { fmt.Fprintln(w, msg) },
-				Progress:     w,
-				BeforeStore: func(conn *auth.AgentConnection) error {
-					registered, commitErr := target.commit(app, conn)
-					isDefault = registered
-					return commitErr
-				},
+			return connectAgentProfile(cmd, app, agentConnectFlags{
+				deviceName: deviceName, softwareName: softwareName, scope: scope, noBrowser: noBrowser, local: local,
 			})
-			err = loginOutcome(ctx, err, w, r)
-			stop()
-			if err != nil {
-				return err
-			}
-
-			fmt.Fprintln(w)
-			fmt.Fprintln(w, r.Success.Render(fmt.Sprintf("Connected profile %q to a Basecamp agent", target.name)))
-			fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("Profile: %s · Account: %s · Access: %s · Token: minted on demand, no refresh token",
-				target.name, result.AccountID, result.Scope)))
-			if target.existing == nil {
-				line := fmt.Sprintf("Created profile %q for account %s", target.name, result.AccountID)
-				if isDefault {
-					line += " (default)"
-				}
-				fmt.Fprintln(w, r.Muted.Render(line))
-			}
-			fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("Check it any time: basecamp auth status -P %s", target.name)))
-			return nil
 		},
 	}
 
@@ -141,6 +101,68 @@ client secret this holds. Drop the local copy with ` + "`basecamp auth logout -P
 	cmd.Flags().BoolVar(&local, "local", false, "Treat this as a local session: open the browser here even over SSH, in CI, or without a display")
 
 	return cmd
+}
+
+// agentConnectFlags are the choices an agent connection takes.
+type agentConnectFlags struct {
+	deviceName   string
+	softwareName string
+	scope        string
+	noBrowser    bool
+	local        bool
+
+	// quiet leaves out what was stored, for the guided setup, which says
+	// in one line of its own which agent this computer is now connected as.
+	quiet bool
+}
+
+// connectAgentProfile runs the agent-connection handshake for the active
+// profile and says what it stored. Both `auth agent connect` and the guided
+// `connect setup` run it, so a person sees one connection either way.
+func connectAgentProfile(cmd *cobra.Command, app *appctx.App, f agentConnectFlags) error {
+	target, err := resolveAgentConnectProfile(app)
+	if err != nil {
+		return err
+	}
+
+	w := cmd.OutOrStdout()
+	r := output.NewRendererWithTheme(w, false, tui.ResolveTheme(tui.DetectDark()))
+
+	var isDefault bool
+	ctx, stop := loginContext(cmd)
+	result, err := app.Auth.ConnectAgent(ctx, auth.AgentConnectOptions{
+		DeviceName:   connectDeviceName(f.deviceName),
+		SoftwareName: f.softwareName,
+		Scope:        f.scope,
+		NoBrowser:    f.noBrowser,
+		Local:        f.local,
+		Logger:       func(msg string) { fmt.Fprintln(w, msg) },
+		Progress:     w,
+		BeforeStore: func(conn *auth.AgentConnection) error {
+			registered, commitErr := target.commit(app, conn)
+			isDefault = registered
+			return commitErr
+		},
+	})
+	err = loginOutcome(ctx, err, w, r)
+	stop()
+	if err != nil || f.quiet {
+		return err
+	}
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, r.Success.Render(fmt.Sprintf("Connected profile %q to a Basecamp agent", target.name)))
+	fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("Profile: %s · Account: %s · Access: %s · Token: minted on demand, no refresh token",
+		target.name, result.AccountID, result.Scope)))
+	if target.existing == nil {
+		line := fmt.Sprintf("Created profile %q for account %s", target.name, result.AccountID)
+		if isDefault {
+			line += " (default)"
+		}
+		fmt.Fprintln(w, r.Muted.Render(line))
+	}
+	fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("Check it any time: basecamp auth status -P %s", target.name)))
+	return nil
 }
 
 // connectDeviceName is what the approval page calls this computer: what

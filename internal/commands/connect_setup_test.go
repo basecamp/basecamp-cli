@@ -34,6 +34,7 @@ const (
 	setupBotPerson      int64 = 51177542
 	setupBotIdentity    int64 = 4242
 	setupProject        int64 = 48699913
+	setupProject2       int64 = 48699914
 	setupClientPerson   int64 = 1003
 
 	// Tokens the mock server tells apart. None is shaped like a real one.
@@ -68,6 +69,14 @@ type connectSetupServer struct {
 	duringMint func()
 	// mintFailure, when set, answers the stream ticket mint.
 	mintFailure func(w http.ResponseWriter)
+	// boss is who the agent works for, in its own profile; nil for a plain
+	// agent, or a Basecamp that does not say.
+	boss map[string]any
+	// agentProjects is what the agent's project list answers.
+	agentProjects []map[string]any
+	// refuseSecret answers every mint with invalid_client, as Basecamp does
+	// for an agent disconnected, or connected on another computer.
+	refuseSecret bool
 }
 
 func startConnectSetupServer(t *testing.T) *connectSetupServer {
@@ -99,6 +108,12 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 		writeJSON(w, map[string]any{"client_id": "agent-client", "client_secret": fakeConnectSecret, "account_id": "999", "scope": scope})
 	})
 	mux.HandleFunc("/oauth/tokens", func(w http.ResponseWriter, _ *http.Request) {
+		if s.refuseSecret {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
+			return
+		}
 		scope := s.grantScope
 		if scope == "" {
 			scope = "full"
@@ -122,7 +137,11 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 			if s.agentAsUser {
 				personable = "User"
 			}
-			writeJSON(w, map[string]any{"id": s.agentID, "name": "Marie Chef", "personable_type": personable})
+			profile := map[string]any{"id": s.agentID, "name": "Marie Chef", "personable_type": personable}
+			if s.boss != nil {
+				profile["boss"] = s.boss
+			}
+			writeJSON(w, profile)
 		case setupOperatorToken:
 			writeJSON(w, map[string]any{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User"})
 		case setupBotToken:
@@ -172,10 +191,27 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 		}
 		writeJSON(w, body)
 	}
+	mux.HandleFunc("/999/projects.json", func(w http.ResponseWriter, r *http.Request) {
+		if bearer(r) != setupAgentToken {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		projects := s.agentProjects
+		if projects == nil {
+			projects = []map[string]any{}
+		}
+		writeJSON(w, projects)
+	})
 	mux.HandleFunc(fmt.Sprintf("/999/projects/%d", setupProject), func(w http.ResponseWriter, r *http.Request) {
 		projectRead(w, r, map[string]any{"id": setupProject, "name": "Connector"})
 	})
 	mux.HandleFunc(fmt.Sprintf("/999/projects/%d/people.json", setupProject), func(w http.ResponseWriter, r *http.Request) {
+		projectRead(w, r, []any{})
+	})
+	mux.HandleFunc(fmt.Sprintf("/999/projects/%d", setupProject2), func(w http.ResponseWriter, r *http.Request) {
+		projectRead(w, r, map[string]any{"id": setupProject2, "name": "Launch"})
+	})
+	mux.HandleFunc(fmt.Sprintf("/999/projects/%d/people.json", setupProject2), func(w http.ResponseWriter, r *http.Request) {
 		projectRead(w, r, []any{})
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

@@ -211,6 +211,11 @@ type Trust struct {
 	// that profile's own credential read back, which proves who they are.
 	Operator        Person
 	OperatorProfile string
+	// OperatorIsOwner says Operator is the person the agent works for, as
+	// Basecamp named them in the agent's own profile. Basecamp's word proves
+	// who they are, as a profile's own credential does, so they are not read
+	// again: a new agent may share no project with them yet.
+	OperatorIsOwner bool
 	// Allowlist is every allowlisted Person id the file will hold.
 	Allowlist []int64
 	// Recorded is the trust connect.json already holds for this same agent
@@ -244,7 +249,14 @@ func VerifyTrust(ctx context.Context, people Reader, t Trust, agentID int64) []C
 	slices.Sort(ids)
 	ids = slices.Compact(ids)
 	checks := make([]Check, 0, 1+len(ids))
-	checks = append(checks, verifyPerson(ctx, people, "Operator", t.Operator, agentID, t.OperatorProfile, t.Recorded.OperatorID == t.Operator.ID && t.Operator.ID > 0))
+	proof := ""
+	switch {
+	case t.OperatorProfile != "":
+		proof = fmt.Sprintf("the identity of profile %q", t.OperatorProfile)
+	case t.OperatorIsOwner:
+		proof = "the agent's owner"
+	}
+	checks = append(checks, verifyPerson(ctx, people, "Operator", t.Operator, agentID, proof, t.Recorded.OperatorID == t.Operator.ID && t.Operator.ID > 0))
 	for _, id := range ids {
 		name := fmt.Sprintf("Allowlist %d", id)
 		checks = append(checks, verifyPerson(ctx, people, name, Person{ID: id}, agentID, "", slices.Contains(t.Recorded.AllowlistIDs, id)))
@@ -252,7 +264,9 @@ func VerifyTrust(ctx context.Context, people Reader, t Trust, agentID int64) []C
 	return checks
 }
 
-func verifyPerson(ctx context.Context, r Reader, name string, p Person, agentID int64, fromProfile string, recorded bool) Check {
+// verifyPerson checks one trusted person. proof, when set, says what already
+// proves who they are, and they are not read again.
+func verifyPerson(ctx context.Context, r Reader, name string, p Person, agentID int64, proof string, recorded bool) Check {
 	c := Check{Name: name}
 	switch {
 	case p.ID <= 0:
@@ -263,8 +277,8 @@ func verifyPerson(ctx context.Context, r Reader, name string, p Person, agentID 
 		return c
 	}
 	source := ""
-	if fromProfile != "" {
-		source = fmt.Sprintf(", the identity of profile %q", fromProfile)
+	if proof != "" {
+		source = ", " + proof
 	} else {
 		read, err := r.Person(ctx, p.ID)
 		switch {

@@ -192,8 +192,10 @@ Explain the modes this way when you ask:
 In every mode, assigning work to the agent counts only from the operator, and
 agents never authorize anything, the agent itself included.
 
-**The operator** is the person the agent takes instructions from. Name them by
-their own CLI profile with `--operator-profile '<profile>'`: setup reads who
+**The operator** is the person the agent takes instructions from. A personal
+agent's operator is its owner, whom Basecamp names in the agent's own profile:
+for one, pass no operator flag and setup takes the owner. For any other agent,
+name them by their own CLI profile with `--operator-profile '<profile>'`: setup reads who
 that profile is through its own login, which proves it. `--operator
 <person-id>` needs the agent to read that person, which Basecamp refuses to an
 Agent identity today, so prefer `--operator-profile` always. The operator's
@@ -273,8 +275,10 @@ not looked at leaves trust and projects in place that nobody mentioned.
 
 Then confirm the identity (`basecamp me`) with the person before going on.
 
-**2. Operator.** Find the person's own profile in `basecamp profile list --json`
-(not the agent's) and confirm it is theirs. Use `--operator-profile`.
+**2. Operator.** For a personal agent (one that works for a person), pass no
+operator flag: setup takes its owner. Otherwise find the person's own profile in
+`basecamp profile list --json` (not the agent's) and confirm it is theirs. Use
+`--operator-profile`.
 
 **3. Trust mode.** Explain the three modes in a sentence each and ask. Default
 to `operator`. For `allowlist`, get each person's Person id (for example
@@ -434,11 +438,17 @@ that record or that step.
   proof that it runs), the hold, the feed position
   (held or not, never the position), gaps, queues, live tasks and their workers,
   lifecycle messages waiting for a person, held records, the last dispatches.
-  Read-only and safe while the connector runs. It shows no content.
+  Read-only and safe while the connector runs. It shows no content. When the
+  worker failed to start twice in a row, the connector stops taking new work
+  and status opens with "Not taking work:" and the reason. Explain the
+  reason. New work waits and nothing is lost. The connector takes work again
+  once the worker starts cleanly, or when it restarts.
 - `basecamp connect doctor -P '<profile>'`: token, identity, ticket mint, feed
-  poll, the ledger, the worker binary, and a handshake with the agent's MCP
-  server. It writes nothing to the ledger and posts nothing to Basecamp,
-  though it may renew the profile's credential as any command does.
+  poll, the ledger, the worker (started as the connector would start it, and
+  asked whether it knows the connector's flags and is logged in, with no model
+  call), and a handshake with the agent's MCP server. It writes nothing to the
+  ledger and posts nothing to Basecamp, though it may renew the profile's
+  credential as any command does.
 - `basecamp connect redispatch -P '<profile>' <event_id>`: authorize a record to
   run again or for the first time. Accepted for an unknown or failed outcome
   (one whose task is still running waits for that task to end), a blocked
