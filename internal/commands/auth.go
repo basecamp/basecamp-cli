@@ -181,6 +181,16 @@ func remedyFor(app *appctx.App, refusal error) string {
 // the caller asked. Anything else (the server could not be reached, a fault)
 // is returned as itself, since no verdict was had.
 func checkWithServer(ctx context.Context, app *appctx.App) (*checkVerdict, error) {
+	// The authorization document lists an identity's accounts, and an agent
+	// has no identity, so it refuses an agent's token whatever its standing.
+	// An agent credential is checked against the profile of the account it
+	// is bound to instead, which a profile without that account cannot name.
+	agent := os.Getenv("BASECAMP_TOKEN") == "" && app.Auth.GetOAuthType() == "agent"
+	if agent {
+		if err := app.RequireAccount(); err != nil {
+			return nil, err
+		}
+	}
 	endpoint, err := app.Auth.AuthorizationEndpoint(ctx)
 	if err != nil {
 		return nil, err
@@ -202,7 +212,11 @@ func checkWithServer(ctx context.Context, app *appctx.App) (*checkVerdict, error
 	// boundary between the two could fail there, locally, and be reported
 	// as the server's refusal.
 	client := app.SDKClientFor(&basecamp.StaticTokenProvider{Token: token})
-	_, err = client.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{Endpoint: endpoint, FilterProduct: "bc3"})
+	if agent {
+		_, err = client.ForAccount(app.Config.AccountID).People().Me(ctx)
+	} else {
+		_, err = client.Authorization().GetInfo(ctx, &basecamp.GetInfoOptions{Endpoint: endpoint, FilterProduct: "bc3"})
+	}
 	switch {
 	case err == nil:
 		return &checkVerdict{valid: true, sent: true}, nil

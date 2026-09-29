@@ -92,7 +92,9 @@ explain the result. This skill is the reference you do that from.
 **Identity.** Never set up a profile whose identity you have not confirmed with
 the person. Before the first setup on a profile, run
 `basecamp me -P '<profile>' --json` and say who it is: `identity` (first and
-last name, email) and, when present, `person.name` and `person.id`. Go on only
+last name, email) and, when present, `person.name` and `person.id`. An Agent
+credential has no identity: `me` reports `principal: agent` and only `person`
+(its name, id and `personable_type`). Go on only
 when the person says that is the agent. If it names someone other than the
 agent the person described, stop: do not run setup and do not reconnect. Tell
 the person who the credential is and let them decide. After setup, check

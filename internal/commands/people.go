@@ -24,8 +24,11 @@ import (
 
 // MeOutput represents the output for the me command
 type MeOutput struct {
-	Identity basecamp.Identity `json:"identity"`
-	Accounts []AccountInfo     `json:"accounts"`
+	// Identity is the signed-in identity. An agent has none, so its answer
+	// omits it and says so in Principal instead.
+	Identity  *basecamp.Identity `json:"identity,omitempty"`
+	Principal string             `json:"principal,omitempty"`
+	Accounts  []AccountInfo      `json:"accounts"`
 	// Person is the account-scoped person record, looked up when the
 	// authorization document names no one (an in-house bc3 token reports
 	// only the identity id) and an account is configured to ask.
@@ -35,9 +38,10 @@ type MeOutput struct {
 // MePerson is the person the credential resolves to within the configured
 // account.
 type MePerson struct {
-	ID    int64  `json:"id"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	Email          string `json:"email"`
+	PersonableType string `json:"personable_type,omitempty"`
 }
 
 // AccountInfo represents an account in the me command output
@@ -68,6 +72,10 @@ func runMe(cmd *cobra.Command, args []string) error {
 	}
 	if !authenticated {
 		return output.ErrAuth("Not authenticated. Run: basecamp auth login")
+	}
+
+	if os.Getenv("BASECAMP_TOKEN") == "" && app.Auth.GetOAuthType() == "agent" {
+		return runMeAsAgent(cmd, app)
 	}
 
 	endpoint, err := app.Auth.AuthorizationEndpoint(cmd.Context())
@@ -137,7 +145,7 @@ func runMe(cmd *cobra.Command, args []string) error {
 	}
 
 	result := MeOutput{
-		Identity: authInfo.Identity,
+		Identity: &authInfo.Identity,
 		Accounts: accounts,
 		Person:   person,
 	}
@@ -172,6 +180,41 @@ func runMe(cmd *cobra.Command, args []string) error {
 	return app.OK(result,
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
+	)
+}
+
+// runMeAsAgent answers `me` for an agent credential. An agent is a principal
+// with no identity behind it, so the authorization document — which lists
+// an identity's accounts — refuses its token. The account its credential is
+// bound to is the profile's, and the agent is the person that account's
+// profile document names.
+func runMeAsAgent(cmd *cobra.Command, app *appctx.App) error {
+	if err := app.RequireAccount(); err != nil {
+		return err
+	}
+
+	p, err := app.Account().People().Me(cmd.Context())
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	person := &MePerson{ID: p.ID, Name: p.Name, Email: p.EmailAddress, PersonableType: p.PersonableType}
+	_ = app.Auth.SetUserIdentity(cmd.Context(), strconv.FormatInt(p.ID, 10), "")
+
+	result := MeOutput{
+		Principal: "agent",
+		Accounts:  []AccountInfo{},
+		Person:    person,
+	}
+
+	summary := fmt.Sprintf("%s (agent person %d) in account %s", p.Name, p.ID, app.Config.AccountID)
+
+	return app.OK(result,
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{Action: "profile", Cmd: "basecamp people show me", Description: "The agent's profile"},
+			output.Breadcrumb{Action: "auth", Cmd: "basecamp auth status", Description: "Auth status"},
+		),
 	)
 }
 

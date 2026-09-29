@@ -1341,3 +1341,80 @@ func TestMeKeepsTheIdentityEmailOverThePersons(t *testing.T) {
 	assert.Equal(t, "51177542", creds.UserID)
 	assert.Equal(t, "identity@example.com", creds.UserEmail, "the merged email is what gets stored")
 }
+
+// TestMeWithAgentCredential: an agent has no identity, and the
+// authorization document refuses its token, so `me` names the person the
+// bound account's profile document answers with and asks for nothing else.
+func TestMeWithAgentCredential(t *testing.T) {
+	srv := startLoginIdentityServer(t, "agent-tok")
+	srv.authorizationStatus = http.StatusUnauthorized
+	srv.personName = "Marie Chef"
+	srv.personableType = "Agent"
+	app, buf := loginTestApp(t, srv, &config.Config{ActiveProfile: "marie", AccountID: "999", CacheDir: t.TempDir()})
+	require.NoError(t, app.Auth.GetStore().Save("profile:marie", &auth.Credentials{
+		AccessToken: "agent-tok", OAuthType: "agent", ClientID: "bc-agent-7", ClientSecret: "s3cret",
+		Scope: "full", ExpiresAt: 9999999999,
+	}))
+
+	require.NoError(t, executePeopleCommand(NewMeCmd(), app))
+
+	var envelope struct {
+		Summary string         `json:"summary"`
+		Data    map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, "Marie Chef (agent person 51177542) in account 999", envelope.Summary)
+	assert.Equal(t, "agent", envelope.Data["principal"])
+	assert.NotContains(t, envelope.Data, "identity")
+	assert.Equal(t, []any{}, envelope.Data["accounts"])
+	assert.Equal(t, map[string]any{
+		"id": float64(51177542), "name": "Marie Chef", "email": "clawdito@example.com", "personable_type": "Agent",
+	}, envelope.Data["person"])
+	assert.Equal(t, []string{"/999/my/profile.json"}, srv.seenPaths())
+
+	creds, err := app.Auth.GetStore().Load("profile:marie")
+	require.NoError(t, err)
+	assert.Equal(t, "51177542", creds.UserID)
+	assert.Equal(t, "agent", creds.OAuthType)
+	assert.Equal(t, "s3cret", creds.ClientSecret, "reading the profile leaves the agent's credential as it was")
+}
+
+// agentMeApp is an app whose "marie" profile holds an agent credential,
+// against a server whose authorization document refuses agent tokens.
+func agentMeApp(t *testing.T, accountID string) (*appctx.App, *bytes.Buffer, *loginIdentityServer) {
+	t.Helper()
+	srv := startLoginIdentityServer(t, "agent-tok")
+	srv.authorizationStatus = http.StatusUnauthorized
+	app, buf := loginTestApp(t, srv, &config.Config{ActiveProfile: "marie", AccountID: accountID, CacheDir: t.TempDir()})
+	require.NoError(t, app.Auth.GetStore().Save("profile:marie", &auth.Credentials{
+		AccessToken: "agent-tok", OAuthType: "agent", ClientID: "bc-agent-7", ClientSecret: "s3cret",
+		Scope: "full", ExpiresAt: 9999999999,
+	}))
+	return app, buf, srv
+}
+
+// TestMeWithAgentCredentialNeedsItsAccount: an agent is known only by the
+// account it is bound to, so a profile naming none is a usage error, and
+// nothing is asked of the server.
+func TestMeWithAgentCredentialNeedsItsAccount(t *testing.T) {
+	for _, accountID := range []string{"", "not-a-number"} {
+		app, _, srv := agentMeApp(t, accountID)
+
+		err := executePeopleCommand(NewMeCmd(), app)
+		require.Error(t, err)
+		assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
+		assert.Empty(t, srv.seenPaths())
+	}
+}
+
+// TestMeUnderEnvTokenIgnoresAStoredAgentCredential: BASECAMP_TOKEN is sent
+// ahead of any stored credential, so it is what `me` describes, through the
+// authorization document, even when the stored one is an agent's.
+func TestMeUnderEnvTokenIgnoresAStoredAgentCredential(t *testing.T) {
+	app, _, srv := agentMeApp(t, "999")
+	t.Setenv("BASECAMP_TOKEN", "bc_at_env")
+
+	_ = executePeopleCommand(NewMeCmd(), app)
+
+	assert.Equal(t, []string{"/authorization.json"}, srv.seenPaths())
+}

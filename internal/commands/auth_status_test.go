@@ -709,3 +709,63 @@ func TestAuthStatusNamesWhyTheTokenWillNotRefresh(t *testing.T) {
 		})
 	}
 }
+
+// TestAuthStatusCheckAgentCredential: the authorization document refuses
+// an agent's token, since an agent has no identity to list accounts for, so
+// an agent credential is checked against its bound account's profile.
+func TestAuthStatusCheckAgentCredential(t *testing.T) {
+	srv := startLoginIdentityServer(t, "agent-tok")
+	srv.authorizationStatus = http.StatusUnauthorized
+	app, buf := loginTestApp(t, srv, &config.Config{ActiveProfile: "marie", AccountID: "999"})
+	require.NoError(t, app.Auth.GetStore().Save("profile:marie", &auth.Credentials{
+		AccessToken: "agent-tok", OAuthType: "agent", ClientID: "bc-agent-7", ClientSecret: "s3cret",
+		Scope: "full", ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	}))
+
+	cmd := newAuthStatusCmd()
+	cmd.SetArgs([]string{"--check"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+
+	var envelope statusEnvelope
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Equal(t, true, envelope.Data["valid"])
+	assert.Equal(t, []string{"/999/my/profile.json"}, srv.seenPaths())
+}
+
+// TestAuthStatusCheckAgentCredentialWithoutAccount: an agent profile that
+// names no account is misconfigured, not rejected, so the check says so
+// instead of reporting the server's refusal of the authorization document.
+func TestAuthStatusCheckAgentCredentialWithoutAccount(t *testing.T) {
+	srv := startLoginIdentityServer(t, "agent-tok")
+	srv.authorizationStatus = http.StatusUnauthorized
+	app, _ := loginTestApp(t, srv, &config.Config{ActiveProfile: "marie"})
+	require.NoError(t, app.Auth.GetStore().Save("profile:marie", &auth.Credentials{
+		AccessToken: "agent-tok", OAuthType: "agent", ClientID: "bc-agent-7", ClientSecret: "s3cret",
+		Scope: "full", ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	}))
+
+	_, err := checkWithServer(context.Background(), app)
+	require.Error(t, err)
+	assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
+	assert.Empty(t, srv.seenPaths())
+}
+
+// TestAuthStatusCheckEnvTokenOverAStoredAgentCredential: the check sends
+// BASECAMP_TOKEN, so it asks what that token answers to, not the stored
+// agent credential's account profile.
+func TestAuthStatusCheckEnvTokenOverAStoredAgentCredential(t *testing.T) {
+	srv := startLoginIdentityServer(t, "bc_at_env")
+	app, _ := loginTestApp(t, srv, &config.Config{ActiveProfile: "marie", AccountID: "999"})
+	require.NoError(t, app.Auth.GetStore().Save("profile:marie", &auth.Credentials{
+		AccessToken: "agent-tok", OAuthType: "agent", ClientID: "bc-agent-7", ClientSecret: "s3cret",
+		Scope: "full", ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	}))
+	t.Setenv("BASECAMP_TOKEN", "bc_at_env")
+
+	verdict, err := checkWithServer(context.Background(), app)
+	require.NoError(t, err)
+	assert.True(t, verdict.valid)
+	assert.Equal(t, []string{"/authorization.json"}, srv.seenPaths())
+}

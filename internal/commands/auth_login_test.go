@@ -109,6 +109,8 @@ type loginIdentityServer struct {
 	authorizationStatus int
 	// personName lets a test plant hostile content in the person record.
 	personName string
+	// personableType, when set, is the person record's personable_type.
+	personableType string
 	// expiresAt is what /authorization.json reports; empty omits the field.
 	expiresAt string
 }
@@ -131,9 +133,11 @@ func startLoginIdentityServer(t *testing.T, wantToken string) *loginIdentityServ
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
-			"id": 51177542, "name": s.personName, "email_address": "clawdito@example.com",
-		}))
+		person := map[string]any{"id": 51177542, "name": s.personName, "email_address": "clawdito@example.com"}
+		if s.personableType != "" {
+			person["personable_type"] = s.personableType
+		}
+		require.NoError(t, json.NewEncoder(w).Encode(person))
 	})
 	mux.HandleFunc("/authorization.json", func(w http.ResponseWriter, r *http.Request) {
 		if !record(r) {
