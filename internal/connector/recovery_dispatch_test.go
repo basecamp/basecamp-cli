@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -98,11 +99,20 @@ func recordedWorkers(t *testing.T, l *Ledger) []int {
 	return out
 }
 
+// noticeRef is a completion notice's signature line, which names the events
+// it speaks for: "Ref 101, 102 · attempt att_… · automatic notice…".
+var noticeRef = regexp.MustCompile(`Ref ([0-9]+(?:, [0-9]+)*) · attempt `)
+
 // notices are the connector's completion notices naming the event.
 func (h *harness) notices(eventID int64) []storedMessage {
 	var out []storedMessage
+	id := strconv.FormatInt(eventID, 10)
 	for _, m := range h.connectorPosts() {
-		if strings.Contains(m.Content, "automatic notice") && strings.Contains(m.Content, "Event "+strconv.FormatInt(eventID, 10)+":") {
+		text := MessageText(m.Content)
+		if !strings.Contains(text, "automatic notice") {
+			continue
+		}
+		if ref := noticeRef.FindStringSubmatch(text); ref != nil && slices.Contains(strings.Split(ref[1], ", "), id) {
 			out = append(out, m)
 		}
 	}
@@ -320,8 +330,9 @@ func TestRecoveryPostsUnknownAndRedispatchRunsItAgain(t *testing.T) {
 
 		notices := h.notices(101)
 		require.Len(t, notices, 1)
-		assert.Contains(t, notices[0].Content, "Event 101: unknown")
-		assert.Contains(t, notices[0].Content, "basecamp connect redispatch 101")
+		assert.Contains(t, notices[0].Content, "before I finished this.")
+		assert.Contains(t, notices[0].Content, "Mention me again to try again.")
+		assert.NotContains(t, notices[0].Content, "basecamp connect redispatch", "the operator's command is not the thread's business")
 		assert.Equal(t, int64(5001), notices[0].RecordingID, "on the recording that asked")
 
 		l := h.ledger()
@@ -394,7 +405,11 @@ func TestRecoveryRetriesASpawnErrorOnce(t *testing.T) {
 			assert.False(t, attempts[0].SpawnFailed)
 			assert.Equal(t, string(StopFailed), attempts[0].StopReason)
 			assert.Equal(t, 1, h.agentStarts())
-			assert.Len(t, h.notices(101), 1)
+			notices := h.notices(101)
+			require.Len(t, notices, 1)
+			assert.Equal(t, couldNotStart+" "+operatorChecks,
+				strings.SplitN(MessageText(notices[0].Content), " Ref ", 2)[0],
+				"the worker never picked the request up: the thread is told the computer needs looking at")
 		})
 	})
 }
@@ -412,7 +427,8 @@ func assertSpawnBlocked(t *testing.T, h *harness, l *Ledger) {
 	assert.Zero(t, h.agentStarts(), "no worker process ever existed")
 	notices := h.notices(101)
 	require.Len(t, notices, 1)
-	assert.Contains(t, notices[0].Content, "could not be started")
+	assert.Equal(t, couldNotStart+" "+operatorChecks,
+		strings.SplitN(MessageText(notices[0].Content), " Ref ", 2)[0])
 }
 
 // Follow-ups and their siblings survive a task's end, a crash included: each

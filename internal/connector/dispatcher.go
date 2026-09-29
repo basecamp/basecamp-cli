@@ -161,6 +161,14 @@ type DispatcherOptions struct {
 	Launcher driver.Launcher
 	// NoAutomaticRetry: never retry a failed spawn (sandbox mode).
 	NoAutomaticRetry bool
+	// Preflight checks the worker without any work (driver.Preflighter).
+	// While new work is held after the worker could not start
+	// (StartFailuresToHold), it says why, and a check that passes takes work
+	// again. Nil: only a start that works, or a restart, does.
+	Preflight func(ctx context.Context) driver.Preflight
+	// HoldCheck is how long held work waits before the worker is first
+	// checked again; HoldCheckInterval when zero.
+	HoldCheck time.Duration
 
 	// MCP names what the worker's Basecamp MCP server runs as.
 	MCP WorkerMCP
@@ -257,6 +265,9 @@ type Dispatcher struct {
 	// path is too long for one; empty until the first attempt needs it.
 	socketBase   string
 	socketBaseMu sync.Mutex
+	// starts is whether the worker has been starting (dispatcher_starts.go).
+	// Under mu.
+	starts startRecord
 }
 
 // NewDispatcher builds a dispatcher.
@@ -311,6 +322,9 @@ func NewDispatcher(opts DispatcherOptions) (*Dispatcher, error) {
 	if opts.ProgressInterval <= 0 {
 		opts.ProgressInterval = DefaultProgressInterval
 	}
+	if opts.HoldCheck <= 0 {
+		opts.HoldCheck = HoldCheckInterval
+	}
 	// Every log line passes through the redaction rule; a task's own lines
 	// through its task's (taskRedaction).
 	opts.Redaction = opts.Redaction.With(driver.Redaction{Dirs: []string{opts.PrivateDir, opts.MCP.StateDir}})
@@ -323,6 +337,7 @@ func NewDispatcher(opts DispatcherOptions) (*Dispatcher, error) {
 		live:   map[string]*taskRun{},
 
 		stopping: make(chan struct{}),
+		starts:   startRecord{checkEvery: opts.HoldCheck},
 
 		terminateRecorded: driver.TerminateRecorded,
 		confirmGroupGone:  driver.ConfirmGroupGone,
@@ -512,7 +527,7 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 		return nil
 	default:
 	}
-	if d.free() <= 0 {
+	if d.free() <= 0 || d.holdingNewWork(ctx) {
 		return nil
 	}
 	// Invariant 2, in the query: only records in a project this pass read as
@@ -725,8 +740,11 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 		cleanup()
 		// A start that launched a process says so (driver.StartError); the
 		// release point confirms that group gone before anything is settled.
-		d.release(settleCtx, launch, driver.StartedProcess(err), taker, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
+		settlement, settled := d.release(settleCtx, launch, driver.StartedProcess(err), taker, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
 			NoAutomaticRetry: d.opts.NoAutomaticRetry || unusable}, nil)
+		if settled {
+			d.noteStart(settleCtx, settlement, strings.TrimPrefix(err.Error(), driver.ErrNotStarted.Error()+": "))
+		}
 		return nil
 	}
 	p := session.Process()
@@ -1082,8 +1100,9 @@ const settleAttempts = 5
 // It settles nothing until the worker's process group is confirmed gone, and
 // nothing if the ledger refuses the settlement. Either way the attempt stays
 // live: its token and its conversation are still its own, a person settles
-// it, and this process goes on counting it among the workers it has.
-func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.Process, holder TokenHolder, end AttemptEnd, run *taskRun) {
+// it, and this process goes on counting it among the workers it has. It
+// returns the settlement, and false when there was none.
+func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.Process, holder TokenHolder, end AttemptEnd, run *taskRun) (Settlement, bool) {
 	log := d.taskLog(d.taskRedaction(launch, driver.SessionConfig{}))
 	err := d.confirmGroupGone(worker, d.opts.CancelGrace)
 	if err == nil {
@@ -1100,7 +1119,7 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 		log.Error("connector: the worker's process group is still alive; its attempt stays live, holding its conversation and a worker slot",
 			"attempt_id", end.AttemptID, "task_id", launch.TaskID, "error", err)
 		d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: end.AttemptID, State: string(AttemptRunning), StopReason: "held"})
-		return
+		return Settlement{}, false
 	}
 	settlement, err := d.settle(ctx, end)
 	if err != nil {
@@ -1111,7 +1130,7 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 		log.Error("connector: could not settle an attempt; it stays live, holding its conversation and a worker slot",
 			"attempt_id", end.AttemptID, "task_id", launch.TaskID, "error", err)
 		d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: end.AttemptID, State: string(AttemptRunning), StopReason: "held"})
-		return
+		return Settlement{}, false
 	}
 	reportUnreported(log, end.Stop, settlement)
 	// Adoption is a read of Basecamp, bounded but slow, and no dispatch
@@ -1124,6 +1143,7 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 	if run != nil {
 		d.forget(launch.AttemptID)
 	}
+	return settlement, true
 }
 
 // settle ends an attempt in the ledger, retrying a failure with backoff: an
@@ -1273,20 +1293,23 @@ func (r *taskRun) supervise(ctx context.Context) {
 	// through the recorder; what the ledger would not take is settled now.
 	unrecorded := r.refusals.unrecorded()
 
-	if stop != StopFinished {
-		if tail, ok := r.session.(interface{ StderrTail() string }); ok {
-			// The driver's StderrTail is already its redactor's Stderr: the
-			// last line, sanitized, never the text verbatim.
-			if text := strings.TrimSpace(tail.StderrTail()); text != "" {
-				r.log.Warn("connector: the worker's last output", "attempt_id", r.launch.AttemptID,
-					"stop_reason", string(stop), "stderr", richtext.SanitizeSingleLine(text))
-			}
-		}
+	var said string
+	if tail, ok := r.session.(interface{ StderrTail() string }); ok {
+		// The driver's StderrTail is already its redactor's Stderr: the
+		// last line, sanitized, never the text verbatim.
+		said = richtext.SanitizeSingleLine(strings.TrimSpace(tail.StderrTail()))
+	}
+	if stop != StopFinished && said != "" {
+		r.log.Warn("connector: the worker's last output", "attempt_id", r.launch.AttemptID,
+			"stop_reason", string(stop), "stderr", said)
 	}
 
 	// Through the one release point: it confirms the worker's group is gone
 	// before the attempt is settled.
-	d.release(settleCtx, r.launch, r.session.Process(), taker, AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, UnrecordedRefusals: unrecorded}, r)
+	settlement, settled := d.release(settleCtx, r.launch, r.session.Process(), taker, AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, UnrecordedRefusals: unrecorded}, r)
+	if settled {
+		d.noteStart(settleCtx, settlement, said)
+	}
 }
 
 // promptLoop runs turns until there is nothing left to prompt or the attempt

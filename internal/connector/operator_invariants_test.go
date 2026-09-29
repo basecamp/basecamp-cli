@@ -794,8 +794,8 @@ func TestACompletionNoticeAsksNothingOfADecidedRecord(t *testing.T) {
 	intents, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentCompletion}})
 	require.NoError(t, err)
 	require.Len(t, intents, 1)
-	assert.Contains(t, intents[0].Body, "Event 1: failed")
-	assert.NotContains(t, intents[0].Body, "redispatch 1", "a person already redispatched it")
+	assert.Contains(t, MessageText(intents[0].Body), "Something went wrong and I couldn't finish this.")
+	assert.NotContains(t, intents[0].Body, "Mention me again", "a person already redispatched it")
 }
 
 // An import that closes a record does not leave it a lifecycle message that
@@ -831,7 +831,7 @@ func TestACompletionNoticeIsRenderedAgainWhenItIsClaimed(t *testing.T) {
 	notices, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentCompletion}})
 	require.NoError(t, err)
 	require.Len(t, notices, 1)
-	require.Contains(t, notices[0].Body, "redispatch 1")
+	require.Contains(t, notices[0].Body, "Mention me again to try again.")
 
 	_, err = l.Discard(ctx, 1, opBy)
 	require.NoError(t, err)
@@ -839,8 +839,8 @@ func TestACompletionNoticeIsRenderedAgainWhenItIsClaimed(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	assert.Equal(t, IntentSending, claimed.State)
-	assert.Contains(t, claimed.Body, "Event 1: unknown")
-	assert.NotContains(t, claimed.Body, "redispatch 1", "a person already decided it")
+	assert.Contains(t, claimed.Body, "before I finished this.")
+	assert.NotContains(t, claimed.Body, "Mention me again", "a person already decided it")
 }
 
 // Invariant 2, at the database: a task takes no follow-up while the hold
@@ -861,7 +861,9 @@ func TestInvariant2ATaskTakesNoFollowUpUnderTheHold(t *testing.T) {
 }
 
 // A record a person authorized is decided too, though it stays blocked until
-// its prerequisite runs: the notice claimed meanwhile asks nothing more.
+// its prerequisite runs: the notice claimed meanwhile asks nothing more. A
+// record blocked on its start asks the person who runs the agent, not the
+// thread, so neither notice suggests a mention.
 func TestACompletionNoticeAsksNothingOfAnAuthorizedBlockedRecord(t *testing.T) {
 	l := newTestLedger(t)
 	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
@@ -876,7 +878,8 @@ func TestACompletionNoticeAsksNothingOfAnAuthorizedBlockedRecord(t *testing.T) {
 	notices, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentCompletion}})
 	require.NoError(t, err)
 	require.Len(t, notices, 1)
-	require.Contains(t, notices[0].Body, "redispatch 1")
+	require.Contains(t, notices[0].Body, "The person who runs me needs to check it.")
+	require.NotContains(t, notices[0].Body, "Mention me again")
 
 	got, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 	require.NoError(t, err)
@@ -884,12 +887,17 @@ func TestACompletionNoticeAsksNothingOfAnAuthorizedBlockedRecord(t *testing.T) {
 	claimed, ok, err := l.claimIntent(ctx)
 	require.NoError(t, err)
 	require.True(t, ok)
-	assert.NotContains(t, claimed.Body, "redispatch 1")
+	assert.NotContains(t, claimed.Body, "Mention me again")
 }
 
 // An authorization answers for the outcome it was made on. When the attempt it
-// led to ends unknown again, or cannot start, the notice asks again.
+// led to ends unknown again the notice asks again, and when it cannot start the
+// notice asks the person who runs the agent.
 func TestAnEarlierAuthorizationDoesNotSilenceALaterNotice(t *testing.T) {
+	asks := map[string]string{
+		"unknown again":        "Mention me again to try again.",
+		"blocked on its start": "The person who runs me needs to check it.",
+	}
 	for name, second := range map[string]func(t *testing.T, l *Ledger){
 		"unknown again": func(t *testing.T, l *Ledger) {
 			launch := launchOf(t, l, 1)
@@ -926,7 +934,7 @@ func TestAnEarlierAuthorizationDoesNotSilenceALaterNotice(t *testing.T) {
 				}
 			}
 			require.NotZero(t, latest.ID)
-			assert.Contains(t, latest.Body, "redispatch 1", "a person is asked again")
+			assert.Contains(t, latest.Body, asks[name], "a person is asked again")
 		})
 	}
 }

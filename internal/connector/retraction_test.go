@@ -55,6 +55,7 @@ func TestPostedAskIsRetractedWhenItIsAnswered(t *testing.T) {
 		require.NoError(t, ob.Flush(ctx))
 		holding := obIntent(t, ledger, holdingKey(1))
 		require.Equal(t, IntentSent, holding.State)
+		holding = obPostedByAnEarlierVersion(t, ledger, basecamp, holding)
 
 		clock.Advance(12 * time.Minute)
 		_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
@@ -93,6 +94,7 @@ func TestPostedAskIsRetractedWhenItIsAnswered(t *testing.T) {
 		require.NoError(t, ob.Flush(ctx))
 		completion := obIntent(t, ledger, completionKey(l.AttemptID))
 		require.Equal(t, IntentSent, completion.State)
+		completion = obPostedByAnEarlierVersion(t, ledger, basecamp, completion)
 		require.Contains(t, completion.Body, "Needs a person: basecamp connect redispatch 1")
 
 		clock.Advance(3 * time.Minute)
@@ -117,6 +119,7 @@ func TestPostedAskIsRetractedWhenItIsAnswered(t *testing.T) {
 		require.NoError(t, ob.Flush(ctx))
 		holding := obIntent(t, ledger, holdingKey(1))
 		require.Equal(t, IntentSent, holding.State)
+		holding = obPostedByAnEarlierVersion(t, ledger, basecamp, holding)
 
 		clock.Advance(90 * time.Minute)
 		_, err = ledger.Discard(ctx, 1, "jorge")
@@ -142,6 +145,7 @@ func TestPostedAskIsRetractedWhenItIsAnswered(t *testing.T) {
 		require.NoError(t, ob.Flush(ctx))
 		holding := obIntent(t, ledger, holdingKey(1))
 		require.Equal(t, IntentSent, holding.State)
+		holding = obPostedByAnEarlierVersion(t, ledger, basecamp, holding)
 
 		_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
 		require.NoError(t, err)
@@ -176,6 +180,7 @@ func TestARetractionSpeaksOnlyForItsOwnEvent(t *testing.T) {
 	require.NoError(t, ob.Flush(ctx))
 	completion := obIntent(t, ledger, completionKey(l.AttemptID))
 	require.Equal(t, IntentSent, completion.State)
+	completion = obPostedByAnEarlierVersion(t, ledger, basecamp, completion)
 	require.Contains(t, completion.Body, "Needs a person: basecamp connect redispatch 1")
 	require.Contains(t, completion.Body, "Needs a person: basecamp connect redispatch 2")
 
@@ -204,14 +209,16 @@ func TestARetractionSpeaksOnlyForItsOwnEvent(t *testing.T) {
 }
 
 // Which events a posted message asks about, read off the words that went out.
+// Only notices an earlier version posted ask anything.
 func TestRedispatchAsksInReadsEveryAsk(t *testing.T) {
-	two := renderCompletion(MessageComment, Settlement{TaskID: 3, AttemptID: "a1", Stop: StopFailed, Events: []SettledEvent{
+	two := legacyCompletion(MessageComment, Settlement{TaskID: 3, AttemptID: "a1", Stop: StopFailed, Events: []SettledEvent{
 		{EventID: 41, Outcome: OutcomeFailed},
 		{EventID: 42, Outcome: OutcomeSucceeded, Reported: true},
 		{EventID: 43, Outcome: OutcomeUnknown},
 	}})
 	assert.Equal(t, []int64{41, 43}, redispatchAsksIn(two), "the succeeded event is reported, not asked about")
-	assert.Equal(t, []int64{7}, redispatchAsksIn(renderHoldingReply(MessageComment, 7)))
+	assert.Equal(t, []int64{7}, redispatchAsksIn(legacyHoldingReply(MessageComment, 7)))
+	assert.Empty(t, redispatchAsksIn(renderHoldingReply(MessageComment, 7)), "a holding reply written now asks nothing")
 	assert.Empty(t, redispatchAsksIn(GuardAckBody))
 	assert.Empty(t, redispatchAsksIn(renderStillRunning(MessageComment, 3, "a1", 1, time.Now(), time.Now(), time.Time{})))
 	assert.Equal(t, "event 42", eventList([]int64{42}))
@@ -235,6 +242,7 @@ func TestARetractionWaitsWhileTheAskIsStillOpen(t *testing.T) {
 	require.NoError(t, ob.Flush(ctx))
 	holding := obIntent(t, ledger, holdingKey(1))
 	require.Equal(t, IntentSent, holding.State)
+	holding = obPostedByAnEarlierVersion(t, ledger, basecamp, holding)
 
 	clock.Advance(12 * time.Minute)
 	_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
@@ -369,6 +377,7 @@ func TestImportedDoneRetractsAPostedAsk(t *testing.T) {
 	require.NoError(t, ob.Flush(ctx))
 	holding := obIntent(t, ledger, holdingKey(1))
 	require.Equal(t, IntentSent, holding.State)
+	holding = obPostedByAnEarlierVersion(t, ledger, basecamp, holding)
 
 	clock.Advance(30 * time.Minute)
 	_, err = ledger.Import(ctx, Reconciliation{Version: ReconciliationVersion,
@@ -406,6 +415,7 @@ func TestOnlyAnAskIsRetracted(t *testing.T) {
 	require.NoError(t, ob.Flush(ctx))
 	completion := obIntent(t, ledger, completionKey(l.AttemptID))
 	require.Equal(t, IntentSent, completion.State)
+	completion = obPostedByAnEarlierVersion(t, ledger, basecamp, completion)
 
 	clock.Advance(time.Minute)
 	_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
@@ -438,8 +448,8 @@ func TestAnAskThatWasNeverSentIsNotRetracted(t *testing.T) {
 	require.NoError(t, obOutbox(t, ledger, basecamp).Flush(ctx))
 	sent := obIntent(t, ledger, completionKey(l.AttemptID))
 	require.Equal(t, IntentSent, sent.State)
-	assert.NotContains(t, sent.Body, "Needs a person", "the ask stood down at its claim instead")
-	assert.Contains(t, sent.Body, "Event 1: unknown, the worker did not report on it.", "what happened is still reported")
+	assert.NotContains(t, sent.Body, "Mention me again", "a person already decided it, so it suggests nothing")
+	assert.Contains(t, sent.Body, "I ran out of time before I finished this.", "what happened is still reported")
 	assert.Empty(t, obRetractions(t, ledger), "nothing to retract: the ask was never posted")
 }
 
@@ -462,7 +472,7 @@ func TestANoticeThatNeverAskedIsNotRetracted(t *testing.T) {
 	require.NoError(t, ob.Flush(ctx))
 	quiet := obIntent(t, ledger, completionKey(first.AttemptID))
 	require.Equal(t, IntentSent, quiet.State)
-	require.NotContains(t, quiet.Body, "Needs a person")
+	require.NotContains(t, quiet.Body, "Mention me again")
 
 	// It runs again, ends unknown again, and this time a person closes it.
 	clock.Advance(time.Minute)
@@ -617,6 +627,7 @@ func obSendingHoldingReply(t *testing.T) (*Ledger, *obClock, *Outbox, *fakeBasec
 	basecamp.beforePost = nil
 	holding := obIntent(t, ledger, holdingKey(1))
 	require.Equal(t, IntentSending, holding.State)
+	holding = obPostedByAnEarlierVersion(t, ledger, basecamp, holding)
 	return ledger, clock, ob, basecamp, holding
 }
 
@@ -631,6 +642,7 @@ func TestAnAskIsRetractedOnce(t *testing.T) {
 	ob := obOutbox(t, ledger, basecamp)
 	require.NoError(t, ob.Flush(ctx))
 	holding := obIntent(t, ledger, holdingKey(1))
+	holding = obPostedByAnEarlierVersion(t, ledger, basecamp, holding)
 
 	clock.Advance(12 * time.Minute)
 	_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
@@ -858,7 +870,7 @@ VALUES (7, 'holding_reply:event:1',         'holding_reply', 'sent', 1, 48699913
         '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:00:00.000000000Z', '2026-09-17T11:01:00.000000000Z', '2026-09-17T11:02:00.000000000Z', 555),
        (8, 'holding_reply:refused:event:1', 'holding_reply', 'sent', 1, 48699913, 'comment', 10304028989, ?2,
         '2026-09-17T11:30:00.000000000Z', '2026-09-17T11:30:00.000000000Z', '2026-09-17T11:31:00.000000000Z', '2026-09-17T11:32:00.000000000Z', 556)`,
-			renderHoldingReply(MessageComment, 1), refusedStartReplyAsItWentOut(1))
+			legacyHoldingReply(MessageComment, 1), refusedStartReplyAsItWentOut(1))
 		require.NoError(t, err)
 	})
 	basecamp := newFakeBasecamp(clock.Now)
@@ -894,20 +906,26 @@ VALUES (7, 'holding_reply:event:1',         'holding_reply', 'sent', 1, 48699913
 // The ask is read off the words that went out, and read exactly: a notice
 // about event 12 is not an ask for event 1.
 func TestAsksRedispatchReadsTheAskExactly(t *testing.T) {
-	assert.True(t, asksRedispatch(renderHoldingReply(MessageComment, 1), 1))
-	assert.True(t, asksRedispatch(renderHoldingReply(MessageChatLine, 12), 12))
-	assert.False(t, asksRedispatch(renderHoldingReply(MessageComment, 12), 1))
-	assert.False(t, asksRedispatch(renderHoldingReply(MessageComment, 1), 12))
+	// Notices an earlier version posted, as a ledger in use still holds them.
+	assert.True(t, asksRedispatch(legacyHoldingReply(MessageComment, 1), 1))
+	assert.True(t, asksRedispatch(legacyHoldingReply(MessageChatLine, 12), 12))
+	assert.False(t, asksRedispatch(legacyHoldingReply(MessageComment, 12), 1))
+	assert.False(t, asksRedispatch(legacyHoldingReply(MessageComment, 1), 12))
 	assert.False(t, asksRedispatch(GuardAckBody, 1))
 	assert.False(t, asksRedispatch(renderStillRunning(MessageComment, 3, "a1", 1, time.Now(), time.Now(), time.Time{}), 1))
 
-	asking := renderCompletion(MessageComment, Settlement{TaskID: 3, AttemptID: "a1", Stop: StopFailed,
+	asking := legacyCompletion(MessageComment, Settlement{TaskID: 3, AttemptID: "a1", Stop: StopFailed,
 		Events: []SettledEvent{{EventID: 1, Outcome: OutcomeFailed}}})
 	assert.True(t, asksRedispatch(asking, 1))
-	reporting := renderCompletion(MessageComment, Settlement{TaskID: 3, AttemptID: "a1", Stop: StopFinished,
+	reporting := legacyCompletion(MessageComment, Settlement{TaskID: 3, AttemptID: "a1", Stop: StopFinished,
 		Events: []SettledEvent{{EventID: 1, Outcome: OutcomeSucceeded, Reported: true}}})
-	require.NotEmpty(t, reporting)
 	assert.False(t, asksRedispatch(reporting, 1), "succeeded with no reply reported asks for nothing")
+
+	// Notices written now ask nothing, whatever they report.
+	assert.False(t, asksRedispatch(renderHoldingReply(MessageComment, 1), 1))
+	assert.False(t, asksRedispatch(renderHoldingReply(MessageChatLine, 12), 12))
+	assert.False(t, asksRedispatch(renderCompletion(MessageComment, Settlement{TaskID: 3, AttemptID: "a1", Stop: StopFailed,
+		Events: []SettledEvent{{EventID: 1, Outcome: OutcomeFailed}}}), 1))
 }
 
 // An upgraded ledger's legacy refused-start reply, in both states it can be
@@ -993,4 +1011,68 @@ VALUES (8, 'holding_reply:refused:event:1', 'holding_reply', ?1, 1, 48699913, 'c
         '2026-09-17T11:30:00.000000000Z', '2026-09-17T11:30:00.000000000Z', `+sendingAt+`, `+finishedAt+`, `+receiptID+`)`,
 		string(state), refusedStartReplyAsItWentOut(1))
 	require.NoError(t, err)
+}
+
+// Notices written now speak to the person in the thread and ask nothing of
+// whoever runs the connector, so a person's decision on the record leaves them
+// standing: nothing is posted to answer them, and the thread holds the notice
+// and whatever the retried work says, not a note about a note.
+func TestANoticeWrittenNowIsNeverRetracted(t *testing.T) {
+	t.Run("a holding reply, once the record is redispatched and routed", func(t *testing.T) {
+		ctx := context.Background()
+		ledger, clock := obLedger(t)
+		seenRecord(t, ledger, 1)
+		_, err := ledger.Admission().Commit(ctx, obNoRouteVerdict(1, 0, obCommentReply))
+		require.NoError(t, err)
+		basecamp := newFakeBasecamp(clock.Now)
+		ob := obOutbox(t, ledger, basecamp)
+		require.NoError(t, ob.Flush(ctx))
+		holding := obIntent(t, ledger, holdingKey(1))
+		require.Equal(t, IntentSent, holding.State)
+		require.Contains(t, MessageText(holding.Body), "Once it's added to my projects, mention me again.")
+
+		clock.Advance(12 * time.Minute)
+		_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
+		require.NoError(t, err)
+		obRoutedNow(t, ledger, 1)
+		clock.Advance(RetractionWait)
+		require.NoError(t, ob.Flush(ctx))
+
+		assert.Empty(t, obRetractions(t, ledger))
+		assert.Len(t, basecamp.at(holding.Destination), 1, "the notice alone; nothing answers it")
+	})
+
+	t.Run("a completion notice, once the record is redispatched or discarded", func(t *testing.T) {
+		for _, decide := range []string{"redispatch", "discard"} {
+			t.Run(decide, func(t *testing.T) {
+				ctx := context.Background()
+				ledger, clock := obLedger(t)
+				obAdmit(t, ledger, 1, "recording:10304028989")
+				l := obLaunch(t, ledger, 1)
+				clock.Advance(5 * time.Minute)
+				_, err := ledger.EndAttempt(ctx, AttemptEnd{AttemptID: l.AttemptID, Stop: StopShutdown})
+				require.NoError(t, err)
+				basecamp := newFakeBasecamp(clock.Now)
+				ob := obOutbox(t, ledger, basecamp)
+				require.NoError(t, ob.Flush(ctx))
+				completion := obIntent(t, ledger, completionKey(l.AttemptID))
+				require.Equal(t, IntentSent, completion.State)
+				require.Equal(t, "I was interrupted before I finished this. Mention me again to try again. "+
+					"Ref 1 · attempt "+l.AttemptID+" · automatic notice from basecamp connect", MessageText(completion.Body))
+
+				clock.Advance(time.Minute)
+				if decide == "redispatch" {
+					_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
+				} else {
+					_, err = ledger.Discard(ctx, 1, "jorge")
+				}
+				require.NoError(t, err)
+				clock.Advance(RetractionWait)
+				require.NoError(t, ob.Flush(ctx))
+
+				assert.Empty(t, obRetractions(t, ledger))
+				assert.Len(t, basecamp.at(completion.Destination), 1, "the notice alone; nothing answers it")
+			})
+		}
+	})
 }

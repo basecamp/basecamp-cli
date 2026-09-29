@@ -330,8 +330,20 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	return p.app.OK(report, output.WithSummary(connectStatusSummary(report)))
 }
 
+// notTakingWork is why the connector stopped taking work, when it did: its
+// worker could not start (connector.StartFailuresToHold).
+func notTakingWork(s connector.Status) (string, bool) {
+	if s.Connection == nil || s.Connection.State != connector.ConnectionNotTakingWork {
+		return "", false
+	}
+	return s.Connection.Detail, true
+}
+
 func connectStatusSummary(r connectStatusReport) string {
 	parts := []string{}
+	if _, ok := notTakingWork(r.Status); ok {
+		parts = append(parts, "not taking work")
+	}
 	if r.Status.Hold != nil {
 		parts = append(parts, "held")
 	}
@@ -351,6 +363,9 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 		title += " (shadow)"
 	}
 	fmt.Fprintf(w, "%s\n\n", title)
+	if why, ok := notTakingWork(s); ok {
+		fmt.Fprintf(w, "  Not taking work: %s. %s\n\n", clean(why), connector.NotTakingWorkFix)
+	}
 
 	switch {
 	case r.LockHolder == nil:

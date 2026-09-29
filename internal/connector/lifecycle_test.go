@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -37,10 +36,37 @@ func TestLifecycleTemplatesRenderFromRecordsAlone(t *testing.T) {
 		assert.Equal(t, in.Body, renderCompletion(in.Destination.Kind, settlement), "the ledger and the settlement agree")
 		assert.Equal(t, Destination{BucketID: adapterBucketID, Kind: MessageComment, RecordingID: obReplyRecording}, in.Destination)
 		assert.Equal(t,
-			"<div>Task "+itoa(l.TaskID)+" ended: the worker was stopped at the task&#39;s deadline.<br>"+
-				"Event 1: unknown, the worker did not report on it. Needs a person: basecamp connect redispatch 1<br>"+
-				"<br>Attempt "+l.AttemptID+" · automatic notice from basecamp connect</div>",
+			"<div>I ran out of time before I finished this.<br>"+
+				"Mention me again to try again.<br>"+
+				"<br>Ref 1 · attempt "+l.AttemptID+" · automatic notice from basecamp connect</div>",
 			in.Body, "event 2 was never exposed: it waits for a task of its own and is not named")
+	})
+
+	t.Run("a worker that never picked the request up", func(t *testing.T) {
+		for _, pulled := range []bool{false, true} {
+			ctx := context.Background()
+			ledger, _ := obLedger(t)
+			obAdmit(t, ledger, 1, "recording:10304028989")
+			l := obLaunch(t, ledger, 1)
+			if pulled {
+				d, err := ledger.Dispatch(ctx, l.Token, adapterAgentID)
+				require.NoError(t, err)
+				obPull(t, d, 1)
+			}
+			settlement, err := ledger.EndAttempt(ctx, AttemptEnd{AttemptID: l.AttemptID, Stop: StopFailed})
+			require.NoError(t, err)
+
+			in := obIntent(t, ledger, completionKey(l.AttemptID))
+			fromRows, err := settlementFromRecords(ctx, ledger.db, l.AttemptID)
+			require.NoError(t, err)
+			assert.Equal(t, in.Body, renderCompletion(in.Destination.Kind, fromRows))
+			assert.Equal(t, in.Body, renderCompletion(in.Destination.Kind, settlement), "the ledger and the settlement agree")
+			if pulled {
+				assert.Contains(t, MessageText(in.Body), "I stopped before I finished this. Mention me again to try again.")
+			} else {
+				assert.Contains(t, MessageText(in.Body), couldNotStart+" "+operatorChecks+" Ref 1 ·")
+			}
+		}
 	})
 
 	t.Run("still running", func(t *testing.T) {
@@ -58,8 +84,8 @@ func TestLifecycleTemplatesRenderFromRecordsAlone(t *testing.T) {
 		assert.Equal(t, IntentStillRunning, in.Kind)
 		assert.Equal(t, renderStillRunning(MessageComment, l.TaskID, l.AttemptID, 1, in.CreatedAt, l.LaunchedAt, tick.ProgressAt), in.Body)
 		assert.Equal(t,
-			"<div>Working on this as of 12:10 UTC: task "+itoa(l.TaskID)+" started at 12:00 UTC. Last progress at 12:03 UTC.<br><br>"+
-				"Attempt "+l.AttemptID+", update 1 · automatic notice from basecamp connect</div>", in.Body)
+			"<div>Working on this as of 12:10 UTC, started at 12:00 UTC. Last progress at 12:03 UTC.<br><br>"+
+				"Ref attempt "+l.AttemptID+", update 1 · automatic notice from basecamp connect</div>", in.Body)
 	})
 
 	t.Run("holding reply in a Campfire", func(t *testing.T) {
@@ -84,8 +110,6 @@ func TestLifecycleTemplatesRenderFromRecordsAlone(t *testing.T) {
 	})
 }
 
-func itoa(v int64) string { return strconv.FormatInt(v, 10) }
-
 // A still-running notice can be the connector's last word on a task — an
 // attempt whose events all succeeded with a reply calls for no completion
 // notice — so it says when it was true and claims nothing about now. The
@@ -103,7 +127,7 @@ func TestStillRunningNoticeIsDatedAndNotPresentTense(t *testing.T) {
 	require.NoError(t, err)
 	quiet := obIntent(t, ledger, stillRunningKey(l.AttemptID, 1))
 	assert.Contains(t, MessageText(quiet.Body),
-		"Working on this as of 12:40 UTC: task "+itoa(l.TaskID)+" started at 12:00 UTC. No progress has been reported yet.",
+		"Working on this as of 12:40 UTC, started at 12:00 UTC. No progress has been reported yet.",
 		"an attempt with nothing to report is still dated by the sighting")
 
 	require.NoError(t, ledger.RecordProgress(ctx, l.AttemptID))
@@ -112,7 +136,7 @@ func TestStillRunningNoticeIsDatedAndNotPresentTense(t *testing.T) {
 	require.NoError(t, err)
 	reported := obIntent(t, ledger, stillRunningKey(l.AttemptID, 2))
 	assert.Contains(t, MessageText(reported.Body),
-		"Working on this as of 13:00 UTC: task "+itoa(l.TaskID)+" started at 12:00 UTC. Last progress at 12:40 UTC.",
+		"Working on this as of 13:00 UTC, started at 12:00 UTC. Last progress at 12:40 UTC.",
 		"the sighting and the worker's last progress are different facts, both said")
 
 	for _, in := range []Intent{quiet, reported} {
@@ -149,13 +173,21 @@ func TestLifecycleMessagesCarryNoContent(t *testing.T) {
 	}
 }
 
+const (
+	couldNotStart  = "I couldn't start on this: something's wrong on the computer I run on."
+	operatorChecks = "The person who runs me needs to check it."
+)
+
 // Completion: one notice per attempt, when anything is not succeeded with a
-// reply; the notice names what needs redispatch.
+// reply. It tells the person in the thread what happened in plain words, and
+// suggests mentioning the agent again only when that would help.
 func TestCompletionNoticeRule(t *testing.T) {
+	const sig = "automatic notice from basecamp connect"
 	cases := []struct {
 		name   string
+		stop   StopReason
 		events []SettledEvent
-		want   []string
+		want   string
 	}{
 		{name: "all succeeded with replies", events: []SettledEvent{
 			{EventID: 1, Outcome: OutcomeSucceeded, Reported: true, ReplyID: id64(5)},
@@ -163,47 +195,95 @@ func TestCompletionNoticeRule(t *testing.T) {
 		}},
 		{name: "succeeded without a reply", events: []SettledEvent{
 			{EventID: 1, Outcome: OutcomeSucceeded, Reported: true},
-		}, want: []string{"Event 1: succeeded, with no reply reported."}},
-		{name: "failed and unknown need redispatch", events: []SettledEvent{
+		}, want: "I finished this, but didn't post a reply.\n\nRef 1 · attempt att_x · " + sig},
+		{name: "failed and unknown suggest mentioning again", events: []SettledEvent{
 			{EventID: 1, Outcome: OutcomeSucceeded, Reported: true, ReplyID: id64(5)},
-			{EventID: 2, Outcome: OutcomeFailed, Reported: true, ReplyID: id64(6)},
+			{EventID: 2, Outcome: OutcomeFailed, Reported: true},
 			{EventID: 3, Outcome: OutcomeUnknown},
-		}, want: []string{
-			"Event 2: failed. Needs a person: basecamp connect redispatch 2",
-			"Event 3: unknown, the worker did not report on it. Needs a person: basecamp connect redispatch 3",
+		}, want: "Something went wrong and I couldn't finish this. I stopped before I finished this.\n" +
+			"Mention me again to try again.\n\nRef 2, 3 · attempt att_x · " + sig},
+		{name: "failed with a reply has already said why", events: []SettledEvent{
+			{EventID: 1, Outcome: OutcomeFailed, Reported: true, ReplyID: id64(6)},
 		}},
+		{name: "decided by a person asks for nothing", events: []SettledEvent{
+			{EventID: 1, Outcome: OutcomeUnknown, Decided: true, Pulled: true},
+		}, want: "I stopped before I finished this.\n\nRef 1 · attempt att_x · " + sig},
 		{name: "only returned or withdrawn for a retry", events: []SettledEvent{
 			{EventID: 1, Withdrawn: true},
 			{EventID: 2, Returned: true},
 		}},
 		{name: "blocked after a second failed start", events: []SettledEvent{
 			{EventID: 1, Withdrawn: true, Blocked: true},
-		}, want: []string{"Event 1: the worker could not be started. Needs a person: basecamp connect redispatch 1"}},
+		}, want: couldNotStart + "\n" + operatorChecks + "\n\nRef 1 · attempt att_x · " + sig},
+		{name: "a worker that failed before it picked the request up", stop: StopFailed, events: []SettledEvent{
+			{EventID: 1, Outcome: OutcomeUnknown},
+		}, want: couldNotStart + "\n" + operatorChecks + "\n\nRef 1 · attempt att_x · " + sig},
+		{name: "a worker that finished a turn without picking the request up", events: []SettledEvent{
+			{EventID: 1, Outcome: OutcomeUnknown},
+		}, want: "I stopped before I finished this.\nMention me again to try again.\n\nRef 1 · attempt att_x · " + sig},
+		{name: "never picked up and decided by a person", stop: StopFailed, events: []SettledEvent{
+			{EventID: 1, Outcome: OutcomeUnknown, Decided: true},
+		}, want: couldNotStart + "\n" + operatorChecks + "\n\nRef 1 · attempt att_x · " + sig},
+		{name: "never picked up before the connector was interrupted", stop: StopLost, events: []SettledEvent{
+			{EventID: 1, Outcome: OutcomeUnknown},
+		}, want: "I was interrupted before I finished this.\nMention me again to try again.\n\nRef 1 · attempt att_x · " + sig},
+		{name: "never picked up before its deadline", stop: StopDeadline, events: []SettledEvent{
+			{EventID: 1, Outcome: OutcomeUnknown},
+		}, want: "I ran out of time before I finished this.\nMention me again to try again.\n\nRef 1 · attempt att_x · " + sig},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s := Settlement{TaskID: 9, AttemptID: "att_x", Stop: StopFinished, Events: tc.events}
-			body := renderCompletion(MessageChatLine, s)
-			assert.Equal(t, len(tc.want) > 0, CompletionNeeded(s))
-			if len(tc.want) == 0 {
-				assert.Empty(t, body)
-				return
+			stop := tc.stop
+			if stop == "" {
+				stop = StopFinished
 			}
-			assert.Equal(t, "Task 9 ended: the worker finished.\n"+strings.Join(tc.want, "\n")+"\n\nAttempt att_x · automatic notice from basecamp connect", body)
+			s := Settlement{TaskID: 9, AttemptID: "att_x", Stop: stop, Events: tc.events}
+			assert.Equal(t, tc.want != "", CompletionNeeded(s))
+			assert.Equal(t, tc.want, renderCompletion(MessageChatLine, s))
 		})
 	}
 }
 
-// Every stop reason reads as itself; a failure is never called a cancel.
-func TestCompletionNamesEachStopReason(t *testing.T) {
-	seen := map[string]bool{}
+// Why a request was left unfinished, in a reader's words: an interruption, the
+// deadline, or an unexplained stop. Never "cancel", and never the machinery.
+func TestUnfinishedSaysWhyInPlainWords(t *testing.T) {
+	assert.Equal(t, unfinishedSentence(StopShutdown), unfinishedSentence(StopLost), "to a reader, a shutdown and a crash are both an interruption")
+	sentences := map[string]bool{}
 	for _, stop := range []StopReason{StopFinished, StopFailed, StopDeadline, StopShutdown, StopLost} {
-		sentence := stopSentence(stop)
-		assert.NotEqual(t, "the worker stopped", sentence, stop)
-		assert.NotContains(t, sentence, "cancel", stop)
-		assert.False(t, seen[sentence], stop)
-		seen[sentence] = true
+		sentence := unfinishedSentence(stop)
+		sentences[sentence] = true
+		for _, jargon := range []string{"cancel", "worker", "task", "connector", "attempt"} {
+			assert.NotContains(t, sentence, jargon, stop)
+		}
 	}
+	assert.Len(t, sentences, 3, "interrupted, out of time, stopped")
+}
+
+// Notices are for the person in the thread: no commands, no config files, no
+// machinery, and no ask a person has to come back and answer. The ids live in
+// the signature line, where reconciliation matches a notice against Basecamp.
+func TestNoticesSpeakToThePersonInTheThread(t *testing.T) {
+	at := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+	bodies := map[string]string{
+		"holding reply": renderHoldingReply(MessageComment, 41),
+		"still running": renderStillRunning(MessageComment, 7, "att_y", 1, at.Add(10*time.Minute), at, time.Time{}),
+		"completion": renderCompletion(MessageComment, Settlement{TaskID: 7, AttemptID: "att_y", Stop: StopLost,
+			Events: []SettledEvent{{EventID: 41, Outcome: OutcomeUnknown}}}),
+		"never started": renderCompletion(MessageComment, Settlement{TaskID: 7, AttemptID: "att_y", Stop: StopFailed,
+			Events: []SettledEvent{{EventID: 41, Outcome: OutcomeUnknown}}}),
+	}
+	for name, body := range bodies {
+		text := MessageText(body)
+		for _, jargon := range []string{"basecamp connect redispatch", "connect.json", "Needs a person", "worker", "Task 7", "Event 41"} {
+			assert.NotContains(t, text, jargon, name)
+		}
+		assert.True(t, strings.HasSuffix(text, "· "+lifecycleSignature), name)
+		assert.Empty(t, redispatchAsksIn(body), "%s asks nothing a person has to come back and answer", name)
+	}
+	assert.Contains(t, MessageText(bodies["holding reply"]), "Ref 41 ·")
+	assert.Contains(t, MessageText(bodies["completion"]), "Ref 41 · attempt att_y ·")
+	assert.NotContains(t, MessageText(bodies["never started"]), "Mention me again",
+		"mentioning the agent again would meet the same computer")
 }
 
 // An attempt whose events all succeeded with replies posts nothing.
@@ -262,7 +342,8 @@ func TestOutboxCompletionReadsBlockedBack(t *testing.T) {
 	completions, err := ledger.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentCompletion}})
 	require.NoError(t, err)
 	require.Len(t, completions, 1, "the first withdrawal retries quietly; the second needs a person")
-	assert.Contains(t, completions[0].Body, "Event 1: the worker could not be started. Needs a person: basecamp connect redispatch 1")
+	assert.Contains(t, MessageText(completions[0].Body), couldNotStart+" "+operatorChecks)
+	assert.NotContains(t, completions[0].Body, "Mention me again", "a mention would meet the same computer")
 }
 
 // The holding reply answers only a request blocked for want of a route.

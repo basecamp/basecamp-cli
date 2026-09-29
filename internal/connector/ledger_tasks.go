@@ -815,6 +815,10 @@ type SettledEvent struct {
 	// Decided is a record a person has already redispatched or discarded, so
 	// the completion notice asks nothing of them.
 	Decided bool
+	// Pulled is whether a worker asked for the event's instruction. An event
+	// the launch exposed and no worker pulled is one the worker never picked
+	// up: it stopped before it began.
+	Pulled bool
 }
 
 // EndAttempt ends a live attempt with its stop reason, supersedes the task's
@@ -869,9 +873,10 @@ UPDATE attempts SET state = 'ended', ended_at = ?, stop_reason = ?, spawn_failed
 		outcome   string
 		replyID   sql.NullInt64
 		exposedBy sql.NullString
+		pulled    bool
 	}
 	rows, err := tx.QueryContext(ctx, `
-SELECT event_id, delivery, outcome, reply_id, exposed_attempt_id FROM task_events
+SELECT event_id, delivery, outcome, reply_id, exposed_attempt_id, pulled_at IS NOT NULL FROM task_events
 WHERE task_id = ? AND retired_at IS NULL ORDER BY event_id`, taskID)
 	if err != nil {
 		return Settlement{}, fmt.Errorf("connector: settle task %d: %w", taskID, err)
@@ -880,7 +885,7 @@ WHERE task_id = ? AND retired_at IS NULL ORDER BY event_id`, taskID)
 	for rows.Next() {
 		var r row
 		var delivery string
-		if err := rows.Scan(&r.eventID, &delivery, &r.outcome, &r.replyID, &r.exposedBy); err != nil {
+		if err := rows.Scan(&r.eventID, &delivery, &r.outcome, &r.replyID, &r.exposedBy, &r.pulled); err != nil {
 			_ = rows.Close()
 			return Settlement{}, fmt.Errorf("connector: settle task %d: %w", taskID, err)
 		}
@@ -895,7 +900,7 @@ WHERE task_id = ? AND retired_at IS NULL ORDER BY event_id`, taskID)
 	// exposure only on a task already superseded.
 	var withdrawals []int
 	for _, r := range events {
-		se := SettledEvent{EventID: r.eventID}
+		se := SettledEvent{EventID: r.eventID, Pulled: r.pulled}
 		switch {
 		case r.delivery == DeliveryCompleted:
 			// A reported outcome stands (invariant 5).

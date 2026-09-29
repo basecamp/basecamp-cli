@@ -30,11 +30,17 @@ const GuardAckBody = "👀 received"
 // a person can tell a notice from the agent's own words.
 const lifecycleSignature = "automatic notice from basecamp connect"
 
-// redispatchCommand is the only thing a lifecycle notice ever asks a person to
-// do. Every notice that carries it is retractable, because a person's decision
-// on the record answers it; every notice that does not — the guard
-// acknowledgement, the still-running notice, a completion notice reporting an
-// outcome nobody has to act on — is a record of a moment, and a record stands.
+// Notices speak to the person in the thread, not to whoever runs the
+// connector: what happened, in plain words, and the one thing that person can
+// do, which is to mention the agent again. A new mention is a new request, so
+// that retry never runs an instruction a worker has already seen. Ids stay
+// only in the signature line, where reconciliation matches a notice against
+// what Basecamp holds. The operator's recovery command lives in `connect
+// status` and the log, not in the thread.
+//
+// Notices posted before this carried redispatchCommand as an ask. Those are
+// still read back and answered when a person acts on them (renderRetraction);
+// no notice written now carries it, so none needs answering.
 const redispatchCommand = "basecamp connect redispatch "
 
 func redispatchAsk(eventID int64) string {
@@ -104,10 +110,10 @@ func eventList(ids []int64) string {
 // the connector does not serve.
 func renderHoldingReply(kind MessageKind, eventID int64) string {
 	lines := []string{
-		"I can't start on this here yet: this project is not one my connector is set up to work in, so nothing was run.",
-		"Once the project is added to connect.json, a person can run it with: " + redispatchAsk(eventID),
+		"I'm not set up to work in this project yet, so I haven't started on this.",
+		"Once it's added to my projects, mention me again.",
 		"",
-		"Event " + strconv.FormatInt(eventID, 10) + " · " + lifecycleSignature,
+		"Ref " + strconv.FormatInt(eventID, 10) + " · " + lifecycleSignature,
 	}
 	return renderLines(kind, lines)
 }
@@ -217,15 +223,15 @@ FROM events e WHERE e.id = ?1`
 // The stamp is the connector's own — when it saw the attempt live — and not
 // the worker's last progress, which is a different fact the notice reports
 // separately: a task can be alive and quiet for an hour.
-func renderStillRunning(kind MessageKind, taskID int64, attemptID string, occurrence int, at, launchedAt, progressAt time.Time) string {
+func renderStillRunning(kind MessageKind, _ int64, attemptID string, occurrence int, at, launchedAt, progressAt time.Time) string {
 	progress := "No progress has been reported yet."
 	if !progressAt.IsZero() {
 		progress = "Last progress at " + clock(progressAt) + "."
 	}
 	lines := []string{
-		"Working on this as of " + clock(at) + ": task " + strconv.FormatInt(taskID, 10) + " started at " + clock(launchedAt) + ". " + progress,
+		"Working on this as of " + clock(at) + ", started at " + clock(launchedAt) + ". " + progress,
 		"",
-		"Attempt " + attemptID + ", update " + strconv.Itoa(occurrence) + " · " + lifecycleSignature,
+		"Ref attempt " + attemptID + ", update " + strconv.Itoa(occurrence) + " · " + lifecycleSignature,
 	}
 	return renderLines(kind, lines)
 }
@@ -237,7 +243,7 @@ func renderStillRunning(kind MessageKind, taskID int64, attemptID string, occurr
 // a task of their own or withdrawn for their one automatic retry.
 func CompletionNeeded(s Settlement) bool {
 	for _, e := range s.Events {
-		if completionLine(e) != "" {
+		if completionLine(e, s.Stop) != "" {
 			return true
 		}
 	}
@@ -245,45 +251,71 @@ func CompletionNeeded(s Settlement) bool {
 }
 
 // completionLine is what the notice says about one event; empty when it says
-// nothing.
-func completionLine(e SettledEvent) string {
-	id := strconv.FormatInt(e.EventID, 10)
-	redispatch := " Needs a person: " + redispatchAsk(e.EventID)
-	if e.Decided {
-		// A person already redispatched or discarded it: the notice says what
-		// happened, and asks for nothing.
-		redispatch = ""
-	}
+// nothing. It is the notice's own sentence, so a notice about several events
+// reads as one short paragraph.
+func completionLine(e SettledEvent, stop StopReason) string {
 	switch {
-	case e.Blocked:
-		return "Event " + id + ": the worker could not be started." + redispatch
+	case neverStarted(e, stop):
+		return "I couldn't start on this: something's wrong on the computer I run on."
 	case e.Withdrawn, e.Returned:
 		return ""
+	case e.Outcome == OutcomeFailed && e.ReplyID != nil:
+		// The worker replied and said why: the person already knows, and
+		// mentioning the agent again would not change a refusal. The
+		// operator still sees the failure in connect status.
+		return ""
 	case e.Outcome == OutcomeFailed:
-		return "Event " + id + ": failed." + redispatch
+		return "Something went wrong and I couldn't finish this."
 	case e.Outcome == OutcomeUnknown:
-		return "Event " + id + ": unknown, the worker did not report on it." + redispatch
+		return unfinishedSentence(stop)
 	case e.Outcome == OutcomeSucceeded && e.ReplyID == nil:
-		return "Event " + id + ": succeeded, with no reply reported."
+		return "I finished this, but didn't post a reply."
 	}
 	return ""
 }
 
-// stopSentence says how an attempt stopped.
-func stopSentence(stop StopReason) string {
+// unfinishedSentence says why a request the worker never reported on was left
+// unfinished, in the words a person reading the thread would use.
+func unfinishedSentence(stop StopReason) string {
 	switch stop {
-	case StopFinished:
-		return "the worker finished"
-	case StopFailed:
-		return "the worker failed"
+	case StopShutdown, StopLost:
+		return "I was interrupted before I finished this."
 	case StopDeadline:
-		return "the worker was stopped at the task's deadline"
-	case StopShutdown:
-		return "the connector shut down and stopped the worker"
-	case StopLost:
-		return "the worker was lost"
+		return "I ran out of time before I finished this."
+	case StopFinished, StopFailed:
+		return "I stopped before I finished this."
 	}
-	return "the worker stopped"
+	return "I stopped before I finished this."
+}
+
+// retryable reports whether mentioning the agent again is worth suggesting: a
+// request that was not finished and that no person has already decided.
+func retryable(e SettledEvent, stop StopReason) bool {
+	if e.Decided || e.Withdrawn || e.Returned || neverStarted(e, stop) {
+		return false
+	}
+	return e.Outcome == OutcomeFailed || e.Outcome == OutcomeUnknown
+}
+
+// neverStarted reports whether the worker failed before it picked the request
+// up: a start refused a second automatic retry, or an exposure no worker ever
+// pulled from a worker that failed. Mentioning the agent again would meet the
+// same computer, so the notice asks its operator to look instead. A worker
+// that finished a turn without asking for its request ran; one that ran out
+// its deadline was running; and an exposure the connector itself interrupted,
+// by a shutdown or a crash, says it was interrupted.
+func neverStarted(e SettledEvent, stop StopReason) bool {
+	switch {
+	case e.Blocked:
+		// A blocked record is also withdrawn from its task; blocked is what
+		// the notice reports, so it decides.
+		return true
+	case e.Withdrawn, e.Returned, e.Pulled:
+		return false
+	case e.Outcome != OutcomeUnknown:
+		return false
+	}
+	return stop == StopFailed
 }
 
 // renderCompletion is an attempt's completion notice, or "" when the
@@ -292,13 +324,32 @@ func renderCompletion(kind MessageKind, s Settlement) string {
 	if !CompletionNeeded(s) {
 		return ""
 	}
-	lines := []string{"Task " + strconv.FormatInt(s.TaskID, 10) + " ended: " + stopSentence(s.Stop) + "."}
+	var (
+		sentences []string
+		ids       []string
+		retry     bool
+		operator  bool
+	)
 	for _, e := range s.Events {
-		if line := completionLine(e); line != "" {
-			lines = append(lines, line)
+		line := completionLine(e, s.Stop)
+		if line == "" {
+			continue
 		}
+		if !slices.Contains(sentences, line) {
+			sentences = append(sentences, line)
+		}
+		ids = append(ids, strconv.FormatInt(e.EventID, 10))
+		retry = retry || retryable(e, s.Stop)
+		operator = operator || neverStarted(e, s.Stop)
 	}
-	lines = append(lines, "", "Attempt "+s.AttemptID+" · "+lifecycleSignature)
+	lines := []string{strings.Join(sentences, " ")}
+	if operator {
+		lines = append(lines, "The person who runs me needs to check it.")
+	}
+	if retry {
+		lines = append(lines, "Mention me again to try again.")
+	}
+	lines = append(lines, "", "Ref "+strings.Join(ids, ", ")+" · attempt "+s.AttemptID+" · "+lifecycleSignature)
 	return renderLines(kind, lines)
 }
 
@@ -614,7 +665,7 @@ FROM attempts a JOIN tasks t ON t.id = a.task_id WHERE a.id = ? AND a.state = 'e
 	// equal to the attempt's end is not evidence that it came after: the
 	// notice asks again, which is the safe direction.
 	rows, err := q.QueryContext(ctx, `
-SELECT te.event_id, te.delivery, te.outcome, te.reply_id, te.withdrawn_at IS NOT NULL, e.state, e.reason,
+SELECT te.event_id, te.delivery, te.outcome, te.reply_id, te.pulled_at IS NOT NULL, te.withdrawn_at IS NOT NULL, e.state, e.reason,
        e.state NOT IN ('completed', 'blocked') OR e.redispatch_decision IS NOT NULL
        OR COALESCE(e.authorized_at > (SELECT ended_at FROM attempts WHERE id = ?2), 0)
 FROM task_events te JOIN events e ON e.id = te.event_id
@@ -631,7 +682,7 @@ ORDER BY te.event_id`, s.TaskID, attemptID)
 			reason                   string
 			reply                    sql.NullInt64
 		)
-		if err := rows.Scan(&e.EventID, &delivery, &outcome, &reply, &e.Withdrawn, &state, &reason, &e.Decided); err != nil {
+		if err := rows.Scan(&e.EventID, &delivery, &outcome, &reply, &e.Pulled, &e.Withdrawn, &state, &reason, &e.Decided); err != nil {
 			return Settlement{}, fmt.Errorf("connector: settlement of %s: %w", attemptID, err)
 		}
 		switch {

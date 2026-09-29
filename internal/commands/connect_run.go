@@ -757,6 +757,20 @@ func connectDispatcherOptions(d connectDispatch) connector.DispatcherOptions {
 		Lines:              d.Lines,
 		Logger:             d.Logger,
 		StillRunning:       connector.DefaultStillRunning,
+		Preflight:          workerPreflight(d.Driver),
+	}
+}
+
+// workerPreflight is the driver's preflight, for a dispatcher that stopped
+// taking work because its worker could not start; nil for a driver without
+// one.
+func workerPreflight(d driver.Driver) func(context.Context) driver.Preflight {
+	p, ok := d.(driver.Preflighter)
+	if !ok {
+		return nil
+	}
+	return func(ctx context.Context) driver.Preflight {
+		return p.Preflight(ctx, connector.DefaultPolicy())
 	}
 }
 

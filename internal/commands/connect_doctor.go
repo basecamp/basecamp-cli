@@ -35,12 +35,13 @@ func newConnectDoctorCmd() *cobra.Command {
 		Short: "Check what the connector needs to run",
 		Long: `Check the connector for a set-up profile: connect.json, the token, the agent's
 identity, the stream ticket mint, the account feed, the ledger (its gaps, open
-losses, hold and messages waiting for a person), the
-worker the driver runs — the worker's own CLI on PATH under the spawn driver,
-the pinned ACP adapter in the connector's adapters directory under the acp
-driver, and the adapter's own refusal of configuration on this machine that
-the connector cannot switch off, checked in the directory this command runs
-in — and a handshake with the agent's Basecamp MCP server, started with a worker's
+losses, hold and messages waiting for a person), the worker the driver runs —
+under the spawn driver, the worker's own CLI started as the connector starts
+it and asked, without any work or model call, whether it runs, knows the
+connector's flags and is logged in; under the acp driver, the pinned ACP
+adapter in the connector's adapters directory, and the adapter's own refusal
+of configuration on this machine that the connector cannot switch off,
+checked in the directory this command runs in — and a handshake with the agent's Basecamp MCP server, started with a worker's
 environment (without the basecamp_connect domain, which only a dispatched
 task's token opens).
 
@@ -79,7 +80,7 @@ func runConnectDoctor(cmd *cobra.Command, _ []string) error {
 		)
 	}
 	checks = append(checks, ledgerChecks(ctx, p)...)
-	checks = append(checks, workerBinaryChecks(p.file)...)
+	checks = append(checks, workerChecks(ctx, p.file)...)
 	checks = append(checks, mcpHandshakeCheck(ctx, p.name))
 
 	result := summarizeChecks(asDoctorChecks(checks))
@@ -184,6 +185,16 @@ func ledgerChecks(ctx context.Context, p connectProfile) []setup.Check {
 // acpAdapterCheck names and locates.
 func workerBinaries(file setup.File) []string {
 	return []string{file.WorkerName()}
+}
+
+// workerChecks is the worker as the connector would start it: the spawn
+// driver's preflight, where the driver has one, and otherwise where its
+// binary is found.
+func workerChecks(ctx context.Context, file setup.File) []setup.Check {
+	if p, ok := connectWorkerPreflight(ctx, file); ok {
+		return preflightChecks(p)
+	}
+	return workerBinaryChecks(file)
 }
 
 // workerBinaryChecks looks for the worker where the driver that runs it
