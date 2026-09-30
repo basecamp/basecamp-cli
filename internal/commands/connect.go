@@ -274,7 +274,8 @@ type connectSetupFlags struct {
 
 	// guided is the guided setup running this one: a setup that passes says
 	// so in a line, since the guided summary names the agent, its owner and
-	// its projects. A failure still lists every check.
+	// its projects. A failure still lists every check. It only ever makes a
+	// connect.json, so it refuses one that appeared while it was asking.
 	guided bool
 	// shownAgent and shownAccount are the agent and account guided setup
 	// showed the person; setup refuses to save for any other (0 and "" when
@@ -444,6 +445,13 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	}
 	if existing.Profile != name {
 		return output.ErrUsage(fmt.Sprintf("%s names profile %q, not %q", path, existing.Profile, name))
+	}
+	// Guided setup makes connect.json only where there was none. One written
+	// while it was asking is another setup's, and its trust may not be what
+	// guided setup told the person: it is left as it is.
+	if f.guided && exists {
+		return output.ErrUsageHint("This agent was set up by another command while setup was asking about it, so nothing was changed",
+			runGuidedSetupAgain(name))
 	}
 
 	// Everything refusable without the network is refused first.

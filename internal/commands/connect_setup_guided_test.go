@@ -19,6 +19,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
+	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -554,6 +555,30 @@ func TestGuidedConnectSetupRefusesAnAgentSwappedMidQuestion(t *testing.T) {
 	require.ErrorAs(t, err, &apiErr)
 	assert.Contains(t, apiErr.Message, "connected to a different agent while setup was asking")
 	assertNotWritten(t, "agent")
+}
+
+// A setup made for the same agent while guided setup was asking isn't merged
+// into: guided setup told the person only its owner could give it work, and
+// the other setup's trust may say otherwise (Codex on #794).
+func TestGuidedConnectSetupRefusesASetupWrittenMidQuestion(t *testing.T) {
+	s := startConnectSetupServer(t)
+	ownedByTheOperator(s)
+	s.agentProjects = projectsNamed(setupProject)
+	app := connectSetupApp(t, s, "agent")
+	p := &scriptedPrompter{confirms: []bool{true}, onConfirm: func(string) {
+		out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--trust", "project", serveArg())
+		require.NoError(t, err, out)
+	}}
+	guided(t, p)
+
+	out, err := runConnectSetupCmd(t, app)
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Contains(t, apiErr.Message, "set up by another command while setup was asking")
+	loaded, err := setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Equal(t, admission.TrustProject, loaded.Trust.Mode, "the other setup's file is left as it wrote it")
 }
 
 // A lock's metadata names a pid; the connector holding it started before it
