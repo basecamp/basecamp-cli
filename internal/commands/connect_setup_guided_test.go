@@ -11,12 +11,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -548,4 +550,17 @@ func TestGuidedConnectSetupRefusesAnAgentSwappedMidQuestion(t *testing.T) {
 	require.ErrorAs(t, err, &apiErr)
 	assert.Contains(t, apiErr.Message, "connected to a different agent while setup was asking")
 	assertNotWritten(t, "agent")
+}
+
+// A lock's metadata names a pid; the connector holding it started before it
+// took the lock. A process the kernel gave the pid to after a crash started
+// later, and isn't the connector (Codex on #794).
+func TestHolderStillRunsOnlyForTheProcessThatTookTheLock(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	assert.True(t, holderStillRuns(connector.InstanceHolderInfo{PID: os.Getpid(), StartedAt: now}),
+		"this process started before now")
+	longAgo := time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
+	assert.False(t, holderStillRuns(connector.InstanceHolderInfo{PID: os.Getpid(), StartedAt: longAgo}),
+		"a lock taken before this process existed was taken by another")
+	assert.False(t, holderStillRuns(connector.InstanceHolderInfo{PID: os.Getpid(), StartedAt: "not a time"}))
 }

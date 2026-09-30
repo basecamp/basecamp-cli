@@ -578,7 +578,31 @@ func connectorRunning(file setup.File) bool {
 		return false
 	}
 	holder, ok := connector.InstanceHolder(dir, file.AccountID, file.Agent.PersonID)
-	return ok && processPresence(holder.PID) == pidPresent
+	if !ok {
+		return false
+	}
+	return holderStillRuns(holder)
+}
+
+// holderStillRuns reports whether the process a lock's metadata names is the
+// one that took the lock. The metadata outlives a crash, and its pid can be
+// given to something else since (Codex on #794), so a live pid is not
+// enough: the process holding it must have started before the lock was
+// taken. One the kernel handed the pid to afterwards started later. The lock
+// itself is never touched: taking it, even briefly, could make a starting
+// connector find it held.
+func holderStillRuns(holder connector.InstanceHolderInfo) bool {
+	lockedAt, err := time.Parse(time.RFC3339, holder.StartedAt)
+	if err != nil {
+		return false
+	}
+	p, err := driver.LookupProcess(holder.PID)
+	if err != nil {
+		return false
+	}
+	// The metadata keeps whole seconds; the process may have started within
+	// the second the lock was taken.
+	return !p.StartedAt.After(lockedAt.Add(time.Second))
 }
 
 // renderGuidedChecks is a passing setup in the guided one's words: any
