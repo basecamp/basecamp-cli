@@ -779,6 +779,9 @@ func batchMentionScope(cmd *cobra.Command, app *appctx.App, targets string) name
 	}
 
 	vouched := mentionScope(app, explicit)
+	if vouched == nil {
+		return nil
+	}
 	return func(ctx context.Context) (int64, error) {
 		id, err := vouched(ctx)
 		if err != nil {

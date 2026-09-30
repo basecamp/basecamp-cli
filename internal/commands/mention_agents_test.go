@@ -204,6 +204,7 @@ func TestBatchMentionScope(t *testing.T) {
 	assert.Zero(t, batchScopeOf(t, a+","+c, "--in", "123"), "no single project holds every target")
 	assert.Equal(t, int64(123), batchScopeOf(t, a+",garbage"), "a token the posting loop skips does not unscope the batch")
 	assert.Equal(t, int64(123), batchScopeOf(t, a+",2", "--in", "Test Project"), "a named --in resolves when consulted")
+	assert.Zero(t, batchScopeOf(t, a+",2", "--in", "  "), "a blank --in vouches for nothing")
 }
 
 func TestCommentsCreateNamedInIsResolvedOnlyWhenAnAgentNeedsIt(t *testing.T) {
