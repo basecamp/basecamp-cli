@@ -174,6 +174,19 @@ func guidedSetupProfile(ctx context.Context, app *appctx.App) (string, error) {
 		if err := app.Config.ApplyProfile(connectAgentProfileName); err != nil {
 			return "", err
 		}
+		// As root does after applying a profile: what this invocation named,
+		// in its environment and flags, outranks the profile's own values,
+		// so an --account the profile isn't bound to is refused rather than
+		// replaced.
+		if err := config.LoadFromEnv(app.Config); err != nil {
+			return "", err
+		}
+		config.ApplyOverrides(app.Config, config.FlagOverrides{
+			Account:  app.Flags.Account,
+			Project:  app.Flags.Project,
+			Todolist: app.Flags.Todolist,
+			CacheDir: app.Flags.CacheDir,
+		})
 	} else {
 		app.Config.ActiveProfile = connectAgentProfileName
 	}

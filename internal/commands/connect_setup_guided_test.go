@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -184,6 +185,27 @@ func TestGuidedConnectSetupPicksProjectsByNumber(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, f.Projects, 1)
 	assert.Contains(t, f.Projects, setupProject2)
+}
+
+// Switching to the agent's profile keeps what this invocation named: an
+// --account the profile isn't bound to is refused, as it is with -P, not
+// quietly replaced by the profile's own (Codex on #794).
+func TestGuidedConnectSetupKeepsAnExplicitAccount(t *testing.T) {
+	s := startConnectSetupServer(t)
+	ownedByTheOperator(s)
+	s.agentProjects = projectsNamed(setupProject)
+	connectSetupApp(t, s, "agent")
+	guided(t, &scriptedPrompter{confirms: []bool{true}})
+
+	app := newConnectSetupApp(t, s, "")
+	app.Flags.Account = "777"
+	app.Config.AccountID = "777"
+	app.Config.Sources["account_id"] = string(config.SourceFlag)
+
+	out, err := runConnectSetupCmd(t, app)
+	require.Error(t, err, out)
+	assert.Contains(t, err.Error(), "this command named account 777")
+	assertNotWritten(t, "agent")
 }
 
 // Setup never offers the background service, which would run the agent in
