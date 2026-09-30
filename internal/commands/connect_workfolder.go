@@ -1,12 +1,10 @@
 package commands
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
-	"syscall"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
@@ -23,11 +21,10 @@ func workFolderCheck() setup.Check {
 		// Workers enter the folder by its path (cmd.Dir), and getcwd can
 		// return a path that can no longer be entered: a parent, or the
 		// folder itself, lost its search permission after the shell went in.
-		// "dir/." is only reachable through a folder that can be entered.
-		_, err = os.Stat(dir + string(filepath.Separator) + ".")
-		if errors.Is(err, syscall.ENAMETOOLONG) {
-			// No room for "/.": a path at the limit is checked as it is.
-			_, err = os.Stat(dir)
+		// The path resolving says the parents can be searched; "." resolving
+		// says the folder itself can, without lengthening the path.
+		if _, err = os.Stat(dir); err == nil {
+			_, err = os.Stat(".")
 		}
 	}
 	if err != nil {
