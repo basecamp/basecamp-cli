@@ -149,11 +149,7 @@ func runGuidedConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupF
 		file = &loaded
 	}
 
-	running := connectorRunning(*file)
-	if !running {
-		running = offerToKeepItRunning(cmd, w, r, name)
-	}
-	renderGuidedSummary(w, r, agent, *file, running, name)
+	renderGuidedSummary(w, r, agent, *file, connectorRunning(*file), name)
 	return nil
 }
 
@@ -507,32 +503,6 @@ func connectorRunning(file setup.File) bool {
 	return ok && processPresence(holder.PID) == pidPresent
 }
 
-// offerToKeepItRunning offers the service where there is one, and says how
-// to run the connector where there is not. It reports whether the connector
-// was started.
-func offerToKeepItRunning(cmd *cobra.Command, w io.Writer, r *output.Renderer, name string) bool {
-	foreground := "basecamp connect -P " + richtext.ShellQuote(name)
-	fmt.Fprintln(w)
-	if !connectSupportedOS(connectServiceGOOS) {
-		fmt.Fprintln(w, "To start your agent, run this and leave it running: "+foreground)
-		return false
-	}
-	start, err := connectSetupAsk.Confirm("Start your agent now, and whenever you log in?", true)
-	if err != nil || !start {
-		fmt.Fprintln(w, "To start it yourself, run this and leave it running: "+foreground)
-		return false
-	}
-	// Why the service didn't start is systemd's to explain, and `connect
-	// service install` run by itself says it in full.
-	if err := runConnectServiceInstall(cmd, &connectServiceFlags{guided: true}); err != nil {
-		fmt.Fprintln(w, r.Warning.Render("I couldn't start it in the background on this computer."))
-		fmt.Fprintln(w, "Run this now and leave it running: "+foreground)
-		fmt.Fprintln(w, r.Muted.Render("To see why, run: basecamp connect service install -P "+richtext.ShellQuote(name)))
-		return false
-	}
-	return true
-}
-
 // renderGuidedChecks is a passing setup in the guided one's words: any
 // warnings, by name, then that everything checks out.
 func renderGuidedChecks(w io.Writer, checks []setup.Check) {
@@ -586,7 +556,14 @@ func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, fil
 		fmt.Fprintln(w, "  Running:   yes")
 		fmt.Fprintf(w, "\nMention %s in one of those projects to try it.\n", agentName)
 	} else {
-		fmt.Fprintln(w, "  Running:   no. Start it with: basecamp connect -P "+richtext.ShellQuote(name))
+		// No background service yet: it would work in the home directory and
+		// is untested on real machines. The agent works, and may change files
+		// without asking, in the folder it is started in.
+		fmt.Fprintln(w, "  Running:   no")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "To start it, run this in the folder it should work in, and leave it running.")
+		fmt.Fprintln(w, "It can change files in that folder without asking.")
+		fmt.Fprintln(w, "  basecamp connect -P "+richtext.ShellQuote(name))
 		fmt.Fprintf(w, "\nOnce it's running, mention %s in one of those projects to try it.\n", agentName)
 	}
 }

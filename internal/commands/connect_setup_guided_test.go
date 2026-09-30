@@ -139,7 +139,7 @@ func TestGuidedConnectSetupFromNothing(t *testing.T) {
 	s := startConnectSetupServer(t)
 	ownedByTheOperator(s)
 	s.agentProjects = projectsNamed(setupProject, setupProject2)
-	p := &scriptedPrompter{confirms: []bool{true, false}}
+	p := &scriptedPrompter{confirms: []bool{true}}
 	guided(t, p)
 
 	out, err := runConnectSetupCmd(t, bareSetupApp(t, s, "agent"))
@@ -150,13 +150,14 @@ func TestGuidedConnectSetupFromNothing(t *testing.T) {
 	assert.Contains(t, out, "✓ Operator (you) is the only person who can give it work.")
 	assert.Equal(t, []string{
 		"Work in all 2 of Marie Chef's projects? Connector, Launch",
-		"Start your agent now, and whenever you log in?",
 	}, p.asked)
 	assert.Contains(t, out, "✓ Claude Code 2.1.283 is ready")
 	assert.Contains(t, out, "✓ Everything checks out")
 	assert.Contains(t, out, "Marie Chef is set up on this computer")
 	assert.Contains(t, out, "Works in:  Connector, Launch")
 	assert.Contains(t, out, "Running:   no")
+	assert.Contains(t, out, "To start it, run this in the folder it should work in, and leave it running.")
+	assert.Contains(t, out, "  basecamp connect -P agent\n")
 	assert.Contains(t, out, "Once it's running, mention Marie Chef in one of those projects to try it.")
 	for _, internal := range []string{"Connected profile", "Account: 999", "auth status", "connect.json", "Identity", "Person " + strconv.FormatInt(setupOperatorPerson, 10)} {
 		assert.NotContains(t, out, internal)
@@ -172,7 +173,7 @@ func TestGuidedConnectSetupPicksProjectsByNumber(t *testing.T) {
 	s := startConnectSetupServer(t)
 	ownedByTheOperator(s)
 	s.agentProjects = projectsNamed(setupProject, setupProject2)
-	guided(t, &scriptedPrompter{confirms: []bool{false, false}, inputs: []string{"2"}})
+	guided(t, &scriptedPrompter{confirms: []bool{false}, inputs: []string{"2"}})
 
 	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"))
 	require.NoError(t, err, out)
@@ -185,59 +186,30 @@ func TestGuidedConnectSetupPicksProjectsByNumber(t *testing.T) {
 	assert.Contains(t, f.Projects, setupProject2)
 }
 
-// Started in the background, the agent is running, and setup says so in the
-// summary rather than in the service's own report of the unit it wrote.
-func TestGuidedConnectSetupStartsTheAgentInTheBackground(t *testing.T) {
+// Setup never offers the background service, which would run the agent in
+// the home directory, and never touches systemd: it says how to start the
+// agent in the folder it should work in.
+func TestGuidedConnectSetupNeverOffersTheBackgroundService(t *testing.T) {
 	s := startConnectSetupServer(t)
 	ownedByTheOperator(s)
 	s.agentProjects = projectsNamed(setupProject)
-	guided(t, &scriptedPrompter{confirms: []bool{true, true}})
-	systemctlAnswers(t, nil)
-
-	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"))
-	require.NoError(t, err, out)
-
-	assert.Contains(t, out, "Running:   yes")
-	assert.Contains(t, out, "\nMention Marie Chef in one of those projects to try it.")
-	assert.NotContains(t, out, "Wrote ")
-	assert.NotContains(t, out, "loginctl")
-}
-
-// A service that cannot start is said plainly, with the command that runs
-// the agent now; the systemd detail is `connect service install`'s to give.
-func TestGuidedConnectSetupSaysPlainlyWhenTheServiceCannotStart(t *testing.T) {
-	s := startConnectSetupServer(t)
-	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
-	guided(t, &scriptedPrompter{confirms: []bool{true, true}})
-	systemctlAnswers(t, errors.New("the user manager does not see a unit by that name"))
-
-	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"))
-	require.NoError(t, err, out)
-
-	assert.Contains(t, out, "I couldn't start it in the background on this computer.")
-	assert.Contains(t, out, "Run this now and leave it running: basecamp connect -P agent")
-	assert.Contains(t, out, "To see why, run: basecamp connect service install -P agent")
-	assert.NotContains(t, out, "user manager")
-	assert.Contains(t, out, "Running:   no")
-}
-
-// systemctlAnswers makes every systemctl call succeed, or fail with err,
-// without running it.
-func systemctlAnswers(t *testing.T, err error) {
-	t.Helper()
+	p := &scriptedPrompter{confirms: []bool{true}}
+	guided(t, p)
 	prev := runSystemctl
 	runSystemctl = func(args ...string) ([]byte, error) {
-		if err != nil {
-			return nil, err
-		}
-		if len(args) > 0 && args[0] == "show" {
-			path, err := connectServiceUnitPath("agent")
-			return []byte(path + "\n"), err
-		}
+		t.Errorf("setup ran systemctl %v", args)
 		return nil, nil
 	}
 	t.Cleanup(func() { runSystemctl = prev })
+
+	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"))
+	require.NoError(t, err, out)
+
+	assert.Equal(t, []string{"Work in Marie Chef's project, Connector?"}, p.asked)
+	assert.Contains(t, out, "  basecamp connect -P agent\n")
+	for _, service := range []string{"whenever you log in", "in the background", "service install", "systemctl"} {
+		assert.NotContains(t, out, service)
+	}
 }
 
 // An agent in no projects yet is the next step of a first setup, in
@@ -372,13 +344,13 @@ func TestGuidedConnectSetupOnAFinishedSetupSaysSo(t *testing.T) {
 	path := connectSetupPath(t, "agent")
 	before, err := os.ReadFile(path)
 	require.NoError(t, err)
-	p := &scriptedPrompter{confirms: []bool{false}}
+	p := &scriptedPrompter{}
 	guided(t, p)
 
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"))
 	require.NoError(t, err, out)
 
-	assert.Equal(t, []string{"Start your agent now, and whenever you log in?"}, p.asked)
+	assert.Empty(t, p.asked)
 	assert.Contains(t, out, "Marie Chef is set up on this computer")
 	assert.Contains(t, out, "Works in:  Connector")
 	after, err := os.ReadFile(path)
