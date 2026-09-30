@@ -90,6 +90,11 @@ var accountHomeFolder = func() (string, error) {
 // such as C:\ or a UNC share on Windows. A root is its own parent, once
 // symlinks are resolved: /proc/self/root is / by another name.
 func isFilesystemRoot(dir string) bool {
+	// Identity first: a path can reach the root through more symlinks than
+	// EvalSymlinks can expand within the path-length limit.
+	if samePath(dir, string(filepath.Separator)) {
+		return true
+	}
 	// Resolve the path as given: cleaning first would turn a path like
 	// /proc/self/root/.. into /proc/self, which is not where it leads.
 	clean := filepath.Clean(dir)
