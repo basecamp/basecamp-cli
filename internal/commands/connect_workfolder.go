@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
@@ -26,13 +27,17 @@ func workFolderCheck() setup.Check {
 	// The path is shown on one line: a folder name can carry newlines or
 	// terminal escapes, and check messages are printed as they are.
 	shown := richtext.SanitizeSingleLine(dir)
-	switch home, err := os.UserHomeDir(); {
-	case err == nil && samePath(dir, home):
+	home := homeFolder()
+	switch {
+	case home != "" && samePath(dir, home):
 		c.Status = setup.StatusWarn
 		c.Message = fmt.Sprintf("Started from here, the agent works in %s, your home folder, and may change files anywhere in it without asking", shown)
 	case isFilesystemRoot(dir):
 		c.Status = setup.StatusWarn
 		c.Message = fmt.Sprintf("Started from here, the agent works in %s, the root of the filesystem, and may change any file it can reach without asking", shown)
+	case home == "":
+		c.Status = setup.StatusWarn
+		c.Message = fmt.Sprintf("Started from here, the agent works in %s and may change files in it without asking. Couldn't tell where your home folder is, so couldn't check this isn't it", shown)
 	default:
 		c.Status = setup.StatusPass
 		c.Message = fmt.Sprintf("Started from here, the agent works in %s and may change files in it without asking", shown)
@@ -40,6 +45,28 @@ func workFolderCheck() setup.Check {
 	}
 	c.Hint = "Start the connector from a folder made for the agent, or from the project it should work on."
 	return c
+}
+
+// homeFolder is where the person's home folder is: $HOME (USERPROFILE on
+// Windows), or else the account's own record, or "" when neither says.
+func homeFolder() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		return home
+	}
+	if home, err := accountHomeFolder(); err == nil && home != "" {
+		return home
+	}
+	return ""
+}
+
+// accountHomeFolder reads the home folder from the account's record. A
+// variable so a test can stand in for the system's user database.
+var accountHomeFolder = func() (string, error) {
+	u, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	return u.HomeDir, nil
 }
 
 // isFilesystemRoot reports whether dir is a root: / on Unix, a volume root

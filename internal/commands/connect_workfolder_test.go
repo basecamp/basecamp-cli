@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -140,4 +141,36 @@ func currentFolder(t *testing.T) string {
 	dir, err := os.Getwd()
 	require.NoError(t, err)
 	return richtext.SanitizeSingleLine(dir)
+}
+
+// With no HOME, the account's own record still says where home is.
+func TestWorkFolderCheckFindsHomeWithoutHOME(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, "")
+	accountHome(t, home, nil)
+	t.Chdir(home)
+
+	c := workFolderCheck()
+	assert.Equal(t, setup.StatusWarn, c.Status)
+	assert.Contains(t, c.Message, currentFolder(t)+", your home folder")
+}
+
+// When nothing says where home is, the check can't rule it out, so it warns
+// rather than passing.
+func TestWorkFolderCheckWarnsWhenHomeIsUnknown(t *testing.T) {
+	setHome(t, "")
+	accountHome(t, "", errors.New("no such user"))
+	t.Chdir(t.TempDir())
+
+	c := workFolderCheck()
+	assert.Equal(t, setup.StatusWarn, c.Status)
+	assert.Contains(t, c.Message, "Couldn't tell where your home folder is")
+}
+
+// accountHome stands in for the account's record of its home folder.
+func accountHome(t *testing.T, home string, err error) {
+	t.Helper()
+	prev := accountHomeFolder
+	accountHomeFolder = func() (string, error) { return home, err }
+	t.Cleanup(func() { accountHomeFolder = prev })
 }
