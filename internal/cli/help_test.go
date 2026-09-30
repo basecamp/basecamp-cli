@@ -48,6 +48,23 @@ func TestRootHelpContainsCategoryHeaders(t *testing.T) {
 	assert.Contains(t, out, "FLAGS")
 }
 
+func TestKeyringBypassIsDiscoverableInHelp(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"auth", "--help"}, {"doctor", "--help"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			isolateHelpTest(t)
+			var buf bytes.Buffer
+			cmd := NewRootCmd()
+			cmd.AddCommand(commands.NewAuthCmd(), commands.NewDoctorCmd())
+			cmd.SetOut(&buf)
+			cmd.SetArgs(args)
+			require.NoError(t, cmd.Execute())
+			assert.Contains(t, buf.String(), "BASECAMP_NO_KEYRING=1")
+			assert.Contains(t, buf.String(), "plaintext")
+			assert.Contains(t, buf.String(), "0600")
+		})
+	}
+}
+
 func TestRootHelpContainsExamples(t *testing.T) {
 	isolateHelpTest(t)
 

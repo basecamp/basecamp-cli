@@ -33,7 +33,15 @@ func NewAuthCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
 		Short: "Manage authentication",
-		Long:  "Manage Basecamp authentication including login, logout, and status.",
+		Long: `Manage Basecamp authentication including login, logout, and status.
+
+Credentials use the system keyring when available. Set BASECAMP_NO_KEYRING=1
+before running a command to bypass the keyring and use plaintext credentials
+in the config directory (credentials.json, mode 0600).
+
+On Linux, keyring probes and operations time out after 10 seconds. An initial
+probe failure uses the warned file fallback. A later operation timeout returns
+an error without switching storage; a timed-out write may still complete.`,
 	}
 
 	cmd.AddCommand(

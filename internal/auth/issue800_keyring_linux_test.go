@@ -39,7 +39,7 @@ func issue800ReadWithStalledBus(t *testing.T, headless, disable bool) {
 	socketDir, err := os.MkdirTemp("", "issue800-")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
-	listener, err := net.Listen("unix", filepath.Join(socketDir, "bus"))
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", filepath.Join(socketDir, "bus"))
 	require.NoError(t, err)
 	defer listener.Close()
 

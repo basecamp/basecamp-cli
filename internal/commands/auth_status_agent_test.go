@@ -129,7 +129,7 @@ func TestDoctorOffersTheAgentLoginForABrokenAgent(t *testing.T) {
 		ClientSecret:  "agent-secret",
 		TokenEndpoint: srv.URL + "/oauth/tokens",
 	}))
-	credentials := checkCredentials(app, false)
+	credentials := checkCredentials(context.Background(), app, false)
 	assert.Equal(t, "fail", credentials.Status)
 	assert.Contains(t, credentials.Hint, "--with-client-credentials")
 	assert.Contains(t, app.Auth.LoginCommand(), "--client-id agent-client")

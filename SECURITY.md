@@ -26,7 +26,23 @@ If system keyring is unavailable (headless servers, containers), set:
 export BASECAMP_NO_KEYRING=1
 ```
 
-Credentials will be stored in `~/.config/basecamp/credentials.json` with `0600` permissions.
+Credentials will be stored in `~/.config/basecamp/credentials.json` with `0600` permissions
+(or in the configured XDG config directory). This is plaintext storage, not encryption.
+Any non-empty `BASECAMP_NO_KEYRING` value bypasses the keyring before it is probed.
+
+On Linux, the availability probe and each later keyring operation are bounded
+by 10 seconds, including desktop sessions. An initial probe timeout uses the
+file fallback and prints a warning on the first credential read or write.
+Existing keyring credentials are not copied to the file: a fallback file may
+be absent or stale.
+
+After a successful probe, a later timeout returns an error; it never silently
+switches to plaintext or serves stale file credentials. The keyring library
+cannot cancel a started operation, so a timed-out write or delete may still
+complete. That store refuses further keyring operations for the rest of the
+process. Do not automatically retry a write whose outcome is unknown.
+
+Interactive macOS and Windows keyring behavior is unchanged.
 
 ## Supported Versions
 

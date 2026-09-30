@@ -215,6 +215,14 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 		}
 	}
 
+	// CREDENTIAL STORAGE — the escape hatch must be visible before a
+	// stalled keyring prevents doctor or auth status from answering.
+	b.WriteString("\n")
+	b.WriteString(r.Header.Render("CREDENTIAL STORAGE"))
+	b.WriteString("\n")
+	b.WriteString("  Set BASECAMP_NO_KEYRING=1 to bypass the system keyring.\n")
+	b.WriteString("  Uses plaintext credentials.json in the config directory (mode 0600).\n")
+
 	// EXAMPLES
 	b.WriteString("\n")
 	b.WriteString(r.Header.Render("EXAMPLES"))
