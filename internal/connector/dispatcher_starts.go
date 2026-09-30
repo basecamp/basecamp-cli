@@ -150,6 +150,15 @@ func (d *Dispatcher) whyNotStarting(ctx context.Context, said string) string {
 	return product + " couldn't start twice in a row — " + reason
 }
 
+// startsHeld reports whether new work is held, and nothing more: a pass asks
+// holdingNewWork once, which may start a check; each launch in the pass asks
+// this.
+func (d *Dispatcher) startsHeld() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.starts.held
+}
+
 // holdingNewWork reports whether new work is held, and starts a check of the
 // worker when one is due.
 func (d *Dispatcher) holdingNewWork(ctx context.Context) bool {

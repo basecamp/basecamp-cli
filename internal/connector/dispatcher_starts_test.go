@@ -50,6 +50,27 @@ func startsOf(fake *fakeDriver, calls *atomic.Int32) {
 	fake.onStart = func(driver.SessionConfig) { calls.Add(1) }
 }
 
+// The hold is asked before every launch, not once a batch: starts that fail
+// at once give their slots back, so a batch that only checked capacity would
+// go on launching after the second failure (Codex on #794).
+func TestAHoldStopsTheRestOfTheBatch(t *testing.T) {
+	fake := newFakeDriver()
+	notFound := fmt.Errorf("%w: exec: \"claude\": executable file not found in $PATH", driver.ErrNotStarted)
+	fake.startErr = []error{notFound, notFound, notFound, notFound, notFound}
+	var calls atomic.Int32
+	startsOf(fake, &calls)
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Concurrency = 2 })
+	for id := int64(1); id <= 5; id++ {
+		admitOn(t, h.ledger, id, fmt.Sprintf("recording:%d", id))
+	}
+	stop := h.run(t)
+
+	require.Eventually(t, func() bool { return connectionOf(t, h.ledger).State == ConnectionNotTakingWork }, 10*time.Second, 10*time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
+	stop()
+	assert.Equal(t, int32(StartFailuresToHold), calls.Load(), "nothing is started after the second failure, in the same batch or the next")
+}
+
 // Two starts in a row that never ran hold new work: the next record waits,
 // admitted, and the connector says so once, with the fix. A restart takes
 // work again.

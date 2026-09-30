@@ -544,8 +544,11 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 	for _, record := range records {
 		// Asked again on every record, not counted down: a start that failed
 		// can have held its attempt, and a held attempt takes a slot as a
-		// running one does (Copilot).
-		if d.free() <= 0 {
+		// running one does (Copilot). The start-failure hold is asked again
+		// too: a start that failed at once gives its slot back, and the one
+		// that made the second failure in a row holds new work from the next
+		// record on, not the next pass.
+		if d.free() <= 0 || d.startsHeld() {
 			break
 		}
 		switch err := d.start(ctx, record); {
