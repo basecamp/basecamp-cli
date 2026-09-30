@@ -61,7 +61,9 @@ wait for review, until basecamp connect release. Linux only.
   basecamp connect release            clear the hold
   basecamp connect shadow promote     make the shadow ledger the connector's, held
   basecamp connect import <file>      apply a cutover reconciliation file
-  basecamp connect service install    have the OS keep it running`,
+
+Start it in the folder it should work in and leave it running: workers run
+there and may change files in it without asking.`,
 		Example: `  basecamp connect setup -P agent --operator-profile me --serve 12345
   basecamp connect -P agent
   basecamp connect -P agent --project 12345 --shadow`,

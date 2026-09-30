@@ -7,9 +7,9 @@ description: |
   and readiness (basecamp connect setup). Explains every setup
   result and failure. Also reads what the connector ran (status, doctor) and
   carries out a person's decisions on its records (redispatch, discard,
-  release, the cutover's shadow promote and import). Starts and supervises the
-  connector through its systemd service, and reads the pointer lines it
-  writes.
+  release, the cutover's shadow promote and import). Tells the person how to
+  start the connector in the folder it should work in, and reads the pointer
+  lines it writes.
   Use when asked to connect an agent, set up or change the connector, add or
   remove a project, change who can drive the agent, find out why setup says
   the connector is not ready, or see, retry, close or release what the
@@ -31,7 +31,6 @@ triggers:
   - release the hold
   - start the connector
   - stop the connector
-  - basecamp connect service install
   - is the connector running
 ---
 
@@ -465,65 +464,45 @@ consent.
 
 **Never run `basecamp connect` yourself.** It runs in the foreground until it
 is interrupted, so a session that starts it never gets its turn back, and a
-connector that lives only as long as your session dies with it. It is a
-service. Install the service and let the OS run it.
+connector that lives only as long as your session dies with it. The person
+runs it, in a terminal of their own, and leaves it running:
 
-    basecamp connect service install -P '<profile>'
+    cd '<folder>' && basecamp connect -P '<profile>'
 
-That writes a systemd user unit, enables it and starts it. The unit restarts
-the connector whenever it stops, so a crash or a kill brings it back.
+**The folder is the agent's workspace.** Every worker runs there and may change
+files in it without asking. Suggest a folder made for the agent, or the project
+the person wants it to work on. Never suggest their home directory, and if the
+connector is already running from it, say so.
 
-**A reboot is the exception.** A user manager starts at login, so unless
-lingering is on, the connector stays down after a restart until someone signs
-in. Install says so when it finds lingering off, and gives the
-`sudo loginctl enable-linger` command. Pass that on; do not run it, and do not
-tell anyone an unattended machine will come back on its own until they have.
-Pass the run's shape to install, not to the connector: `--project <id>`
-(repeatable) to hear only some projects, `--shadow` to admit and log without
-dispatching or posting anything, `--hold` to run with the durable hold set.
-Installing again over an existing service rewrites the unit and restarts it, so
-that is how a project is added or shadow is turned off.
+Stopping it is safe: Ctrl-C (a SIGINT) cancels live workers, posts their
+completions and exits. Nothing is lost while it is stopped: started again, it
+catches up on what people asked in the meantime. On a server, the person can
+keep it running in `tmux` or `screen`.
 
-`basecamp connect service uninstall -P '<profile>'` stops it and removes the
-unit. The stop is a SIGTERM, which is how the connector is meant to be asked:
-it cancels its live workers, posts their completions and exits. Nothing else is
-removed — the ledger, the checkpoint and connect.json stay, and installing
-again resumes from them.
+There is no background service yet. If someone asks for one, say it isn't
+available, and that the connector catches up whenever it is started again.
 
-Linux only, and the refusal says so: the connector runs nowhere else, so there
-is no macOS service to install. If a person on a Mac asks, say that rather than
-looking for a launchd flag.
+Pass the run's shape to the connector itself: `--project <id>` (repeatable) to
+hear only some projects, `--shadow` to admit and log without dispatching or
+posting anything, `--hold` to run with the durable hold set.
+
+Linux only for now: on any other system the connector refuses to start, and
+says so. If a person on a Mac asks, say that.
 
 Quote the profile, as everywhere else in this skill.
 
 ### Seeing what it is doing
 
-Two different questions, two different places.
-
 **What it has heard and run** is `basecamp connect status -P '<profile>'`,
 which reads the ledger. That is the answer to "is it working", "what is it
-holding", "did that mention get picked up". It works whether or not the service
-is running.
-
-**Whether it is up** is the service:
-
-    systemctl --user is-active basecamp-connect-'<profile>'.service
-    systemctl --user status basecamp-connect-'<profile>'.service
-
-A unit in `failed` after several restarts is a connector that cannot start:
-the unit gives up after five tries rather than retrying forever and reporting
-`activating` while nothing works. Run `basecamp connect doctor -P '<profile>'`
-and explain the failed check. Once the cause is fixed, `service install` again
-— it clears the failure counter, which a bare `systemctl --user restart` does
-not, so restarting by hand from `failed` is refused until the window passes.
+holding", "did that mention get picked up". It also says whether a connector
+holds the ledger, which is whether one is running.
 
 ### The pointer lines
 
 While it runs, the connector writes one JSON object per line on stdout — a
 pointer line per event it saw and per decision it took — and its logs on
-stderr. Under the service both land in the journal:
-
-    journalctl --user -u basecamp-connect-'<profile>'.service -n 50 -o cat
+stderr, in the terminal the person started it from.
 
 **A pointer line carries no content, and you must not try to make it.** It
 names ids, the trigger, the class, the route and the state, and nothing of what
@@ -532,6 +511,6 @@ person wants to know what was said, the answer is in Basecamp, not here — open
 the recording the pointer names. Never quote a pointer line into a Basecamp
 comment, and never reconstruct a message from one.
 
-Use the journal to answer "what happened at 14:32" or "why did that event not
+Use those lines to answer "what happened at 14:32" or "why did that event not
 dispatch". For anything about the current state of a record, prefer `status`:
-it is the ledger's own answer, and the journal is a log of how it got there.
+it is the ledger's own answer, and the lines are a log of how it got there.

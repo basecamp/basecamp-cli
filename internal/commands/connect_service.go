@@ -101,8 +101,14 @@ type connectServiceFlags struct {
 // newConnectServiceCmd is the service group.
 func newConnectServiceCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "service",
-		Short: "Install or remove the OS service that keeps the connector running",
+		Use: "service",
+		// Hidden until it's ready: the unit runs the connector in the home
+		// directory, where the worker may change files without asking,
+		// freezes PATH at install, is Linux-only, and is untried on real
+		// machines. People start the connector themselves in the folder it
+		// should work in.
+		Hidden: true,
+		Short:  "Install or remove the OS service that keeps the connector running",
 		Long: `Install or remove a systemd user unit that runs the connector and starts
 it again when it stops.
 
