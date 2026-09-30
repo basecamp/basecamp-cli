@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -327,5 +328,33 @@ func answerConfirmWith(t *testing.T, typed string) {
 	runConfirmForm = func(fields ...huh.Field) error {
 		require.Len(t, fields, 1)
 		return fields[0].(*huh.Confirm).RunAccessible(io.Discard, strings.NewReader(typed))
+	}
+}
+
+// The interactive prompt, key by key: Enter submits whatever the prompt
+// opened on, y and n answer, and the arrows toggle. These are huh's key
+// bindings, as runForm sets them, working on Confirm's own field.
+func TestConfirmFieldAnswersFromTheKeyboard(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	enter := tea.KeyMsg{Type: tea.KeyEnter}
+	for _, tc := range []struct {
+		def  bool
+		keys []tea.KeyMsg
+		want bool
+	}{
+		{def: true, keys: []tea.KeyMsg{enter}, want: true},
+		{def: false, keys: []tea.KeyMsg{enter}, want: false},
+		{def: true, keys: []tea.KeyMsg{{Type: tea.KeyRunes, Runes: []rune("n")}}, want: false},
+		{def: false, keys: []tea.KeyMsg{{Type: tea.KeyRunes, Runes: []rune("y")}}, want: true},
+		{def: true, keys: []tea.KeyMsg{{Type: tea.KeyLeft}, enter}, want: false},
+	} {
+		result := tc.def
+		field := confirmField("Go ahead?", &result)
+		field.WithKeyMap(escKeyMap()) // the key map runForm gives every form
+		field.Focus()
+		for _, k := range tc.keys {
+			field.Update(k)
+		}
+		assert.Equal(t, tc.want, result, "default %v, keys %v", tc.def, tc.keys)
 	}
 }
