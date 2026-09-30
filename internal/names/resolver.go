@@ -32,14 +32,15 @@ type Resolver struct {
 	resolveMeFn func(context.Context) (int64, string, error)
 
 	// Session-scoped cache
-	mu        sync.RWMutex
-	projects  []Project
-	people    []Person
-	pingable  []Person              // cached /people/pingable.json
-	agents    map[int64][]Person    // agents on a project, keyed by project ID
-	agentErrs map[int64]error       // failed agent fetches, so a run does not retry them
-	todolists map[string][]Todolist // keyed by project ID
-	me        *Person               // cached /my/profile.json result
+	mu         sync.RWMutex
+	projects   []Project
+	people     []Person
+	pingable   []Person              // cached /people/pingable.json
+	agents     map[int64][]Person    // agents on a project, keyed by project ID
+	agentErrs  map[int64]error       // failed agent fetches, so a run does not retry them
+	agentsByID map[int64]*Person     // agents looked up directly by person ID
+	todolists  map[string][]Todolist // keyed by project ID
+	me         *Person               // cached /my/profile.json result
 }
 
 // Project represents a Basecamp project for name resolution.
@@ -88,6 +89,7 @@ func (r *Resolver) SetAccountID(accountID string) {
 		r.pingable = nil
 		r.agents = make(map[int64][]Person)
 		r.agentErrs = nil
+		r.agentsByID = nil
 		r.me = nil
 		r.todolists = make(map[string][]Todolist)
 	}
@@ -374,6 +376,7 @@ func (r *Resolver) ClearCache() {
 	r.pingable = nil
 	r.agents = make(map[int64][]Person)
 	r.agentErrs = nil
+	r.agentsByID = nil
 	r.me = nil
 	r.todolists = make(map[string][]Todolist)
 }

@@ -119,6 +119,13 @@ func (r *Resolver) ResolveMentionByID(ctx context.Context, id int64) (*Person, e
 	}
 	notFound := err
 
+	r.mu.RLock()
+	cached, ok := r.agentsByID[id]
+	r.mu.RUnlock()
+	if ok {
+		return cached, nil
+	}
+
 	p, err := r.forAccount().People().Get(ctx, id)
 	if err != nil {
 		converted := convertSDKError(err)
@@ -131,13 +138,21 @@ func (r *Resolver) ResolveMentionByID(ctx context.Context, id int64) (*Person, e
 	if p.PersonableType != personableAgent {
 		return nil, notFound
 	}
-	return &Person{
+	agent := &Person{
 		ID:             p.ID,
 		AttachableSGID: p.AttachableSGID,
 		Name:           p.Name,
 		Email:          p.EmailAddress,
 		PersonableType: p.PersonableType,
-	}, nil
+	}
+
+	r.mu.Lock()
+	if r.agentsByID == nil {
+		r.agentsByID = make(map[int64]*Person)
+	}
+	r.agentsByID[id] = agent
+	r.mu.Unlock()
+	return agent, nil
 }
 
 const personableAgent = "Agent"

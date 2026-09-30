@@ -295,3 +295,14 @@ func TestResolveMentionByNameSameNamedAgentsAreAmbiguous(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveMentionByIDLooksUpAnAgentOncePerRun(t *testing.T) {
+	r, s := newMentionFixture(t)
+
+	for range 3 {
+		p, err := r.ResolveMentionByID(context.Background(), 7)
+		require.NoError(t, err)
+		assert.Equal(t, "sgid-quincy", p.AttachableSGID)
+	}
+	assert.Equal(t, 1, s.count("/99999/people/7")+s.count("/99999/people/7.json"))
+}
