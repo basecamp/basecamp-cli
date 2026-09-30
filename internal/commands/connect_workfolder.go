@@ -46,8 +46,10 @@ func workFolderCheck() setup.Check {
 // such as C:\ or a UNC share on Windows. A root is its own parent, once
 // symlinks are resolved: /proc/self/root is / by another name.
 func isFilesystemRoot(dir string) bool {
+	// Resolve the path as given: cleaning first would turn a path like
+	// /proc/self/root/.. into /proc/self, which is not where it leads.
 	clean := filepath.Clean(dir)
-	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 		clean = resolved
 	}
 	return filepath.Dir(clean) == clean

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // Workers run in the folder the connector starts in and may change files
@@ -21,7 +22,7 @@ func TestWorkFolderCheckWarnsInTheHomeFolder(t *testing.T) {
 
 	c := workFolderCheck()
 	assert.Equal(t, setup.StatusWarn, c.Status)
-	assert.Contains(t, c.Message, "your home folder")
+	assert.Contains(t, c.Message, currentFolder(t)+", your home folder")
 	assert.NotEmpty(t, c.Hint)
 }
 
@@ -34,7 +35,7 @@ func TestWorkFolderCheckPassesInAFolderOfItsOwn(t *testing.T) {
 
 	c := workFolderCheck()
 	assert.Equal(t, setup.StatusPass, c.Status)
-	assert.Contains(t, c.Message, "agent")
+	assert.Contains(t, c.Message, currentFolder(t))
 	assert.NotContains(t, c.Message, "home folder")
 }
 
@@ -119,4 +120,24 @@ func TestWorkFolderCheckFailsWhenTheFolderIsGone(t *testing.T) {
 	c := workFolderCheck()
 	assert.Equal(t, setup.StatusFail, c.Status)
 	assert.NotEmpty(t, c.Hint)
+}
+
+// A symlink to the root, given with a trailing .., is still resolved as
+// given: /proc/self/root/.. leads to /, though it cleans to /proc/self.
+func TestIsFilesystemRootResolvesThePathAsGiven(t *testing.T) {
+	base := t.TempDir()
+	link := filepath.Join(base, "root-link")
+	if err := os.Symlink(string(filepath.Separator), link); err != nil {
+		t.Skipf("can't make a symlink here: %v", err)
+	}
+	require.NoError(t, os.Mkdir(filepath.Join(base, "sibling"), 0o700))
+	assert.True(t, isFilesystemRoot(link+string(filepath.Separator)+".."))
+}
+
+// currentFolder is the working directory as the check reports it.
+func currentFolder(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	require.NoError(t, err)
+	return richtext.SanitizeSingleLine(dir)
 }
