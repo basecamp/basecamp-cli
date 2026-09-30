@@ -27,7 +27,7 @@ func TestTheConnectorSaysPlainlyWhenItsAgentWasDisconnected(t *testing.T) {
 		Err:    errors.New("event feed mint failed (unauthorized)"),
 	})
 
-	state, detail, err := connectorStoppedBy(refused, "Ryan Singer (agent)", "agent")
+	state, detail, err := connectorStoppedBy(refused, "Ryan Singer (agent)", "agent", confirmed)
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
 	assert.Equal(t, output.CodeAuth, e.Code)
@@ -37,7 +37,7 @@ func TestTheConnectorSaysPlainlyWhenItsAgentWasDisconnected(t *testing.T) {
 	assert.Equal(t, connector.ConnectionDisconnected, state)
 	assert.Equal(t, e.Message, detail)
 
-	_, _, err = connectorStoppedBy(refused, "Ryan\nSinger (agent)", "my agent")
+	_, _, err = connectorStoppedBy(refused, "Ryan\nSinger (agent)", "my agent", confirmed)
 	require.ErrorAs(t, err, &e)
 	assert.NotContains(t, e.Message, "\n")
 	assert.Equal(t, "Reconnect it: basecamp connect setup -P 'my agent'", e.Hint)
@@ -50,12 +50,23 @@ func TestARefusedTokenRenewalIsTheSameDisconnect(t *testing.T) {
 	refused.Cause = auth.ErrAgentCredentialRefused
 	for _, reason := range []eventfeed.TerminalReason{eventfeed.ReasonMintFailed, eventfeed.ReasonPollFailed} {
 		err := fmt.Errorf("intake: %w", &eventfeed.TerminalError{Reason: reason, Err: fmt.Errorf("renew the token: %w", refused)})
-		state, _, got := connectorStoppedBy(err, "Ryan Singer (agent)", "agent")
+		state, _, got := connectorStoppedBy(err, "Ryan Singer (agent)", "agent", mustNotAsk(t))
 		var e *output.Error
 		require.ErrorAs(t, got, &e, reason)
 		assert.Equal(t, "Ryan Singer (agent) was disconnected in Basecamp, or connected on another computer", e.Message, reason)
 		assert.Equal(t, connector.ConnectionDisconnected, state, reason)
 	}
+}
+
+// The feed's authorization_failed also counts forbidden answers, so it is
+// called a disconnect only when Basecamp confirms the credential is refused
+// (Copilot on #806).
+func TestAnAuthorizationFailureTheCredentialSurvivesIsNotCalledADisconnect(t *testing.T) {
+	err := fmt.Errorf("intake: %w", &eventfeed.TerminalError{Reason: eventfeed.ReasonAuthorizationFailed, Msg: "3 consecutive connection-level authorization failures"})
+	state, detail, got := connectorStoppedBy(err, "Ryan Singer (agent)", "agent", func() bool { return false })
+	assert.Same(t, err, got)
+	assert.Equal(t, connector.ConnectionStopped, state)
+	assert.Empty(t, detail)
 }
 
 // With no name to give, the message still reads as a sentence.
@@ -71,7 +82,7 @@ func TestTheConnectorKeepsOtherStopsAsTheyAre(t *testing.T) {
 		fmt.Errorf("intake: %w", &eventfeed.TerminalError{Reason: eventfeed.ReasonProtocolFatal, Msg: "bad frame"}),
 		fmt.Errorf("dispatch: %w", errors.New("stopped on its own")),
 	} {
-		state, detail, got := connectorStoppedBy(err, "Ryan Singer (agent)", "agent")
+		state, detail, got := connectorStoppedBy(err, "Ryan Singer (agent)", "agent", confirmed)
 		assert.Same(t, err, got)
 		assert.Equal(t, connector.ConnectionStopped, state)
 		assert.Empty(t, detail)
@@ -97,4 +108,12 @@ func TestConnectStatusLeadsWithDisconnected(t *testing.T) {
 	renderConnectStatus(&out, report)
 	assert.NotContains(t, out.String(), "Disconnected")
 	assert.NotContains(t, connectStatusSummary(report), "disconnected")
+}
+
+func confirmed() bool { return true }
+
+// mustNotAsk is a check that fails the test if it is made: a refused renewal
+// is Basecamp's answer already.
+func mustNotAsk(t *testing.T) func() bool {
+	return func() bool { t.Error("asked Basecamp again about a refusal it already gave"); return true }
 }

@@ -512,7 +512,13 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return output.ErrTerminated("connector terminated")
 	case firstErr != nil:
 		var err error
-		stopState, stopDetail, err = connectorStoppedBy(firstErr, me.Name, name)
+		refused := func() bool {
+			checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			defer cancel()
+			refused, _ := agentCredentialRefused(checkCtx, app, name)
+			return refused
+		}
+		stopState, stopDetail, err = connectorStoppedBy(firstErr, me.Name, name, refused)
 		if err != firstErr { //nolint:errorlint // identity: was firstErr put in the person's words
 			logger.Error("connector: Basecamp refused the agent's credential", "error", firstErr)
 		}
@@ -527,22 +533,21 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 // stopped it with err, and the connection state status keeps for that. The
 // stop people meet — the agent was disconnected in Basecamp, or connected on
 // another computer — is said in their words; anything else is returned as it
-// is.
-func connectorStoppedBy(err error, agent, profile string) (state, detail string, exit error) {
-	if !agentWasRefused(err) {
+// is. The feed's authorization_failed counts forbidden answers too, so it is
+// called a disconnect only when refused, asking Basecamp, confirms it; a
+// refused token renewal is already Basecamp's answer.
+func connectorStoppedBy(err error, agent, profile string, refused func() bool) (state, detail string, exit error) {
+	disconnected := errors.Is(err, auth.ErrAgentCredentialRefused) || (feedAuthorizationFailed(err) && refused())
+	if !disconnected {
 		return connector.ConnectionStopped, "", err
 	}
-	disconnected := errAgentDisconnected(agent, profile)
-	return connector.ConnectionDisconnected, disconnected.Message, disconnected
+	e := errAgentDisconnected(agent, profile)
+	return connector.ConnectionDisconnected, e.Message, e
 }
 
-// agentWasRefused reports whether err is Basecamp refusing the agent's
-// credential: the event feed ending on it, or a token renewal it refused,
-// however the feed classed that renewal (mint or poll).
-func agentWasRefused(err error) bool {
-	if errors.Is(err, auth.ErrAgentCredentialRefused) {
-		return true
-	}
+// feedAuthorizationFailed reports whether err is the event feed ending on
+// repeated authorization failures.
+func feedAuthorizationFailed(err error) bool {
 	var terminal *eventfeed.TerminalError
 	return errors.As(err, &terminal) && terminal.Reason == eventfeed.ReasonAuthorizationFailed
 }
