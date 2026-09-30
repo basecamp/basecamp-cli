@@ -352,9 +352,13 @@ func TestConfirmFieldAnswersFromTheKeyboard(t *testing.T) {
 		field := confirmField("Go ahead?", &result)
 		field.WithKeyMap(escKeyMap()) // the key map runForm gives every form
 		field.Focus()
+		var last tea.Cmd
 		for _, k := range tc.keys {
-			field.Update(k)
+			_, last = field.Update(k)
 		}
 		assert.Equal(t, tc.want, result, "default %v, keys %v", tc.def, tc.keys)
+		// Every sequence ends on a key that answers, so the prompt moves on.
+		require.NotNil(t, last, "keys %v", tc.keys)
+		assert.Equal(t, huh.NextField(), last(), "keys %v", tc.keys)
 	}
 }
