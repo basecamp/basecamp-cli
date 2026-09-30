@@ -85,7 +85,7 @@ func setHome(t *testing.T, dir string) {
 }
 
 // A folder name can carry newlines and terminal escapes. The check shows the
-// path on one line, escaped, and still recognises the folder.
+// path on one line, escaped, and still recognizes the folder.
 func TestWorkFolderCheckShowsTheFolderOnOneLine(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows forbids newlines and escapes in folder names")

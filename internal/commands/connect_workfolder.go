@@ -55,12 +55,14 @@ func isFilesystemRoot(dir string) bool {
 	return filepath.Dir(clean) == clean
 }
 
-// samePath reports whether two paths name the same folder, through symlinks.
+// samePath reports whether two paths name the same folder: the same file on
+// disk, whatever the path's spelling, symlinks or letter case (a Mac's
+// filesystem ignores case). Paths that can't be read compare as cleaned text.
 func samePath(a, b string) bool {
-	ra, errA := filepath.EvalSymlinks(a)
-	rb, errB := filepath.EvalSymlinks(b)
+	ia, errA := os.Stat(a)
+	ib, errB := os.Stat(b)
 	if errA != nil || errB != nil {
 		return filepath.Clean(a) == filepath.Clean(b)
 	}
-	return ra == rb
+	return os.SameFile(ia, ib)
 }
