@@ -83,7 +83,8 @@ func runMigrate(cmd *cobra.Command, force bool) error {
 	result := &MigrateResult{}
 
 	// 1. Migrate keyring entries, unless the keyring is bypassed
-	if os.Getenv("BASECAMP_NO_KEYRING") == "" {
+	keyringSkipped := os.Getenv("BASECAMP_NO_KEYRING") != ""
+	if !keyringSkipped {
 		migrateKeyring(result, configDir)
 	}
 
@@ -107,11 +108,15 @@ func runMigrate(cmd *cobra.Command, force bool) error {
 	if result.ThemeMoved {
 		parts = append(parts, "theme migrated")
 	}
+	if keyringSkipped {
+		parts = append(parts, "keyring skipped (BASECAMP_NO_KEYRING set)")
+	}
 
-	// Only write marker when something actually migrated and no errors occurred
+	// Only write marker when something actually migrated, no errors occurred,
+	// and the keyring step ran: a skipped keyring may still hold bcq entries.
 	migrated := result.KeyringMigrated > 0 || result.CacheMoved || result.ThemeMoved
 	hasErrors := len(result.KeyringErrors) > 0
-	if migrated && !hasErrors {
+	if migrated && !hasErrors && !keyringSkipped {
 		if err := os.MkdirAll(configDir, 0700); err == nil {
 			_ = os.WriteFile(markerPath, []byte("migrated\n"), 0600)
 		}
