@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -91,6 +92,8 @@ func TestARefusedSecretIsNeverSentAgain(t *testing.T) {
 	assert.Contains(t, e2.Message, "remembered")
 	assert.Contains(t, e2.Hint, "--with-client-credentials", "the remedy is the one the refusal itself carried")
 	assert.NotContains(t, err.Error(), "agent-secret")
+	assert.True(t, errors.Is(err, ErrAgentCredentialRefused),
+		"a remembered refusal is still a disconnect to the connector and guided setup")
 
 	// A later process reads the same verdict.
 	fresh := newDeviceTestManager(t, e.srv.URL)
@@ -161,6 +164,7 @@ func TestARateLimitIsHeldUntilItsRetryAfter(t *testing.T) {
 	assert.Contains(t, held.Message, "held until")
 	assert.Contains(t, held.Hint, "1 seconds")
 	assert.NotContains(t, held.Hint, "--with-client-credentials", "a rate limit is not a refused secret")
+	assert.False(t, errors.Is(err, ErrAgentCredentialRefused), "a rate limit is not a disconnect")
 
 	*now = now.Add(time.Second)
 	token, err := m.AccessToken(context.Background())

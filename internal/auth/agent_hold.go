@@ -188,7 +188,9 @@ func (m *Manager) heldMint(creds *Credentials) error {
 		} else {
 			msg += "; the refusal is remembered until " + when + ", when this client secret will be tried once more — a login with a new secret replaces it sooner"
 		}
-		return output.ErrAuth(msg)
+		e := output.ErrAuth(msg)
+		e.Cause = ErrAgentCredentialRefused
+		return e
 	}
 	return nil
 }
