@@ -208,6 +208,27 @@ func TestGuidedConnectSetupKeepsAnExplicitAccount(t *testing.T) {
 	assertNotWritten(t, "agent")
 }
 
+// Resuming a finished setup still checks the credential it will run on: a
+// read-only one can't reply or acknowledge, so the resumed setup refuses it
+// as a first setup does, rather than saying all is well (Codex on #794).
+func TestGuidedConnectSetupResumedRefusesAReadOnlyCredential(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	ownedByTheOperator(s)
+	s.agentProjects = projectsNamed(setupProject)
+	app := newConnectSetupApp(t, s, "agent")
+	creds, err := app.Auth.GetStore().Load(app.Auth.CredentialKey())
+	require.NoError(t, err)
+	creds.Scope = "read"
+	require.NoError(t, app.Auth.GetStore().Save(app.Auth.CredentialKey(), creds))
+	guided(t, &scriptedPrompter{})
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"))
+	require.Error(t, err, out)
+	assert.Contains(t, err.Error(), "not full access")
+	assert.NotContains(t, out, "is set up on this computer")
+}
+
 // Setup never offers the background service, which would run the agent in
 // the home directory, and never touches systemd: it says how to start the
 // agent in the folder it should work in.

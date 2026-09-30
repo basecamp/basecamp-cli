@@ -128,6 +128,11 @@ func runGuidedConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupF
 	}
 	worker := setup.New(name)
 	if file != nil {
+		// A setup being resumed isn't run through setup's checks again, but
+		// the credential it will run on may have been replaced since.
+		if err := checkGuidedScope(ctx, app, name); err != nil {
+			return err
+		}
 		worker = *file
 	}
 	if err := checkGuidedWorker(ctx, w, r, worker); err != nil {
@@ -151,6 +156,21 @@ func runGuidedConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupF
 
 	renderGuidedSummary(w, r, agent, *file, connectorRunning(*file), name)
 	return nil
+}
+
+// checkGuidedScope refuses a credential that can't reply or acknowledge, as
+// setup's own scope check does on a first setup.
+func checkGuidedScope(ctx context.Context, app *appctx.App, name string) error {
+	creds, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
+	if err != nil {
+		return output.ErrAuth("Could not read this computer's connection to your agent: " + err.Error())
+	}
+	c := setup.ScopeCheck(creds.OAuthType, creds.Scope)
+	if c.Status != setup.StatusFail {
+		return nil
+	}
+	return output.ErrUsageHint(richtext.SanitizeSingleLine(c.Message),
+		"Reconnect with full access: basecamp auth agent connect -P "+richtext.ShellQuote(name)+". Then run this again: basecamp connect setup")
 }
 
 // guidedSetupProfile is the profile the guided setup works on: the one named
