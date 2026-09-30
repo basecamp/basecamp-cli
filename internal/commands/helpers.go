@@ -652,6 +652,12 @@ func resolveMentions(ctx context.Context, resolver *names.Resolver, scope names.
 	return richtext.ResolveMentions(html,
 		func(name string) (string, string, error) {
 			person, err := resolver.ResolveMentionByName(ctx, name, scope)
+			// A project that cannot be resolved is the command's error, not a
+			// missed mention: never downgrade it to plain text.
+			var scopeErr *names.ScopeError
+			if errors.As(err, &scopeErr) {
+				return "", "", scopeErr.Err
+			}
 			if err != nil {
 				// Downgrade resolver-level not-found and ambiguous to skip — leave
 				// as plain text. Only match errors without an HTTP status; API-level
@@ -711,16 +717,19 @@ func mentionScope(app *appctx.App, candidates ...string) names.ProjectScope {
 	return nil
 }
 
-// sharedURLProject returns the bucket named by every URL in a comma-separated
-// target list, or "" when the list holds no URL or its URLs disagree.
+// sharedURLProject returns the bucket every target in a comma-separated list
+// is known to be in, or "" when any target is a bare ID (its project is
+// unknown) or the URLs disagree. One resolved mention goes to every target,
+// so the scope must hold for all of them.
 func sharedURLProject(targets string) string {
 	shared := ""
 	for part := range strings.SplitSeq(targets, ",") {
-		_, projectID := extractWithProject(strings.TrimSpace(part))
-		if projectID == "" {
+		part = strings.TrimSpace(part)
+		if part == "" {
 			continue
 		}
-		if shared != "" && shared != projectID {
+		_, projectID := extractWithProject(part)
+		if projectID == "" || (shared != "" && shared != projectID) {
 			return ""
 		}
 		shared = projectID
@@ -729,7 +738,7 @@ func sharedURLProject(targets string) string {
 }
 
 // unresolvedMentionWarning formats a warning string for unresolved mentions.
-// The hint names the one reach a fuzzy @Name has for agents, since a
+// The hint names the one way a fuzzy @Name reaches an agent, since a
 // mention meant for an agent is the miss a reader cannot otherwise explain.
 func unresolvedMentionWarning(unresolved []string) string {
 	if len(unresolved) == 0 {

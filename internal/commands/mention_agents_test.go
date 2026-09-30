@@ -157,3 +157,26 @@ func TestChatPostMentionsAgentInRoomProject(t *testing.T) {
 	assert.Contains(t, transport.postedContent(t), `sgid="sgid-quincy"`)
 	assert.Empty(t, noticeOf(t, buf))
 }
+
+func TestCommentsCreateUnknownProjectInMentionScopeFails(t *testing.T) {
+	transport := &agentMentionTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	// A project that doesn't resolve is the command's error, not an
+	// unresolved mention to post as plain text.
+	err := executeChatCommand(NewCommentsCmd(), app, "create", "789", "Hey @Quincy", "--in", "No Such Project")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "No Such Project")
+	assert.Empty(t, transport.posted)
+}
+
+func TestSharedURLProject(t *testing.T) {
+	a := "https://3.basecamp.com/99999/buckets/123/todos/1"
+	b := "https://3.basecamp.com/99999/buckets/123/todos/2"
+	c := "https://3.basecamp.com/99999/buckets/456/todos/3"
+	assert.Equal(t, "123", sharedURLProject(a))
+	assert.Equal(t, "123", sharedURLProject(a+","+b))
+	assert.Empty(t, sharedURLProject(a+","+c), "URLs in different projects")
+	assert.Empty(t, sharedURLProject(a+",2"), "a bare ID's project is unknown")
+	assert.Empty(t, sharedURLProject("2"))
+}

@@ -15,6 +15,13 @@ import (
 // scope means no project is in scope.
 type ProjectScope func(context.Context) (int64, error)
 
+// ScopeError reports that a mention's project scope could not be resolved.
+// It is distinct from a person lookup miss, which callers may downgrade.
+type ScopeError struct{ Err error }
+
+func (e *ScopeError) Error() string { return e.Err.Error() }
+func (e *ScopeError) Unwrap() error { return e.Err }
+
 // ResolveMentionByName resolves a fuzzy @Name mention.
 //
 // People resolve against the pingable set, exactly as ResolvePersonByName
@@ -81,7 +88,7 @@ func (r *Resolver) scopedAgents(ctx context.Context, scope ProjectScope) ([]Pers
 	}
 	projectID, err := scope(ctx)
 	if err != nil {
-		return nil, err
+		return nil, &ScopeError{Err: err}
 	}
 	return r.getProjectAgents(ctx, projectID)
 }
@@ -137,9 +144,10 @@ func ambiguousPeople(matches []Person) error {
 func (r *Resolver) getProjectAgents(ctx context.Context, projectID int64) ([]Person, error) {
 	r.mu.RLock()
 	agents, ok := r.agents[projectID]
+	failed := r.agentErrs[projectID]
 	r.mu.RUnlock()
-	if ok {
-		return agents, nil
+	if ok || failed != nil {
+		return agents, failed
 	}
 
 	r.mu.Lock()
@@ -147,10 +155,19 @@ func (r *Resolver) getProjectAgents(ctx context.Context, projectID int64) ([]Per
 	if agents, ok := r.agents[projectID]; ok {
 		return agents, nil
 	}
+	if failed := r.agentErrs[projectID]; failed != nil {
+		return nil, failed
+	}
 
 	result, err := r.forAccount().People().ListProjectPeople(ctx, projectID, nil)
 	if err != nil {
-		return nil, convertSDKError(err)
+		// Remember the failure for the run: a mention the pingable set
+		// already matches tolerates it, and each such mention must not retry.
+		if r.agentErrs == nil {
+			r.agentErrs = make(map[int64]error)
+		}
+		r.agentErrs[projectID] = convertSDKError(err)
+		return nil, r.agentErrs[projectID]
 	}
 
 	agents = []Person{}

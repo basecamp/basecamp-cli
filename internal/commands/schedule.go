@@ -723,7 +723,7 @@ You can pass either an entry ID or a Basecamp URL:
 				if err != nil {
 					return err
 				}
-				mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, mentionScope(app, resolvedProjectID), html)
+				mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, mentionScope(app, urlProjectID, resolvedProjectID), html)
 				if mentionErr != nil {
 					return mentionErr
 				}

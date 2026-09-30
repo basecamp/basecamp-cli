@@ -1025,7 +1025,7 @@ edit to rich text.`,
 				if ct == "" {
 					messageContent = richtext.MarkdownToHTML(messageContent)
 				}
-				result, resolveErr := resolveMentions(cmd.Context(), app.Names, mentionScope(app, urlProjectID, *project, app.Flags.Project), messageContent)
+				result, resolveErr := resolveMentions(cmd.Context(), app.Names, mentionScope(app, urlProjectID, resolvedProjectID, *project, app.Flags.Project), messageContent)
 				if resolveErr != nil {
 					return resolveErr
 				}

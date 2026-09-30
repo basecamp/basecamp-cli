@@ -251,3 +251,24 @@ func TestResolveMentionByIDPingableFailureIsHard(t *testing.T) {
 	require.True(t, errors.As(err, &outErr), "got %v", err)
 	assert.Equal(t, http.StatusInternalServerError, outErr.HTTPStatus)
 }
+
+func TestResolveMentionByNameRemembersAFailedAgentFetch(t *testing.T) {
+	r, s := newMentionFixture(t)
+
+	for range 3 {
+		_, err := r.ResolveMentionByName(context.Background(), "Jane", inProject(404))
+		require.NoError(t, err)
+	}
+	assert.Equal(t, 1, s.count("/99999/projects/404/people.json"), "a failed fetch is not retried within a run")
+}
+
+func TestResolveMentionByNameReportsScopeErrorsAsSuch(t *testing.T) {
+	r, _ := newMentionFixture(t)
+	scopeErr := output.ErrNotFound("Project", "Nope")
+	scope := func(context.Context) (int64, error) { return 0, scopeErr }
+
+	_, err := r.ResolveMentionByName(context.Background(), "Quincy", scope)
+	var se *ScopeError
+	require.True(t, errors.As(err, &se), "got %v", err)
+	assert.Same(t, scopeErr, se.Err)
+}
