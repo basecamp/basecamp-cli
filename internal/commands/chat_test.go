@@ -1654,6 +1654,34 @@ func TestChatLineRefusesARoomsLinesURL(t *testing.T) {
 	}
 }
 
+// TestChatLineHoldsAURLToChatUpdatesChecks verifies that chat line and chat
+// delete refuse, before any request, a URL from an untrusted host or another
+// account, as chat update does (Copilot on #807).
+func TestChatLineHoldsAURLToChatUpdatesChecks(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"line from an untrusted host", []string{"line", "https://evil.example.com/99999/buckets/123/chats/789/lines/111"}, "untrusted host"},
+		{"delete from an untrusted host", []string{"delete", "https://evil.example.com/99999/buckets/123/chats/789/lines/111", "--force"}, "untrusted host"},
+		{"line from another account", []string{"line", "https://3.basecamp.com/88888/buckets/123/chats/789/lines/111"}, "does not match the configured account 99999"},
+		{"delete from another account", []string{"delete", "https://3.basecamp.com/88888/buckets/123/chats/789/lines/111", "--force"}, "does not match the configured account 99999"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+			transport := &mockTwoRoomChatTransport{}
+			app, _ := newChatDeleteTestApp(transport)
+
+			err := executeChatCommand(NewChatCmd(), app, tc.args...)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.Empty(t, transport.linePaths)
+		})
+	}
+}
+
 // TestChatLineBareIDInMultiRoomProjectNeedsRoom verifies that a bare line ID
 // still refuses to guess between two rooms: only a URL or --room names one.
 func TestChatLineBareIDInMultiRoomProjectNeedsRoom(t *testing.T) {
