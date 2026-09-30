@@ -14,7 +14,7 @@ import (
 // A probe's cleanup runs after the probe has been reaped, when its pid may
 // already lead someone else's group. That group is left alone (Codex on #794).
 func TestProbeCleanupLeavesAReusedPidAlone(t *testing.T) {
-	stranger := exec.Command("sleep", "30")
+	stranger := exec.CommandContext(t.Context(), "sleep", "30")
 	stranger.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	require.NoError(t, stranger.Start())
 	exited := make(chan struct{})
