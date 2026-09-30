@@ -269,7 +269,8 @@ func completionLine(e SettledEvent, s Settlement) string {
 	case e.Outcome == OutcomeUnknown:
 		return unfinishedSentence(s.Stop)
 	case e.Outcome == OutcomeSucceeded && e.ReplyID == nil:
-		return "I finished this, but didn't post a reply."
+		// Only that no reply was reported: a worker may reply and not say so.
+		return "I finished this, but didn't report a reply."
 	}
 	return ""
 }

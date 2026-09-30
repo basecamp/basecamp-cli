@@ -195,7 +195,7 @@ func TestCompletionNoticeRule(t *testing.T) {
 		}},
 		{name: "succeeded without a reply", events: []SettledEvent{
 			{EventID: 1, Outcome: OutcomeSucceeded, Reported: true},
-		}, want: "I finished this, but didn't post a reply.\n\nRef 1 · attempt att_x · " + sig},
+		}, want: "I finished this, but didn't report a reply.\n\nRef 1 · attempt att_x · " + sig},
 		{name: "failed and unknown suggest mentioning again", events: []SettledEvent{
 			{EventID: 1, Outcome: OutcomeSucceeded, Reported: true, ReplyID: id64(5)},
 			{EventID: 2, Outcome: OutcomeFailed, Reported: true},
