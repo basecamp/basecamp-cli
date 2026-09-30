@@ -989,3 +989,21 @@ func TestAttachGitHubAuthFallsBackToGithubToken(t *testing.T) {
 func buildDoctorBreadcrumbsForTest(checks []Check) []output.Breadcrumb {
 	return buildDoctorBreadcrumbs(checks, "basecamp auth login")
 }
+
+// TestDoctorStillPrescribesLoginForMissingCredentials: the unreadable-store
+// guard must not swallow the breadcrumb for a store that was read and held
+// nothing — that is exactly the case a login repairs.
+func TestDoctorStillPrescribesLoginForMissingCredentials(t *testing.T) {
+	app, _ := setupDoctorTestApp(t, "12345")
+	t.Setenv("BASECAMP_TOKEN", "")
+
+	checks := runDoctorChecks(context.Background(), app, false)
+	var logins []string
+	for _, crumb := range buildDoctorBreadcrumbs(checks, app.Auth.LoginCommand()) {
+		if crumb.Action == "login" {
+			logins = append(logins, crumb.Cmd)
+		}
+	}
+	require.Len(t, logins, 1, "a missing credential must still offer exactly one login")
+	assert.Equal(t, app.Auth.LoginCommand(), logins[0])
+}
