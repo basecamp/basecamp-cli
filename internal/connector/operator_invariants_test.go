@@ -831,7 +831,7 @@ func TestACompletionNoticeIsRenderedAgainWhenItIsClaimed(t *testing.T) {
 	notices, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentCompletion}})
 	require.NoError(t, err)
 	require.Len(t, notices, 1)
-	require.Contains(t, notices[0].Body, "Mention me again to try again.")
+	require.Contains(t, notices[0].Body, "If I didn&#39;t, mention me again to try again.")
 
 	_, err = l.Discard(ctx, 1, opBy)
 	require.NoError(t, err)
@@ -839,7 +839,7 @@ func TestACompletionNoticeIsRenderedAgainWhenItIsClaimed(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, ok)
 	assert.Equal(t, IntentSending, claimed.State)
-	assert.Contains(t, claimed.Body, "before I finished this.")
+	assert.Contains(t, claimed.Body, "may not have finished this.")
 	assert.NotContains(t, claimed.Body, "Mention me again", "a person already decided it")
 }
 
@@ -895,7 +895,7 @@ func TestACompletionNoticeAsksNothingOfAnAuthorizedBlockedRecord(t *testing.T) {
 // notice asks the person who runs the agent.
 func TestAnEarlierAuthorizationDoesNotSilenceALaterNotice(t *testing.T) {
 	asks := map[string]string{
-		"unknown again":        "Mention me again to try again.",
+		"unknown again":        "If I didn&#39;t, mention me again to try again.",
 		"blocked on its start": "The person who runs me needs to check it.",
 	}
 	for name, second := range map[string]func(t *testing.T, l *Ledger){

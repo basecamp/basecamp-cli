@@ -449,7 +449,7 @@ func TestAnAskThatWasNeverSentIsNotRetracted(t *testing.T) {
 	sent := obIntent(t, ledger, completionKey(l.AttemptID))
 	require.Equal(t, IntentSent, sent.State)
 	assert.NotContains(t, sent.Body, "Mention me again", "a person already decided it, so it suggests nothing")
-	assert.Contains(t, sent.Body, "I ran out of time before I finished this.", "what happened is still reported")
+	assert.Contains(t, sent.Body, "I ran out of time and may not have finished this.", "what happened is still reported")
 	assert.Empty(t, obRetractions(t, ledger), "nothing to retract: the ask was never posted")
 }
 
@@ -1057,7 +1057,7 @@ func TestANoticeWrittenNowIsNeverRetracted(t *testing.T) {
 				require.NoError(t, ob.Flush(ctx))
 				completion := obIntent(t, ledger, completionKey(l.AttemptID))
 				require.Equal(t, IntentSent, completion.State)
-				require.Equal(t, "I was interrupted before I finished this. Mention me again to try again. "+
+				require.Equal(t, "I was interrupted and may not have finished this. If I didn't, mention me again to try again. "+
 					"Ref 1 · attempt "+l.AttemptID+" · automatic notice from basecamp connect", MessageText(completion.Body))
 
 				clock.Advance(time.Minute)

@@ -274,18 +274,21 @@ func completionLine(e SettledEvent, s Settlement) string {
 	return ""
 }
 
-// unfinishedSentence says why a request the worker never reported on was left
-// unfinished, in the words a person reading the thread would use.
+// unfinishedSentence says why a request the worker never reported on may be
+// unfinished, in the words a person reading the thread would use. May: an
+// unknown outcome isn't an unfinished one. The worker may have done the work,
+// even replied, and stopped before it said so, so the notice doesn't claim
+// it wasn't done.
 func unfinishedSentence(stop StopReason) string {
 	switch stop {
 	case StopShutdown, StopLost:
-		return "I was interrupted before I finished this."
+		return "I was interrupted and may not have finished this."
 	case StopDeadline:
-		return "I ran out of time before I finished this."
+		return "I ran out of time and may not have finished this."
 	case StopFinished, StopFailed:
-		return "I stopped before I finished this."
+		return "I stopped and may not have finished this."
 	}
-	return "I stopped before I finished this."
+	return "I stopped and may not have finished this."
 }
 
 // retryable reports whether mentioning the agent again is worth suggesting: a
@@ -330,6 +333,7 @@ func renderCompletion(kind MessageKind, s Settlement) string {
 		sentences []string
 		ids       []string
 		retry     bool
+		unsure    bool
 		operator  bool
 	)
 	for _, e := range s.Events {
@@ -342,13 +346,19 @@ func renderCompletion(kind MessageKind, s Settlement) string {
 		}
 		ids = append(ids, strconv.FormatInt(e.EventID, 10))
 		retry = retry || retryable(e, s)
+		unsure = unsure || (retryable(e, s) && e.Outcome == OutcomeUnknown)
 		operator = operator || neverStarted(e, s)
 	}
 	lines := []string{strings.Join(sentences, " ")}
 	if operator {
 		lines = append(lines, "The person who runs me needs to check it.")
 	}
-	if retry {
+	switch {
+	case unsure:
+		// Mentioning again after work that was in fact done would do it
+		// twice: the reader looks first.
+		lines = append(lines, "If I didn't, mention me again to try again.")
+	case retry:
 		lines = append(lines, "Mention me again to try again.")
 	}
 	lines = append(lines, "", "Ref "+strings.Join(ids, ", ")+" · attempt "+s.AttemptID+" · "+lifecycleSignature)

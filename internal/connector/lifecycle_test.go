@@ -36,8 +36,8 @@ func TestLifecycleTemplatesRenderFromRecordsAlone(t *testing.T) {
 		assert.Equal(t, in.Body, renderCompletion(in.Destination.Kind, settlement), "the ledger and the settlement agree")
 		assert.Equal(t, Destination{BucketID: adapterBucketID, Kind: MessageComment, RecordingID: obReplyRecording}, in.Destination)
 		assert.Equal(t,
-			"<div>I ran out of time before I finished this.<br>"+
-				"Mention me again to try again.<br>"+
+			"<div>I ran out of time and may not have finished this.<br>"+
+				"If I didn&#39;t, mention me again to try again.<br>"+
 				"<br>Ref 1 · attempt "+l.AttemptID+" · automatic notice from basecamp connect</div>",
 			in.Body, "event 2 was never exposed: it waits for a task of its own and is not named")
 	})
@@ -62,7 +62,7 @@ func TestLifecycleTemplatesRenderFromRecordsAlone(t *testing.T) {
 			assert.Equal(t, in.Body, renderCompletion(in.Destination.Kind, fromRows))
 			assert.Equal(t, in.Body, renderCompletion(in.Destination.Kind, settlement), "the ledger and the settlement agree")
 			if pulled {
-				assert.Contains(t, MessageText(in.Body), "I stopped before I finished this. Mention me again to try again.")
+				assert.Contains(t, MessageText(in.Body), "I stopped and may not have finished this. If I didn't, mention me again to try again.")
 			} else {
 				assert.Contains(t, MessageText(in.Body), couldNotStart+" "+operatorChecks+" Ref 1 ·")
 			}
@@ -200,14 +200,14 @@ func TestCompletionNoticeRule(t *testing.T) {
 			{EventID: 1, Outcome: OutcomeSucceeded, Reported: true, ReplyID: id64(5)},
 			{EventID: 2, Outcome: OutcomeFailed, Reported: true},
 			{EventID: 3, Outcome: OutcomeUnknown},
-		}, want: "Something went wrong and I couldn't finish this. I stopped before I finished this.\n" +
-			"Mention me again to try again.\n\nRef 2, 3 · attempt att_x · " + sig},
+		}, want: "Something went wrong and I couldn't finish this. I stopped and may not have finished this.\n" +
+			"If I didn't, mention me again to try again.\n\nRef 2, 3 · attempt att_x · " + sig},
 		{name: "failed with a reply has already said why", events: []SettledEvent{
 			{EventID: 1, Outcome: OutcomeFailed, Reported: true, ReplyID: id64(6)},
 		}},
 		{name: "decided by a person asks for nothing", events: []SettledEvent{
 			{EventID: 1, Outcome: OutcomeUnknown, Decided: true, Pulled: true},
-		}, want: "I stopped before I finished this.\n\nRef 1 · attempt att_x · " + sig},
+		}, want: "I stopped and may not have finished this.\n\nRef 1 · attempt att_x · " + sig},
 		{name: "only returned or withdrawn for a retry", events: []SettledEvent{
 			{EventID: 1, Withdrawn: true},
 			{EventID: 2, Returned: true},
@@ -220,20 +220,20 @@ func TestCompletionNoticeRule(t *testing.T) {
 		}, want: couldNotStart + "\n" + operatorChecks + "\n\nRef 1 · attempt att_x · " + sig},
 		{name: "a worker that finished a turn without picking the request up", events: []SettledEvent{
 			{EventID: 1, Outcome: OutcomeUnknown},
-		}, want: "I stopped before I finished this.\nMention me again to try again.\n\nRef 1 · attempt att_x · " + sig},
+		}, want: "I stopped and may not have finished this.\nIf I didn't, mention me again to try again.\n\nRef 1 · attempt att_x · " + sig},
 		{name: "a follow-up lost by a worker that had picked up the first request", stop: StopFailed, events: []SettledEvent{
 			{EventID: 1, Pulled: true, Outcome: OutcomeSucceeded, Reported: true, ReplyID: id64(5)},
 			{EventID: 2, Outcome: OutcomeUnknown},
-		}, want: "I stopped before I finished this.\nMention me again to try again.\n\nRef 2 · attempt att_x · " + sig},
+		}, want: "I stopped and may not have finished this.\nIf I didn't, mention me again to try again.\n\nRef 2 · attempt att_x · " + sig},
 		{name: "never picked up and decided by a person", stop: StopFailed, events: []SettledEvent{
 			{EventID: 1, Outcome: OutcomeUnknown, Decided: true},
 		}, want: couldNotStart + "\n" + operatorChecks + "\n\nRef 1 · attempt att_x · " + sig},
 		{name: "never picked up before the connector was interrupted", stop: StopLost, events: []SettledEvent{
 			{EventID: 1, Outcome: OutcomeUnknown},
-		}, want: "I was interrupted before I finished this.\nMention me again to try again.\n\nRef 1 · attempt att_x · " + sig},
+		}, want: "I was interrupted and may not have finished this.\nIf I didn't, mention me again to try again.\n\nRef 1 · attempt att_x · " + sig},
 		{name: "never picked up before its deadline", stop: StopDeadline, events: []SettledEvent{
 			{EventID: 1, Outcome: OutcomeUnknown},
-		}, want: "I ran out of time before I finished this.\nMention me again to try again.\n\nRef 1 · attempt att_x · " + sig},
+		}, want: "I ran out of time and may not have finished this.\nIf I didn't, mention me again to try again.\n\nRef 1 · attempt att_x · " + sig},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -330,8 +330,8 @@ func TestRecoveryPostsUnknownAndRedispatchRunsItAgain(t *testing.T) {
 
 		notices := h.notices(101)
 		require.Len(t, notices, 1)
-		assert.Contains(t, notices[0].Content, "before I finished this.")
-		assert.Contains(t, notices[0].Content, "Mention me again to try again.")
+		assert.Contains(t, notices[0].Content, "may not have finished this.")
+		assert.Contains(t, notices[0].Content, "If I didn&#39;t, mention me again to try again.")
 		assert.NotContains(t, notices[0].Content, "basecamp connect redispatch", "the operator's command is not the thread's business")
 		assert.Equal(t, int64(5001), notices[0].RecordingID, "on the recording that asked")
 
