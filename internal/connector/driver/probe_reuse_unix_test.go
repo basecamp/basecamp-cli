@@ -3,11 +3,16 @@
 package driver
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,7 +29,7 @@ func TestProbeCleanupLeavesAReusedPidAlone(t *testing.T) {
 
 	// The probe that had this pid started earlier: its recorded start time is
 	// not the stranger's.
-	g := &probeGroup{process: Process{PID: pid, PGID: pid, StartedAt: time.Unix(1, 0), StartedExact: true}}
+	g := &probeGroup{recorded: true, pid: pid, startedAt: time.Unix(1, 0), exact: true}
 	g.cleanup()
 
 	select {
@@ -32,4 +37,33 @@ func TestProbeCleanupLeavesAReusedPidAlone(t *testing.T) {
 		t.Fatal("the stranger was signaled")
 	case <-time.After(300 * time.Millisecond):
 	}
+}
+
+// A launcher can exit before the probe records it, leaving a child in its
+// group: its start time is gone by then, and cleanup still ends the child
+// (Codex on #794).
+func TestProbeCleanupEndsTheChildOfALauncherThatExitedBeforeItWasRecorded(t *testing.T) {
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "child.pid")
+	launcher := exec.CommandContext(t.Context(), "/bin/sh", "-c", "sleep 60 >/dev/null 2>&1 & echo $! > "+pidFile)
+	g := probeInItsOwnGroup(launcher)
+	require.NoError(t, launcher.Start())
+	var child int
+	require.Eventually(t, func() bool {
+		raw, err := os.ReadFile(pidFile)
+		if err != nil || !strings.HasSuffix(string(raw), "\n") {
+			return false
+		}
+		child, err = strconv.Atoi(strings.TrimSpace(string(raw)))
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond)
+	t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
+	require.Eventually(t, func() bool { _, err := processStartTime(launcher.Process.Pid); return err != nil },
+		5*time.Second, 10*time.Millisecond, "the launcher has exited")
+
+	g.started()
+	_ = launcher.Wait()
+	g.cleanup()
+
+	assert.Eventually(t, func() bool { return syscall.Kill(child, 0) != nil }, 5*time.Second, 20*time.Millisecond, "the child is gone")
 }
