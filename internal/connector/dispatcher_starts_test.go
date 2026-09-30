@@ -241,6 +241,27 @@ func TestAnOlderLaunchThatWorkedDoesNotClearANewerHold(t *testing.T) {
 	assert.False(t, h.d.startsHeld())
 }
 
+// A launch that worked, made between two that failed, answers only the
+// failure before it: the one after it stands, and so does the hold (Codex on
+// #794).
+func TestALaunchThatWorkedDoesNotClearAHoldMadeByALaterFailure(t *testing.T) {
+	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
+		o.Preflight = func(context.Context) driver.Preflight {
+			return driver.Preflight{Product: "Claude Code", Checks: []driver.PreflightCheck{{Name: driver.PreflightStarts,
+				Status: driver.PreflightFail, Message: "claude isn't on PATH"}}}
+		}
+	})
+	ctx := context.Background()
+	h.d.startFailed(ctx, "", h.d.nextSeqForTest()) // A fails
+	between := h.d.nextSeqForTest()                // B starts, and runs a while
+	h.d.startFailed(ctx, "", h.d.nextSeqForTest()) // the worker breaks: C fails, held
+	require.True(t, h.d.startsHeld())
+
+	h.d.startWorked(ctx, between) // B finishes
+	assert.True(t, h.d.startsHeld(), "B started before C failed")
+	assert.Equal(t, ConnectionNotTakingWork, connectionOf(t, h.ledger).State)
+}
+
 // Two starts in a row that never ran hold new work: the next record waits,
 // admitted, and the connector says so once, with the fix. A restart takes
 // work again.

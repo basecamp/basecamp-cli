@@ -49,9 +49,9 @@ const NotTakingWorkFix = "Fix it, then run `basecamp connect setup` or restart t
 
 // startRecord is whether the worker has been starting.
 type startRecord struct {
-	// failures counts attempts in a row whose worker never picked its request
-	// up.
-	failures int
+	// failed are the launch seqs of attempts in a row whose worker never
+	// picked its request up.
+	failed []uint64
 	// held is whether new work is held.
 	held bool
 	// checkAt is when a held dispatcher next checks the worker, and checking
@@ -60,9 +60,6 @@ type startRecord struct {
 	checking bool
 	// checkEvery is how long a hold waits before its first check.
 	checkEvery time.Duration
-	// failedFrom is the earliest launch among the failures counted: a
-	// launch made before it that worked says nothing about them.
-	failedFrom uint64
 }
 
 // noteStart reads a settled attempt for whether its worker started: one that
@@ -100,9 +97,17 @@ func workerNeverStarted(s Settlement) bool {
 
 func (d *Dispatcher) startWorked(ctx context.Context, seq uint64) {
 	d.mu.Lock()
-	if d.starts.failures > 0 && seq < d.starts.failedFrom {
-		// Launched before the failures counted, and finished after them: it
-		// started on a computer that has changed since, so it clears nothing.
+	// Failures launched after this one say the computer changed since it
+	// started: they stand, and so does any hold they made. Only failures
+	// launched before it are answered by it.
+	var newer []uint64
+	for _, f := range d.starts.failed {
+		if f > seq {
+			newer = append(newer, f)
+		}
+	}
+	if len(newer) > 0 {
+		d.starts.failed = newer
 		d.mu.Unlock()
 		return
 	}
@@ -116,11 +121,8 @@ func (d *Dispatcher) startWorked(ctx context.Context, seq uint64) {
 
 func (d *Dispatcher) startFailed(ctx context.Context, said string, seq uint64) {
 	d.mu.Lock()
-	if d.starts.failures == 0 || seq < d.starts.failedFrom {
-		d.starts.failedFrom = seq
-	}
-	d.starts.failures++
-	hold := d.starts.failures >= StartFailuresToHold && !d.starts.held
+	d.starts.failed = append(d.starts.failed, seq)
+	hold := len(d.starts.failed) >= StartFailuresToHold && !d.starts.held
 	if hold {
 		// Checking until the hold is recorded: a check that passed in the
 		// meantime would take work again before the hold was said.
@@ -165,7 +167,9 @@ func (d *Dispatcher) checkWorkerAtStart(ctx context.Context) {
 	}
 	why := product + " isn't ready — " + strings.TrimRight(richtext.SanitizeSingleLine(c.Message), ".")
 	d.mu.Lock()
-	d.starts.failures = StartFailuresToHold
+	// As if StartFailuresToHold starts had failed before any launch: the
+	// first launch that works answers them.
+	d.starts.failed = make([]uint64, StartFailuresToHold)
 	d.starts.held = true
 	d.starts.checkAt = time.Now().Add(d.starts.checkEvery)
 	d.holds++
@@ -261,7 +265,8 @@ func (d *Dispatcher) checkHeldWorker(ctx context.Context, gen uint64) {
 		return
 	}
 	d.starts.held = false
-	d.starts.failures = StartFailuresToHold - 1
+	// One more failure holds work again.
+	d.starts.failed = d.starts.failed[len(d.starts.failed)-(StartFailuresToHold-1):]
 	d.starts.checkEvery = min(d.starts.checkEvery*2, HoldCheckLimit)
 	d.mu.Unlock()
 	d.takeWorkAgain(ctx, "the worker started when it was checked")
