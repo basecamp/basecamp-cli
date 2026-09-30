@@ -135,11 +135,16 @@ func RunProbe(ctx context.Context, cmd Command, timeout time.Duration) ProbeResu
 		ec.Env = []string{}
 	}
 	ec.WaitDelay = 2 * time.Second
-	defer probeInItsOwnGroup(ec)()
+	group := probeInItsOwnGroup(ec)
+	defer group.cleanup()
 	var stdout, stderr limitedBuffer
 	stdout.max, stderr.max = probeOutputLimit, probeOutputLimit
 	ec.Stdout, ec.Stderr = &stdout, &stderr
-	err := ec.Run()
+	err := ec.Start()
+	if err == nil {
+		group.started()
+		err = ec.Wait()
+	}
 	out := ProbeResult{Stdout: stdout.String(), Stderr: stderr.String(), Exit: -1}
 	if ec.ProcessState != nil {
 		out.Exit = ec.ProcessState.ExitCode()

@@ -54,6 +54,10 @@ func LookupProcess(int) (Process, error) { return Process{}, errUnsupported }
 // TerminateRecorded does nothing off Unix.
 func TerminateRecorded(Process, time.Duration) (bool, error) { return false, errUnsupported }
 
-// probeInItsOwnGroup leaves the probe as it is off Unix, where the connector
-// doesn't run workers.
-func probeInItsOwnGroup(*exec.Cmd) (cleanup func()) { return func() {} }
+// probeGroup leaves the probe as it is off Unix, where the connector doesn't
+// run workers.
+type probeGroup struct{}
+
+func probeInItsOwnGroup(*exec.Cmd) *probeGroup { return &probeGroup{} }
+func (*probeGroup) started()                   {}
+func (*probeGroup) cleanup()                   {}
