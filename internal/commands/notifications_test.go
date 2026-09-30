@@ -140,7 +140,8 @@ func notificationsFeedBody(unreads, reads int) string {
 	item := func(id int) string {
 		return fmt.Sprintf(`{"id":%d,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}`, id)
 	}
-	var u, r []string
+	u := make([]string, 0, unreads)
+	r := make([]string, 0, reads)
 	for i := range unreads {
 		u = append(u, item(i+1))
 	}

@@ -29,8 +29,8 @@ all current and scheduled Bubble Ups.`,
 			"agent_notes": "Account-wide notifications — no --in <project> needed.\n" +
 				"Returns unreads and reads sections, plus bubble_ups/scheduled_bubble_ups (BC5) or memories (BC4).\n" +
 				"Use 'read' with notification IDs to mark as read.\n" +
-				"The server returns at most 100 unreads: unreads_capped: true means there are more than the list holds.\n" +
-				"--page pages through read notifications only; every page repeats the same unreads.\n" +
+				"The server returns at most 100 unreads: unreads_capped: true means the list reached that cap, so there may be more; treat 100 as a lower bound.\n" +
+				"'basecamp notifications list --page N' pages through read notifications only; every page repeats the same unreads.\n" +
 				"Use 'bubbleups' (BC5) for the full bubble-ups list; 'list --limit-bubble-ups' caps inline bubble-ups at 2.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -173,7 +173,7 @@ func runNotificationsList(cmd *cobra.Command, page int32, limitBubbleUps bool) e
 	}
 	if unreadsCapped {
 		opts = append(opts, output.WithNotice(fmt.Sprintf(
-			"Showing the first %d unread notifications; the server returns no more than that, and --page does not reach the rest",
+			"Showing %d unread notifications, the most the server returns; there may be more, and --page does not reach them",
 			maxNotificationUnreads)))
 	}
 	return app.OK(notificationsListResult{NotificationsResult: result, UnreadsCapped: unreadsCapped}, opts...)

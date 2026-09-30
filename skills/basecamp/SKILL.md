@@ -1234,7 +1234,8 @@ basecamp notifications list --limit-bubble-ups --json # Cap inline bubble-ups at
 **Unreads are capped at 100.** The server returns at most 100 unread
 notifications, and `--page` pages through read notifications only — every page
 repeats the same unreads. When the list is full, the summary says "100+ unread"
-and `.data.unreads_capped` is `true`; treat 100 as a floor, not a count.
+and `.data.unreads_capped` is `true`: there may be more, so treat 100 as a lower
+bound, not a count.
 
 **Bubble Ups (BC5):** `bubbleups` lists all current and scheduled bubble-ups
 (paginated; `--page` fetches a single page). `list --limit-bubble-ups` keeps the
