@@ -168,6 +168,47 @@ func TestSessionsThatCannotBePreparedHoldNewWork(t *testing.T) {
 	}
 }
 
+// A worker check belongs to the hold it was started for. One still running
+// when that hold was cleared, and a newer hold made, must not take work again
+// for the newer hold when it passes (Codex on #794).
+func TestAnOldWorkerCheckCannotClearANewerHold(t *testing.T) {
+	var calls atomic.Int32
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
+		o.Preflight = func(context.Context) driver.Preflight {
+			if calls.Add(1) == 2 { // the first hold's check: slow, and it passes
+				entered <- struct{}{}
+				<-release
+				return driver.Preflight{Product: "Claude Code"}
+			}
+			return driver.Preflight{Product: "Claude Code", Checks: []driver.PreflightCheck{{Name: driver.PreflightLogin,
+				Status: driver.PreflightFail, Message: "Claude Code is logged out on this computer"}}}
+		}
+	})
+	ctx := context.Background()
+	h.d.startFailed(ctx, "")
+	h.d.startFailed(ctx, "") // hold 1, and its reason (preflight call 1)
+	h.d.mu.Lock()
+	first := h.d.holds
+	h.d.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.d.checkHeldWorker(ctx, first) // preflight call 2, held open
+	}()
+	<-entered
+	h.d.startWorked(ctx) // a healthy task clears hold 1
+	h.d.startFailed(ctx, "")
+	h.d.startFailed(ctx, "") // hold 2, and its reason (preflight call 3)
+	require.True(t, h.d.startsHeld())
+	close(release) // hold 1's check passes, late
+	<-done
+
+	assert.True(t, h.d.startsHeld(), "the newer hold stands")
+	assert.Equal(t, ConnectionNotTakingWork, connectionOf(t, h.ledger).State)
+}
+
 // Two starts in a row that never ran hold new work: the next record waits,
 // admitted, and the connector says so once, with the fix. A restart takes
 // work again.

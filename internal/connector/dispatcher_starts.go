@@ -112,7 +112,9 @@ func (d *Dispatcher) startFailed(ctx context.Context, said string) {
 		// Checking until the hold is recorded: a check that passed in the
 		// meantime would take work again before the hold was said.
 		d.starts.held, d.starts.checking = true, true
+		d.holds++
 	}
+	gen := d.holds
 	d.mu.Unlock()
 	if !hold {
 		return
@@ -121,10 +123,12 @@ func (d *Dispatcher) startFailed(ctx context.Context, said string) {
 	// The preflight runs outside the lock, so a start that worked may clear
 	// the hold meanwhile; noteNotTakingWork records the reason only if it
 	// still stands.
-	d.noteNotTakingWork(ctx, d.whyNotStarting(ctx, said))
+	d.noteNotTakingWork(ctx, d.whyNotStarting(ctx, said), gen)
 	d.mu.Lock()
-	d.starts.checking = false
-	d.starts.checkAt = time.Now().Add(d.starts.checkEvery)
+	if d.holds == gen {
+		d.starts.checking = false
+		d.starts.checkAt = time.Now().Add(d.starts.checkEvery)
+	}
 	d.mu.Unlock()
 }
 
@@ -151,15 +155,17 @@ func (d *Dispatcher) checkWorkerAtStart(ctx context.Context) {
 	d.starts.failures = StartFailuresToHold
 	d.starts.held = true
 	d.starts.checkAt = time.Now().Add(d.starts.checkEvery)
+	d.holds++
+	gen := d.holds
 	d.mu.Unlock()
-	d.noteNotTakingWork(ctx, why)
+	d.noteNotTakingWork(ctx, why, gen)
 }
 
-// noteNotTakingWork says why new work is held, if it still is.
-func (d *Dispatcher) noteNotTakingWork(ctx context.Context, why string) {
+// noteNotTakingWork says why new work is held, if hold gen still stands.
+func (d *Dispatcher) noteNotTakingWork(ctx context.Context, why string, gen uint64) {
 	d.noteMu.Lock()
 	defer d.noteMu.Unlock()
-	if !d.startsHeld() {
+	if !d.holdStands(gen) {
 		return
 	}
 	d.log.Error("connector: not taking work: " + why + ". " + NotTakingWorkFix)
@@ -189,6 +195,13 @@ func (d *Dispatcher) whyNotStarting(ctx context.Context, said string) string {
 	return product + " couldn't start twice in a row — " + reason
 }
 
+// holdStands reports whether hold gen is the one holding new work now.
+func (d *Dispatcher) holdStands(gen uint64) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.starts.held && d.holds == gen
+}
+
 // startsHeld reports whether new work is held, and nothing more: a pass asks
 // holdingNewWork once, which may start a check; each launch in the pass asks
 // this.
@@ -208,7 +221,8 @@ func (d *Dispatcher) holdingNewWork(ctx context.Context) bool {
 	}
 	if d.opts.Preflight != nil && !d.starts.checking && !time.Now().Before(d.starts.checkAt) {
 		d.starts.checking = true
-		d.wg.Go(func() { d.checkHeldWorker(ctx) })
+		gen := d.holds
+		d.wg.Go(func() { d.checkHeldWorker(ctx, gen) })
 	}
 	return true
 }
@@ -217,15 +231,17 @@ func (d *Dispatcher) holdingNewWork(ctx context.Context) bool {
 // again one failure short of holding it again, and doubles the wait before
 // the next hold's first check: the check could not see what stopped the
 // worker, or the worker has been fixed, and the next start says which.
-func (d *Dispatcher) checkHeldWorker(ctx context.Context) {
+func (d *Dispatcher) checkHeldWorker(ctx context.Context, gen uint64) {
 	p := d.opts.Preflight(ctx)
 	_, failed := p.Failed()
 	d.mu.Lock()
-	d.starts.checking = false
-	if !d.starts.held {
+	// A check for a hold since cleared, or replaced by a newer one, decides
+	// nothing: the newer hold's own checks do.
+	if !d.starts.held || d.holds != gen {
 		d.mu.Unlock()
 		return
 	}
+	d.starts.checking = false
 	if failed || ctx.Err() != nil {
 		d.starts.checkAt = time.Now().Add(d.starts.checkEvery)
 		d.mu.Unlock()

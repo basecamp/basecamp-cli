@@ -243,6 +243,10 @@ type Dispatcher struct {
 	// (dispatcher_starts.go): each writer asks the hold again under it, so a
 	// reason that arrives after the hold was cleared is not recorded.
 	noteMu sync.Mutex
+	// holds numbers each hold on new work as it's made. It is never reset,
+	// so a worker check or a reason that outlives its hold (a start that
+	// worked cleared it, and a newer one was made) can tell it isn't theirs.
+	holds uint64
 	// stopping is closed when Run is shutting down, which is what bounds the
 	// adopted-reply rule's reads: their own context is the settlement's,
 	// which a shutdown deliberately does not cancel.
