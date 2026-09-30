@@ -301,7 +301,7 @@ func TestValidateConfigFile(t *testing.T) {
 
 func TestBuildDoctorBreadcrumbs(t *testing.T) {
 	checks := []Check{
-		{Name: "Credentials", Status: "fail"},
+		{Name: "Credentials", Status: "fail", Hint: "Run: basecamp auth login"},
 		{Name: "Authentication", Status: "fail"},
 		{Name: "API Connectivity", Status: "pass"},
 	}
@@ -316,7 +316,7 @@ func TestBuildDoctorBreadcrumbs(t *testing.T) {
 func TestBuildDoctorBreadcrumbsDeduplication(t *testing.T) {
 	// Both Credentials and Authentication fail - should only suggest login once
 	checks := []Check{
-		{Name: "Credentials", Status: "fail"},
+		{Name: "Credentials", Status: "fail", Hint: "Run: basecamp auth login"},
 		{Name: "Authentication", Status: "fail"},
 	}
 

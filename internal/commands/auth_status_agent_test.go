@@ -115,7 +115,7 @@ func TestDoctorOffersTheAgentLoginForABrokenAgent(t *testing.T) {
 	assert.Contains(t, check.Hint, "--with-client-credentials")
 	assert.NotContains(t, check.Hint, "Run: basecamp auth login -P")
 
-	crumbs := buildDoctorBreadcrumbs([]Check{{Name: "Credentials", Status: "fail"}}, app.Auth.LoginCommand())
+	crumbs := buildDoctorBreadcrumbs([]Check{{Name: "Credentials", Status: "fail", Hint: app.Auth.LoginHint()}}, app.Auth.LoginCommand())
 	require.NotEmpty(t, crumbs)
 	assert.Contains(t, crumbs[0].Cmd, "--with-client-credentials")
 	assert.Contains(t, crumbs[0].Cmd, "--client-id agent-client")

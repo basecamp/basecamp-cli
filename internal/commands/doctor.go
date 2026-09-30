@@ -1160,6 +1160,12 @@ func buildDoctorBreadcrumbs(checks []Check, login string) []output.Breadcrumb {
 
 		switch c.Name {
 		case "Credentials", "Authentication":
+			// Credential checks carry a login hint only when the store was
+			// readable and a login would repair what it reported. Do not
+			// invent that remedy for a timeout or another read failure.
+			if c.Name == "Credentials" && !strings.Contains(c.Hint, login) {
+				continue
+			}
 			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 				Action:      "login",
 				Cmd:         login,
