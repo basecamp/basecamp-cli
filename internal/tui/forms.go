@@ -97,8 +97,12 @@ func runFields(fields ...huh.Field) error {
 
 // Confirm shows a yes/no confirmation prompt, opening on defaultValue, so
 // Enter alone answers it. Escape or Ctrl+C cancels.
+//
+// Except in huh's accessible mode (TERM=dumb), which answers end of input
+// with the prompt's default and can't tell it from Enter: there a Yes default
+// would let Ctrl+D consent, so the prompt opens on No and Yes must be typed.
 func Confirm(message string, defaultValue bool) (bool, error) {
-	result := defaultValue
+	result := defaultValue && os.Getenv("TERM") != "dumb"
 	field := confirmField(message, &result)
 
 	if err := runConfirmForm(field); err != nil {

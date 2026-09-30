@@ -5,8 +5,10 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -281,17 +283,49 @@ func TestPromptFloorCovers(t *testing.T) {
 	}
 }
 
-// A prompt opens on its default, so pressing Enter picks it. It used to open
-// on No whatever the default, and a guided setup that asked "Work in all of
-// your agent's projects?" (default Yes) ended with none chosen.
+// A prompt opens on its default, so pressing Enter picks it, and an answer
+// typed against the default wins. It used to open on No whatever the default,
+// and a guided setup that asked "Work in all of your agent's projects?"
+// (default Yes) ended with none chosen. The answers go through the field's own
+// input handling, so the prompt must be bound to what Confirm returns.
 func TestConfirmAnsweredWithEnterIsItsDefault(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	for _, tc := range []struct {
+		def   bool
+		typed string
+		want  bool
+	}{
+		{def: true, typed: "\n", want: true},
+		{def: false, typed: "\n", want: false},
+		{def: true, typed: "n\n", want: false},
+		{def: false, typed: "y\n", want: true},
+	} {
+		answerConfirmWith(t, tc.typed)
+		got, err := Confirm("Go ahead?", tc.def)
+		require.NoError(t, err)
+		assert.Equal(t, tc.want, got, "default %v, typed %q", tc.def, tc.typed)
+	}
+}
+
+// Accessible mode answers end of input with the default, so Ctrl+D must not
+// consent to a question that defaults to Yes.
+func TestConfirmInAccessibleModeNeverTakesYesFromEndOfInput(t *testing.T) {
+	t.Setenv("TERM", "dumb")
+	answerConfirmWith(t, "") // end of input, no answer
+
+	got, err := Confirm("Set up Basecamp for your coding agents?", true)
+	require.NoError(t, err)
+	assert.False(t, got)
+}
+
+// answerConfirmWith makes Confirm's form read typed from its field's own
+// accessible input handling, as a person at a dumb terminal would type it.
+func answerConfirmWith(t *testing.T, typed string) {
+	t.Helper()
 	prev := runConfirmForm
 	t.Cleanup(func() { runConfirmForm = prev })
-	runConfirmForm = func(...huh.Field) error { return nil } // Enter: submit as opened
-
-	for _, def := range []bool{true, false} {
-		got, err := Confirm("Go ahead?", def)
-		require.NoError(t, err)
-		assert.Equal(t, def, got, "default %v", def)
+	runConfirmForm = func(fields ...huh.Field) error {
+		require.Len(t, fields, 1)
+		return fields[0].(*huh.Confirm).RunAccessible(io.Discard, strings.NewReader(typed))
 	}
 }
