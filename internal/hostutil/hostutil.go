@@ -57,10 +57,13 @@ func IsLocalhost(host string) bool {
 
 // trustedBasecampHosts are the production Basecamp 3 hosts the CLI trusts when
 // resolving a pasted resource URL: the web host and the API host returned in
-// API payloads.
+// API payloads, under both the original domains and the ones Basecamp moved
+// to (app.basecamp.com is what the browser shows and what agents are handed).
 var trustedBasecampHosts = map[string]bool{
 	"3.basecamp.com":    true,
 	"3.basecampapi.com": true,
+	"app.basecamp.com":  true,
+	"api.basecamp.com":  true,
 }
 
 // IsTrustedBasecampHost reports whether rawURL points at a host the CLI trusts

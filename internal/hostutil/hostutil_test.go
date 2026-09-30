@@ -171,6 +171,9 @@ func TestIsTrustedBasecampHost(t *testing.T) {
 		// Production hosts are always trusted.
 		{"production web host", "https://3.basecamp.com/99/buckets/1/chats/2/lines/3", prodBaseURL, true},
 		{"production api host", "https://3.basecampapi.com/99/chats/2/lines/3", prodBaseURL, true},
+		{"current production web host", "https://app.basecamp.com/99/buckets/1/chats/2/lines/3", prodBaseURL, true},
+		{"current production api host", "https://api.basecamp.com/99/chats/2/lines/3", prodBaseURL, true},
+		{"look-alike of the current web host", "https://app.basecamp.com.evil.example/99/buckets/1/chats/2/lines/3", prodBaseURL, false},
 
 		// Host comparison is case-insensitive (hostnames are).
 		{"uppercased production host", "https://3.BASECAMP.com/99/buckets/1/chats/2/lines/3", prodBaseURL, true},

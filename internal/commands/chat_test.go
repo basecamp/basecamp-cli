@@ -1614,6 +1614,11 @@ func TestChatLineURLTargetsItsRoom(t *testing.T) {
 			want: "GET /99999/chats/789/lines/111",
 		},
 		{
+			name: "line with a URL from app.basecamp.com",
+			args: []string{"line", "https://app.basecamp.com/99999/buckets/123/chats/789/lines/111"},
+			want: "GET /99999/chats/789/lines/111",
+		},
+		{
 			name: "delete with a URL",
 			args: []string{"delete", "https://3.basecamp.com/99999/buckets/123/chats/789/lines/111", "--force"},
 			want: "DELETE /99999/chats/789/lines/111",
