@@ -170,13 +170,29 @@ func TestCommentsCreateUnknownProjectInMentionScopeFails(t *testing.T) {
 	assert.Empty(t, transport.posted)
 }
 
-func TestSharedURLProject(t *testing.T) {
+func TestBatchMentionScope(t *testing.T) {
 	a := "https://3.basecamp.com/99999/buckets/123/todos/1"
 	b := "https://3.basecamp.com/99999/buckets/123/todos/2"
 	c := "https://3.basecamp.com/99999/buckets/456/todos/3"
-	assert.Equal(t, "123", sharedURLProject(a))
-	assert.Equal(t, "123", sharedURLProject(a+","+b))
-	assert.Empty(t, sharedURLProject(a+","+c), "URLs in different projects")
-	assert.Empty(t, sharedURLProject(a+",2"), "a bare ID's project is unknown")
-	assert.Empty(t, sharedURLProject("2"))
+
+	scopeOf := func(t *testing.T, targets string, in ...string) int64 {
+		t.Helper()
+		app, _ := newTestAppWithTransport(t, &agentMentionTransport{})
+		cmd := NewCommentsCmd()
+		require.NoError(t, cmd.ParseFlags(in))
+		scope := batchMentionScope(cmd, app, targets)
+		if scope == nil {
+			return 0
+		}
+		id, err := scope(t.Context())
+		require.NoError(t, err)
+		return id
+	}
+
+	assert.Equal(t, int64(123), scopeOf(t, a))
+	assert.Equal(t, int64(123), scopeOf(t, a+","+b))
+	assert.Zero(t, scopeOf(t, a+",2"), "a bare ID's project is unknown")
+	assert.Equal(t, int64(456), scopeOf(t, a+",2", "--in", "456"), "--in speaks for a bare ID")
+	assert.Zero(t, scopeOf(t, a+","+c), "URLs in different projects")
+	assert.Zero(t, scopeOf(t, a+","+c, "--in", "123"), "--in cannot be right for both projects")
 }

@@ -717,24 +717,33 @@ func mentionScope(app *appctx.App, candidates ...string) names.ProjectScope {
 	return nil
 }
 
-// sharedURLProject returns the bucket every target in a comma-separated list
-// is known to be in, or "" when any target is a bare ID (its project is
-// unknown) or the URLs disagree. One resolved mention goes to every target,
-// so the scope must hold for all of them.
-func sharedURLProject(targets string) string {
-	shared := ""
+// batchMentionScope returns the mention scope for a comma-separated target
+// list. One resolved mention goes to every target, so the scope must hold for
+// all of them: the bucket every target's URL names; else --in when no two
+// URLs disagree (a bare ID's project is unknown, so --in speaks for it); and
+// no scope at all when URLs name different projects, since no single
+// project's agents can be right for every target.
+func batchMentionScope(cmd *cobra.Command, app *appctx.App, targets string) names.ProjectScope {
+	shared, bare := "", false
 	for part := range strings.SplitSeq(targets, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
 		}
 		_, projectID := extractWithProject(part)
-		if projectID == "" || (shared != "" && shared != projectID) {
-			return ""
+		switch {
+		case projectID == "":
+			bare = true
+		case shared != "" && shared != projectID:
+			return nil
+		default:
+			shared = projectID
 		}
-		shared = projectID
 	}
-	return shared
+	if bare {
+		shared = ""
+	}
+	return mentionScope(app, shared, projectFlagValue(cmd), app.Flags.Project)
 }
 
 // unresolvedMentionWarning formats a warning string for unresolved mentions.

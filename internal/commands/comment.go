@@ -1231,7 +1231,7 @@ busybox-ash) it posts a literal leading $ and keeps \n as backslash-n:
 			}
 
 			// Resolve @mentions (e.g., @John, @John.Doe → clickable mention tags)
-			mentionResult, err := resolveMentions(cmd.Context(), app.Names, mentionScope(app, sharedURLProject(recordingArg), projectFlagValue(cmd), app.Flags.Project), html)
+			mentionResult, err := resolveMentions(cmd.Context(), app.Names, batchMentionScope(cmd, app, recordingArg), html)
 			if err != nil {
 				return err
 			}

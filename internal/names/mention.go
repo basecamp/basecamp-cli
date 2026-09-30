@@ -50,9 +50,12 @@ func (r *Resolver) ResolveMentionByName(ctx context.Context, input string, scope
 
 	agents, err := r.scopedAgents(ctx, scope)
 	if err != nil {
-		// Only fail when agents were the sole remaining answer: a mention the
-		// pingable set already matches loses just the exact-agent preference.
-		if match == nil && len(matches) == 0 {
+		// A scope that cannot be resolved is always an error. A failed fetch
+		// of its people fails only when agents were the sole remaining
+		// answer: a mention the pingable set already matches loses just the
+		// exact-agent preference.
+		var scopeErr *ScopeError
+		if errors.As(err, &scopeErr) || (match == nil && len(matches) == 0) {
 			return nil, err
 		}
 		agents = nil

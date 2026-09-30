@@ -272,3 +272,12 @@ func TestResolveMentionByNameReportsScopeErrorsAsSuch(t *testing.T) {
 	require.True(t, errors.As(err, &se), "got %v", err)
 	assert.Same(t, scopeErr, se.Err)
 }
+
+func TestResolveMentionByNameScopeErrorBeatsAPartialPersonMatch(t *testing.T) {
+	r, _ := newMentionFixture(t)
+	scope := func(context.Context) (int64, error) { return 0, output.ErrNotFound("Project", "Nope") }
+
+	_, err := r.ResolveMentionByName(context.Background(), "Jane", scope)
+	var se *ScopeError
+	require.True(t, errors.As(err, &se), "got %v", err)
+}
