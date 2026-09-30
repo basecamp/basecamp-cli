@@ -527,3 +527,25 @@ func expireAgentToken(t *testing.T, app *appctx.App) {
 	creds.ExpiresAt = 1
 	require.NoError(t, store.Save(app.Auth.CredentialKey(), creds))
 }
+
+// Guided setup asks about the agent it read. If the profile is connected to a
+// different agent while a question is open, setup saves nothing for the new
+// one: the person answered for the first (Codex on #794).
+func TestGuidedConnectSetupRefusesAnAgentSwappedMidQuestion(t *testing.T) {
+	s := startConnectSetupServer(t)
+	ownedByTheOperator(s)
+	s.agentProjects = projectsNamed(setupProject)
+	p := &scriptedPrompter{confirms: []bool{true}, onConfirm: func(string) {
+		s.mu.Lock()
+		s.agentID++ // another agent's credential now answers for the profile
+		s.mu.Unlock()
+	}}
+	guided(t, p)
+
+	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"))
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Contains(t, apiErr.Message, "connected to a different agent while setup was asking")
+	assertNotWritten(t, "agent")
+}

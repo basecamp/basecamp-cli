@@ -276,6 +276,11 @@ type connectSetupFlags struct {
 	// so in a line, since the guided summary names the agent, its owner and
 	// its projects. A failure still lists every check.
 	guided bool
+	// shownAgent and shownAccount are the agent and account guided setup
+	// showed the person; setup refuses to save for any other (0 and "" when
+	// not guided).
+	shownAgent   int64
+	shownAccount string
 }
 
 func newConnectSetupCmd() *cobra.Command {
@@ -517,6 +522,13 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	me, err := reader.Me(ctx)
 	if err != nil {
 		return output.ErrAuth(fmt.Sprintf("Could not read who profile %q is in account %s: %s", name, accountID, setup.ErrorText(err)))
+	}
+	// Guided setup asked its questions about one agent; a credential stored
+	// under the profile since, for another, is not what the person answered
+	// for (Codex on #794).
+	if f.shownAgent != 0 && (me.ID != f.shownAgent || accountID != f.shownAccount) {
+		return output.ErrUsageHint("This computer was connected to a different agent while setup was asking about it, so nothing was set up",
+			"Run basecamp connect setup again.")
 	}
 	identityCheck, err := checkConnectIdentity(ctx, app, client, kind, creds.OAuthType, me, expect)
 	if err != nil {

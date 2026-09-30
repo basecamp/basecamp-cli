@@ -467,6 +467,7 @@ func setUpGuidedConnectFile(cmd *cobra.Command, app *appctx.App, w io.Writer, r 
 
 	setupFlags := *f
 	setupFlags.guided = true
+	setupFlags.shownAgent, setupFlags.shownAccount = agent.Me.ID, agent.AccountID
 	for _, p := range serve {
 		setupFlags.serve = append(setupFlags.serve, strconv.FormatInt(p.ID, 10))
 	}
