@@ -42,7 +42,9 @@ cannot cancel a started operation, so a timed-out write or delete may still
 complete. That store refuses further keyring operations for the rest of the
 process. Do not automatically retry a write whose outcome is unknown.
 
-Interactive macOS and Windows keyring behavior is unchanged.
+On macOS and Windows, only a headless session (no terminal on any standard
+stream and no GUI session) bounds the availability probe; interactive sessions
+leave it unbounded so an unlock prompt is not cut off mid-answer.
 
 ## Supported Versions
 

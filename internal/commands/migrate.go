@@ -155,9 +155,10 @@ type keyringFuncs struct {
 	delete func(service, key string) error
 }
 
-// legacyKeyringTimeout bounds each direct go-keyring call made for the bcq
-// legacy entries. A Linux Secret Service call can stall on D-Bus forever
-// (#800); other platforms keep their interactive unlock prompts unbounded.
+// legacyKeyringTimeout bounds the direct go-keyring calls made for the bcq
+// legacy entries: each call in migrate, the whole lookup in doctor. A Linux
+// Secret Service call can stall on D-Bus forever (#800); other platforms keep
+// their interactive unlock prompts unbounded.
 var legacyKeyringTimeout = func() time.Duration {
 	if runtime.GOOS == "linux" {
 		return 10 * time.Second
