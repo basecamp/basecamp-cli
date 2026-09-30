@@ -239,6 +239,10 @@ type Dispatcher struct {
 	mu   sync.Mutex
 	live map[string]*taskRun
 	wg   sync.WaitGroup
+	// noteMu orders what the start-failure hold says about the connection
+	// (dispatcher_starts.go): each writer asks the hold again under it, so a
+	// reason that arrives after the hold was cleared is not recorded.
+	noteMu sync.Mutex
 	// stopping is closed when Run is shutting down, which is what bounds the
 	// adopted-reply rule's reads: their own context is the settlement's,
 	// which a shutdown deliberately does not cancel.

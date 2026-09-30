@@ -118,11 +118,10 @@ func (d *Dispatcher) startFailed(ctx context.Context, said string) {
 		return
 	}
 
-	why := d.whyNotStarting(ctx, said)
-	d.log.Error("connector: not taking work: " + why + ". " + NotTakingWorkFix)
-	if err := d.ledger.NoteConnection(ctx, ConnectionNotTakingWork, why); err != nil {
-		d.log.Warn("connector: could not record that no work is being taken, for status", "error", err)
-	}
+	// The preflight runs outside the lock, so a start that worked may clear
+	// the hold meanwhile; noteNotTakingWork records the reason only if it
+	// still stands.
+	d.noteNotTakingWork(ctx, d.whyNotStarting(ctx, said))
 	d.mu.Lock()
 	d.starts.checking = false
 	d.starts.checkAt = time.Now().Add(d.starts.checkEvery)
@@ -153,6 +152,16 @@ func (d *Dispatcher) checkWorkerAtStart(ctx context.Context) {
 	d.starts.held = true
 	d.starts.checkAt = time.Now().Add(d.starts.checkEvery)
 	d.mu.Unlock()
+	d.noteNotTakingWork(ctx, why)
+}
+
+// noteNotTakingWork says why new work is held, if it still is.
+func (d *Dispatcher) noteNotTakingWork(ctx context.Context, why string) {
+	d.noteMu.Lock()
+	defer d.noteMu.Unlock()
+	if !d.startsHeld() {
+		return
+	}
 	d.log.Error("connector: not taking work: " + why + ". " + NotTakingWorkFix)
 	if err := d.ledger.NoteConnection(ctx, ConnectionNotTakingWork, why); err != nil {
 		d.log.Warn("connector: could not record that no work is being taken, for status", "error", err)
@@ -230,6 +239,11 @@ func (d *Dispatcher) checkHeldWorker(ctx context.Context) {
 }
 
 func (d *Dispatcher) takeWorkAgain(ctx context.Context, why string) {
+	d.noteMu.Lock()
+	defer d.noteMu.Unlock()
+	if d.startsHeld() {
+		return // held again since: its own reason stands
+	}
 	d.log.Info("connector: taking work again: " + why)
 	if err := d.ledger.NoteConnection(ctx, ConnectionRunning, ""); err != nil {
 		d.log.Warn("connector: could not record that work is being taken again, for status", "error", err)

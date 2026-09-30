@@ -112,6 +112,38 @@ func TestAWorkerThatIsNotReadyAtStartHoldsWorkUntilItIs(t *testing.T) {
 	require.Eventually(t, func() bool { return connectionOf(t, h.ledger).State == ConnectionRunning }, 5*time.Second, 10*time.Millisecond)
 }
 
+// A hold's reason is recorded only while the hold stands. Its preflight runs
+// outside the lock, so a start that worked can clear the hold and record the
+// connector running first; the late reason must not then say it isn't taking
+// work (Codex on #794).
+func TestAHoldClearedWhileItsPreflightRunsLeavesStatusRunning(t *testing.T) {
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
+		o.Preflight = func(context.Context) driver.Preflight {
+			entered <- struct{}{}
+			<-release
+			return driver.Preflight{Product: "Claude Code", Checks: []driver.PreflightCheck{{Name: driver.PreflightLogin,
+				Status: driver.PreflightFail, Message: "Claude Code is logged out on this computer"}}}
+		}
+	})
+	ctx := context.Background()
+	h.d.startFailed(ctx, "")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.d.startFailed(ctx, "") // the second in a row: holds, then asks the preflight why
+	}()
+	<-entered
+	h.d.startWorked(ctx) // a healthy task settles meanwhile
+	require.Equal(t, ConnectionRunning, connectionOf(t, h.ledger).State)
+	close(release)
+	<-done
+
+	assert.Equal(t, ConnectionRunning, connectionOf(t, h.ledger).State, "the hold was cleared before its reason arrived")
+	assert.False(t, h.d.startsHeld())
+}
+
 // Two starts in a row that never ran hold new work: the next record waits,
 // admitted, and the connector says so once, with the fix. A restart takes
 // work again.
