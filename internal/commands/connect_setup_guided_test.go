@@ -318,6 +318,21 @@ func TestGuidedConnectSetupWithNoProjectsServedSaysHowToAddOne(t *testing.T) {
 	assert.NotContains(t, out, "in one of those projects")
 }
 
+// Switching to the agent profile checks its base URL as root checks the one
+// it started with: an insecure one is a setup error, not a panic in the SDK
+// (Codex on #794).
+func TestGuidedConnectSetupRefusesAnInsecureAgentProfileURL(t *testing.T) {
+	s := startConnectSetupServer(t)
+	connectSetupApp(t, s, "agent")
+	guided(t, &scriptedPrompter{})
+	_, err := registerProfile("agent", &config.ProfileConfig{BaseURL: "http://example.com", AccountID: "999", Scope: "full"})
+	require.NoError(t, err)
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, ""))
+	require.Error(t, err, out)
+	assert.Contains(t, err.Error(), "base_url")
+}
+
 // Setup never offers the background service, which would run the agent in
 // the home directory, and never touches systemd: it says how to start the
 // agent in the folder it should work in.

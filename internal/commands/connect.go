@@ -337,10 +337,11 @@ Run setup again to change any of it; what you do not pass is kept.
 Guided. In a terminal, with none of the flags that set policy, setup walks
 you through instead: it connects this computer to your agent when it is not
 (or no longer) connected, takes your agent's owner as the operator, asks
-which of your agent's projects it works in (all of them by default), sets
-up a connect.json that cannot be used again, and offers to keep the
-connector running. Run it again any time: it takes the next step, or says
-everything is set.
+which of your agent's projects it works in (all of them by default), and
+writes connect.json, offering to set it up again when the one there can't
+be used or is for another agent. It ends by saying how to start the
+connector: in the folder it should work in, left running. Run it again any
+time: it takes the next step, or says everything is set.
 
 Examples:
   basecamp connect setup                                # guided, in a terminal

@@ -20,6 +20,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/tui"
@@ -213,6 +214,16 @@ func guidedSetupProfile(ctx context.Context, app *appctx.App) (string, error) {
 			Todolist: app.Flags.Todolist,
 			CacheDir: app.Flags.CacheDir,
 		})
+		// Root checked the base URL of the profile it started with; this one
+		// is checked as root would, before anything reaches it.
+		if err := hostutil.RequireSecureURL(app.Config.BaseURL); err != nil {
+			where := "the config file that defines the profile"
+			if path := profileFieldFile(app.Config, connectAgentProfileName, "base_url"); path != "" {
+				where = "the profile's entry in " + richtext.SanitizeSingleLine(path)
+			}
+			return "", output.ErrUsageHint(fmt.Sprintf("Profile %q's base_url: %s", connectAgentProfileName, err),
+				"Correct base_url in "+where+".")
+		}
 	} else {
 		app.Config.ActiveProfile = connectAgentProfileName
 	}
