@@ -1217,6 +1217,11 @@ busybox-ash) it posts a literal leading $ and keeps \n as backslash-n:
 				return err
 			}
 
+			batchProjectID, err := batchProject(cmd, app, recordingArg)
+			if err != nil {
+				return err
+			}
+
 			// Expand comma-separated IDs and extract from URLs
 			expandedIDs := extractIDs([]string{recordingArg})
 
@@ -1225,13 +1230,13 @@ busybox-ash) it posts a literal leading $ and keeps \n as backslash-n:
 			html := richtext.MarkdownToHTML(content)
 
 			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
-			html, err := resolveLocalImages(cmd, app, html)
+			html, err = resolveLocalImages(cmd, app, html)
 			if err != nil {
 				return err
 			}
 
 			// Resolve @mentions (e.g., @John, @John.Doe → clickable mention tags)
-			mentionResult, err := resolveMentions(cmd.Context(), app.Names, batchMentionScope(cmd, app, recordingArg), html)
+			mentionResult, err := resolveMentions(cmd.Context(), app.Names, mentionScope(app, batchProjectID), html)
 			if err != nil {
 				return err
 			}

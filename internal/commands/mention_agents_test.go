@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // agentMentionTransport fakes a project whose people include an agent. The
@@ -170,7 +173,7 @@ func TestCommentsCreateUnknownProjectInMentionScopeFails(t *testing.T) {
 	assert.Empty(t, transport.posted)
 }
 
-func TestBatchMentionScope(t *testing.T) {
+func TestBatchProject(t *testing.T) {
 	a := "https://3.basecamp.com/99999/buckets/123/todos/1"
 	b := "https://3.basecamp.com/99999/buckets/123/todos/2"
 	c := "https://3.basecamp.com/99999/buckets/456/todos/3"
@@ -180,7 +183,10 @@ func TestBatchMentionScope(t *testing.T) {
 		app, _ := newTestAppWithTransport(t, &agentMentionTransport{})
 		cmd := NewCommentsCmd()
 		require.NoError(t, cmd.ParseFlags(in))
-		scope := batchMentionScope(cmd, app, targets)
+		cmd.SetContext(t.Context())
+		projectID, err := batchProject(cmd, app, targets)
+		require.NoError(t, err)
+		scope := mentionScope(app, projectID)
 		if scope == nil {
 			return 0
 		}
@@ -192,7 +198,38 @@ func TestBatchMentionScope(t *testing.T) {
 	assert.Equal(t, int64(123), scopeOf(t, a))
 	assert.Equal(t, int64(123), scopeOf(t, a+","+b))
 	assert.Zero(t, scopeOf(t, a+",2"), "a bare ID's project is unknown")
-	assert.Equal(t, int64(456), scopeOf(t, a+",2", "--in", "456"), "--in speaks for a bare ID")
+	assert.Equal(t, int64(123), scopeOf(t, a+",2", "--in", "123"), "--in agreeing with every URL speaks for a bare ID")
+	assert.Equal(t, int64(456), scopeOf(t, "1,2", "--in", "456"), "--in scopes a batch of bare IDs")
 	assert.Zero(t, scopeOf(t, a+","+c), "URLs in different projects")
-	assert.Zero(t, scopeOf(t, a+","+c, "--in", "123"), "--in cannot be right for both projects")
+}
+
+func TestCommentsCreateRefusesURLProjectConflictingWithIn(t *testing.T) {
+	a := "https://3.basecamp.com/99999/buckets/123/todos/1"
+	c := "https://3.basecamp.com/99999/buckets/456/todos/3"
+
+	for _, targets := range []string{a + ",2", a, a + "," + c} {
+		t.Run(targets, func(t *testing.T) {
+			transport := &agentMentionTransport{}
+			app, _ := newTestAppWithTransport(t, transport)
+
+			err := executeChatCommand(NewCommentsCmd(), app, "create", targets, "Hey @Quincy", "--in", "456")
+			require.Error(t, err)
+			var outErr *output.Error
+			require.True(t, errors.As(err, &outErr), "got %v", err)
+			assert.Equal(t, output.CodeUsage, outErr.Code)
+			assert.Contains(t, outErr.Message+outErr.Hint, "123")
+			assert.Contains(t, outErr.Message+outErr.Hint, "456")
+			assert.Contains(t, outErr.Message+outErr.Hint, "--in")
+			assert.Empty(t, transport.posted, "nothing is posted")
+		})
+	}
+}
+
+func TestCommentsCreateAcceptsURLProjectMatchingIn(t *testing.T) {
+	transport := &agentMentionTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	err := executeChatCommand(NewCommentsCmd(), app, "create", agentCardURL+",790", "Hey @Quincy", "--in", "123")
+	require.NoError(t, err)
+	assert.Contains(t, transport.postedContent(t), `sgid="sgid-quincy"`)
 }
