@@ -16,30 +16,38 @@ ACTIONS (RO = read-only):
 - update_project: Update an existing project
 
 == basecamp_todos
-Todos, todolists, todolist groups, and todosets — plus each todolist's hill chart.
+Todos, todolists, todolist groups, and todosets — plus each todolist's hill chart, and the subtasks on to-dos and cards.
 
 Gateway tool: call with {"action": "...", "params": {...}}.
 Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
 
 ACTIONS (RO = read-only):
+- complete_subtask: Mark a subtask as completed
 - complete_todo: Mark a todo as complete
+- create_subtask: Create a subtask under a to-do or a card
 - create_todo: Create a new todo in a todolist
 - create_todolist: Create a new todolist in a todoset
 - create_todolist_group: Create a new group in a todolist
 - create_todoset_todo: Create a to-do directly under a project's to-do set, outside any to-do list
+- delete_subtask: Delete a subtask
 - get_hill_chart (RO): Get the hill chart for a todoset
+- get_subtask (RO): Get a subtask by ID
 - get_todo (RO): Get a single todo by id
 - get_todolist_or_group (RO): Get a single todolist or todolist group by id The endpoint is polymorphic, but it answers with one shape: BC3 has no group model, so both variants come back as a flat Todolist (see the Todolist shape)
 - get_todoset (RO): Get a todoset (container for todolists in a project)
+- list_subtasks (RO, paginated): List a recording's subtasks, in position order
 - list_todolist_groups (RO, paginated): List groups in a todolist
 - list_todolists (RO, paginated): List todolists in a todoset
 - list_todos (RO, paginated): List todos in a todolist
 - replace_todo: Replace a todo with a new complete representation
+- reposition_subtask: Move a subtask to a new position among its siblings
 - reposition_todo: Reposition a todo within its todolist
 - reposition_todolist: Reposition a to-do list within its to-do set
 - reposition_todolist_group: Reposition a todolist group
+- uncomplete_subtask: Mark a subtask as not completed
 - uncomplete_todo: Mark a todo as incomplete
 - update_hill_chart_settings: Track or untrack todolists on a hill chart
+- update_subtask: Update a subtask
 - update_todolist_or_group: Replace a todolist (or todolist group) with a new complete representation
 
 == basecamp_cards
@@ -141,7 +149,7 @@ Call {"action": "describe", "params": {"action": "NAME"}} for an action's full p
 ACTIONS (RO = read-only):
 - create_schedule_entry: Create a new schedule entry
 - create_timesheet_entry: Create a timesheet entry on a recording
-- destroy_timesheet_entry: Permanently delete a timesheet entry; answers 403 when the caller may not archive or trash it
+- destroy_timesheet_entry: Permanently delete a timesheet entry, which never appears in the trash and cannot be restored; this is the only way to remove one, since bc3 answers 403 to TrashRecording and ArchiveRecording for every timesheet entry, and it answers 403 when the caller may not remove the entry
 - get_calendar (RO): Get a calendar by its bucket id
 - get_project_timesheet (RO, paginated): Get timesheet for a specific project
 - get_recording_timesheet (RO, paginated): Get timesheet for a specific recording
@@ -218,19 +226,22 @@ ACTIONS (RO = read-only):
 - update_subscription: Update subscriptions by adding or removing specific users
 
 == basecamp_automation
-Automatic check-ins (questionnaires, questions, answers, reminders), project templates, webhooks, lineup markers, dock tools, recording lifecycle (archive/trash), change events, and search.
+Automatic check-ins (questionnaires, questions, answers, reminders), project templates and the template library, webhooks, lineup markers, dock tools, recording lifecycle (archive/trash), change events, and search.
 
 Gateway tool: call with {"action": "...", "params": {...}}.
 Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
 
 ACTIONS (RO = read-only):
-- archive_recording: Archive a recording
+- archive_recording: Archive a recording; bc3 answers 403 for types it never lets be archived, timesheet entries among them
 - create_answer: Create a new answer for a question
 - create_lineup_marker: Create a new lineup marker
 - create_project_from_template: Create a project from a template (asynchronous)
 - create_question: Create a new question in a questionnaire
 - create_template: Create a new template
-- create_template_library_copy: Start copying a to-do list template into a project
+- create_template_library_card_table: Create a card table template with the default columns
+- create_template_library_copy: Start copying a to-do list or card table template into a project
+- create_template_library_todolist: Create an empty to-do list template
+- create_templatification: Templatify a to-do list or card table
 - create_tool: Create a tool in a project dock
 - create_webhook: Create a new webhook for a project
 - delete_lineup_marker: Delete a lineup marker
@@ -247,8 +258,10 @@ ACTIONS (RO = read-only):
 - get_questionnaire (RO): Get a questionnaire (automatic check-ins container) by id
 - get_search_metadata (RO): Get search metadata (available filter options)
 - get_template (RO): Get a single template by id
-- get_template_library (RO): Get the account's to-do list template library
+- get_template_library_card_tables (RO): Get the account's card table templates
 - get_template_library_copy (RO): Get the current status of a to-do list template copy
+- get_template_library_todolists (RO): Get the account's to-do list templates
+- get_templatification (RO): Get a templatification
 - get_tool (RO): Get a dock tool by id
 - get_webhook (RO): Get a single webhook by id
 - list_answers (RO, paginated): List all answers for a question
@@ -264,7 +277,7 @@ ACTIONS (RO = read-only):
 - resume_question: Resume a paused check-in question (resumes sending reminders)
 - search (RO, paginated): Search for content across the account
 - spotlight_recording: Put a recording's card in the spotlight area on its project or template home page
-- trash_recording: Trash a recording
+- trash_recording: Trash a recording; bc3 answers 403 for types it never lets be trashed, timesheet entries among them (DestroyTimesheetEntry removes those, permanently)
 - unarchive_recording: Unarchive a recording (restore to active status)
 - unspotlight_recording: Remove a recording from the spotlight area
 - update_answer: Update an existing answer

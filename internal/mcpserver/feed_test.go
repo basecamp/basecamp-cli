@@ -225,7 +225,9 @@ func TestFeedTellsTheTwo400sApart(t *testing.T) {
 			name:   "a reason this code does not know is not guessed at through the sentence",
 			action: "poll_events",
 			body:   `{"error":"Unrecognized position. Resume with since=now.","reason":"invalid_cursor_epoch"}`,
-			want:   "bad_request",
+			// A reason the contract doesn't name makes the body malformed
+			// (SDK v0.21.0): refused, not classified.
+			want: "request_failed",
 		},
 	}
 	for _, tc := range cases {
@@ -557,9 +559,10 @@ func TestFeedGoneWithoutAnEpochIsNotAStalePosition(t *testing.T) {
 	text, isError := callFeed(t, session, "poll_events", map[string]any{"position": "stale"})
 	require.True(t, isError, text)
 
+	// The SDK (v0.21.0) calls a 410 without its epoch malformed, and reports
+	// it without a status to act on.
 	detail := feedErrorOf(t, text)
 	assert.Equal(t, "request_failed", detail["type"])
-	assert.Equal(t, float64(http.StatusGone), detail["http_status"])
 	assert.NotContains(t, detail, "data", "no epoch, so no recovery is claimed")
 }
 
@@ -657,11 +660,14 @@ func TestFeedDoesNotReadARemedyOutOfAForeign400(t *testing.T) {
 
 	text, isError := callFeed(t, session, "poll_events", map[string]any{"position": "aBcD"})
 	require.True(t, isError, text)
-	assert.Equal(t, "bad_request", feedErrorOf(t, text)["type"])
+	// Without the feed's own `error` member the SDK (v0.21.0) calls the 400
+	// malformed: refused, not classified.
+	assert.Equal(t, "request_failed", feedErrorOf(t, text)["type"])
 }
 
-// The refusals the SDK leaves untyped land somewhere honest: their status, no
-// recovery claimed, and no recovery data invented.
+// The refusals the SDK leaves untyped land somewhere honest: no recovery
+// claimed, and no recovery data invented. The SDK (v0.21.0) calls these
+// bodies malformed and reports them without a status.
 func TestFeedUntypedRefusalsClaimNoRecovery(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -682,19 +688,18 @@ func TestFeedUntypedRefusalsClaimNoRecovery(t *testing.T) {
 
 			detail := feedErrorOf(t, text)
 			assert.Equal(t, "request_failed", detail["type"])
-			assert.Equal(t, float64(tc.status), detail["http_status"])
 			assert.NotContains(t, detail, "data", "no recovery was offered, so none is claimed")
 		})
 	}
 	t.Run("a 409 on the inbox with both digests is a filter mismatch there too", func(t *testing.T) {
 		session := feedSession(t, http.StatusConflict,
-			`{"error":"filters changed","position_digest":"abc123","filters_digest":"def456"}`, nil)
+			`{"error":"filters changed","position_digest":"0123456789abcdef","filters_digest":"fedcba9876543210"}`, nil)
 
 		text, isError := callFeed(t, session, "poll_inbox", map[string]any{"position": "aBcD"})
 		require.True(t, isError, text)
 		detail := feedErrorOf(t, text)
 		assert.Equal(t, "filter_mismatch", detail["type"])
-		assert.Equal(t, map[string]any{"position_digest": "abc123", "filters_digest": "def456"}, detail["data"])
+		assert.Equal(t, map[string]any{"position_digest": "0123456789abcdef", "filters_digest": "fedcba9876543210"}, detail["data"])
 	})
 }
 

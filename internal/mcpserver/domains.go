@@ -26,8 +26,8 @@ var DomainSpecs = []catalog.DomainSpec{
 	},
 	{
 		Key:   "todos",
-		Tags:  []string{"Todos"},
-		Blurb: "Todos, todolists, todolist groups, and todosets — plus each todolist's hill chart.",
+		Tags:  []string{"Todos", "Subtasks"},
+		Blurb: "Todos, todolists, todolist groups, and todosets — plus each todolist's hill chart, and the subtasks on to-dos and cards.",
 	},
 	{
 		Key:   "cards",
@@ -66,8 +66,8 @@ var DomainSpecs = []catalog.DomainSpec{
 	},
 	{
 		Key:   "automation",
-		Tags:  []string{"Automation", "Checkins"},
-		Blurb: "Automatic check-ins (questionnaires, questions, answers, reminders), project templates, webhooks, lineup markers, dock tools, recording lifecycle (archive/trash), change events, and search.",
+		Tags:  []string{"Checkins", "Templates", "Webhooks", "Lineup", "Dock", "Recordings", "Search"},
+		Blurb: "Automatic check-ins (questionnaires, questions, answers, reminders), project templates and the template library, webhooks, lineup markers, dock tools, recording lifecycle (archive/trash), change events, and search.",
 	},
 	{
 		Key:   "reports",
