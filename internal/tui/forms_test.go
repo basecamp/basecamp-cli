@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -277,5 +278,20 @@ func TestPromptFloorCovers(t *testing.T) {
 		}
 		assert.True(t, covered[fn.Name.Name],
 			"forms.go exports %s but promptFloors() does not exercise its non-interactive floor", fn.Name.Name)
+	}
+}
+
+// A prompt opens on its default, so pressing Enter picks it. It used to open
+// on No whatever the default, and a guided setup that asked "Work in all of
+// your agent's projects?" (default Yes) ended with none chosen.
+func TestConfirmAnsweredWithEnterIsItsDefault(t *testing.T) {
+	prev := runConfirmForm
+	t.Cleanup(func() { runConfirmForm = prev })
+	runConfirmForm = func(...huh.Field) error { return nil } // Enter: submit as opened
+
+	for _, def := range []bool{true, false} {
+		got, err := Confirm("Go ahead?", def)
+		require.NoError(t, err)
+		assert.Equal(t, def, got, "default %v", def)
 	}
 }

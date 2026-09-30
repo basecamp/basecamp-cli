@@ -95,19 +95,30 @@ func runFields(fields ...huh.Field) error {
 	return runForm(huh.NewForm(huh.NewGroup(fields...)))
 }
 
-// Confirm shows a yes/no confirmation prompt. Escape or Ctrl+C cancels.
+// Confirm shows a yes/no confirmation prompt, opening on defaultValue, so
+// Enter alone answers it. Escape or Ctrl+C cancels.
 func Confirm(message string, defaultValue bool) (bool, error) {
-	var result bool
-	field := huh.NewConfirm().
-		Title(message).
-		Affirmative("Yes").
-		Negative("No").
-		Value(&result)
+	result := defaultValue
+	field := confirmField(message, &result)
 
-	if err := runFields(field); err != nil {
+	if err := runConfirmForm(field); err != nil {
 		return defaultValue, err
 	}
 	return result, nil
+}
+
+// runConfirmForm runs Confirm's form. A variable so a test can answer it as
+// Enter does: by submitting whatever the prompt opened on.
+var runConfirmForm = runFields
+
+// confirmField is Confirm's field. The answer highlighted when it opens is
+// whatever result holds.
+func confirmField(message string, result *bool) *huh.Confirm {
+	return huh.NewConfirm().
+		Title(message).
+		Affirmative("Yes").
+		Negative("No").
+		Value(result)
 }
 
 // ConfirmDangerous shows a confirmation prompt for dangerous actions. Escape or Ctrl+C cancels.
