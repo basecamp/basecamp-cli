@@ -41,9 +41,13 @@ func workFolderCheck() setup.Check {
 }
 
 // isFilesystemRoot reports whether dir is a root: / on Unix, a volume root
-// such as C:\ or a UNC share on Windows. A root is its own parent.
+// such as C:\ or a UNC share on Windows. A root is its own parent, once
+// symlinks are resolved: /proc/self/root is / by another name.
 func isFilesystemRoot(dir string) bool {
 	clean := filepath.Clean(dir)
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		clean = resolved
+	}
 	return filepath.Dir(clean) == clean
 }
 
