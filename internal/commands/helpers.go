@@ -754,7 +754,7 @@ func unresolvedMentionWarning(unresolved []string) string {
 		return ""
 	}
 	return "Unresolved mentions left as text: " + strings.Join(unresolved, ", ") +
-		" (agents match by name only on the project from --in or a URL; [@Name](person:ID) needs no project)"
+		" (agents match by name only among the people on the command's project; name it with --in or a URL if the command has none; [@Name](person:ID) needs no project)"
 }
 
 // projectFlagValue returns the --project/--in value visible to cmd, including
