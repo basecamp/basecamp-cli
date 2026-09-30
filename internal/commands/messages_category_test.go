@@ -243,3 +243,19 @@ func TestMessagesCreateCategoryNameUsesExplicitBoardProject(t *testing.T) {
 	assert.Equal(t, float64(70), body["category_id"])
 	assert.Empty(t, messagesRequestsTo(transport, messageCategoriesPath), "the --in project's types are not the board's")
 }
+
+func TestMessagesCreateCategoryNameRefusesBoardOfUnknownProject(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{method: http.MethodGet, path: "/99999/message_boards/555", status: http.StatusOK, body: `{"id":555}`},
+		messageCategoriesRoute(defaultMessageCategories),
+		stubRoute{method: http.MethodPost, path: "/99999/message_boards/555/messages.json", status: http.StatusCreated, body: `{"id":999,"subject":"Hello","status":"active"}`},
+	)
+	app.Config.ProjectID = "123"
+
+	err := executeRecordingCommand(NewMessagesCmd(), app, "create", "Hello", "--message-board", "555", "--category", "Announcement")
+
+	requireMessagesUsageError(t, err, "Cannot tell which project")
+	requireNoMessageWrite(t, transport)
+	assert.Empty(t, messagesRequestsTo(transport, messageCategoriesPath))
+}

@@ -968,9 +968,11 @@ func resolveCreatedMessageCategory(ctx context.Context, app *appctx.App, project
 		if err != nil {
 			return 0, convertSDKError(err)
 		}
-		if board.Bucket != nil && board.Bucket.ID != 0 {
-			projectID = strconv.FormatInt(board.Bucket.ID, 10)
+		if board.Bucket == nil || board.Bucket.ID == 0 {
+			return 0, output.ErrUsageHint("Cannot tell which project this message board is in to look up its category by name",
+				"Pass the message type ID instead: basecamp messagetypes list --in <project>")
 		}
+		projectID = strconv.FormatInt(board.Bucket.ID, 10)
 	}
 	return resolveMessageCategory(ctx, app, projectID, category)
 }
