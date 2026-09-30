@@ -71,6 +71,47 @@ func TestAHoldStopsTheRestOfTheBatch(t *testing.T) {
 	assert.Equal(t, int32(StartFailuresToHold), calls.Load(), "nothing is started after the second failure, in the same batch or the next")
 }
 
+// The worker is checked before anything is handed to it: a connector that
+// starts with Claude Code logged out holds new work from the first pass, says
+// why, and takes work once a check passes. No request is spent finding out
+// (Codex on #794).
+func TestAWorkerThatIsNotReadyAtStartHoldsWorkUntilItIs(t *testing.T) {
+	fake := newFakeDriver()
+	var h *dispatchHarness
+	fake.turn = func(s *fakeSession, _ int, _ string) (driver.PromptResult, error) {
+		pickUp(t, h.ledger, s.cfg.Scope.TaskID)
+		return driver.PromptResult{Stop: driver.TurnEndTurn}, nil
+	}
+	var calls atomic.Int32
+	startsOf(fake, &calls)
+	var checks atomic.Int32
+	var logs safeBuffer
+	h = newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.Concurrency = 1
+		o.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+		o.HoldCheck = 300 * time.Millisecond
+		o.Preflight = func(context.Context) driver.Preflight {
+			p := driver.Preflight{Product: "Claude Code"}
+			if checks.Add(1) == 1 {
+				p.Checks = []driver.PreflightCheck{{Name: driver.PreflightLogin, Status: driver.PreflightFail,
+					Message: "Claude Code is logged out on this computer — run `claude` and log in."}}
+			}
+			return p
+		}
+	})
+	admitOn(t, h.ledger, 1, "recording:1")
+	stop := h.run(t)
+	defer stop()
+
+	require.Eventually(t, func() bool { return connectionOf(t, h.ledger).State == ConnectionNotTakingWork }, 5*time.Second, 5*time.Millisecond)
+	assert.Equal(t, "Claude Code isn't ready — Claude Code is logged out on this computer — run `claude` and log in", connectionOf(t, h.ledger).Detail)
+	assert.Equal(t, int32(0), calls.Load(), "nothing is handed to a worker that isn't ready")
+	assert.Contains(t, logs.String(), "level=ERROR msg=\"connector: not taking work: Claude Code isn't ready")
+
+	require.Eventually(t, func() bool { return calls.Load() == 1 }, 10*time.Second, 10*time.Millisecond, "a check that passes takes work")
+	require.Eventually(t, func() bool { return connectionOf(t, h.ledger).State == ConnectionRunning }, 5*time.Second, 10*time.Millisecond)
+}
+
 // Two starts in a row that never ran hold new work: the next record waits,
 // admitted, and the connector says so once, with the fix. A restart takes
 // work again.
@@ -132,9 +173,10 @@ func TestAWorkerThatNeverPicksItsRequestUpHoldsNewWorkUntilItStarts(t *testing.T
 		o.HoldCheck = 50 * time.Millisecond
 		o.Preflight = func(context.Context) driver.Preflight {
 			p := driver.Preflight{Product: "Claude Code"}
-			// The hold's own check, and the first check after it, find
-			// Claude Code logged out; then someone logs in.
-			if checks.Add(1) <= 2 {
+			// The check at start passes: what ends these sessions is not
+			// something it can see. The hold's own check, and the first check
+			// after it, find Claude Code logged out; then someone logs in.
+			if n := checks.Add(1); n == 2 || n == 3 {
 				p.Checks = []driver.PreflightCheck{{Name: driver.PreflightLogin, Status: driver.PreflightFail,
 					Message: "Claude Code is logged out on this computer — run `claude` and log in"}}
 			}

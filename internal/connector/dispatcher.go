@@ -362,6 +362,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	if err := d.Recover(ctx); err != nil {
 		return err
 	}
+	d.checkWorkerAtStart(ctx)
 	ticker := time.NewTicker(d.opts.Tick)
 	defer ticker.Stop()
 	for {

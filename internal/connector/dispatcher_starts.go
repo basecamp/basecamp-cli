@@ -129,6 +129,36 @@ func (d *Dispatcher) startFailed(ctx context.Context, said string) {
 	d.mu.Unlock()
 }
 
+// checkWorkerAtStart runs the worker's preflight before the first pass. A
+// worker that cannot start fails every request it is handed, so one found
+// not ready holds new work from the start, as two failed starts in a row
+// would, and is checked again on the hold's schedule. No request is spent
+// finding out.
+func (d *Dispatcher) checkWorkerAtStart(ctx context.Context) {
+	if d.opts.Preflight == nil {
+		return
+	}
+	p := d.opts.Preflight(ctx)
+	c, failed := p.Failed()
+	if !failed || ctx.Err() != nil {
+		return
+	}
+	product := p.Product
+	if product == "" {
+		product = d.opts.Driver.Name()
+	}
+	why := product + " isn't ready — " + strings.TrimRight(richtext.SanitizeSingleLine(c.Message), ".")
+	d.mu.Lock()
+	d.starts.failures = StartFailuresToHold
+	d.starts.held = true
+	d.starts.checkAt = time.Now().Add(d.starts.checkEvery)
+	d.mu.Unlock()
+	d.log.Error("connector: not taking work: " + why + ". " + NotTakingWorkFix)
+	if err := d.ledger.NoteConnection(ctx, ConnectionNotTakingWork, why); err != nil {
+		d.log.Warn("connector: could not record that no work is being taken, for status", "error", err)
+	}
+}
+
 // whyNotStarting is the hold's reason in a person's words: what the worker's
 // preflight finds wrong, when it finds something, else what the worker said.
 func (d *Dispatcher) whyNotStarting(ctx context.Context, said string) string {
