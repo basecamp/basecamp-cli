@@ -56,4 +56,4 @@ func TerminateRecorded(Process, time.Duration) (bool, error) { return false, err
 
 // probeInItsOwnGroup leaves the probe as it is off Unix, where the connector
 // doesn't run workers.
-func probeInItsOwnGroup(*exec.Cmd) {}
+func probeInItsOwnGroup(*exec.Cmd) (cleanup func()) { return func() {} }

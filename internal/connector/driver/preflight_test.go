@@ -197,3 +197,20 @@ func TestRunProbeTellsAMissingInterpreterFromAMissingProgram(t *testing.T) {
 	missing := RunProbe(context.Background(), Command{Path: filepath.Join(dir, "absent"), Dir: dir}, 5*time.Second)
 	assert.True(t, missing.NotFound)
 }
+
+// A launcher that leaves a child behind and exits on its own still has that
+// child ended when the probe returns (Codex on #794).
+func TestRunProbeEndsChildrenALauncherLeftWhenItExited(t *testing.T) {
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "child.pid")
+	launcher := filepath.Join(dir, "claude")
+	require.NoError(t, os.WriteFile(launcher, []byte("#!/bin/sh\nsleep 60 &\necho $! > "+pidFile+"\necho 2.1.0\n"), 0o700))
+
+	r := RunProbe(context.Background(), Command{Path: launcher, Dir: dir}, 10*time.Second)
+	require.False(t, r.TimedOut)
+	raw, err := os.ReadFile(pidFile)
+	require.NoError(t, err)
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	require.NoError(t, err)
+	assert.Eventually(t, func() bool { return syscall.Kill(pid, 0) != nil }, 5*time.Second, 20*time.Millisecond, "the child is gone")
+}

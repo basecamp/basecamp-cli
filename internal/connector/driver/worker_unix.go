@@ -30,12 +30,18 @@ func signalGroup(pgid int, sig syscall.Signal) error {
 }
 
 // probeInItsOwnGroup runs a probe as the leader of a group of its own, and
-// ends the whole group when its context does: a launcher that starts the real
-// worker as a child and waits must not leave that child behind when the
-// probe times out.
-func probeInItsOwnGroup(ec *exec.Cmd) {
+// ends the whole group when its context does. The cleanup it returns ends
+// the group once the probe is over, however it ended: a launcher that starts
+// the real worker as a child must not leave that child behind, whether the
+// probe timed out or the launcher exited first.
+func probeInItsOwnGroup(ec *exec.Cmd) (cleanup func()) {
 	ec.SysProcAttr = newProcessGroup()
 	ec.Cancel = func() error {
 		return signalGroup(ec.Process.Pid, syscall.SIGKILL)
+	}
+	return func() {
+		if ec.Process != nil {
+			_ = signalGroup(ec.Process.Pid, syscall.SIGKILL)
+		}
 	}
 }
