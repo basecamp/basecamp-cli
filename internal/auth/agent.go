@@ -161,7 +161,10 @@ func (m *Manager) resolveAgentMint(creds *Credentials) (*agentMint, error) {
 //   - invalid_grant, or a 401/403 that names no reason, can reverse. Held
 //     an hour, then tried once more.
 //   - 429 is held until its Retry-After (a minute when it gives none, at
-//     most an hour), and answered in the meantime as a rate limit.
+//     most retryAfter's cap of maxAgentConnectLifetime), and answered in
+//     the meantime as a rate limit. bc3's abuse blocks run longer (up to a
+//     day), and it answers a request inside one with another 429 without
+//     charging it, so the cap costs one request per cap, not an escalation.
 //   - Anything else — a 5xx, the network, a response this cannot read —
 //     holds nothing, and the next command tries again as it always has.
 //

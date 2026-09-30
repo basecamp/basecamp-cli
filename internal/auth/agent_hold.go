@@ -84,8 +84,9 @@ const agentRefusalRecheck = time.Hour
 // resilience.GatingHooks.OnRequestEnd).
 const defaultAgentRateLimitHold = 60 * time.Second
 
-// maxAgentMintHold bounds any hold that expires. A Retry-After past it is
-// not honored in full, and a stored expiry further out than this from now —
+// maxAgentMintHold bounds any hold that expires. No hold is written past it
+// (retryAfter already caps a Retry-After at maxAgentConnectLifetime, below
+// it), and a stored expiry further out than this from now —
 // a clock that stepped back, a damaged record — is not believed at all:
 // that hold is ignored and the mint goes out, which is the old behavior and
 // the safe direction to fail in.
@@ -111,8 +112,9 @@ type MintHold struct {
 	// At is when the verdict was given, in Unix seconds.
 	At int64 `json:"at"`
 
-	// Until is when the next mint may be sent, in Unix seconds. Zero on a
-	// refusal means never with these client credentials.
+	// Until is when the next mint may be sent, in Unix seconds, rounded
+	// up. Zero on a refusal means never with these client credentials; a
+	// rate limit without one is damaged, and holds nothing.
 	Until int64 `json:"until,omitempty"`
 }
 
@@ -144,7 +146,7 @@ func mintHoldFor(mint *agentMint, resp *http.Response, detail, code string, refu
 			wait = defaultAgentRateLimitHold
 		}
 		hold.Kind = mintHoldRateLimited
-		hold.Until = now.Add(min(wait, maxAgentMintHold)).Unix()
+		hold.Until = ceilUnix(now.Add(min(wait, maxAgentMintHold)))
 	case refused && code == "invalid_client":
 		// Permanent for this secret; see agentRefusalRecheck.
 		hold.Kind = mintHoldRefused
@@ -157,20 +159,20 @@ func mintHoldFor(mint *agentMint, resp *http.Response, detail, code string, refu
 	return hold
 }
 
+// ceilUnix is t in Unix seconds, rounded up: a deadline stored in whole
+// seconds must not end before the one it was given.
+func ceilUnix(t time.Time) int64 {
+	return t.Add(time.Second - time.Nanosecond).Unix()
+}
+
 // heldMint is the error a remembered verdict answers a mint with, or nil
 // when the mint may be sent. It reads nothing but creds, so a report can
 // ask it too.
 func (m *Manager) heldMint(creds *Credentials) error {
 	hold := creds.MintHold
-	if hold == nil || hold.Client != agentClientFingerprint(creds.ClientID, creds.ClientSecret) {
-		return nil
-	}
 	now := m.now()
-	if hold.Until != 0 {
-		until := time.Unix(hold.Until, 0)
-		if !now.Before(until) || until.Sub(now) > maxAgentMintHold {
-			return nil
-		}
+	if !hold.holds(creds, now) {
+		return nil
 	}
 	when := time.Unix(hold.Until, 0).UTC().Format(time.RFC3339)
 
@@ -191,16 +193,43 @@ func (m *Manager) heldMint(creds *Credentials) error {
 	return nil
 }
 
+// holds reports whether a stored hold is one this version believes: about
+// these client credentials, of a kind it knows, and — where it expires —
+// expiring in the future and within maxAgentMintHold. A rate limit always
+// expires. Anything else is ignored, and the mint goes out.
+func (hold *MintHold) holds(creds *Credentials, now time.Time) bool {
+	if hold == nil || hold.Client != agentClientFingerprint(creds.ClientID, creds.ClientSecret) {
+		return false
+	}
+	switch {
+	case hold.Kind == mintHoldRefused && hold.Until == 0:
+		return true
+	case hold.Kind == mintHoldRefused, hold.Kind == mintHoldRateLimited:
+		until := time.Unix(hold.Until, 0)
+		return hold.Until > 0 && now.Before(until) && until.Sub(now) <= maxAgentMintHold
+	default:
+		return false
+	}
+}
+
 // rememberMintHold records hold on the stored credential — if the stored
 // credential is still the one the verdict was about.
 //
 // The caller holds the credential key's cross-process lock, so no login can
 // land between the refusal and this write. The fingerprint is compared
-// anyway, against a fresh read rather than the copy the mint was made from:
-// on a host where the lock could not be taken at all, a login that stored a
-// new secret while the old one was being refused must not have that
-// refusal written over it. A failure to write is reported and otherwise
-// changes nothing — the refusal is what the caller sees either way.
+// anyway, against a fresh read rather than the copy the mint was made from,
+// for a host where that lock could not be taken at all (lock.go runs such a
+// host unsynchronized, with a warning). There it narrows the window a
+// concurrent login can be written over from the token round trip to this
+// load and save; it does not close it, and nothing without a lock can — the
+// store has no compare-and-swap, and the whole-store lock lives in the same
+// directory the key lock could not be made in. A successful mint on such a
+// host saves the copy it loaded before its round trip, a wider window than
+// this one, and has since before holds existed. Skipping the write there
+// instead would leave exactly those hosts minting on every poll.
+//
+// A failure to write is reported and otherwise changes nothing — the
+// refusal is what the caller sees either way.
 func (m *Manager) rememberMintHold(origin string, hold *MintHold) {
 	current, err := m.store.Load(origin)
 	if err != nil {

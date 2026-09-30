@@ -49,11 +49,11 @@ func (e *mintEndpoint) url() string { return e.srv.URL + "/oauth/tokens" }
 const mintedToken = `{"access_token":"minted","token_type":"bearer","expires_in":3600}`
 
 // heldManager is a manager holding an agent credential due for renewal,
-// with a clock the test moves by hand.
+// with a clock the test moves by hand, starting on a whole second.
 func heldManager(t *testing.T, e *mintEndpoint) (*Manager, string, *time.Time) {
 	t.Helper()
 	m := newDeviceTestManager(t, e.srv.URL)
-	now := time.Now()
+	now := time.Now().Truncate(time.Second)
 	m.clock = func() time.Time { return now }
 	key := storeAgent(t, m, agentCredential(e.url(), time.Now().Add(-time.Minute)))
 	return m, key, &now
@@ -171,6 +171,34 @@ func TestARateLimitIsHeldUntilItsRetryAfter(t *testing.T) {
 	stored, err := m.store.Load(key)
 	require.NoError(t, err)
 	assert.Nil(t, stored.MintHold)
+}
+
+// TestARateLimitHoldRoundsItsDeadlineUp: the hold is stored in whole
+// seconds, and a Retry-After counted from partway through a second must not
+// end early — bc3 answers a request inside its block with another 429.
+func TestARateLimitHoldRoundsItsDeadlineUp(t *testing.T) {
+	e := startMintEndpoint(t)
+	e.answer = func(call int) (int, http.Header, string) {
+		if call == 0 {
+			return http.StatusTooManyRequests, http.Header{"Retry-After": {"300"}}, `{}`
+		}
+		return http.StatusOK, nil, mintedToken
+	}
+	m, _, now := heldManager(t, e)
+	*now = now.Truncate(time.Second).Add(999 * time.Millisecond)
+
+	_, err := m.AccessToken(context.Background())
+	require.Error(t, err)
+
+	*now = now.Add(299*time.Second + 500*time.Millisecond)
+	_, err = m.AccessToken(context.Background())
+	require.Error(t, err)
+	assert.EqualValues(t, 1, e.calls.Load(), "a mint went out before the Retry-After had elapsed")
+
+	*now = now.Add(501 * time.Millisecond)
+	_, err = m.AccessToken(context.Background())
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, e.calls.Load())
 }
 
 // TestARateLimitHoldIsBounded: a 429 with no Retry-After is held for the
@@ -321,8 +349,9 @@ func TestAStaleRefusalNeverLandsOnANewSecret(t *testing.T) {
 // all. Either is ignored, which is the old behavior: ask again.
 func TestAHoldTooFarOutIsNotBelieved(t *testing.T) {
 	for name, hold := range map[string]MintHold{
-		"a day out":      {Kind: mintHoldRateLimited, Until: time.Now().Add(24 * time.Hour).Unix()},
-		"a kind unknown": {Kind: "something_newer"},
+		"a day out":                     {Kind: mintHoldRateLimited, Until: time.Now().Add(24 * time.Hour).Unix()},
+		"a kind unknown":                {Kind: "something_newer"},
+		"a rate limit with no deadline": {Kind: mintHoldRateLimited},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := startMintEndpoint(t)

@@ -134,13 +134,16 @@ func TestAuthStatusSaysARefusalIsRemembered(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 
 	assert.Equal(t, 1, calls, "the report asked the token endpoint")
-	assert.Contains(t, buf.String(), "the refusal is remembered")
-	assert.Contains(t, buf.String(), "invalid_client")
 
 	var envelope struct {
 		Notice string `json:"notice"`
+		Data   struct {
+			RenewalRefused string `json:"renewal_refused"`
+		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.Contains(t, envelope.Data.RenewalRefused, "the refusal is remembered")
+	assert.Contains(t, envelope.Data.RenewalRefused, "invalid_client")
 	assert.Contains(t, envelope.Notice, "--with-client-credentials")
 	assert.NotContains(t, buf.String(), "rotated-away")
 }
