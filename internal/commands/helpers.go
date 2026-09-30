@@ -728,24 +728,40 @@ func sameProjectID(a, b string) bool {
 	return x == y
 }
 
-// batchProject returns the one project a comma-separated target list is known
-// to share, which scopes the mention resolved once for every target. --in
-// names it; it must agree with every URL's bucket, and a URL in any other
-// project is refused as conflicting input. Without --in, it is the bucket
-// every target's URL names, or "" when a target is a bare ID (its project is
-// unknown) or the URLs disagree.
-func batchProject(cmd *cobra.Command, app *appctx.App, targets string) (string, error) {
-	var urlProjects []string
-	bare := false
+// batchMentionScope returns the mention scope for a comments create target
+// list. One resolved mention goes to every target, so the scope must be a
+// project every target is known to be in; anything less leaves agents out of
+// scope and a fuzzy agent mention stays text, with the unresolved notice. It
+// never refuses the command: which targets are posted to is decided exactly
+// as before, with a URL's bucket winning over --in.
+//
+//   - Every target a URL in one bucket: that bucket.
+//   - Only bare IDs: --in, if given.
+//   - URLs in one bucket plus bare IDs: that bucket, if --in names it too
+//     (--in is what vouches for the bare IDs).
+//   - URLs in different buckets: none.
+//
+// Tokens that are neither a URL nor a number are skipped by the posting loop,
+// so they are skipped here too. A named --in is resolved only if the scope is
+// consulted.
+func batchMentionScope(cmd *cobra.Command, app *appctx.App, targets string) names.ProjectScope {
+	urlProject, bare := "", false
 	for part := range strings.SplitSeq(targets, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
 		}
-		if _, projectID := extractWithProject(part); projectID != "" {
-			urlProjects = append(urlProjects, projectID)
-		} else {
+		recordingID, projectID := extractWithProject(part)
+		if _, err := strconv.ParseInt(recordingID, 10, 64); err != nil {
+			continue
+		}
+		switch {
+		case projectID == "":
 			bare = true
+		case urlProject != "" && !sameProjectID(urlProject, projectID):
+			return nil
+		default:
+			urlProject = projectID
 		}
 	}
 
@@ -753,36 +769,26 @@ func batchProject(cmd *cobra.Command, app *appctx.App, targets string) (string, 
 	if explicit == "" {
 		explicit = app.Flags.Project
 	}
-	if explicit != "" {
-		if len(urlProjects) == 0 {
-			return explicit, nil
-		}
-		var resolved string
-		if id, err := strconv.ParseInt(explicit, 10, 64); err == nil {
-			resolved = strconv.FormatInt(id, 10)
-		} else if resolved, _, err = app.Names.ResolveProject(cmd.Context(), explicit); err != nil {
-			return "", err
-		}
-		for _, projectID := range urlProjects {
-			if !sameProjectID(projectID, resolved) {
-				return "", output.ErrUsageHint(
-					fmt.Sprintf("--in names project %s, but a URL target is in project %s", resolved, projectID),
-					"Drop --in to let each URL name its project, or split the batch by project",
-				)
-			}
-		}
-		return resolved, nil
+	switch {
+	case urlProject == "":
+		return mentionScope(app, explicit)
+	case !bare:
+		return mentionScope(app, urlProject)
+	case explicit == "":
+		return nil
 	}
 
-	if bare || len(urlProjects) == 0 {
-		return "", nil
-	}
-	for _, projectID := range urlProjects[1:] {
-		if !sameProjectID(projectID, urlProjects[0]) {
-			return "", nil
+	vouched := mentionScope(app, explicit)
+	return func(ctx context.Context) (int64, error) {
+		id, err := vouched(ctx)
+		if err != nil {
+			return 0, err
 		}
+		if !sameProjectID(strconv.FormatInt(id, 10), urlProject) {
+			return 0, nil
+		}
+		return id, nil
 	}
-	return urlProjects[0], nil
 }
 
 // unresolvedMentionWarning formats a warning string for unresolved mentions.

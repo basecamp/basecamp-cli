@@ -3,7 +3,6 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -12,8 +11,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // agentMentionTransport fakes a project whose people include an agent. The
@@ -173,79 +170,63 @@ func TestCommentsCreateUnknownProjectInMentionScopeFails(t *testing.T) {
 	assert.Empty(t, transport.posted)
 }
 
-func TestBatchProject(t *testing.T) {
+// batchScopeOf returns the project a comments create batch scopes agent
+// mentions to, or 0 when it has none.
+func batchScopeOf(t *testing.T, targets string, flags ...string) int64 {
+	t.Helper()
+	app, _ := newTestAppWithTransport(t, &agentMentionTransport{})
+	cmd := NewCommentsCmd()
+	require.NoError(t, cmd.ParseFlags(flags))
+	scope := batchMentionScope(cmd, app, targets)
+	if scope == nil {
+		return 0
+	}
+	id, err := scope(t.Context())
+	require.NoError(t, err)
+	return id
+}
+
+func TestBatchMentionScope(t *testing.T) {
 	a := "https://3.basecamp.com/99999/buckets/123/todos/1"
 	b := "https://3.basecamp.com/99999/buckets/123/todos/2"
 	c := "https://3.basecamp.com/99999/buckets/456/todos/3"
 
-	scopeOf := func(t *testing.T, targets string, in ...string) int64 {
-		t.Helper()
-		app, _ := newTestAppWithTransport(t, &agentMentionTransport{})
-		cmd := NewCommentsCmd()
-		require.NoError(t, cmd.ParseFlags(in))
-		cmd.SetContext(t.Context())
-		projectID, err := batchProject(cmd, app, targets)
-		require.NoError(t, err)
-		scope := mentionScope(app, projectID)
-		if scope == nil {
-			return 0
-		}
-		id, err := scope(t.Context())
-		require.NoError(t, err)
-		return id
-	}
-
-	assert.Equal(t, int64(123), scopeOf(t, a))
-	assert.Equal(t, int64(123), scopeOf(t, a+","+b))
-	assert.Zero(t, scopeOf(t, a+",2"), "a bare ID's project is unknown")
-	assert.Equal(t, int64(123), scopeOf(t, a+",2", "--in", "123"), "--in agreeing with every URL speaks for a bare ID")
-	assert.Equal(t, int64(456), scopeOf(t, "1,2", "--in", "456"), "--in scopes a batch of bare IDs")
-	assert.Zero(t, scopeOf(t, a+","+c), "URLs in different projects")
-	assert.Equal(t, int64(123), scopeOf(t, a, "--in", "00123"), "IDs compare as numbers")
+	assert.Equal(t, int64(123), batchScopeOf(t, a))
+	assert.Equal(t, int64(123), batchScopeOf(t, a+","+b))
+	assert.Equal(t, int64(123), batchScopeOf(t, a, "--in", "456"), "a URL's bucket wins over --in, as for posting")
+	assert.Equal(t, int64(456), batchScopeOf(t, "1,2", "--in", "456"), "--in scopes a batch of bare IDs")
+	assert.Zero(t, batchScopeOf(t, "1,2"))
+	assert.Zero(t, batchScopeOf(t, a+",2"), "a bare ID's project is unknown")
+	assert.Equal(t, int64(123), batchScopeOf(t, a+",2", "--in", "123"), "--in naming the URL's bucket vouches for the bare ID")
+	assert.Equal(t, int64(123), batchScopeOf(t, a+",2", "--in", "00123"), "IDs compare as numbers")
+	assert.Zero(t, batchScopeOf(t, a+",2", "--in", "124"), "--in elsewhere cannot vouch for the bare ID")
+	assert.Zero(t, batchScopeOf(t, a+","+c), "URLs in different projects")
+	assert.Zero(t, batchScopeOf(t, a+","+c, "--in", "123"), "no single project holds every target")
+	assert.Equal(t, int64(123), batchScopeOf(t, a+",garbage"), "a token the posting loop skips does not unscope the batch")
+	assert.Equal(t, int64(123), batchScopeOf(t, a+",2", "--in", "Test Project"), "a named --in resolves when consulted")
 }
 
-func TestBatchProjectComparesIDsAsNumbers(t *testing.T) {
-	a := "https://3.basecamp.com/99999/buckets/123/todos/1"
-	run := func(in string) (string, error) {
-		app, _ := newTestAppWithTransport(t, &agentMentionTransport{})
-		cmd := NewCommentsCmd()
-		require.NoError(t, cmd.ParseFlags([]string{"--in", in}))
-		cmd.SetContext(t.Context())
-		return batchProject(cmd, app, a+",2")
-	}
+func TestCommentsCreateNamedInIsResolvedOnlyWhenAnAgentNeedsIt(t *testing.T) {
+	transport := &agentMentionTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
 
-	projectID, err := run("00123")
+	err := executeChatCommand(NewCommentsCmd(), app, "create", agentCardURL+",790", "Hey @Jane.Smith", "--in", "Test Project")
 	require.NoError(t, err)
-	assert.Equal(t, "123", projectID)
-
-	_, err = run("124")
-	var outErr *output.Error
-	require.True(t, errors.As(err, &outErr), "got %v", err)
-	assert.Equal(t, output.CodeUsage, outErr.Code)
-	assert.Contains(t, outErr.Message, "124")
-	assert.Contains(t, outErr.Message, "123")
+	assert.Contains(t, transport.postedContent(t), `sgid="sgid-jane"`)
+	assert.Zero(t, transport.getCount("/projects.json"), "an exact pingable match never resolves the project")
 }
 
-func TestCommentsCreateRefusesURLProjectConflictingWithIn(t *testing.T) {
-	a := "https://3.basecamp.com/99999/buckets/123/todos/1"
+func TestCommentsCreateConflictingInStillPosts(t *testing.T) {
 	c := "https://3.basecamp.com/99999/buckets/456/todos/3"
+	transport := &agentMentionTransport{}
+	app, buf := newTestAppWithTransport(t, transport)
 
-	for _, targets := range []string{a + ",2", a, a + "," + c} {
-		t.Run(targets, func(t *testing.T) {
-			transport := &agentMentionTransport{}
-			app, _ := newTestAppWithTransport(t, transport)
-
-			err := executeChatCommand(NewCommentsCmd(), app, "create", targets, "Hey @Quincy", "--in", "456")
-			require.Error(t, err)
-			var outErr *output.Error
-			require.True(t, errors.As(err, &outErr), "got %v", err)
-			assert.Equal(t, output.CodeUsage, outErr.Code)
-			assert.Contains(t, outErr.Message+outErr.Hint, "123")
-			assert.Contains(t, outErr.Message+outErr.Hint, "456")
-			assert.Contains(t, outErr.Message+outErr.Hint, "--in")
-			assert.Empty(t, transport.posted, "nothing is posted")
-		})
-	}
+	// The URL names where the comment goes, as it always has; --in cannot
+	// vouch for the bare ID, so the agent is left as text with the notice.
+	err := executeChatCommand(NewCommentsCmd(), app, "create", c+",790", "Hey @Quincy", "--in", "123")
+	require.NoError(t, err)
+	assert.NotContains(t, transport.postedContent(t), "sgid-quincy")
+	assert.Contains(t, noticeOf(t, buf), "@Quincy")
 }
 
 func TestCommentsCreateAcceptsURLProjectMatchingIn(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 // ProjectScope yields the project whose agents an @mention may reach. The
 // resolver calls it only when the pingable set cannot answer on its own, so
 // a mention of a pingable person never pays for resolving the project. A nil
-// scope means no project is in scope.
+// scope, or one that yields 0, means no project is in scope.
 type ProjectScope func(context.Context) (int64, error)
 
 // ScopeError reports that a mention's project scope could not be resolved.
@@ -103,6 +103,9 @@ func (r *Resolver) scopedAgents(ctx context.Context, scope ProjectScope) ([]Pers
 	projectID, err := scope(ctx)
 	if err != nil {
 		return nil, &ScopeError{Err: err}
+	}
+	if projectID == 0 {
+		return nil, nil
 	}
 	return r.getProjectAgents(ctx, projectID)
 }
