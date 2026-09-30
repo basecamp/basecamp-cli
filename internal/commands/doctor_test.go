@@ -393,6 +393,11 @@ func TestDoctorDoesNotCallAnUnreadableStoreAMissingLogin(t *testing.T) {
 	assert.Contains(t, check.Message, "Could not read stored credentials")
 	assert.NotContains(t, check.Message, "No credentials found")
 	assert.Empty(t, check.Hint, "an unreadable store must not prescribe another OAuth login")
+
+	checks := runDoctorChecks(context.Background(), app, false)
+	for _, crumb := range buildDoctorBreadcrumbs(checks, app.Auth.LoginCommand()) {
+		assert.NotEqual(t, "login", crumb.Action, "an unreadable store must not prescribe login through a breadcrumb either")
+	}
 }
 
 func TestDoctorLegacyKeyringProbeIsBounded(t *testing.T) {
