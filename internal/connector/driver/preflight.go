@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"os/exec"
 	"regexp"
 	"slices"
@@ -134,6 +135,7 @@ func RunProbe(ctx context.Context, cmd Command, timeout time.Duration) ProbeResu
 		ec.Env = []string{}
 	}
 	ec.WaitDelay = 2 * time.Second
+	probeInItsOwnGroup(ec)
 	var stdout, stderr limitedBuffer
 	stdout.max, stderr.max = probeOutputLimit, probeOutputLimit
 	ec.Stdout, ec.Stderr = &stdout, &stderr
@@ -146,7 +148,10 @@ func RunProbe(ctx context.Context, cmd Command, timeout time.Duration) ProbeResu
 	switch {
 	case ctx.Err() != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
 		out.TimedOut = true
-	case errors.Is(err, exec.ErrNotFound), errors.Is(err, fs.ErrNotExist) && ec.ProcessState == nil:
+	case errors.Is(err, exec.ErrNotFound), errors.Is(err, fs.ErrNotExist) && ec.ProcessState == nil && !isFile(ec.Path):
+		// Missing only when the program itself is: a program that is there
+		// but whose interpreter or loader is gone fails its exec with the
+		// same ENOENT, and is a program that can't start, not one PATH lacks.
 		out.NotFound = true
 		out.Err = err
 	case errors.As(err, &exitErr):
@@ -154,6 +159,11 @@ func RunProbe(ctx context.Context, cmd Command, timeout time.Duration) ProbeResu
 		out.Err = err
 	}
 	return out
+}
+
+func isFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 type limitedBuffer struct {

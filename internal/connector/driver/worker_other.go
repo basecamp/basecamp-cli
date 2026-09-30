@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os/exec"
 	"time"
 )
 
@@ -52,3 +53,7 @@ func LookupProcess(int) (Process, error) { return Process{}, errUnsupported }
 
 // TerminateRecorded does nothing off Unix.
 func TerminateRecorded(Process, time.Duration) (bool, error) { return false, errUnsupported }
+
+// probeInItsOwnGroup leaves the probe as it is off Unix, where the connector
+// doesn't run workers.
+func probeInItsOwnGroup(*exec.Cmd) {}

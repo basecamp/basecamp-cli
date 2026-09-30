@@ -2,7 +2,10 @@
 
 package driver
 
-import "syscall"
+import (
+	"os/exec"
+	"syscall"
+)
 
 // newProcessGroup makes the child the leader of a new process group, so the
 // whole tree it starts is signaled as one.
@@ -24,4 +27,15 @@ func signalGroup(pgid int, sig syscall.Signal) error {
 		return syscall.EINVAL
 	}
 	return syscall.Kill(-pgid, sig)
+}
+
+// probeInItsOwnGroup runs a probe as the leader of a group of its own, and
+// ends the whole group when its context does: a launcher that starts the real
+// worker as a child and waits must not leave that child behind when the
+// probe times out.
+func probeInItsOwnGroup(ec *exec.Cmd) {
+	ec.SysProcAttr = newProcessGroup()
+	ec.Cancel = func() error {
+		return signalGroup(ec.Process.Pid, syscall.SIGKILL)
+	}
 }

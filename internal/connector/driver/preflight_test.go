@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -160,4 +163,37 @@ func sprintfIf(format, arg string) string {
 		return fmt.Sprintf(format, arg)
 	}
 	return format
+}
+
+// A probe that times out ends its whole process tree: a launcher that started
+// the real worker as a child and waited must not leave that child running
+// (Codex on #794).
+func TestRunProbeEndsTheLaunchersChildrenWhenItTimesOut(t *testing.T) {
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "child.pid")
+	launcher := filepath.Join(dir, "claude")
+	require.NoError(t, os.WriteFile(launcher, []byte("#!/bin/sh\nsleep 60 &\necho $! > "+pidFile+"\nwait\n"), 0o700))
+
+	r := RunProbe(context.Background(), Command{Path: launcher, Dir: dir}, 300*time.Millisecond)
+	require.True(t, r.TimedOut)
+	raw, err := os.ReadFile(pidFile)
+	require.NoError(t, err)
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	require.NoError(t, err)
+	assert.Eventually(t, func() bool { return syscall.Kill(pid, 0) != nil }, 5*time.Second, 20*time.Millisecond, "the launcher's child is gone")
+}
+
+// A program that is on PATH but can't be run — its interpreter is gone — is
+// not reported as missing from PATH (Codex on #794).
+func TestRunProbeTellsAMissingInterpreterFromAMissingProgram(t *testing.T) {
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "claude")
+	require.NoError(t, os.WriteFile(launcher, []byte("#!/nonexistent/interpreter\n"), 0o700))
+
+	r := RunProbe(context.Background(), Command{Path: launcher, Dir: dir}, 5*time.Second)
+	assert.False(t, r.NotFound, "the program is there")
+	require.Error(t, r.Err)
+
+	missing := RunProbe(context.Background(), Command{Path: filepath.Join(dir, "absent"), Dir: dir}, 5*time.Second)
+	assert.True(t, missing.NotFound)
 }
