@@ -262,6 +262,29 @@ func TestALaunchThatWorkedDoesNotClearAHoldMadeByALaterFailure(t *testing.T) {
 	assert.Equal(t, ConnectionNotTakingWork, connectionOf(t, h.ledger).State)
 }
 
+// A failure that settles after a later launch worked says nothing about the
+// computer now: the worker has started since. It neither holds work nor
+// counts towards a hold (Codex on #794).
+func TestAFailureThatSettlesAfterALaterLaunchWorkedIsNotCounted(t *testing.T) {
+	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
+		o.Preflight = func(context.Context) driver.Preflight {
+			return driver.Preflight{Product: "Claude Code", Checks: []driver.PreflightCheck{{Name: driver.PreflightStarts,
+				Status: driver.PreflightFail, Message: "claude isn't on PATH"}}}
+		}
+	})
+	ctx := context.Background()
+	a, b := h.d.nextSeqForTest(), h.d.nextSeqForTest() // A and B launch together
+	h.d.startWorked(ctx, h.d.nextSeqForTest())         // C, launched after them, works
+	h.d.startFailed(ctx, "", a)                        // then A and B settle as failures
+	h.d.startFailed(ctx, "", b)
+	assert.False(t, h.d.startsHeld(), "C started after A and B launched")
+
+	h.d.startFailed(ctx, "", h.d.nextSeqForTest()) // one new failure is one, not three
+	assert.False(t, h.d.startsHeld())
+	h.d.startFailed(ctx, "", h.d.nextSeqForTest())
+	assert.True(t, h.d.startsHeld())
+}
+
 // Two starts in a row that never ran hold new work: the next record waits,
 // admitted, and the connector says so once, with the fix. A restart takes
 // work again.

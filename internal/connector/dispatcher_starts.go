@@ -52,6 +52,10 @@ type startRecord struct {
 	// failed are the launch seqs of attempts in a row whose worker never
 	// picked its request up.
 	failed []uint64
+	// workedThrough is the latest launch whose worker picked its request up.
+	// A failure launched before it settled late: the computer has started a
+	// worker since, so it counts for nothing.
+	workedThrough uint64
 	// held is whether new work is held.
 	held bool
 	// checkAt is when a held dispatcher next checks the worker, and checking
@@ -97,6 +101,7 @@ func workerNeverStarted(s Settlement) bool {
 
 func (d *Dispatcher) startWorked(ctx context.Context, seq uint64) {
 	d.mu.Lock()
+	d.starts.workedThrough = max(d.starts.workedThrough, seq)
 	// Failures launched after this one say the computer changed since it
 	// started: they stand, and so does any hold they made. Only failures
 	// launched before it are answered by it.
@@ -112,7 +117,7 @@ func (d *Dispatcher) startWorked(ctx context.Context, seq uint64) {
 		return
 	}
 	wasHeld := d.starts.held
-	d.starts = startRecord{checkEvery: d.opts.HoldCheck}
+	d.starts = startRecord{workedThrough: d.starts.workedThrough, checkEvery: d.opts.HoldCheck}
 	d.mu.Unlock()
 	if wasHeld {
 		d.takeWorkAgain(ctx, "the worker started")
@@ -121,6 +126,10 @@ func (d *Dispatcher) startWorked(ctx context.Context, seq uint64) {
 
 func (d *Dispatcher) startFailed(ctx context.Context, said string, seq uint64) {
 	d.mu.Lock()
+	if seq <= d.starts.workedThrough {
+		d.mu.Unlock()
+		return
+	}
 	d.starts.failed = append(d.starts.failed, seq)
 	hold := len(d.starts.failed) >= StartFailuresToHold && !d.starts.held
 	if hold {
