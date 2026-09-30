@@ -71,9 +71,11 @@ func homeFolder() string {
 	return ""
 }
 
+// reachable reports whether path is a folder that can be looked at: a home
+// that is a file, or can't be read, can't be compared with.
 func reachable(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // accountHomeFolder reads the home folder from the account's record. A

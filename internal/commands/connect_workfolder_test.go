@@ -250,3 +250,17 @@ func TestWorkFolderCheckAcceptsAPathAtTheLengthLimit(t *testing.T) {
 	c := workFolderCheck()
 	assert.Equal(t, setup.StatusPass, c.Status, c.Message)
 }
+
+// A HOME that names a file isn't a home folder: the account's record decides.
+func TestWorkFolderCheckIgnoresAHomeThatIsAFile(t *testing.T) {
+	home := t.TempDir()
+	file := filepath.Join(t.TempDir(), "not-a-folder")
+	require.NoError(t, os.WriteFile(file, nil, 0o600))
+	setHome(t, file)
+	accountHome(t, home, nil)
+	t.Chdir(home)
+
+	c := workFolderCheck()
+	assert.Equal(t, setup.StatusWarn, c.Status)
+	assert.Contains(t, c.Message, currentFolder(t)+", your home folder")
+}
