@@ -19,3 +19,19 @@ FLAG basecamp todos create --content
 FLAG basecamp cards create --title
 FLAG basecamp messages create --subject
 FLAG basecamp webhooks create --url
+# Hidden for now; the skills still describe it.
+CMD basecamp connect
+CMD basecamp connect setup
+FLAG basecamp --operator-profile
+FLAG basecamp --serve
+FLAG basecamp --shadow
+FLAG basecamp --worker
+CMD basecamp connect discard
+CMD basecamp connect doctor
+CMD basecamp connect import
+CMD basecamp connect redispatch
+CMD basecamp connect release
+CMD basecamp connect shadow promote
+CMD basecamp connect show
+CMD basecamp connect status
+FLAG basecamp --unserve

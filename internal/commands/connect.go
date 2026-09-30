@@ -32,8 +32,10 @@ import (
 func NewConnectCmd() *cobra.Command {
 	var run connectRunFlags
 	cmd := &cobra.Command{
-		Use:   "connect",
-		Short: "Run a local agent connector for a Basecamp agent",
+		Use: "connect",
+		// Hidden for now.
+		Hidden: true,
+		Short:  "Run a local agent connector for a Basecamp agent",
 		Long: `Run a local agent connector: it listens to the account event feed as a
 Basecamp agent, admits what a trusted person asks of that agent, and hands
 the work to a local coding agent that replies in Basecamp as the agent.

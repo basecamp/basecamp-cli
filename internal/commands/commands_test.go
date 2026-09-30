@@ -16,8 +16,10 @@ func TestCatalogMatchesRegisteredCommands(t *testing.T) {
 
 	// Get registered command names
 	registered := make(map[string]bool)
+	hidden := make(map[string]bool)
 	for _, cmd := range root.Commands() {
 		registered[cmd.Name()] = true
+		hidden[cmd.Name()] = cmd.Hidden
 	}
 	// Get catalog command names
 	catalog := make(map[string]bool)
@@ -33,10 +35,11 @@ func TestCatalogMatchesRegisteredCommands(t *testing.T) {
 		}
 	}
 
-	// Find commands registered but not in catalog
+	// Find commands registered but not in catalog. A hidden command need not
+	// be listed, as it is not in help.
 	var missingFromCatalog []string
 	for name := range registered {
-		if !catalog[name] {
+		if !catalog[name] && !hidden[name] {
 			missingFromCatalog = append(missingFromCatalog, name)
 		}
 	}
