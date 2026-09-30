@@ -1632,6 +1632,28 @@ func TestChatLineURLTargetsItsRoom(t *testing.T) {
 	}
 }
 
+// TestChatLineRefusesARoomsLinesURL verifies that a room's line-collection URL,
+// which parses with the room's ID where a line's belongs, is refused before
+// any request rather than read as line {c} (Copilot on #807).
+func TestChatLineRefusesARoomsLinesURL(t *testing.T) {
+	for _, args := range [][]string{
+		{"line", "https://3.basecamp.com/99999/buckets/123/chats/789/lines"},
+		{"delete", "https://3.basecamp.com/99999/buckets/123/chats/789/lines", "--force"},
+	} {
+		t.Run(args[0], func(t *testing.T) {
+			t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+			transport := &mockTwoRoomChatTransport{}
+			app, _ := newChatDeleteTestApp(transport)
+
+			err := executeChatCommand(NewChatCmd(), app, args...)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "expected a chat-line ID or URL")
+			assert.Empty(t, transport.linePaths)
+		})
+	}
+}
+
 // TestChatLineBareIDInMultiRoomProjectNeedsRoom verifies that a bare line ID
 // still refuses to guess between two rooms: only a URL or --room names one.
 func TestChatLineBareIDInMultiRoomProjectNeedsRoom(t *testing.T) {
