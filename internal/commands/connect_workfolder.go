@@ -18,10 +18,11 @@ func workFolderCheck() setup.Check {
 	c := setup.Check{Name: "Work folder"}
 	dir, err := os.Getwd()
 	if err == nil {
-		// Workers open the folder by its path (cmd.Dir), and a path can come
-		// back from getcwd that can no longer be reached, say when a parent
-		// lost its search permission after the shell went in.
-		_, err = os.Stat(dir)
+		// Workers enter the folder by its path (cmd.Dir), and getcwd can
+		// return a path that can no longer be entered: a parent, or the
+		// folder itself, lost its search permission after the shell went in.
+		// "dir/." is only reachable through a folder that can be entered.
+		_, err = os.Stat(dir + string(filepath.Separator) + ".")
 	}
 	if err != nil {
 		// The connector can't start without it (connector.NewDispatcher).

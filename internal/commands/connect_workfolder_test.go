@@ -195,3 +195,24 @@ func TestWorkFolderCheckFailsWhenThePathCantBeReached(t *testing.T) {
 	c := workFolderCheck()
 	assert.Equal(t, setup.StatusFail, c.Status)
 }
+
+// A folder that can no longer be entered is one no worker can start in, even
+// if the shell is still inside it.
+func TestWorkFolderCheckFailsWhenTheFolderCantBeEntered(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions")
+	}
+	setHome(t, t.TempDir())
+	work := filepath.Join(t.TempDir(), "work")
+	require.NoError(t, os.Mkdir(work, 0o700))
+	t.Chdir(work)
+	t.Setenv("PWD", "")
+	require.NoError(t, os.Chmod(work, 0o600))
+	t.Cleanup(func() { _ = os.Chmod(work, 0o700) })
+	if _, err := os.Stat(work + "/."); err == nil {
+		t.Skip("permissions aren't enforced here (running as root?)")
+	}
+
+	c := workFolderCheck()
+	assert.Equal(t, setup.StatusFail, c.Status)
+}
