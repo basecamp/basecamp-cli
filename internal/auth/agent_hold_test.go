@@ -356,6 +356,10 @@ func TestAHoldTooFarOutIsNotBelieved(t *testing.T) {
 		"a day out":                     {Kind: mintHoldRateLimited, Until: time.Now().Add(24 * time.Hour).Unix()},
 		"a kind unknown":                {Kind: "something_newer"},
 		"a rate limit with no deadline": {Kind: mintHoldRateLimited},
+		// Only invalid_client is held forever; any other refusal that
+		// lost its deadline would otherwise never be rechecked.
+		"a reversible refusal with no deadline": {Kind: mintHoldRefused, Detail: "token error: invalid_grant"},
+		"a bare 401 with no deadline":           {Kind: mintHoldRefused, Detail: "the server answered HTTP 401"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := startMintEndpoint(t)

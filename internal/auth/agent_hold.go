@@ -79,6 +79,12 @@ const (
 // gets there.
 const agentRefusalRecheck = time.Hour
 
+// invalidClientDetail is the Detail of the one refusal held with no
+// recheck. A refusal read back without a deadline is believed only when it
+// says this: any other refusal can reverse, so one whose deadline was lost
+// is damaged, and holds nothing.
+const invalidClientDetail = "token error: invalid_client"
+
 // defaultAgentRateLimitHold is how long a 429 with no readable Retry-After
 // is held — the fallback the rest of the CLI takes for one (see
 // resilience.GatingHooks.OnRequestEnd).
@@ -113,8 +119,8 @@ type MintHold struct {
 	At int64 `json:"at"`
 
 	// Until is when the next mint may be sent, in Unix seconds, rounded
-	// up. Zero on a refusal means never with these client credentials; a
-	// rate limit without one is damaged, and holds nothing.
+	// up. Zero on an invalid_client refusal means never with these client
+	// credentials; any other hold without one is damaged, and holds nothing.
 	Until int64 `json:"until,omitempty"`
 }
 
@@ -197,15 +203,15 @@ func (m *Manager) heldMint(creds *Credentials) error {
 
 // holds reports whether a stored hold is one this version believes: about
 // these client credentials, of a kind it knows, and — where it expires —
-// expiring in the future and within maxAgentMintHold. A rate limit always
-// expires. Anything else is ignored, and the mint goes out.
+// expiring in the future and within maxAgentMintHold. Only an
+// invalid_client refusal never expires. Anything else is ignored, and the mint goes out.
 func (hold *MintHold) holds(creds *Credentials, now time.Time) bool {
 	if hold == nil || hold.Client != agentClientFingerprint(creds.ClientID, creds.ClientSecret) {
 		return false
 	}
 	switch {
 	case hold.Kind == mintHoldRefused && hold.Until == 0:
-		return true
+		return hold.Detail == invalidClientDetail
 	case hold.Kind == mintHoldRefused, hold.Kind == mintHoldRateLimited:
 		until := time.Unix(hold.Until, 0)
 		return hold.Until > 0 && now.Before(until) && until.Sub(now) <= maxAgentMintHold
