@@ -29,6 +29,8 @@ all current and scheduled Bubble Ups.`,
 			"agent_notes": "Account-wide notifications — no --in <project> needed.\n" +
 				"Returns unreads and reads sections, plus bubble_ups/scheduled_bubble_ups (BC5) or memories (BC4).\n" +
 				"Use 'read' with notification IDs to mark as read.\n" +
+				"The server returns at most 100 unreads: unreads_capped: true means there are more than the list holds.\n" +
+				"--page pages through read notifications only; every page repeats the same unreads.\n" +
 				"Use 'bubbleups' (BC5) for the full bubble-ups list; 'list --limit-bubble-ups' caps inline bubble-ups at 2.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -54,6 +56,10 @@ func newNotificationsListCmd() *cobra.Command {
 		Short: "List notifications",
 		Long: `List notifications (same as bare 'notifications').
 
+The server returns at most 100 unread notifications, so a full list shows as
+"100+ unread". --page pages through read notifications only; every page
+repeats the same unreads.
+
 With --limit-bubble-ups, caps the inline bubble_ups list at 2 and omits
 scheduled_bubble_ups (the totals are still reported). Use
 'basecamp notifications bubbleups' to page through the full list.`,
@@ -62,7 +68,7 @@ scheduled_bubble_ups (the totals are still reported). Use
 		},
 	}
 
-	cmd.Flags().Int32Var(&page, "page", 0, "Page number (default: first page)")
+	cmd.Flags().Int32Var(&page, "page", 0, "Page of read notifications only; unreads are the same on every page (default: first page)")
 	cmd.Flags().BoolVar(&limitBubbleUps, "limit-bubble-ups", false, "Cap inline bubble-ups at 2 and omit scheduled bubble-ups (BC5)")
 
 	return cmd
@@ -102,9 +108,14 @@ func runNotificationsList(cmd *cobra.Command, page int32, limitBubbleUps bool) e
 		resurfaced = len(result.Memories)
 	}
 	total := len(result.Unreads) + len(result.Reads) + resurfaced + scheduled
-	summary := fmt.Sprintf("%d notification(s)", total)
+	unreadsCapped := len(result.Unreads) >= maxNotificationUnreads
+	floor := ""
+	if unreadsCapped {
+		floor = "+"
+	}
+	summary := fmt.Sprintf("%d%s notification(s)", total, floor)
 	if len(result.Unreads) > 0 {
-		summary += fmt.Sprintf(" (%d unread)", len(result.Unreads))
+		summary += fmt.Sprintf(" (%d%s unread)", len(result.Unreads), floor)
 	}
 	if limitBubbleUps {
 		// The bubble_ups array is capped at 2 and scheduled_bubble_ups is
@@ -145,7 +156,7 @@ func runNotificationsList(cmd *cobra.Command, page int32, limitBubbleUps bool) e
 		{
 			Action:      "next",
 			Cmd:         nextCmd,
-			Description: "Next page",
+			Description: "Next page of read notifications",
 		},
 	}
 	if limitBubbleUps {
@@ -156,10 +167,29 @@ func runNotificationsList(cmd *cobra.Command, page int32, limitBubbleUps bool) e
 		})
 	}
 
-	return app.OK(result,
+	opts := []output.ResponseOption{
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(breadcrumbs...),
-	)
+	}
+	if unreadsCapped {
+		opts = append(opts, output.WithNotice(fmt.Sprintf(
+			"Showing the first %d unread notifications; the server returns no more than that, and --page does not reach the rest",
+			maxNotificationUnreads)))
+	}
+	return app.OK(notificationsListResult{NotificationsResult: result, UnreadsCapped: unreadsCapped}, opts...)
+}
+
+// maxNotificationUnreads is the server's cap on the unreads a readings request
+// returns (MAX_UNREADS in bc3's My::ReadingsController). A list this long is a
+// floor, not a count, and no page parameter reaches past it.
+const maxNotificationUnreads = 100
+
+// notificationsListResult is the SDK result with one field added: whether the
+// unreads list hit the server cap. Embedding keeps every existing field at the
+// top level of the JSON unchanged.
+type notificationsListResult struct {
+	*basecamp.NotificationsResult
+	UnreadsCapped bool `json:"unreads_capped"`
 }
 
 func newNotificationsReadCmd() *cobra.Command {

@@ -1222,7 +1222,7 @@ blue, aqua, purple, gray, pink, brown.
 
 ```bash
 basecamp notifications --json                         # List (page 1)
-basecamp notifications list --page 2 --json           # Page 2
+basecamp notifications list --page 2 --json           # Page 2 of read notifications
 basecamp notifications read <id> --json               # Mark as read
 basecamp notifications read <id> <id> --page 2 --json # Mark from page 2
 basecamp notifications bubbleups --json               # All bubble-ups (BC5)
@@ -1230,6 +1230,11 @@ basecamp notifications list --limit-bubble-ups --json # Cap inline bubble-ups at
 ```
 
 **Note:** `read` resolves notification IDs from the specified page. Use `--page` to match the page you listed.
+
+**Unreads are capped at 100.** The server returns at most 100 unread
+notifications, and `--page` pages through read notifications only — every page
+repeats the same unreads. When the list is full, the summary says "100+ unread"
+and `.data.unreads_capped` is `true`; treat 100 as a floor, not a count.
 
 **Bubble Ups (BC5):** `bubbleups` lists all current and scheduled bubble-ups
 (paginated; `--page` fetches a single page). `list --limit-bubble-ups` keeps the
