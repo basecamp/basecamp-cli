@@ -441,7 +441,10 @@ that record or that step.
   worker failed to start twice in a row, the connector stops taking new work
   and status opens with "Not taking work:" and the reason. Explain the
   reason. New work waits and nothing is lost. The connector takes work again
-  once the worker starts cleanly, or when it restarts.
+  once the worker starts cleanly, or when it restarts. When the connector
+  stopped because the agent was disconnected in Basecamp or connected on
+  another computer, status opens with "Disconnected:"; `basecamp connect setup
+  -P '<profile>'` reconnects it.
 - `basecamp connect doctor -P '<profile>'`: token, identity, ticket mint, feed
   poll, the ledger, the worker (started as the connector would start it, and
   asked whether it knows the connector's flags and is logged in, with no model

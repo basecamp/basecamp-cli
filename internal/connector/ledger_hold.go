@@ -508,6 +508,10 @@ const (
 	// A second signal or a crash leaves the last state standing, so status
 	// reads this beside the instance lock's holder rather than instead of it.
 	ConnectionStopped = "stopped"
+	// ConnectionDisconnected is a connector that stopped because Basecamp
+	// refused the agent's credential: the agent was disconnected in Basecamp,
+	// or connected on another computer. Its detail says so, for the person.
+	ConnectionDisconnected = "disconnected"
 )
 
 // NoteConnection records the running connector's connection state, for

@@ -425,9 +425,10 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		os.Exit(connector.ExitCodeForSignal(sig))
 	}()
 
+	stopState, stopDetail := connector.ConnectionStopped, ""
 	defer func() {
 		// Whatever ended the run, status says it is not running any more.
-		_ = ledger.NoteConnection(context.WithoutCancel(ctx), connector.ConnectionStopped, "")
+		_ = ledger.NoteConnection(context.WithoutCancel(ctx), stopState, stopDetail)
 	}()
 	logger.Info("connector: running", "profile", richtext.SanitizeSingleLine(name), "account", account,
 		"agent_person_id", agentID, "shadow", f.shadow, "projects", len(buckets), "state", richtext.SanitizeSingleLine(stateDir))
@@ -504,11 +505,45 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	case sig == syscall.SIGTERM:
 		return output.ErrTerminated("connector terminated")
 	case firstErr != nil:
-		return firstErr
+		var err error
+		stopState, stopDetail, err = connectorStoppedBy(firstErr, me.Name, name)
+		if err != firstErr { //nolint:errorlint // identity: was firstErr put in the person's words
+			logger.Error("connector: Basecamp refused the agent's credential", "error", firstErr)
+		}
+		return err
 	case ctx.Err() != nil:
 		return ctx.Err()
 	}
 	return nil
+}
+
+// connectorStoppedBy is what the connector exits with when one of its parts
+// stopped it with err, and the connection state status keeps for that. The
+// stop people meet — the agent was disconnected in Basecamp, or connected on
+// another computer — is said in their words; anything else is returned as it
+// is.
+func connectorStoppedBy(err error, agent, profile string) (state, detail string, exit error) {
+	if !feedRefusedTheAgent(err) {
+		return connector.ConnectionStopped, "", err
+	}
+	disconnected := errAgentDisconnected(agent, profile)
+	return connector.ConnectionDisconnected, disconnected.Message, disconnected
+}
+
+// feedRefusedTheAgent reports whether err is the event feed ending because
+// Basecamp refused the agent's credential.
+func feedRefusedTheAgent(err error) bool {
+	var terminal *eventfeed.TerminalError
+	return errors.As(err, &terminal) && terminal.Reason == eventfeed.ReasonAuthorizationFailed
+}
+
+// errAgentDisconnected says the connector stopped because its agent was
+// disconnected, in the words guided setup uses for the same thing, and how to
+// reconnect.
+func errAgentDisconnected(agent, profile string) *output.Error {
+	e := output.ErrAuth(richtext.SanitizeSingleLine(agent) + " was disconnected in Basecamp, or connected on another computer")
+	e.Hint = "Reconnect it: basecamp connect setup -P " + richtext.ShellQuote(profile)
+	return e
 }
 
 // connectSinceOverride is the feed position --since asks for. Zero is the

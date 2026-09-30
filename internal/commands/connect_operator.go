@@ -344,6 +344,9 @@ func connectStatusSummary(r connectStatusReport) string {
 	if _, ok := notTakingWork(r.Status); ok {
 		parts = append(parts, "not taking work")
 	}
+	if c := r.Status.Connection; c != nil && c.State == connector.ConnectionDisconnected {
+		parts = append(parts, "disconnected")
+	}
 	if r.Status.Hold != nil {
 		parts = append(parts, "held")
 	}
@@ -365,6 +368,9 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 	fmt.Fprintf(w, "%s\n\n", title)
 	if why, ok := notTakingWork(s); ok {
 		fmt.Fprintf(w, "  Not taking work: %s. %s\n\n", clean(why), connector.NotTakingWorkFix)
+	}
+	if s.Connection != nil && s.Connection.State == connector.ConnectionDisconnected {
+		fmt.Fprintf(w, "  Disconnected: %s. Reconnect it: basecamp connect setup -P %s\n\n", clean(s.Connection.Detail), richtext.ShellQuote(r.name()))
 	}
 
 	switch {
