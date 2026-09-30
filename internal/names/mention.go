@@ -61,12 +61,23 @@ func (r *Resolver) ResolveMentionByName(ctx context.Context, input string, scope
 		agents = nil
 	}
 
+	// Agents with the same name, ignoring case, are ambiguous even when one
+	// matches exactly: resolve would pick the first, and the other is as
+	// much the agent meant.
+	var namesakes []Person
+	for _, a := range agents {
+		if strings.EqualFold(a.Name, input) {
+			namesakes = append(namesakes, a)
+		}
+	}
+	if len(namesakes) > 1 {
+		return nil, ambiguousPeople(namesakes)
+	}
+
 	agent, agentMatches := resolve(input, agents, personIDName)
 	switch {
-	case agent != nil && strings.EqualFold(agent.Name, input):
-		return agent, nil
-	case len(agentMatches) > 1 && strings.EqualFold(agentMatches[0].Name, input):
-		return nil, ambiguousPeople(agentMatches)
+	case len(namesakes) == 1:
+		return &namesakes[0], nil
 	case match != nil:
 		return match, nil
 	case len(matches) > 1:

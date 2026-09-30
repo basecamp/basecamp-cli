@@ -281,3 +281,17 @@ func TestResolveMentionByNameScopeErrorBeatsAPartialPersonMatch(t *testing.T) {
 	var se *ScopeError
 	require.True(t, errors.As(err, &se), "got %v", err)
 }
+
+func TestResolveMentionByNameSameNamedAgentsAreAmbiguous(t *testing.T) {
+	for _, second := range []string{"Quincy", "quincy"} {
+		t.Run(second, func(t *testing.T) {
+			r, s := newMentionFixture(t)
+			s.project["123"] = append(s.project["123"], person(8, second, "sgid-quincy-2", "Agent"))
+
+			_, err := r.ResolveMentionByName(context.Background(), "Quincy", inProject(123))
+			var outErr *output.Error
+			require.True(t, errors.As(err, &outErr), "got %v", err)
+			assert.Equal(t, output.CodeAmbiguous, outErr.Code)
+		})
+	}
+}
