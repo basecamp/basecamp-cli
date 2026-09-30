@@ -1166,6 +1166,10 @@ func (d *Dispatcher) release(ctx context.Context, launch Launch, worker driver.P
 	d.wg.Go(func() { d.adopt(ctx, settlement) })
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptEnded), StopReason: string(end.Stop)})
 	if run != nil {
+		// Whether the worker started is noted while its slot is still taken:
+		// freed first, a pass could launch into the gap before a second
+		// failure's hold was set (Codex on #794).
+		d.noteStart(ctx, settlement, run.said, run.seq)
 		d.forget(launch.AttemptID)
 	}
 	return settlement, true
@@ -1276,6 +1280,8 @@ type taskRun struct {
 	refusals *refusalRecorder
 	// seq is the launch's place in the order launches were made.
 	seq uint64
+	// said is what the worker said last, for a hold's reason.
+	said string
 }
 
 // supervise prompts the worker, delivers follow-ups, and settles the attempt
@@ -1332,11 +1338,10 @@ func (r *taskRun) supervise(ctx context.Context) {
 	}
 
 	// Through the one release point: it confirms the worker's group is gone
-	// before the attempt is settled.
-	settlement, settled := d.release(settleCtx, r.launch, r.session.Process(), taker, AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, UnrecordedRefusals: unrecorded}, r)
-	if settled {
-		d.noteStart(settleCtx, settlement, said, r.seq)
-	}
+	// before the attempt is settled, and notes whether the worker started
+	// before its slot is given back.
+	r.said = said
+	d.release(settleCtx, r.launch, r.session.Process(), taker, AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, UnrecordedRefusals: unrecorded}, r)
 }
 
 // promptLoop runs turns until there is nothing left to prompt or the attempt

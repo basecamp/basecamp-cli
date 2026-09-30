@@ -306,6 +306,35 @@ func TestTwoFailedStartsInARowHoldNewWork(t *testing.T) {
 	<-restarted.made
 }
 
+// The second failure's hold is set while its worker still takes its slot, so
+// no pass can launch into the gap between the slot freeing and the hold
+// (Codex on #794). The hold's own check runs inside that window, and sees it.
+func TestAFailedWorkerKeepsItsSlotUntilItsFailureIsCounted(t *testing.T) {
+	fake := newFakeDriver()
+	var h *dispatchHarness
+	fake.turn = failingBeforePickUp(t, &h, 2)
+	var slotTaken atomic.Bool
+	var holdChecked atomic.Bool
+	h = newDispatchHarness(t, fake, func(o *DispatcherOptions) {
+		o.Concurrency = 1
+		o.Preflight = func(context.Context) driver.Preflight {
+			if h != nil && h.d.startsHeld() && !holdChecked.Swap(true) {
+				h.d.mu.Lock()
+				slotTaken.Store(len(h.d.live) > 0)
+				h.d.mu.Unlock()
+			}
+			return driver.Preflight{Product: "Claude Code"}
+		}
+	})
+	for id := int64(1); id <= 3; id++ {
+		admitOn(t, h.ledger, id, fmt.Sprintf("recording:%d", id))
+	}
+	stop := h.run(t)
+	require.Eventually(t, holdChecked.Load, 10*time.Second, 10*time.Millisecond)
+	stop()
+	assert.True(t, slotTaken.Load(), "the failed worker's slot was given back before its failure held work")
+}
+
 // A worker whose session ends before it asks for its request did not start
 // either, though a process existed: two in a row hold new work, and the
 // preflight's reason is the one given. A check that passes takes work again.
