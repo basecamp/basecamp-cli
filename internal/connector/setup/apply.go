@@ -119,6 +119,17 @@ func Apply(f File, ch Changes) (File, error) {
 	return out, nil
 }
 
+// CheckDangerousOperator refuses a new operator while dangerous mode is on:
+// the person whose requests run with a shell would change without anyone
+// having turned it on for them. A first setup, with no operator yet, is not a
+// change. Setup calls it once the operator is resolved.
+func CheckDangerousOperator(before, after File) error {
+	if after.Dangerous && before.Trust.OperatorID != 0 && after.Trust.OperatorID != before.Trust.OperatorID {
+		return ErrDangerousOperatorChange
+	}
+	return nil
+}
+
 func applyTrust(t *admission.Trust, ch Changes) error {
 	mode := ch.Trust
 	if len(ch.Allow) > 0 {

@@ -6,6 +6,11 @@ import "errors"
 // the agent work.
 var ErrDangerousShared = errors.New("dangerous mode is only for an agent that you alone can give work to")
 
+// ErrDangerousOperatorChange is a new operator while dangerous mode is on:
+// the person whose requests run with a shell would change without anyone
+// turning it on for them.
+var ErrDangerousOperatorChange = errors.New("the operator can't change while dangerous mode is on")
+
 // ErrDangerousWhileShared is letting other people give the agent work while
 // dangerous mode is on.
 var ErrDangerousWhileShared = errors.New("other people can't be allowed to give your agent work while dangerous mode is on")

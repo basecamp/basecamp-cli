@@ -794,7 +794,8 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 	}
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptRunning)})
 
-	run := &taskRun{d: d, launch: launch, record: record, session: session, cleanup: cleanup, log: log, refusals: refusals, tokens: tokens, seq: seq}
+	run := &taskRun{d: d, launch: launch, record: record, session: session, cleanup: cleanup, log: log, refusals: refusals, tokens: tokens, seq: seq,
+		dangerous: cfg.Policy.Rules().Mode == driver.ModeAnything}
 	d.mu.Lock()
 	d.live[launch.AttemptID] = run
 	d.mu.Unlock()
@@ -1282,6 +1283,8 @@ type taskRun struct {
 	seq uint64
 	// said is what the worker said last, for a hold's reason.
 	said string
+	// dangerous is whether the worker was started in dangerous mode.
+	dangerous bool
 }
 
 // supervise prompts the worker, delivers follow-ups, and settles the attempt
@@ -1396,6 +1399,14 @@ func (r *taskRun) promptLoop(ctx context.Context, deadline, stillRunning <-chan 
 // one of its readings of the file and not instantly — invariant 2, and the
 // paragraph below.
 func (r *taskRun) nextFollowUp(ctx context.Context) (int64, bool, error) {
+	// A worker started in dangerous mode is handed nothing more once the
+	// owner has turned it off: what it is doing now finishes as it started,
+	// and nothing new reaches it with a shell.
+	if r.dangerous && r.d.opts.Policy().Rules().Mode != driver.ModeAnything {
+		r.log.Warn("connector: dangerous mode was turned off; no more instructions are handed to this worker, which was started with it",
+			"task_id", r.launch.TaskID)
+		return 0, false, nil
+	}
 	// Once, and the same set all the way down: the check, and the join it
 	// authorizes. Read twice, the cache could turn over in between and the
 	// two could disagree.

@@ -612,6 +612,9 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		next.Agent.IdentityID = expect
 	}
 	next.Trust.OperatorID = trust.Operator.ID
+	if err := setup.CheckDangerousOperator(existing, next); err != nil {
+		return refusedChange(cmd.ErrOrStderr(), name, err)
+	}
 	if err := next.Validate(); err != nil {
 		return output.ErrUsage("connect.json was not written: " + err.Error())
 	}
@@ -672,6 +675,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		return classifyWriteError(name, saveErr)
 	}
 	report.Written = true
+	noteDangerousChange(cmd.ErrOrStderr(), existing, next, name)
 
 	summary := summarizeChecks(asDoctorChecks(report.Checks()))
 	if !report.Ready() {

@@ -140,18 +140,65 @@ func TestConnectStatusSaysWhenDangerousModeIsOn(t *testing.T) {
 	assert.NotContains(t, out.String(), "Dangerous")
 }
 
-// A launch runs in dangerous mode only while connect.json says so and the
-// connector was started with its owner alone trusted: trust is read once, at
-// start, so a connector admitting others never gets a shell for their work.
-func TestDangerousLaunchesNeedAConnectorStartedForItsOwnerAlone(t *testing.T) {
+// A launch runs in dangerous mode only while this run may use it at all and
+// connect.json says so now: turning it off takes effect at the next launch.
+func TestDangerousLaunchesFollowTheFileWithinWhatTheRunAllows(t *testing.T) {
 	fileOn := true
 	file := func() bool { return fileOn }
 
-	assert.True(t, dangerousLaunches(admission.TrustOperator, file)())
-	assert.False(t, dangerousLaunches(admission.TrustProject, file)(), "started trusting the project")
-	assert.False(t, dangerousLaunches(admission.TrustAllowlist, file)(), "started trusting others")
+	assert.True(t, dangerousLaunches(true, file)())
+	assert.False(t, dangerousLaunches(false, file)(), "a run that may not use it never does")
 
-	launches := dangerousLaunches(admission.TrustOperator, file)
+	launches := dangerousLaunches(true, file)
 	fileOn = false
 	assert.False(t, launches(), "turning it off takes effect at the next launch")
+}
+
+// A run may use dangerous mode only when connect.json has it on, trusts the
+// operator alone, and nobody else's request is still waiting from an earlier
+// run.
+func TestDangerousModeIsAllowedOnlyForARunWithNothingOfOthersWaiting(t *testing.T) {
+	ledger, err := connector.OpenLedger(t.TempDir() + "/state/connector.db")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ledger.Close() })
+	ctx := t.Context()
+
+	file := setup.File{Dangerous: true, Trust: admission.Trust{Mode: admission.TrustOperator, OperatorID: 111}}
+	allowed, err := dangerousAllowedThisRun(ctx, ledger, file)
+	require.NoError(t, err)
+	assert.True(t, allowed)
+
+	off := file
+	off.Dangerous = false
+	allowed, err = dangerousAllowedThisRun(ctx, ledger, off)
+	require.NoError(t, err)
+	assert.False(t, allowed)
+
+	shared := file
+	shared.Trust.Mode = admission.TrustProject
+	allowed, err = dangerousAllowedThisRun(ctx, ledger, shared)
+	require.NoError(t, err)
+	assert.False(t, allowed)
+}
+
+// With dangerous mode on, the operator can't change without turning it off:
+// the person whose requests run with a shell would otherwise change without
+// anyone having turned it on for them.
+func TestTheOperatorCantChangeWhileDangerousModeIsOn(t *testing.T) {
+	before := setup.File{Dangerous: true, Trust: admission.Trust{Mode: admission.TrustOperator, OperatorID: 111}}
+	after := before
+	after.Trust.OperatorID = 222
+	require.ErrorIs(t, setup.CheckDangerousOperator(before, after), setup.ErrDangerousOperatorChange)
+
+	var out bytes.Buffer
+	err := refusedChange(&out, "agent", setup.ErrDangerousOperatorChange)
+	var e *output.Error
+	require.ErrorAs(t, err, &e)
+	assert.Contains(t, e.Message, "the person who can give your agent work can't change")
+	assert.Contains(t, e.Hint, "--dangerous=false")
+
+	after.Dangerous = false
+	require.NoError(t, setup.CheckDangerousOperator(before, after), "turned off in the same run")
+	first := setup.File{}
+	require.NoError(t, setup.CheckDangerousOperator(first, before), "a first setup has no operator to change")
 }

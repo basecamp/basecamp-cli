@@ -627,3 +627,18 @@ FROM task_events WHERE task_id = ? ORDER BY event_id`, taskID)
 	}
 	return out, rows.Err()
 }
+
+// UnfinishedFromOthers counts the records not yet finished that someone other
+// than operatorID asked for: admitted, queued, blocked, held or dispatched,
+// by the person admission trusted at the gate (the performer, else the
+// creator). A record only seen is judged again under the trust the
+// connector runs with now, so it isn't counted.
+func (l *Ledger) UnfinishedFromOthers(ctx context.Context, operatorID int64) (int, error) {
+	var n int
+	err := l.db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM events
+WHERE state IN (?, ?, ?, ?, ?)
+  AND COALESCE(performed_by_id, creator_id) <> ?`,
+		string(StateAdmitted), string(StateQueued), string(StateBlocked), string(StateHeld), string(StateDispatched), operatorID).Scan(&n)
+	return n, err
+}
