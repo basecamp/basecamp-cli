@@ -87,7 +87,7 @@ func pickedUp(s Settlement) bool {
 
 func workerNeverStarted(s Settlement) bool {
 	for _, e := range s.Events {
-		if neverStarted(e, s.Stop) {
+		if neverStarted(e, s) {
 			return true
 		}
 	}

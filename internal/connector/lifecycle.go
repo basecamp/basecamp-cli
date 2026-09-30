@@ -243,7 +243,7 @@ func renderStillRunning(kind MessageKind, _ int64, attemptID string, occurrence 
 // a task of their own or withdrawn for their one automatic retry.
 func CompletionNeeded(s Settlement) bool {
 	for _, e := range s.Events {
-		if completionLine(e, s.Stop) != "" {
+		if completionLine(e, s) != "" {
 			return true
 		}
 	}
@@ -253,9 +253,9 @@ func CompletionNeeded(s Settlement) bool {
 // completionLine is what the notice says about one event; empty when it says
 // nothing. It is the notice's own sentence, so a notice about several events
 // reads as one short paragraph.
-func completionLine(e SettledEvent, stop StopReason) string {
+func completionLine(e SettledEvent, s Settlement) string {
 	switch {
-	case neverStarted(e, stop):
+	case neverStarted(e, s):
 		return "I couldn't start on this: something's wrong on the computer I run on."
 	case e.Withdrawn, e.Returned:
 		return ""
@@ -267,7 +267,7 @@ func completionLine(e SettledEvent, stop StopReason) string {
 	case e.Outcome == OutcomeFailed:
 		return "Something went wrong and I couldn't finish this."
 	case e.Outcome == OutcomeUnknown:
-		return unfinishedSentence(stop)
+		return unfinishedSentence(s.Stop)
 	case e.Outcome == OutcomeSucceeded && e.ReplyID == nil:
 		return "I finished this, but didn't post a reply."
 	}
@@ -290,8 +290,8 @@ func unfinishedSentence(stop StopReason) string {
 
 // retryable reports whether mentioning the agent again is worth suggesting: a
 // request that was not finished and that no person has already decided.
-func retryable(e SettledEvent, stop StopReason) bool {
-	if e.Decided || e.Withdrawn || e.Returned || neverStarted(e, stop) {
+func retryable(e SettledEvent, s Settlement) bool {
+	if e.Decided || e.Withdrawn || e.Returned || neverStarted(e, s) {
 		return false
 	}
 	return e.Outcome == OutcomeFailed || e.Outcome == OutcomeUnknown
@@ -303,8 +303,10 @@ func retryable(e SettledEvent, stop StopReason) bool {
 // same computer, so the notice asks its operator to look instead. A worker
 // that finished a turn without asking for its request ran; one that ran out
 // its deadline was running; and an exposure the connector itself interrupted,
-// by a shutdown or a crash, says it was interrupted.
-func neverStarted(e SettledEvent, stop StopReason) bool {
+// by a shutdown or a crash, says it was interrupted. So does a worker that
+// picked up another of the settlement's requests: it started, and what it
+// failed to get to is a follow-up it left unfinished.
+func neverStarted(e SettledEvent, s Settlement) bool {
 	switch {
 	case e.Blocked:
 		// A blocked record is also withdrawn from its task; blocked is what
@@ -315,7 +317,7 @@ func neverStarted(e SettledEvent, stop StopReason) bool {
 	case e.Outcome != OutcomeUnknown:
 		return false
 	}
-	return stop == StopFailed
+	return s.Stop == StopFailed && !pickedUp(s)
 }
 
 // renderCompletion is an attempt's completion notice, or "" when the
@@ -331,7 +333,7 @@ func renderCompletion(kind MessageKind, s Settlement) string {
 		operator  bool
 	)
 	for _, e := range s.Events {
-		line := completionLine(e, s.Stop)
+		line := completionLine(e, s)
 		if line == "" {
 			continue
 		}
@@ -339,8 +341,8 @@ func renderCompletion(kind MessageKind, s Settlement) string {
 			sentences = append(sentences, line)
 		}
 		ids = append(ids, strconv.FormatInt(e.EventID, 10))
-		retry = retry || retryable(e, s.Stop)
-		operator = operator || neverStarted(e, s.Stop)
+		retry = retry || retryable(e, s)
+		operator = operator || neverStarted(e, s)
 	}
 	lines := []string{strings.Join(sentences, " ")}
 	if operator {

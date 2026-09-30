@@ -221,6 +221,10 @@ func TestCompletionNoticeRule(t *testing.T) {
 		{name: "a worker that finished a turn without picking the request up", events: []SettledEvent{
 			{EventID: 1, Outcome: OutcomeUnknown},
 		}, want: "I stopped before I finished this.\nMention me again to try again.\n\nRef 1 · attempt att_x · " + sig},
+		{name: "a follow-up lost by a worker that had picked up the first request", stop: StopFailed, events: []SettledEvent{
+			{EventID: 1, Pulled: true, Outcome: OutcomeSucceeded, Reported: true, ReplyID: id64(5)},
+			{EventID: 2, Outcome: OutcomeUnknown},
+		}, want: "I stopped before I finished this.\nMention me again to try again.\n\nRef 2 · attempt att_x · " + sig},
 		{name: "never picked up and decided by a person", stop: StopFailed, events: []SettledEvent{
 			{EventID: 1, Outcome: OutcomeUnknown, Decided: true},
 		}, want: couldNotStart + "\n" + operatorChecks + "\n\nRef 1 · attempt att_x · " + sig},
