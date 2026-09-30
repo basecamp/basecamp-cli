@@ -135,6 +135,22 @@ func TestKeyringTimeoutIsAnErrorWithAnExplicitFileStorageRemedy(t *testing.T) {
 	assert.NotContains(t, keyringOperationError(context.DeadlineExceeded).Error(), "BASECAMP_NO_KEYRING")
 }
 
+// timedOutProbeFileStore is the file backend after a keyring probe timeout:
+// its failures carry the probe's deadline, but the keyring is not in use.
+type timedOutProbeFileStore struct{ fallenBackStore }
+
+func (*timedOutProbeFileStore) Load(string) ([]byte, error) {
+	return nil, fmt.Errorf("reading credentials.json: permission denied (%w)", keyringTimeoutForTest())
+}
+
+func TestFileStoreErrorsAfterAProbeTimeoutOmitTheFileStorageRemedy(t *testing.T) {
+	swapNewCredStore(t, func(credstore.StoreOptions) credStore { return &timedOutProbeFileStore{} })
+	store := NewStore(t.TempDir())
+	_, err := store.Load("work")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.NotContains(t, err.Error(), "BASECAMP_NO_KEYRING")
+}
+
 // captureStderr returns what the callback wrote to os.Stderr.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()

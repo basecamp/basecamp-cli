@@ -155,7 +155,7 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 	checks = append(checks, checkConfigFiles(app, verbose)...)
 
 	// 6. Credentials check
-	credCheck := checkCredentials(ctx, app, verbose)
+	credCheck, unreadable := checkStoredCredentials(ctx, app, verbose)
 	checks = append(checks, credCheck)
 
 	// 7. Authentication check (only if credentials exist)
@@ -164,6 +164,12 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 		authCheck := checkAuthentication(ctx, app, verbose)
 		checks = append(checks, authCheck)
 		canTestAPI = authCheck.Status == "pass" || authCheck.Status == "warn"
+	} else if unreadable {
+		checks = append(checks, Check{
+			Name:    "Authentication",
+			Status:  "skip",
+			Message: "Skipped (credentials could not be read)",
+		})
 	} else {
 		checks = append(checks, Check{
 			Name:    "Authentication",
@@ -701,6 +707,14 @@ func validateConfigFile(path, name string, verbose bool) Check {
 
 // checkCredentials checks for stored credentials.
 func checkCredentials(ctx context.Context, app *appctx.App, verbose bool) Check {
+	check, _ := checkStoredCredentials(ctx, app, verbose)
+	return check
+}
+
+// checkStoredCredentials is checkCredentials that also reports whether the
+// failure was a store that could not be read, as opposed to a missing or
+// unusable credential that a login would repair.
+func checkStoredCredentials(ctx context.Context, app *appctx.App, verbose bool) (Check, bool) {
 	check := Check{
 		Name: "Credentials",
 	}
@@ -709,7 +723,7 @@ func checkCredentials(ctx context.Context, app *appctx.App, verbose bool) Check 
 	if envToken := os.Getenv("BASECAMP_TOKEN"); envToken != "" {
 		check.Status = "pass"
 		check.Message = "Using BASECAMP_TOKEN environment variable"
-		return check
+		return check, false
 	}
 
 	// An unreadable store is not a missing login: preserve a keyring timeout
@@ -724,14 +738,15 @@ func checkCredentials(ctx context.Context, app *appctx.App, verbose bool) Check 
 			// A stored but unusable credential already carries the remedy
 			// for its kind; it is not a failure to read the store.
 			check.Message = problem.Message
+			return check, false
 		}
-		return check
+		return check, true
 	}
 	if !authenticated {
 		check.Status = "fail"
 		check.Message = "No credentials found"
 		check.Hint = app.Auth.LoginHint()
-		return check
+		return check, false
 	}
 
 	// Try to load credentials for details
@@ -741,7 +756,7 @@ func checkCredentials(ctx context.Context, app *appctx.App, verbose bool) Check 
 	if err != nil {
 		check.Status = "fail"
 		check.Message = "Could not read stored credentials: " + err.Error()
-		return check
+		return check, true
 	}
 
 	check.Status = "pass"
@@ -767,7 +782,7 @@ func checkCredentials(ctx context.Context, app *appctx.App, verbose bool) Check 
 			check.Message = credsPath
 		}
 	}
-	return check
+	return check, false
 }
 
 // checkAuthentication checks token validity.
@@ -1366,11 +1381,7 @@ func checkLegacyInstall(ctx context.Context) *Check {
 	// Skip when BASECAMP_NO_KEYRING is set (headless/CI environments)
 	if os.Getenv("BASECAMP_NO_KEYRING") == "" {
 		configDir := filepath.Join(configBase, "basecamp")
-		var timeout time.Duration
-		if runtime.GOOS == "linux" {
-			timeout = 10 * time.Second
-		}
-		if legacyKeyringEntryExists(ctx, collectKnownOrigins(configDir), timeout) {
+		if legacyKeyringEntryExists(ctx, collectKnownOrigins(configDir), legacyKeyringTimeout) {
 			found = append(found, "keyring(bcq::*)")
 		}
 	}
