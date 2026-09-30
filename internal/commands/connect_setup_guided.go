@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -397,6 +398,8 @@ func listAgentProjects(ctx context.Context, client *basecamp.AccountClient) ([]g
 // the guided setup has to make one: there is none, or the person chose to
 // set up afresh over one that cannot be used or names another agent.
 func guidedConnectFile(ctx context.Context, w io.Writer, r *output.Renderer, path string, agent guidedAgent) (*setup.File, error) {
+	// What the person is asked about, to move aside only if it is still that.
+	shown, _ := os.ReadFile(path)
 	existing, err := setup.Load(path)
 	var problem string
 	switch {
@@ -426,9 +429,18 @@ func guidedConnectFile(ctx context.Context, w io.Writer, r *output.Renderer, pat
 	defer unlock()
 	// Read again under the lock: another setup may have repaired the file
 	// while this one was asking, and a repaired file is resumed, not moved
-	// aside.
+	// aside. Any other change is another command's setup, perhaps for
+	// another agent, and isn't this one to move.
 	if again, err := setup.Load(path); err == nil && guidedFileFits(again, agent) {
 		return &again, nil
+	}
+	now, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil || !bytes.Equal(now, shown) {
+		return nil, output.ErrUsageHint("Your connector's settings (connect.json) were changed by another command while setup was asking, so nothing was changed",
+			runGuidedSetupAgain(agent.Profile))
 	}
 	aside := path + ".broken-" + time.Now().UTC().Format("20060102T150405Z")
 	if err := os.Rename(path, aside); err != nil {

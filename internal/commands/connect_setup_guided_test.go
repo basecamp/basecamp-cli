@@ -463,6 +463,41 @@ func TestGuidedConnectSetupLeavesARefusedCredentialThePersonKeeps(t *testing.T) 
 	assert.Equal(t, 1, s.intakeCount())
 }
 
+// A file another command replaced while this one was asking is someone
+// else's setup now, whatever agent it names: it isn't moved aside (Codex on
+// #794).
+func TestGuidedConnectSetupLeavesAFileReplacedWhileItAsked(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	ownedByTheOperator(s)
+	s.agentProjects = projectsNamed(setupProject)
+	path := connectSetupPath(t, "agent")
+	good, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var other map[string]any
+	require.NoError(t, json.Unmarshal(good, &other))
+	other["agent"].(map[string]any)["person_id"] = 424242 // reconnected to another agent meanwhile
+	replaced, err := json.Marshal(other)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, []byte("{"), 0o600))
+	guided(t, &scriptedPrompter{confirms: []bool{true}, onConfirm: func(string) {
+		require.NoError(t, os.WriteFile(path, replaced, 0o600))
+	}})
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"))
+	require.Error(t, err, out)
+	var apiErr *output.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Contains(t, apiErr.Message, "changed by another command while setup was asking")
+	assert.Equal(t, "Then run this again: basecamp connect setup -P agent", apiErr.Hint)
+	now, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, replaced, now, "the other command's file is left in place")
+	aside, err := filepath.Glob(path + ".broken-*")
+	require.NoError(t, err)
+	assert.Empty(t, aside)
+}
+
 // A connect.json that cannot be read is set aside and set up again, when
 // the person says so.
 func TestGuidedConnectSetupRebuildsABrokenConnectJSON(t *testing.T) {
