@@ -259,6 +259,65 @@ func TestGuidedConnectSetupChecksAnACPWorker(t *testing.T) {
 	assert.NotContains(t, out, "is set up on this computer")
 }
 
+// On a platform the connector doesn't run on, guided setup stops before it
+// connects anything: connecting would replace the secret a Linux computer may
+// be running this agent on, for a connector that can't run here (Codex on
+// #794).
+func TestGuidedConnectSetupRefusesAnUnsupportedPlatformBeforeConnecting(t *testing.T) {
+	s := startConnectSetupServer(t)
+	ownedByTheOperator(s)
+	s.agentProjects = projectsNamed(setupProject)
+	guided(t, &scriptedPrompter{})
+	connectServiceGOOS = "darwin"
+
+	out, err := runConnectSetupCmd(t, bareSetupApp(t, s, "agent"))
+	require.Error(t, err, out)
+	assert.Contains(t, err.Error(), "Linux only, not darwin")
+	assert.NotContains(t, out, "connect this computer")
+	assertNotWritten(t, "agent")
+}
+
+// A file another setup repaired while this one was asking is resumed, not
+// moved aside (Codex on #794).
+func TestGuidedConnectSetupResumesAFileRepairedWhileItAsked(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	ownedByTheOperator(s)
+	s.agentProjects = projectsNamed(setupProject)
+	path := connectSetupPath(t, "agent")
+	good, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, []byte("{"), 0o600))
+	guided(t, &scriptedPrompter{confirms: []bool{true}, onConfirm: func(string) {
+		require.NoError(t, os.WriteFile(path, good, 0o600)) // the other setup finishes first
+	}})
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"))
+	require.NoError(t, err, out)
+	assert.Contains(t, out, "is set up on this computer")
+	aside, err := filepath.Glob(path + ".broken-*")
+	require.NoError(t, err)
+	assert.Empty(t, aside, "the repaired file was not moved aside")
+}
+
+// With every project taken out of connect.json there is nowhere to try the
+// agent: the summary says so and how to add one (Codex on #794).
+func TestGuidedConnectSetupWithNoProjectsServedSaysHowToAddOne(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--unserve", strconv.FormatInt(setupProject, 10))
+	require.NoError(t, err, out)
+	ownedByTheOperator(s)
+	s.agentProjects = projectsNamed(setupProject)
+	guided(t, &scriptedPrompter{})
+
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"))
+	require.NoError(t, err, out)
+	assert.Contains(t, out, "Works in:  no projects")
+	assert.Contains(t, out, "basecamp connect setup -P agent --serve <project-id>")
+	assert.NotContains(t, out, "in one of those projects")
+}
+
 // Setup never offers the background service, which would run the agent in
 // the home directory, and never touches systemd: it says how to start the
 // agent in the folder it should work in.

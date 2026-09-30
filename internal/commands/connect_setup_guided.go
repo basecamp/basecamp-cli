@@ -97,6 +97,12 @@ func runGuidedConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupF
 	if os.Getenv("BASECAMP_TOKEN") != "" {
 		return errEnvTokenShadows("connect setup cannot check the agent while BASECAMP_TOKEN is set")
 	}
+	// Before anything is connected: connecting replaces the secret another
+	// computer may be running this agent on, for a connector this one
+	// can't run.
+	if !connectSupportedOS(connectServiceGOOS) {
+		return connectUnsupportedOSError(connectServiceGOOS)
+	}
 	name, err := guidedSetupProfile(ctx, app)
 	if err != nil {
 		return err
@@ -387,7 +393,7 @@ func guidedConnectFile(ctx context.Context, w io.Writer, r *output.Renderer, pat
 		return nil, nil
 	case err != nil:
 		problem = "Your connector's settings (connect.json) can't be used: " + setup.ErrorText(err)
-	case existing.Profile != agent.Profile, !accountIDsEqual(existing.AccountID, agent.AccountID), existing.Agent.PersonID != agent.Me.ID:
+	case !guidedFileFits(existing, agent):
 		problem = "Your connector's settings (connect.json) are for a different agent than the one this computer is connected to."
 	default:
 		return &existing, nil
@@ -407,6 +413,12 @@ func guidedConnectFile(ctx context.Context, w io.Writer, r *output.Renderer, pat
 		return nil, classifyLockError(agent.Profile, err)
 	}
 	defer unlock()
+	// Read again under the lock: another setup may have repaired the file
+	// while this one was asking, and a repaired file is resumed, not moved
+	// aside.
+	if again, err := setup.Load(path); err == nil && guidedFileFits(again, agent) {
+		return &again, nil
+	}
 	aside := path + ".broken-" + time.Now().UTC().Format("20060102T150405Z")
 	if err := os.Rename(path, aside); err != nil {
 		return nil, fmt.Errorf("could not move %s aside: %w", richtext.SanitizeSingleLine(path), err)
@@ -414,6 +426,12 @@ func guidedConnectFile(ctx context.Context, w io.Writer, r *output.Renderer, pat
 	fmt.Fprintln(w, r.Muted.Render("Moved the old file to "+richtext.SanitizeSingleLine(aside)))
 	fmt.Fprintln(w)
 	return nil, nil
+}
+
+// guidedFileFits reports whether a connect.json is for the agent this profile
+// holds.
+func guidedFileFits(f setup.File, agent guidedAgent) bool {
+	return f.Profile == agent.Profile && accountIDsEqual(f.AccountID, agent.AccountID) && f.Agent.PersonID == agent.Me.ID
 }
 
 // setUpGuidedConnectFile writes connect.json through setup itself: the
@@ -598,6 +616,14 @@ func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, fil
 	fmt.Fprintln(w, r.Success.Render(fmt.Sprintf("%s is set up on this computer", agentName)))
 	if agent.HasOwner {
 		fmt.Fprintf(w, "  Works for: %s\n", richtext.SanitizeSingleLine(agent.Owner.Name))
+	}
+	if len(served) == 0 {
+		// Every project was taken out of connect.json: a mention anywhere
+		// gets a holding reply, so there is nowhere to try it.
+		fmt.Fprintln(w, "  Works in:  no projects")
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "It isn't working in any projects, so a mention gets \"I'm not set up to work in this project yet\". To add one: basecamp connect setup -P %s --serve <project-id>\n", richtext.ShellQuote(name))
+		return
 	}
 	fmt.Fprintf(w, "  Works in:  %s\n", strings.Join(served, ", "))
 	if running {
