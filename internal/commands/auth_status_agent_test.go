@@ -148,6 +148,76 @@ func TestAuthStatusSaysARefusalIsRemembered(t *testing.T) {
 	assert.NotContains(t, buf.String(), "rotated-away")
 }
 
+// TestAuthStatusKeepsARateLimitedAgentRefreshable: a 429 on an agent's
+// mint is held only until its Retry-After, and the renewal goes out on its
+// own after that. The report says so, and does not call a token inside
+// the refresh window expired as if nothing could renew it.
+func TestAuthStatusKeepsARateLimitedAgentRefreshable(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_TOKEN", "")
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "300")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	cfg := &config.Config{BaseURL: srv.URL, ActiveProfile: "clawdito", Sources: map[string]string{}}
+	authMgr := auth.NewManager(cfg, srv.Client())
+	store := auth.NewStore(config.GlobalConfigDir())
+	authMgr.SetStore(store)
+	require.NoError(t, store.Save("profile:clawdito", &auth.Credentials{
+		AccessToken:   "still-good",
+		OAuthType:     "agent",
+		ClientID:      "agent-client",
+		ClientSecret:  "agent-secret",
+		TokenEndpoint: srv.URL + "/oauth/tokens",
+		// Inside the refresh window, so a renewal is due and is held.
+		ExpiresAt: time.Now().Add(2 * time.Minute).Unix(),
+	}))
+
+	_, err := authMgr.AccessToken(context.Background())
+	require.Error(t, err)
+	require.Equal(t, 1, calls)
+
+	buf := &bytes.Buffer{}
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		Output: output.New(output.Options{Format: output.FormatJSON, Writer: buf}),
+	}
+	app.Flags.JSON = true
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"status"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	require.NoError(t, cmd.Execute())
+
+	assert.Equal(t, 1, calls, "the report asked the token endpoint")
+
+	var envelope struct {
+		Data struct {
+			Refreshable    bool   `json:"refreshable"`
+			Expired        bool   `json:"expired"`
+			RenewalRefused string `json:"renewal_refused"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	assert.True(t, envelope.Data.Refreshable, "a rate limit that ends on its own was reported as unrenewable")
+	assert.False(t, envelope.Data.Expired)
+	assert.Contains(t, envelope.Data.RenewalRefused, "held until")
+	assert.NotContains(t, buf.String(), "--with-client-credentials", "a rate limit is not a refused secret")
+}
+
 // TestDoctorOffersTheAgentLoginForABrokenAgent: doctor is the diagnostic
 // people (and agents) read for exactly the command to run, in its check
 // hints and its breadcrumbs. Naming the interactive login there would have

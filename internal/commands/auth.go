@@ -353,7 +353,11 @@ func authStatusReport(ctx context.Context, app *appctx.App) (*authStatus, error)
 	// Asking what a renewal would do also tells the manager what this
 	// credential IS, so every remedy from here names the right login.
 	refusal := app.Auth.RefreshRefusal(creds)
-	refreshable := refusal == nil
+	// A rate limit the token endpoint set on an agent's mint is held only
+	// until its deadline, and the renewal goes out on its own after it, so
+	// the credential is still refreshable; the hold is reported beside it.
+	rateLimited := refusal != nil && output.AsError(refusal).Code == output.CodeRateLimit
+	refreshable := refusal == nil || rateLimited
 
 	if creds.AccessToken == "" {
 		report.data["authenticated"] = false
@@ -384,9 +388,10 @@ func authStatusReport(ctx context.Context, app *appctx.App) (*authStatus, error)
 	report.data["oauth_type"] = creds.OAuthType
 	report.data["refreshable"] = refreshable
 	if refusal != nil && creds.OAuthType == "agent" {
-		// Why an agent cannot renew — above all a refusal the token
-		// endpoint gave that is being remembered, and until when — for a
-		// caller reading the JSON rather than the token line.
+		// Why an agent cannot renew now — a refusal the token endpoint
+		// gave that is being remembered, or a rate limit still running,
+		// and until when — for a caller reading the JSON rather than the
+		// token line.
 		report.data["renewal_refused"] = output.AsError(refusal).Message
 	}
 	report.data["storage"] = storage
@@ -430,23 +435,26 @@ func authStatusReport(ctx context.Context, app *appctx.App) (*authStatus, error)
 		report.data["expires_at"] = expiresAt.UTC().Format(time.RFC3339)
 		report.data["expires_in"] = expiresIn.Round(time.Second).String()
 		report.data["expired"] = expired
+		held := ""
+		if rateLimited {
+			held = " (" + output.AsError(refusal).Message + ")"
+		}
 		switch {
 		case !expired && refreshable:
-			expiry = "expires in " + coarseDuration(expiresIn) + ", refreshes automatically"
+			expiry = "expires in " + coarseDuration(expiresIn) + ", refreshes automatically" + held
 			report.refreshPromise, report.refreshFailed = expiry, "expires in "+coarseDuration(expiresIn)+", and the refresh failed"
 		case !expired:
 			expiry = "expires in " + coarseDuration(expiresIn)
 		case refreshable:
-			expiry = "expired, will refresh on next use"
+			expiry = "expired, will refresh on next use" + held
 			report.refreshPromise, report.refreshFailed = expiry, "expired, and the refresh failed"
 		case expiresIn >= 0:
 			expiry = "expired (" + coarseDuration(expiresIn) + " left, inside the " + coarseDuration(auth.RefreshWindow) + " the CLI keeps clear of expiry, and the refresh would be refused: " + output.AsError(refusal).Message + ")"
 			report.hint = remedyFor(app, refusal)
 		case creds.OAuthType == "agent":
 			// An agent's renewal can be refused by a verdict the token
-			// endpoint already gave — a secret it refused, a rate limit
-			// still running — and that says why, and until when, where
-			// "expired" alone would not.
+			// endpoint already gave — a secret it refused — and that says
+			// why, and until when, where "expired" alone would not.
 			expiry = "expired, and the renewal would be refused: " + output.AsError(refusal).Message
 			report.hint = remedyFor(app, refusal)
 		default:
