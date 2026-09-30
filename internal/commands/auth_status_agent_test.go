@@ -133,6 +133,18 @@ func TestDoctorOffersTheAgentLoginForABrokenAgent(t *testing.T) {
 	assert.Equal(t, "fail", credentials.Status)
 	assert.Contains(t, credentials.Hint, "--with-client-credentials")
 	assert.Contains(t, app.Auth.LoginCommand(), "--client-id agent-client")
+
+	// The breadcrumb doctor builds from its own checks carries the agent's
+	// login too, not only a hand-built Credentials row.
+	var logins []string
+	for _, crumb := range buildDoctorBreadcrumbs(runDoctorChecks(context.Background(), app, false), app.Auth.LoginCommand()) {
+		if crumb.Action == "login" {
+			logins = append(logins, crumb.Cmd)
+		}
+	}
+	require.Len(t, logins, 1)
+	assert.Contains(t, logins[0], "--with-client-credentials")
+	assert.Contains(t, logins[0], "--client-id agent-client")
 }
 
 // TestAuthStatusNamesTheKindEvenWhenItCannotAuthenticate: a credential can
