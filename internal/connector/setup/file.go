@@ -117,6 +117,14 @@ type File struct {
 	Concurrency int      `json:"concurrency"`
 	Deadline    Duration `json:"deadline"`
 
+	// Dangerous is dangerous mode: the worker may run any command on this
+	// computer, as the person running the connector, without asking. Only
+	// `connect setup --dangerous` turns it on, with a person at a terminal
+	// who typed yes. It is refused unless trust is operator, since everyone
+	// who can give the agent work could otherwise have commands run here,
+	// and needs the spawn driver.
+	Dangerous bool `json:"dangerous,omitempty"`
+
 	// LegacyWorktrees is the --worktrees setting of a connector that gave
 	// each task a git worktree of its own. Worktrees are gone: a task runs
 	// where the connector was started, and nothing here reads this. It is
@@ -246,6 +254,12 @@ func (f File) Validate() error {
 	}
 	if _, err := f.Policy(f.Agent.PersonID); err != nil {
 		return err
+	}
+	if f.Dangerous && f.Trust.Mode != admission.TrustOperator {
+		return ErrDangerousShared
+	}
+	if f.Dangerous && f.Driver != DriverSpawn {
+		return fmt.Errorf("dangerous mode needs the %q driver, not %q", DriverSpawn, f.Driver)
 	}
 	for bucket, project := range f.Projects {
 		if project.Class != "" && !ValidClass(project.Class) {

@@ -118,7 +118,8 @@ func (d *Driver) redactor(cfg driver.SessionConfig) *driver.Redactor {
 
 // modeIDs maps the connector's permission modes to Claude Code's.
 var modeIDs = map[driver.PermissionMode]string{
-	driver.ModeEdits: "acceptEdits",
+	driver.ModeEdits:    "acceptEdits",
+	driver.ModeAnything: "bypassPermissions",
 }
 
 // kindTools are Claude Code's built-in tools for each kind the policy can
@@ -152,6 +153,11 @@ func Args(cfg driver.SessionConfig, sessionID string, resume bool, mcpConfigPath
 	for _, server := range rules.AllowMCPServers {
 		allowed = append(allowed, "mcp__"+server)
 	}
+	toolList := strings.Join(tools, ",")
+	if rules.Mode == driver.ModeAnything {
+		// Dangerous mode: every built-in tool, Bash among them.
+		toolList = "default"
+	}
 
 	args := []string{
 		"-p",
@@ -164,7 +170,7 @@ func Args(cfg driver.SessionConfig, sessionID string, resume bool, mcpConfigPath
 		"--permission-mode", mode,
 		// Nobody answers a prompt: what the rules do not allow is refused.
 		"--permission-prompts", "none",
-		"--tools", strings.Join(tools, ","),
+		"--tools", toolList,
 		"--allowed-tools", strings.Join(allowed, ","),
 		"--strict-mcp-config",
 		"--mcp-config", mcpConfigPath,

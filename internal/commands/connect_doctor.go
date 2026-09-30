@@ -82,6 +82,9 @@ func runConnectDoctor(cmd *cobra.Command, _ []string) error {
 	checks = append(checks, ledgerChecks(ctx, p)...)
 	checks = append(checks, workerChecks(ctx, p.file)...)
 	checks = append(checks, workFolderCheck())
+	if p.file.Dangerous {
+		checks = append(checks, dangerousModeCheck(p.name))
+	}
 	checks = append(checks, mcpHandshakeCheck(ctx, p.name))
 
 	result := summarizeChecks(asDoctorChecks(checks))

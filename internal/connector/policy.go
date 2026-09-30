@@ -26,18 +26,34 @@ import (
 // one — was already unstopped. What contains a worker is the agent's own
 // sandbox (Codex's) and the sandbox launcher being built separately. Until
 // that lands, a worker edits wherever the account can.
-type Policy struct{}
+//
+// Dangerous is dangerous mode, which the owner turns on in connect.json: every
+// tool the agent has is allowed, commands included. See setup.File.Dangerous
+// for when it may be on.
+type Policy struct {
+	Dangerous bool
+}
 
 var _ driver.PermissionPolicy = Policy{}
 
 // DefaultPolicy is the v1 policy.
 func DefaultPolicy() Policy { return Policy{} }
 
+// PolicyFor is the policy connect.json asks for: the default, or dangerous
+// mode.
+func PolicyFor(dangerous bool) Policy { return Policy{Dangerous: dangerous} }
+
 // policyAllowedKinds are what a worker does without asking, besides edits.
 var policyAllowedKinds = []driver.ToolKind{driver.ToolRead, driver.ToolSearch, driver.ToolThink}
 
 // Rules implements driver.PermissionPolicy.
 func (p Policy) Rules() driver.PermissionRules {
+	if p.Dangerous {
+		return driver.PermissionRules{
+			Mode:            driver.ModeAnything,
+			AllowMCPServers: []string{MCPServerName},
+		}
+	}
 	return driver.PermissionRules{
 		Mode:            driver.ModeEdits,
 		AllowKinds:      slices.Clone(policyAllowedKinds),
@@ -47,6 +63,9 @@ func (p Policy) Rules() driver.PermissionRules {
 
 // Decide implements driver.PermissionPolicy.
 func (p Policy) Decide(_ context.Context, req driver.PermissionRequest) driver.PermissionDecision {
+	if p.Dangerous {
+		return driver.PermissionDecision{Allow: true}
+	}
 	if strings.HasPrefix(req.Tool, "mcp__"+MCPServerName+"__") {
 		return driver.PermissionDecision{Allow: true}
 	}

@@ -34,6 +34,22 @@ func TestThePolicyAllowsEditsAndTheAgentsToolsOnly(t *testing.T) {
 	assert.NotContains(t, rules.AllowKinds, driver.ToolExecute)
 }
 
+// Dangerous mode allows every tool, commands included, and only when asked
+// for: the default still runs nothing.
+func TestDangerousModeAllowsEverythingAndOnlyWhenAskedFor(t *testing.T) {
+	ctx := context.Background()
+	on := PolicyFor(true)
+	assert.True(t, on.Decide(ctx, driver.PermissionRequest{Kind: driver.ToolExecute, Locations: []string{"/work/repo"}}).Allow)
+	assert.True(t, on.Decide(ctx, driver.PermissionRequest{Kind: driver.ToolFetch}).Allow)
+	assert.Equal(t, driver.ModeAnything, on.Rules().Mode)
+	assert.Equal(t, []string{MCPServerName}, on.Rules().AllowMCPServers)
+
+	off := PolicyFor(false)
+	assert.False(t, off.Decide(ctx, driver.PermissionRequest{Kind: driver.ToolExecute}).Allow)
+	assert.Equal(t, driver.ModeEdits, off.Rules().Mode)
+	assert.Equal(t, DefaultPolicy(), off)
+}
+
 // The gap, written down where it will be read rather than only in a comment.
 // The policy used to refuse an edit resolving outside the record's working
 // directory — through a symlink, through a dangling one, with no path at all.

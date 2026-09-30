@@ -29,7 +29,7 @@ var connectWorkerPreflight = func(ctx context.Context, file setup.File) (driver.
 	if !ok {
 		return driver.Preflight{}, false
 	}
-	return p.Preflight(ctx, connector.DefaultPolicy()), true
+	return p.Preflight(ctx, connector.PolicyFor(file.Dangerous)), true
 }
 
 // preflightNames are doctor's names for a preflight's checks.

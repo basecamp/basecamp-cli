@@ -389,7 +389,13 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		options := connectDispatcherOptions(connectDispatch{
 			File: file, Buckets: buckets, Ledger: ledger, Driver: worker,
 			Served: served.Current, Authorize: served.Authorize,
-			Profile: name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
+			// Dangerous mode is read at every launch, so turning it off
+			// needs no restart. It is honored only in a connector started
+			// trusting its operator alone: trust is read once, at start, and
+			// a connector admitting other people must never run their work
+			// with a shell, whatever connect.json says now.
+			Dangerous: dangerousLaunches(file.Trust.Mode, served.Dangerous),
+			Profile:   name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
 			// Replies are listed with their words, so the connector's own
 			// notices are left out even before their receipts are known, and
 			// no reply is ever adopted from one. That is the whole filter:
@@ -437,6 +443,9 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		// Whatever ended the run, status says it is not running any more.
 		_ = ledger.NoteConnection(context.WithoutCancel(ctx), stopState, stopDetail)
 	}()
+	if file.Dangerous {
+		logger.Warn("connector: dangerous mode is on: the agent can run any command on this computer, as you, without asking. Turn it off: basecamp connect setup -P " + richtext.ShellQuote(name) + " --dangerous=false")
+	}
 	logger.Info("connector: running", "profile", richtext.SanitizeSingleLine(name), "account", account,
 		"agent_person_id", agentID, "shadow", f.shadow, "projects", len(buckets), "state", richtext.SanitizeSingleLine(stateDir))
 
@@ -661,6 +670,9 @@ type connectServed struct {
 	mu       sync.Mutex
 	loadedAt time.Time
 	projects map[int64]admission.Project
+	// dangerous is connect.json's dangerous mode as of the last read; a file
+	// that could not be read has it off.
+	dangerous bool
 	// err is why the last reload could not answer. It is kept apart from an
 	// empty map on purpose: "the operator serves no projects" and "nothing
 	// could read the file" are different answers, and only the first is
@@ -780,6 +792,7 @@ func (r *connectServed) reload() {
 		}
 		r.failing = true
 		r.projects, r.err = nil, err
+		r.dangerous = false
 		return
 	}
 	if r.failing {
@@ -787,10 +800,24 @@ func (r *connectServed) reload() {
 	}
 	r.failing = false
 	r.err = nil
+	r.dangerous = file.Dangerous
 	r.projects = make(map[int64]admission.Project, len(file.Projects))
 	for bucket, project := range file.Projects {
 		r.projects[bucket] = project
 	}
+}
+
+// Dangerous reports whether connect.json has dangerous mode on as of the last
+// read, reading it again when that read is older than connectServedTTL. A
+// file that cannot be read has it off, so turning it off takes effect at the
+// next launch.
+func (r *connectServed) Dangerous() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if (r.projects == nil && r.err == nil) || r.now().Sub(r.loadedAt) >= connectServedTTL {
+		r.reload()
+	}
+	return r.err == nil && r.dangerous
 }
 
 // connectDispatch is what the run knows when it builds the dispatcher.
@@ -803,6 +830,8 @@ type connectDispatch struct {
 	// Authorize is Served read under connect.json's lock, with the release
 	// the dispatcher holds across a launch's commit.
 	Authorize func() (map[int64]admission.Project, func(), error)
+	// Dangerous is whether the next launch runs in dangerous mode.
+	Dangerous func() bool
 
 	Profile     string
 	Executable  string
@@ -835,6 +864,9 @@ func connectDispatcherOptions(d connectDispatch) connector.DispatcherOptions {
 		Logger:             d.Logger,
 		StillRunning:       connector.DefaultStillRunning,
 		Preflight:          workerPreflight(d.Driver),
+		Policy: func() driver.PermissionPolicy {
+			return connector.PolicyFor(d.Dangerous != nil && d.Dangerous())
+		},
 	}
 }
 

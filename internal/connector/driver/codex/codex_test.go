@@ -214,10 +214,49 @@ func TestArgsHoldThePolicy(t *testing.T) {
 }
 
 // A policy Codex's flags cannot hold is refused before anything starts.
+// Dangerous mode runs Codex with no sandbox and the network on, and still
+// with nobody asked and nothing of the host's config.
+func TestArgsInDangerousModeRunWithoutASandbox(t *testing.T) {
+	cfg := driver.SessionConfig{
+		Cwd:        "/work/app",
+		Policy:     connector.PolicyFor(true),
+		MCPServers: []driver.MCPServer{{Name: "basecamp", Command: "/bin/basecamp"}},
+	}
+	args, err := Args(cfg, "", "")
+	require.NoError(t, err)
+	joined := strings.Join(args, "\x00")
+	for _, want := range [][]string{
+		{"-c", `approval_policy="never"`},
+		{"-c", `sandbox_mode="danger-full-access"`},
+		{"--ignore-user-config"}, {"--ignore-rules"}, {"--strict-config"},
+	} {
+		assert.Contains(t, joined, strings.Join(want, "\x00"))
+	}
+	assert.NotContains(t, joined, "workspace-write")
+	assert.NotContains(t, joined, "network_access=false")
+}
+
+// A dangerous session is checked to be the unsandboxed one asked for, and an
+// ordinary session is never taken for one.
+func TestTheDangerousTurnContextIsTheOneAskedFor(t *testing.T) {
+	tc := turnContext{Cwd: "/work/app", ApprovalPolicy: "never"}
+	tc.SandboxPolicy.Type = "danger-full-access"
+	require.NoError(t, checkDangerousTurnContext(tc, "/work/app"))
+
+	sandboxed := tc
+	sandboxed.SandboxPolicy.Type = "workspace-write"
+	assert.ErrorIs(t, checkDangerousTurnContext(sandboxed, "/work/app"), driver.ErrUnsafeMode)
+	asking := tc
+	asking.ApprovalPolicy = "on-request"
+	assert.ErrorIs(t, checkDangerousTurnContext(asking, "/work/app"), driver.ErrUnsafeMode)
+	assert.ErrorIs(t, checkDangerousTurnContext(tc, "/elsewhere"), driver.ErrUnsafeMode)
+	assert.ErrorIs(t, checkTurnContext(tc, "/work/app"), driver.ErrUnsafeMode, "an unsandboxed session is never an ordinary one")
+}
+
 func TestArgsRefuseAPolicyCodexCannotHold(t *testing.T) {
 	server := []driver.MCPServer{{Name: "basecamp", Command: "/bin/basecamp"}}
 	for name, cfg := range map[string]driver.SessionConfig{
-		"another mode":       {Cwd: "/w", Policy: testPolicy{mode: "anything"}, MCPServers: server},
+		"another mode":       {Cwd: "/w", Policy: testPolicy{mode: "plan"}, MCPServers: server},
 		"execute allowed":    {Cwd: "/w", Policy: testPolicy{kinds: []driver.ToolKind{driver.ToolExecute}}, MCPServers: server},
 		"fetch allowed":      {Cwd: "/w", Policy: testPolicy{kinds: []driver.ToolKind{driver.ToolFetch}}, MCPServers: server},
 		"unkeyable server":   {Cwd: "/w", Policy: testPolicy{}, MCPServers: []driver.MCPServer{{Name: "a.b", Command: "/bin/x"}}},

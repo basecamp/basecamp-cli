@@ -182,6 +182,8 @@ func (d *Driver) LoadSession(ctx context.Context, cfg driver.SessionConfig, sess
 const (
 	approvalNever  = "never"
 	sandboxWorkdir = "workspace-write"
+	// sandboxNone is dangerous mode's: no sandbox, network on.
+	sandboxNone = "danger-full-access"
 )
 
 // disabledFeatures are Codex features that reach past the session's MCP
@@ -208,7 +210,7 @@ func Args(cfg driver.SessionConfig, resumeID, model string) ([]string, error) {
 		return nil, errors.New("codex: a session needs a policy")
 	}
 	rules := cfg.Policy.Rules()
-	if rules.Mode != driver.ModeEdits {
+	if rules.Mode != driver.ModeEdits && rules.Mode != driver.ModeAnything {
 		return nil, fmt.Errorf("%w: codex: no Codex sandbox for policy mode %q", driver.ErrUnusable, rules.Mode)
 	}
 	for _, kind := range rules.AllowKinds {
@@ -238,14 +240,27 @@ func Args(cfg driver.SessionConfig, resumeID, model string) ([]string, error) {
 		// lines below, not this flag and not any check the connector makes.
 		"--skip-git-repo-check",
 		"-c", "approval_policy="+tomlString(approvalNever),
-		"-c", "sandbox_mode="+tomlString(sandboxWorkdir),
-		"-c", "sandbox_workspace_write.network_access=false",
-		"-c", "sandbox_workspace_write.exclude_slash_tmp=true",
-		"-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
-		"-c", "sandbox_workspace_write.writable_roots=[]",
-		// The model's shell commands get Codex's core variables, not the
-		// worker's whole environment.
-		"-c", "shell_environment_policy.inherit="+tomlString("core"),
+	)
+	if rules.Mode == driver.ModeAnything {
+		// Dangerous mode: no sandbox, the network on, and the worker's
+		// environment (itself an allow-list) for the commands it runs.
+		args = append(args,
+			"-c", "sandbox_mode="+tomlString(sandboxNone),
+			"-c", "shell_environment_policy.inherit="+tomlString("all"),
+		)
+	} else {
+		args = append(args,
+			"-c", "sandbox_mode="+tomlString(sandboxWorkdir),
+			"-c", "sandbox_workspace_write.network_access=false",
+			"-c", "sandbox_workspace_write.exclude_slash_tmp=true",
+			"-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+			"-c", "sandbox_workspace_write.writable_roots=[]",
+			// The model's shell commands get Codex's core variables, not
+			// the worker's whole environment.
+			"-c", "shell_environment_policy.inherit="+tomlString("core"),
+		)
+	}
+	args = append(args,
 		"-c", "web_search="+tomlString("disabled"),
 		// Skills on the host (the connector's own front-thread skill among
 		// them) are not instructions this worker follows.
@@ -324,6 +339,7 @@ func (d *Driver) start(ctx context.Context, cfg driver.SessionConfig, resumeID s
 		recorded:    map[string]bool{},
 		id:          resumeID,
 		worker:      worker,
+		dangerous:   cfg.Policy.Rules().Mode == driver.ModeAnything,
 		cwd:         cfg.Cwd,
 		sessions:    sessions,
 		offset:      offset,
@@ -424,7 +440,10 @@ func tomlArray(items []string) string {
 
 // session is one Codex process.
 type session struct {
-	worker      *driver.Worker
+	worker *driver.Worker
+	// dangerous is dangerous mode: the session is verified to have no
+	// sandbox, rather than the working directory's.
+	dangerous   bool
 	cwd         string
 	sessions    string
 	offset      int64
@@ -821,7 +840,7 @@ func (s *session) threadStarted(id string) {
 	}
 	s.id = id
 	go func() {
-		err := verifyRollout(s.sessions, id, s.offset, s.cwd, s.verifyAfter)
+		err := verifyRollout(s.sessions, id, s.offset, s.cwd, s.dangerous, s.verifyAfter)
 		s.mu.Lock()
 		s.verifyErr = err
 		s.mu.Unlock()
@@ -1200,7 +1219,7 @@ func (p *fileSystemPolicy) writesOnlyIn(cwd string) bool {
 
 // verifyRollout waits for the first turn_context record after offset in the
 // thread's rollout and checks it is the policy the flags asked for.
-func verifyRollout(sessions, threadID string, offset int64, cwd string, timeout time.Duration) error {
+func verifyRollout(sessions, threadID string, offset int64, cwd string, dangerous bool, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	var path string
 	for {
@@ -1216,6 +1235,9 @@ func verifyRollout(sessions, threadID string, offset int64, cwd string, timeout 
 			}
 			offset = next
 			if found {
+				if dangerous {
+					return checkDangerousTurnContext(tc, cwd)
+				}
 				return checkTurnContext(tc, cwd)
 			}
 		}
@@ -1244,6 +1266,21 @@ func checkTurnContext(tc turnContext, cwd string) error {
 	}
 	if !fs.writesOnlyIn(cwd) {
 		return fmt.Errorf("%w: Codex's filesystem sandbox writes past the working directory, or was not reported", driver.ErrUnsafeMode)
+	}
+	return nil
+}
+
+// checkDangerousTurnContext checks a dangerous-mode session is the one asked
+// for: no approvals asked of anyone, and no sandbox, in the session's
+// directory. Anything else is not what the owner turned on.
+func checkDangerousTurnContext(tc turnContext, cwd string) error {
+	switch {
+	case tc.ApprovalPolicy != approvalNever:
+		return fmt.Errorf("%w: asked for approvals %q, Codex applied %q", driver.ErrUnsafeMode, approvalNever, sanitize(tc.ApprovalPolicy))
+	case tc.SandboxPolicy.Type != sandboxNone:
+		return fmt.Errorf("%w: asked for sandbox %q, Codex applied %q", driver.ErrUnsafeMode, sandboxNone, sanitize(tc.SandboxPolicy.Type))
+	case !samePath(tc.Cwd, cwd):
+		return fmt.Errorf("%w: Codex runs in another directory than the session's", driver.ErrUnsafeMode)
 	}
 	return nil
 }

@@ -470,6 +470,11 @@ const (
 	// the rules do not allow. It bounds where an edit may land no further
 	// than the agent's own sandbox does.
 	ModeEdits PermissionMode = "edits"
+	// ModeAnything allows every tool the agent has, commands included,
+	// without asking anyone: dangerous mode. The worker runs with the
+	// operator's own authority on this computer, and nothing but the agent's
+	// judgment stands between a request and a command.
+	ModeAnything PermissionMode = "anything"
 )
 
 // Launcher wraps the worker command: the seam where a sandbox launcher
