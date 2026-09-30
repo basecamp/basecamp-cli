@@ -757,7 +757,7 @@ func batchProject(cmd *cobra.Command, app *appctx.App, targets string) (string, 
 		if len(urlProjects) == 0 {
 			return explicit, nil
 		}
-		resolved := explicit
+		var resolved string
 		if id, err := strconv.ParseInt(explicit, 10, 64); err == nil {
 			resolved = strconv.FormatInt(id, 10)
 		} else if resolved, _, err = app.Names.ResolveProject(cmd.Context(), explicit); err != nil {
