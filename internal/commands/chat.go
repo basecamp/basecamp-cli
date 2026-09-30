@@ -690,8 +690,8 @@ You can pass either a line ID or a Basecamp line URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			lineID, urlProjectID := extractWithProject(args[0])
+			// Extract ID, project and room from URL if provided
+			lineID, urlProjectID, urlChatID := chatLineRef(args[0])
 
 			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
@@ -716,8 +716,13 @@ You can pass either a line ID or a Basecamp line URL:
 				return err
 			}
 
-			// Get chat ID from project if not specified
-			effectiveChatID := *chatID
+			// The URL's room wins over --room, which may be stale from a
+			// previous command; the project's default room is the last resort,
+			// and fails when the project has more than one.
+			effectiveChatID := urlChatID
+			if effectiveChatID == "" {
+				effectiveChatID = *chatID
+			}
 			if effectiveChatID == "" {
 				effectiveChatID, err = getChatID(cmd, app, resolvedProjectID)
 				if err != nil {
@@ -1140,8 +1145,8 @@ You can pass either a line ID or a Basecamp line URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			lineID, urlProjectID := extractWithProject(args[0])
+			// Extract ID, project and room from URL if provided
+			lineID, urlProjectID, urlChatID := chatLineRef(args[0])
 
 			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
@@ -1166,8 +1171,13 @@ You can pass either a line ID or a Basecamp line URL:
 				return err
 			}
 
-			// Get chat ID from project if not specified
-			effectiveChatID := *chatID
+			// The URL's room wins over --room, which may be stale from a
+			// previous command; the project's default room is the last resort,
+			// and fails when the project has more than one.
+			effectiveChatID := urlChatID
+			if effectiveChatID == "" {
+				effectiveChatID = *chatID
+			}
 			if effectiveChatID == "" {
 				effectiveChatID, err = getChatID(cmd, app, resolvedProjectID)
 				if err != nil {
@@ -1227,6 +1237,17 @@ You can pass either a line ID or a Basecamp line URL:
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation prompt")
 
 	return cmd
+}
+
+// chatLineRef extracts the line, project and room IDs from a chat line
+// argument. A chat-line URL names the room that owns the line; a bare ID names
+// none, leaving the room to --room or the project's default.
+func chatLineRef(arg string) (lineID, projectID, chatID string) {
+	lineID, projectID = extractWithProject(arg)
+	if parsed := urlarg.Parse(arg); parsed != nil {
+		chatID = parsed.CampfireID
+	}
+	return lineID, projectID, chatID
 }
 
 // getChatID retrieves the chat ID from a project's dock, handling multi-dock projects.

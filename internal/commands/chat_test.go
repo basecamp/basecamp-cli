@@ -1556,6 +1556,96 @@ func TestChatDeleteForceSkipsPrompt(t *testing.T) {
 	assert.Contains(t, transport.capturedPath, "/lines/")
 }
 
+// mockTwoRoomChatTransport serves a project with two chat rooms, so the
+// project has no default room, and records the line requests it is sent.
+type mockTwoRoomChatTransport struct {
+	linePaths []string
+}
+
+func (t *mockTwoRoomChatTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+
+	var status int
+	var body string
+	switch {
+	case req.Method == "GET" && strings.Contains(req.URL.Path, "/projects.json"):
+		status, body = 200, `[{"id": 123, "name": "Test Project"}]`
+	case req.Method == "GET" && strings.Contains(req.URL.Path, "/projects/"):
+		status, body = 200, `{"id": 123, "dock": [`+
+			`{"name": "chat", "id": 456, "title": "Campfire", "enabled": true},`+
+			`{"name": "chat", "id": 789, "title": "Design", "enabled": true}]}`
+	case req.Method == "GET" && strings.Contains(req.URL.Path, "/lines/"):
+		t.linePaths = append(t.linePaths, req.Method+" "+req.URL.Path)
+		status, body = 200, `{"id": 111, "content": "Hello", "type": "Chat::Lines::Text", "creator": {"id": 1, "name": "Tester"}}`
+	case req.Method == "DELETE" && strings.Contains(req.URL.Path, "/lines/"):
+		t.linePaths = append(t.linePaths, req.Method+" "+req.URL.Path)
+		status = 204
+	case req.Method == "GET":
+		status, body = 200, `{}`
+	default:
+		return nil, errors.New("unexpected request")
+	}
+	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+}
+
+// TestChatLineURLTargetsItsRoom verifies that a chat-line URL reaches the room
+// it names in a project with more than one, where there is no default room to
+// fall back on.
+func TestChatLineURLTargetsItsRoom(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "line with a slash URL",
+			args: []string{"line", "https://3.basecamp.com/99999/buckets/123/chats/789/lines/111"},
+			want: "GET /99999/chats/789/lines/111",
+		},
+		{
+			name: "line with an @ URL",
+			args: []string{"line", "https://3.basecamp.com/99999/buckets/123/chats/789@111"},
+			want: "GET /99999/chats/789/lines/111",
+		},
+		{
+			name: "line URL wins over --room",
+			args: []string{"line", "https://3.basecamp.com/99999/buckets/123/chats/789/lines/111", "--room", "456"},
+			want: "GET /99999/chats/789/lines/111",
+		},
+		{
+			name: "delete with a URL",
+			args: []string{"delete", "https://3.basecamp.com/99999/buckets/123/chats/789/lines/111", "--force"},
+			want: "DELETE /99999/chats/789/lines/111",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+			transport := &mockTwoRoomChatTransport{}
+			app, _ := newChatDeleteTestApp(transport)
+
+			err := executeChatCommand(NewChatCmd(), app, tc.args...)
+			require.NoError(t, err)
+			assert.Equal(t, []string{tc.want}, transport.linePaths)
+		})
+	}
+}
+
+// TestChatLineBareIDInMultiRoomProjectNeedsRoom verifies that a bare line ID
+// still refuses to guess between two rooms: only a URL or --room names one.
+func TestChatLineBareIDInMultiRoomProjectNeedsRoom(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+	transport := &mockTwoRoomChatTransport{}
+	app, _ := newChatDeleteTestApp(transport)
+
+	err := executeChatCommand(NewChatCmd(), app, "line", "111")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Multiple chat rooms found")
+	assert.Empty(t, transport.linePaths)
+}
+
 // =============================================================================
 // Display content helper tests
 // =============================================================================
