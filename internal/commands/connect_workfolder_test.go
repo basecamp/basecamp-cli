@@ -99,3 +99,24 @@ func TestWorkFolderCheckShowsTheFolderOnOneLine(t *testing.T) {
 	assert.NotContains(t, c.Message, "\n")
 	assert.NotContains(t, c.Message, "\x1b")
 }
+
+// The connector can't start in a folder it can't read, so neither setup nor
+// doctor may call that ready.
+func TestWorkFolderCheckFailsWhenTheFolderIsGone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows won't remove the current directory")
+	}
+	setHome(t, t.TempDir())
+	gone := filepath.Join(t.TempDir(), "gone")
+	require.NoError(t, os.Mkdir(gone, 0o700))
+	t.Chdir(gone)
+	t.Setenv("PWD", gone)
+	require.NoError(t, os.Remove(gone))
+	if _, err := os.Getwd(); err == nil {
+		t.Skip("this platform still reports a removed working directory")
+	}
+
+	c := workFolderCheck()
+	assert.Equal(t, setup.StatusFail, c.Status)
+	assert.NotEmpty(t, c.Hint)
+}

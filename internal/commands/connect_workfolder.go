@@ -17,8 +17,10 @@ func workFolderCheck() setup.Check {
 	c := setup.Check{Name: "Work folder"}
 	dir, err := os.Getwd()
 	if err != nil {
-		c.Status = setup.StatusWarn
-		c.Message = "Couldn't tell which folder this is: " + richtext.SanitizeSingleLine(err.Error())
+		// The connector can't start without it (connector.NewDispatcher).
+		c.Status = setup.StatusFail
+		c.Message = "Couldn't read which folder this is: " + richtext.SanitizeSingleLine(err.Error())
+		c.Hint = "Change to a folder that exists, then run this again."
 		return c
 	}
 	// The path is shown on one line: a folder name can carry newlines or
