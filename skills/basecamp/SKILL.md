@@ -745,18 +745,23 @@ basecamp messages create "Title" "Body" --in <project>
 basecamp messages create "Draft" "WIP" --draft --in <project>  # Create draft
 basecamp messages publish <id>               # Publish a draft
 basecamp messages update <id> --title "New" --body "Updated"
+basecamp messages update <id> --category "Announcement"   # Set category (ID or name)
+basecamp messages update <id> --no-category              # Remove category
 basecamp messages pin <id> --in <project>     # Pin to top
 basecamp messages unpin <id>                  # Unpin
 ```
 
 **Archived/trashed messages:** `messages list` only returns active messages. For archived or trashed messages, use `basecamp recordings messages --status archived --in <project>` or `--status trashed`.
 
-**Flags:** `--draft` (create as draft), `--no-subscribe` (silent, no notifications), `--subscribe "people"` (comma-separated names, emails, IDs, or "me"; mutually exclusive with `--no-subscribe`), `--message-board <id>` (if multiple boards), `--visible-to-clients` (make visible to clients on the project; omit for the server default)
+**Flags:** `--draft` (create as draft), `--no-subscribe` (silent, no notifications), `--subscribe "people"` (comma-separated names, emails, IDs, or "me"; mutually exclusive with `--no-subscribe`), `--message-board <id>` (if multiple boards), `--visible-to-clients` (make visible to clients on the project; omit for the server default), `--category <id|name>` (message type; a name must match one of the project's types exactly or case-insensitively, never partially)
+
+Message types (categories) are per-project; list them with `basecamp messagetypes list --in <project>`.
 
 ```bash
 basecamp messages create "Bot update" "Done" --no-subscribe --in <project>
 basecamp messages create "FYI" "Note" --subscribe "Alice,bob@x.com" --in <project>
 basecamp messages create "For the client" "..." --visible-to-clients --in <project>
+basecamp messages create "Launch" "We shipped" --category Announcement --in <project>
 ```
 
 **Client visibility at create time:** `messages create`, `todolists create`,

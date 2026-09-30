@@ -427,6 +427,7 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 	var noSubscribe bool
 	var attachFiles []string
 	var visibleToClients bool
+	var category string
 
 	cmd := &cobra.Command{
 		Use:   "create <title> [body]",
@@ -434,7 +435,11 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 		Long: `Post a new message to a project's message board.
 
 Use - as the body argument to read the body from stdin:
-  printf 'Long **Markdown** body' | basecamp messages create "Title" -`,
+  printf 'Long **Markdown** body' | basecamp messages create "Title" -
+
+Use --category to file the message under a message type, by ID or name:
+  basecamp messages create "Launch" "We shipped" --category Announcement
+List a project's message types with: basecamp messagetypes list --in <project>`,
 		// Bounded so a stray third token is a usage error rather than being
 		// silently dropped after "-" has already drained stdin.
 		Args: cobra.MaximumNArgs(2),
@@ -466,6 +471,11 @@ Use - as the body argument to read the body from stdin:
 			}
 			if err := requireNumericID(*messageBoard, "message board ID"); err != nil {
 				return err
+			}
+			if cmd.Flags().Changed("category") {
+				if err := validateMessageCategoryFlag(category); err != nil {
+					return err
+				}
 			}
 			// Attachment paths are readable or not regardless of the body, so
 			// check them before the pipe is drained.
@@ -533,6 +543,14 @@ Use - as the body argument to read the body from stdin:
 				return output.ErrUsage("Invalid message board ID")
 			}
 
+			var categoryID int64
+			if cmd.Flags().Changed("category") {
+				categoryID, err = resolveMessageCategory(cmd.Context(), app, resolvedProjectID, category)
+				if err != nil {
+					return err
+				}
+			}
+
 			// Build SDK request
 			// Convert Markdown content to HTML for Basecamp's rich text fields
 			html := richtext.MarkdownToHTML(body)
@@ -563,6 +581,7 @@ Use - as the body argument to read the body from stdin:
 			req := &basecamp.CreateMessageRequest{
 				Subject:       title,
 				Content:       html,
+				CategoryID:    categoryID,
 				Subscriptions: subs,
 			}
 
@@ -615,6 +634,7 @@ Use - as the body argument to read the body from stdin:
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the message visible to clients on the project (omit for the server default; client-authenticated callers always post client-visible)")
+	cmd.Flags().StringVar(&category, "category", "", "Message type (category) ID or name; see 'basecamp messagetypes list'")
 
 	allowDash(cmd, "arg:1")
 
@@ -624,18 +644,34 @@ Use - as the body argument to read the body from stdin:
 func newMessagesUpdateCmd() *cobra.Command {
 	var title string
 	var body string
+	var category string
+	var noCategory bool
 
 	cmd := &cobra.Command{
 		Use:   "update <id|url>",
 		Short: "Update a message",
-		Long: `Update an existing message's title or body.
+		Long: `Update an existing message's title, body, or category.
 
 You can pass either a message ID or a Basecamp URL:
   basecamp messages update 789 --title "new title"
-  basecamp messages update 789 --body "new body"`,
+  basecamp messages update 789 --body "new body"
+  basecamp messages update 789 --category Announcement
+  basecamp messages update 789 --no-category
+
+--category takes a message type ID or name, matched against the message's
+project. List a project's message types with: basecamp messagetypes list --in <project>`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(title) == "" && strings.TrimSpace(body) == "" {
+			categoryChanged := cmd.Flags().Changed("category")
+			if categoryChanged && noCategory {
+				return output.ErrUsage("--category and --no-category cannot be used together")
+			}
+			if categoryChanged {
+				if err := validateMessageCategoryFlag(category); err != nil {
+					return err
+				}
+			}
+			if strings.TrimSpace(title) == "" && strings.TrimSpace(body) == "" && !categoryChanged && !noCategory {
 				return noChanges(cmd)
 			}
 
@@ -661,6 +697,14 @@ You can pass either a message ID or a Basecamp URL:
 				return err
 			}
 
+			var categoryID int64
+			if categoryChanged {
+				categoryID, err = resolveUpdatedMessageCategory(cmd.Context(), app, messageID, category)
+				if err != nil {
+					return err
+				}
+			}
+
 			// Build SDK request
 			// Convert Markdown content to HTML for Basecamp's rich text fields
 			html := richtext.MarkdownToHTML(body)
@@ -679,8 +723,10 @@ You can pass either a message ID or a Basecamp URL:
 			html = mentionResult.HTML
 
 			req := &basecamp.UpdateMessageRequest{
-				Subject: title,
-				Content: html,
+				Subject:       title,
+				Content:       html,
+				CategoryID:    categoryID,
+				ClearCategory: noCategory,
 			}
 
 			message, err := app.Account().Messages().Update(cmd.Context(), messageID, req)
@@ -708,6 +754,8 @@ You can pass either a message ID or a Basecamp URL:
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "New title")
 	cmd.Flags().StringVarP(&body, "body", "b", "", "New body content; use - to read from stdin")
+	cmd.Flags().StringVar(&category, "category", "", "Message type (category) ID or name; see 'basecamp messagetypes list'")
+	cmd.Flags().BoolVar(&noCategory, "no-category", false, "Remove the message's category")
 
 	allowDash(cmd, "flag:body")
 
@@ -872,4 +920,94 @@ You can pass either a message ID or a Basecamp URL:
 // getMessageBoardID retrieves the message board ID from a project's dock, handling multi-dock projects.
 func getMessageBoardID(cmd *cobra.Command, app *appctx.App, projectID string, explicitID string) (string, error) {
 	return getDockToolID(cmd.Context(), app, projectID, "message_board", explicitID, "message board", "message-board")
+}
+
+// validateMessageCategoryFlag rejects a --category value that can never name a
+// message type, before anything is read from stdin or the network.
+func validateMessageCategoryFlag(category string) error {
+	value := strings.TrimSpace(category)
+	if value == "" {
+		return output.ErrUsageHint("--category needs a message type ID or name",
+			"List message types with: basecamp messagetypes list --in <project>")
+	}
+	if id, err := strconv.ParseInt(value, 10, 64); err == nil && id <= 0 {
+		return output.ErrUsage("--category must be a positive message type ID or a name")
+	}
+	return nil
+}
+
+// resolveUpdatedMessageCategory resolves --category for messages update. A
+// name is matched against the message's own project, which is read from the
+// message, so an ID alone never costs a lookup.
+func resolveUpdatedMessageCategory(ctx context.Context, app *appctx.App, messageID int64, category string) (int64, error) {
+	if id, ok := numericMessageCategory(category); ok {
+		return id, nil
+	}
+	message, err := app.Account().Messages().Get(ctx, messageID)
+	if err != nil {
+		return 0, convertSDKError(err)
+	}
+	if message.Bucket == nil || message.Bucket.ID == 0 {
+		return 0, output.ErrUsageHint("Cannot tell which project this message is in to look up its category by name",
+			"Pass the message type ID instead: basecamp messagetypes list --in <project>")
+	}
+	return resolveMessageCategory(ctx, app, strconv.FormatInt(message.Bucket.ID, 10), category)
+}
+
+func numericMessageCategory(category string) (int64, bool) {
+	id, err := strconv.ParseInt(strings.TrimSpace(category), 10, 64)
+	return id, err == nil && id > 0
+}
+
+// resolveMessageCategory turns a --category value into a message type ID. A
+// positive integer is taken as the ID as given. Anything else is a name,
+// matched against the project's message types: an exact match first, then a
+// case-insensitive one. There is no partial matching — a guessed category is a
+// silent mislabel on a post everyone on the project can see.
+func resolveMessageCategory(ctx context.Context, app *appctx.App, projectID, category string) (int64, error) {
+	if id, ok := numericMessageCategory(category); ok {
+		return id, nil
+	}
+	bucketID, err := strconv.ParseInt(projectID, 10, 64)
+	if err != nil {
+		return 0, output.ErrUsage("Invalid project ID")
+	}
+	result, err := app.Account().MessageTypes().List(ctx, bucketID, nil)
+	if err != nil {
+		return 0, convertSDKError(err)
+	}
+
+	name := strings.TrimSpace(category)
+	var folded []basecamp.MessageType
+	for _, t := range result.MessageTypes {
+		if t.Name == name {
+			return t.ID, nil
+		}
+		if strings.EqualFold(t.Name, name) {
+			folded = append(folded, t)
+		}
+	}
+	switch len(folded) {
+	case 1:
+		return folded[0].ID, nil
+	case 0:
+		available := make([]string, 0, len(result.MessageTypes))
+		for _, t := range result.MessageTypes {
+			available = append(available, fmt.Sprintf("%s (%d)", t.Name, t.ID))
+		}
+		hint := "This project has no message types."
+		if len(available) > 0 {
+			hint = "Available: " + strings.Join(available, ", ") + "."
+		}
+		hint += fmt.Sprintf(" See: basecamp messagetypes list --in %s", projectID)
+		return 0, output.ErrNotFoundHint("message type", name, hint)
+	default:
+		matches := make([]string, len(folded))
+		for i, t := range folded {
+			matches[i] = fmt.Sprintf("%s (%d)", t.Name, t.ID)
+		}
+		ambiguous := output.ErrAmbiguous("message type", matches)
+		ambiguous.Hint = "Pass the message type ID instead: " + strings.Join(matches, ", ")
+		return 0, ambiguous
+	}
 }
