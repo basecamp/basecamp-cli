@@ -216,3 +216,37 @@ func TestWorkFolderCheckFailsWhenTheFolderCantBeEntered(t *testing.T) {
 	c := workFolderCheck()
 	assert.Equal(t, setup.StatusFail, c.Status)
 }
+
+// A $HOME that can't be looked at can't rule home out: with nothing else to
+// go on, the check warns rather than passing.
+func TestWorkFolderCheckWarnsWhenHomeCantBeLookedAt(t *testing.T) {
+	setHome(t, filepath.Join(t.TempDir(), "missing"))
+	accountHome(t, "", errors.New("no such user"))
+	t.Chdir(t.TempDir())
+
+	c := workFolderCheck()
+	assert.Equal(t, setup.StatusWarn, c.Status)
+	assert.Contains(t, c.Message, "Couldn't tell where your home folder is")
+}
+
+// A working directory spelled right at the path-length limit is checked as it
+// is: adding "/." to probe it would only make it too long.
+func TestWorkFolderCheckAcceptsAPathAtTheLengthLimit(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux's 4096-byte path limit")
+	}
+	setHome(t, t.TempDir())
+	work := t.TempDir()
+	t.Chdir(work)
+	long := work
+	for len(long)+2 < 4095 {
+		long += "/."
+	}
+	t.Setenv("PWD", long)
+	if dir, err := os.Getwd(); err != nil || dir != long {
+		t.Skip("Getwd doesn't report PWD as given here")
+	}
+
+	c := workFolderCheck()
+	assert.Equal(t, setup.StatusPass, c.Status, c.Message)
+}

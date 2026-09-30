@@ -1,10 +1,12 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
+	"syscall"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
@@ -23,6 +25,10 @@ func workFolderCheck() setup.Check {
 		// folder itself, lost its search permission after the shell went in.
 		// "dir/." is only reachable through a folder that can be entered.
 		_, err = os.Stat(dir + string(filepath.Separator) + ".")
+		if errors.Is(err, syscall.ENAMETOOLONG) {
+			// No room for "/.": a path at the limit is checked as it is.
+			_, err = os.Stat(dir)
+		}
 	}
 	if err != nil {
 		// The connector can't start without it (connector.NewDispatcher).
@@ -55,15 +61,22 @@ func workFolderCheck() setup.Check {
 }
 
 // homeFolder is where the person's home folder is: $HOME (USERPROFILE on
-// Windows), or else the account's own record, or "" when neither says.
+// Windows), or else the account's own record, or "" when neither names a
+// folder that can be looked at. A home that can't be looked at can't be
+// compared with, so it counts as unknown rather than as somewhere else.
 func homeFolder() string {
-	if home, err := os.UserHomeDir(); err == nil {
+	if home, err := os.UserHomeDir(); err == nil && reachable(home) {
 		return home
 	}
-	if home, err := accountHomeFolder(); err == nil && home != "" {
+	if home, err := accountHomeFolder(); err == nil && home != "" && reachable(home) {
 		return home
 	}
 	return ""
+}
+
+func reachable(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // accountHomeFolder reads the home folder from the account's record. A
