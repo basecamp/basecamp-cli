@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/config"
 )
 
 func TestMigrateCache_NoLegacyDir(t *testing.T) {
@@ -452,4 +454,23 @@ func TestMigrateSkipsKeyringWhenNoKeyring(t *testing.T) {
 	cmd.SetArgs(nil)
 	require.NoError(t, cmd.Execute())
 	assert.Contains(t, out.String(), `"keyring_migrated": 0`)
+}
+
+func TestMigrateMarker_NotWrittenWhenKeyringSkipped(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	configBase := t.TempDir()
+	cacheBase := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configBase)
+	t.Setenv("XDG_CACHE_HOME", cacheBase)
+	require.NoError(t, os.MkdirAll(filepath.Join(cacheBase, "bcq"), 0700))
+
+	cmd := NewMigrateCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs(nil)
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, out.String(), `"cache_moved": true`)
+
+	_, err := os.Stat(filepath.Join(config.GlobalConfigDir(), migratedMarker))
+	assert.True(t, os.IsNotExist(err), "marker must not be written while bcq keyring entries may remain")
 }
