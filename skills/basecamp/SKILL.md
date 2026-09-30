@@ -753,7 +753,7 @@ basecamp messages unpin <id>                  # Unpin
 
 **Archived/trashed messages:** `messages list` only returns active messages. For archived or trashed messages, use `basecamp recordings messages --status archived --in <project>` or `--status trashed`.
 
-**Flags:** `--draft` (create as draft), `--no-subscribe` (silent, no notifications), `--subscribe "people"` (comma-separated names, emails, IDs, or "me"; mutually exclusive with `--no-subscribe`), `--message-board <id>` (if multiple boards), `--visible-to-clients` (make visible to clients on the project; omit for the server default), `--category <id|name>` (message type; a name must match one of the project's types exactly or case-insensitively, never partially)
+**Flags:** `--draft` (create as draft), `--no-subscribe` (silent, no notifications), `--subscribe "people"` (comma-separated names, emails, IDs, or "me"; mutually exclusive with `--no-subscribe`), `--message-board <id>` (if multiple boards), `--visible-to-clients` (make visible to clients on the project; omit for the server default), `--category <id|name>` (message type; a value of digits alone is an ID, anything else a name that must match one of the project's types exactly or case-insensitively, never partially)
 
 Message types (categories) are per-project; list them with `basecamp messagetypes list --in <project>`.
 

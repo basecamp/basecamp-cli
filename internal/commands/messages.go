@@ -635,7 +635,7 @@ List a project's message types with: basecamp messagetypes list --in <project>`,
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the message visible to clients on the project (omit for the server default; client-authenticated callers always post client-visible)")
-	cmd.Flags().StringVar(&category, "category", "", "Message type (category) ID or name; see 'basecamp messagetypes list'")
+	cmd.Flags().StringVar(&category, "category", "", "Message type (category) ID or name; a value of digits alone is an ID. See 'basecamp messagetypes list'")
 
 	allowDash(cmd, "arg:1")
 
@@ -755,7 +755,7 @@ project. List a project's message types with: basecamp messagetypes list --in <p
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "New title")
 	cmd.Flags().StringVarP(&body, "body", "b", "", "New body content; use - to read from stdin")
-	cmd.Flags().StringVar(&category, "category", "", "Message type (category) ID or name; see 'basecamp messagetypes list'")
+	cmd.Flags().StringVar(&category, "category", "", "Message type (category) ID or name; a value of digits alone is an ID. See 'basecamp messagetypes list'")
 	cmd.Flags().BoolVar(&noCategory, "no-category", false, "Remove the message's category")
 
 	allowDash(cmd, "flag:body")
@@ -926,12 +926,11 @@ func getMessageBoardID(cmd *cobra.Command, app *appctx.App, projectID string, ex
 // validateMessageCategoryFlag rejects a --category value that can never name a
 // message type, before anything is read from stdin or the network.
 func validateMessageCategoryFlag(category string) error {
-	value := strings.TrimSpace(category)
-	if value == "" {
+	if strings.TrimSpace(category) == "" {
 		return output.ErrUsageHint("--category needs a message type ID or name",
 			"List message types with: basecamp messagetypes list --in <project>")
 	}
-	if id, err := strconv.ParseInt(value, 10, 64); (err == nil && id <= 0) || errors.Is(err, strconv.ErrRange) {
+	if id, err := strconv.ParseInt(category, 10, 64); (err == nil && id <= 0) || errors.Is(err, strconv.ErrRange) {
 		return output.ErrUsage("--category must be a positive message type ID or a name")
 	}
 	return nil
@@ -977,8 +976,11 @@ func resolveCreatedMessageCategory(ctx context.Context, app *appctx.App, project
 	return resolveMessageCategory(ctx, app, projectID, category)
 }
 
+// numericMessageCategory reports whether --category is an ID: digits and
+// nothing else. The value is not trimmed, because a padded one such as " 42 "
+// can be a real name (messagetypes create keeps surrounding spaces).
 func numericMessageCategory(category string) (int64, bool) {
-	id, err := strconv.ParseInt(strings.TrimSpace(category), 10, 64)
+	id, err := strconv.ParseInt(category, 10, 64)
 	return id, err == nil && id > 0
 }
 

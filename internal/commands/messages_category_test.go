@@ -269,3 +269,27 @@ func TestMessagesCreateCategoryNameIsNotTrimmed(t *testing.T) {
 	body := sentMessageBody(t, transport, http.MethodPost, messageCreatePath)
 	assert.Equal(t, float64(8), body["category_id"])
 }
+
+// Only a value that is digits and nothing else is an ID. A padded one is a
+// name: messagetypes create keeps surrounding spaces, so " 42 " can be one.
+func TestMessagesCategoryPaddedDigitsAreAName(t *testing.T) {
+	const categories = `[{"id":7,"name":" 42 ","icon":"📢"},{"id":42,"name":"Other","icon":"✨"}]`
+
+	t.Run("create", func(t *testing.T) {
+		app, transport := setupMessageCreateCategoryApp(t, categories)
+
+		require.NoError(t, executeRecordingCommand(NewMessagesCmd(), app, "create", "Hello", "--category", " 42 "))
+
+		body := sentMessageBody(t, transport, http.MethodPost, messageCreatePath)
+		assert.Equal(t, float64(7), body["category_id"])
+	})
+
+	t.Run("update", func(t *testing.T) {
+		app, transport := setupMessageUpdateCategoryApp(t, categories)
+
+		require.NoError(t, executeRecordingCommand(NewMessagesCmd(), app, "update", "789", "--category", " 42 "))
+
+		body := sentMessageBody(t, transport, http.MethodPut, messageUpdatePath)
+		assert.Equal(t, map[string]any{"category_id": float64(7)}, body)
+	})
+}
