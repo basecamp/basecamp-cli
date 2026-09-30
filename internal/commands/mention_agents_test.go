@@ -201,6 +201,29 @@ func TestBatchProject(t *testing.T) {
 	assert.Equal(t, int64(123), scopeOf(t, a+",2", "--in", "123"), "--in agreeing with every URL speaks for a bare ID")
 	assert.Equal(t, int64(456), scopeOf(t, "1,2", "--in", "456"), "--in scopes a batch of bare IDs")
 	assert.Zero(t, scopeOf(t, a+","+c), "URLs in different projects")
+	assert.Equal(t, int64(123), scopeOf(t, a, "--in", "00123"), "IDs compare as numbers")
+}
+
+func TestBatchProjectComparesIDsAsNumbers(t *testing.T) {
+	a := "https://3.basecamp.com/99999/buckets/123/todos/1"
+	run := func(in string) (string, error) {
+		app, _ := newTestAppWithTransport(t, &agentMentionTransport{})
+		cmd := NewCommentsCmd()
+		require.NoError(t, cmd.ParseFlags([]string{"--in", in}))
+		cmd.SetContext(t.Context())
+		return batchProject(cmd, app, a+",2")
+	}
+
+	projectID, err := run("00123")
+	require.NoError(t, err)
+	assert.Equal(t, "123", projectID)
+
+	_, err = run("124")
+	var outErr *output.Error
+	require.True(t, errors.As(err, &outErr), "got %v", err)
+	assert.Equal(t, output.CodeUsage, outErr.Code)
+	assert.Contains(t, outErr.Message, "124")
+	assert.Contains(t, outErr.Message, "123")
 }
 
 func TestCommentsCreateRefusesURLProjectConflictingWithIn(t *testing.T) {

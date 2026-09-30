@@ -717,6 +717,17 @@ func mentionScope(app *appctx.App, candidates ...string) names.ProjectScope {
 	return nil
 }
 
+// sameProjectID compares two project IDs as numbers, so "00123" and "123"
+// name the same project. Non-numeric values compare as text.
+func sameProjectID(a, b string) bool {
+	x, errA := strconv.ParseInt(a, 10, 64)
+	y, errB := strconv.ParseInt(b, 10, 64)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return x == y
+}
+
 // batchProject returns the one project a comma-separated target list is known
 // to share, which scopes the mention resolved once for every target. --in
 // names it; it must agree with every URL's bucket, and a URL in any other
@@ -747,13 +758,13 @@ func batchProject(cmd *cobra.Command, app *appctx.App, targets string) (string, 
 			return explicit, nil
 		}
 		resolved := explicit
-		if _, err := strconv.ParseInt(explicit, 10, 64); err != nil {
-			if resolved, _, err = app.Names.ResolveProject(cmd.Context(), explicit); err != nil {
-				return "", err
-			}
+		if id, err := strconv.ParseInt(explicit, 10, 64); err == nil {
+			resolved = strconv.FormatInt(id, 10)
+		} else if resolved, _, err = app.Names.ResolveProject(cmd.Context(), explicit); err != nil {
+			return "", err
 		}
 		for _, projectID := range urlProjects {
-			if projectID != resolved {
+			if !sameProjectID(projectID, resolved) {
 				return "", output.ErrUsageHint(
 					fmt.Sprintf("--in names project %s, but a URL target is in project %s", resolved, projectID),
 					"Drop --in to let each URL name its project, or split the batch by project",
@@ -767,7 +778,7 @@ func batchProject(cmd *cobra.Command, app *appctx.App, targets string) (string, 
 		return "", nil
 	}
 	for _, projectID := range urlProjects[1:] {
-		if projectID != urlProjects[0] {
+		if !sameProjectID(projectID, urlProjects[0]) {
 			return "", nil
 		}
 	}
