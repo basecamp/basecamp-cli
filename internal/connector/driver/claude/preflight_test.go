@@ -34,7 +34,8 @@ func TestSessionFlagsAreEveryFlagASessionPasses(t *testing.T) {
 
 // The preflight starts the claude a session starts, with a session's
 // environment: CLAUDE_CONFIG_DIR, which decides which login Claude Code
-// reads, reaches it, and the connector's other variables do not.
+// reads, reaches it, and the connector's other variables do not. Its login is
+// asked with the host's settings off, as a session runs.
 func TestPreflightRunsClaudeAsASessionWould(t *testing.T) {
 	dir := t.TempDir()
 	seen := filepath.Join(dir, "env")
@@ -44,7 +45,8 @@ env > ` + seen + `
 case "$1" in
   --version) echo "2.1.283 (Claude Code)" ;;
   --help) echo "-p --input-format --output-format --verbose --setting-sources --permission-mode --permission-prompts --tools --allowed-tools --strict-mcp-config --mcp-config --session-id --resume" ;;
-  auth) if [ "$CLAUDE_CONFIG_DIR" = /config ]; then echo '{"loggedIn":true}'; else echo '{"loggedIn":false}'; exit 1; fi ;;
+  --setting-sources) if [ "$2" = "" ] && [ "$3" = auth ] && [ "$CLAUDE_CONFIG_DIR" = /config ]; then echo '{"loggedIn":true}'; else echo '{"loggedIn":false}'; exit 1; fi ;;
+  auth) echo '{"loggedIn":false}'; exit 1 ;; # asked with the host's settings on
 esac
 `
 	require.NoError(t, os.WriteFile(exe, []byte(script), 0o700))

@@ -21,6 +21,12 @@ func (d *Driver) Preflight(ctx context.Context, policy driver.PermissionPolicy) 
 	return d.probe(policy).Check(ctx)
 }
 
+// loginArgs asks Claude Code whether it's logged in the way a session runs
+// it: with the host's settings off (--setting-sources ""), so a user setting
+// that blanks an API key can't make a worker that would run look logged out.
+// The option goes before the subcommand; `auth status` takes no such option.
+var loginArgs = []string{"--setting-sources", "", "auth", "status", "--json"}
+
 func (d *Driver) probe(policy driver.PermissionPolicy) driver.WorkerProbe {
 	return driver.WorkerProbe{
 		Product:  Product,
@@ -29,7 +35,7 @@ func (d *Driver) probe(policy driver.PermissionPolicy) driver.WorkerProbe {
 		Help:     []string{"--help"},
 		Flags:    SessionFlags(policy, d.opts.Model),
 		Update:   "Update Claude Code: claude update",
-		Login:    []string{"auth", "status", "--json"},
+		Login:    loginArgs,
 		LoggedIn: loggedIn,
 		LoginFix: "run `claude` and log in",
 	}
