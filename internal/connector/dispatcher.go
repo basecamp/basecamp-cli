@@ -247,6 +247,10 @@ type Dispatcher struct {
 	// so a worker check or a reason that outlives its hold (a start that
 	// worked cleared it, and a newer one was made) can tell it isn't theirs.
 	holds uint64
+	// launches numbers each launch in the order it was made, so a start
+	// that worked can tell whether failures came from launches made after
+	// it (dispatcher_starts.go).
+	launches uint64
 	// stopping is closed when Run is shutting down, which is what bounds the
 	// adopted-reply rule's reads: their own context is the settlement's,
 	// which a shutdown deliberately does not cancel.
@@ -721,6 +725,10 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 	if err != nil {
 		return err
 	}
+	d.mu.Lock()
+	d.launches++
+	seq := d.launches
+	d.mu.Unlock()
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, EventIDs: launch.EventIDs, State: string(AttemptLaunching)})
 
 	// Settling must outlive a shutdown that interrupts the start.
@@ -737,7 +745,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 		// A start that ran nothing, as a driver's refusal is: it counts
 		// toward holding new work.
 		if settled {
-			d.noteStart(settleCtx, settlement, err.Error())
+			d.noteStart(settleCtx, settlement, err.Error(), seq)
 		}
 		return nil //nolint:nilerr // settled as a start that ran nothing
 	}
@@ -760,7 +768,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 		settlement, settled := d.release(settleCtx, launch, driver.StartedProcess(err), taker, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: spawnFailed,
 			NoAutomaticRetry: d.opts.NoAutomaticRetry || unusable}, nil)
 		if settled {
-			d.noteStart(settleCtx, settlement, strings.TrimPrefix(err.Error(), driver.ErrNotStarted.Error()+": "))
+			d.noteStart(settleCtx, settlement, strings.TrimPrefix(err.Error(), driver.ErrNotStarted.Error()+": "), seq)
 		}
 		return nil
 	}
@@ -786,7 +794,7 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 	}
 	d.line(DispatchLine{Type: "dispatch", TaskID: launch.TaskID, AttemptID: launch.AttemptID, State: string(AttemptRunning)})
 
-	run := &taskRun{d: d, launch: launch, record: record, session: session, cleanup: cleanup, log: log, refusals: refusals, tokens: tokens}
+	run := &taskRun{d: d, launch: launch, record: record, session: session, cleanup: cleanup, log: log, refusals: refusals, tokens: tokens, seq: seq}
 	d.mu.Lock()
 	d.live[launch.AttemptID] = run
 	d.mu.Unlock()
@@ -1266,6 +1274,8 @@ type taskRun struct {
 
 	// refusals records the session's refusals as they happen.
 	refusals *refusalRecorder
+	// seq is the launch's place in the order launches were made.
+	seq uint64
 }
 
 // supervise prompts the worker, delivers follow-ups, and settles the attempt
@@ -1325,7 +1335,7 @@ func (r *taskRun) supervise(ctx context.Context) {
 	// before the attempt is settled.
 	settlement, settled := d.release(settleCtx, r.launch, r.session.Process(), taker, AttemptEnd{AttemptID: r.launch.AttemptID, Stop: stop, UnrecordedRefusals: unrecorded}, r)
 	if settled {
-		d.noteStart(settleCtx, settlement, said)
+		d.noteStart(settleCtx, settlement, said, r.seq)
 	}
 }
 

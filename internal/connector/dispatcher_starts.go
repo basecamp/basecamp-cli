@@ -60,6 +60,9 @@ type startRecord struct {
 	checking bool
 	// checkEvery is how long a hold waits before its first check.
 	checkEvery time.Duration
+	// failedFrom is the earliest launch among the failures counted: a
+	// launch made before it that worked says nothing about them.
+	failedFrom uint64
 }
 
 // noteStart reads a settled attempt for whether its worker started: one that
@@ -67,12 +70,13 @@ type startRecord struct {
 // gone before it picked its request up, did not. An attempt interrupted by
 // the connector says nothing either way. said is what the worker or its start
 // said last, for the person.
-func (d *Dispatcher) noteStart(ctx context.Context, s Settlement, said string) {
+// seq is the launch's place in the order launches were made.
+func (d *Dispatcher) noteStart(ctx context.Context, s Settlement, said string, seq uint64) {
 	switch {
 	case pickedUp(s):
-		d.startWorked(ctx)
+		d.startWorked(ctx, seq)
 	case s.SpawnFailed || workerNeverStarted(s):
-		d.startFailed(ctx, said)
+		d.startFailed(ctx, said, seq)
 	}
 }
 
@@ -94,8 +98,14 @@ func workerNeverStarted(s Settlement) bool {
 	return false
 }
 
-func (d *Dispatcher) startWorked(ctx context.Context) {
+func (d *Dispatcher) startWorked(ctx context.Context, seq uint64) {
 	d.mu.Lock()
+	if d.starts.failures > 0 && seq < d.starts.failedFrom {
+		// Launched before the failures counted, and finished after them: it
+		// started on a computer that has changed since, so it clears nothing.
+		d.mu.Unlock()
+		return
+	}
 	wasHeld := d.starts.held
 	d.starts = startRecord{checkEvery: d.opts.HoldCheck}
 	d.mu.Unlock()
@@ -104,8 +114,11 @@ func (d *Dispatcher) startWorked(ctx context.Context) {
 	}
 }
 
-func (d *Dispatcher) startFailed(ctx context.Context, said string) {
+func (d *Dispatcher) startFailed(ctx context.Context, said string, seq uint64) {
 	d.mu.Lock()
+	if d.starts.failures == 0 || seq < d.starts.failedFrom {
+		d.starts.failedFrom = seq
+	}
 	d.starts.failures++
 	hold := d.starts.failures >= StartFailuresToHold && !d.starts.held
 	if hold {

@@ -129,14 +129,14 @@ func TestAHoldClearedWhileItsPreflightRunsLeavesStatusRunning(t *testing.T) {
 		}
 	})
 	ctx := context.Background()
-	h.d.startFailed(ctx, "")
+	h.d.startFailed(ctx, "", h.d.nextSeqForTest())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.d.startFailed(ctx, "") // the second in a row: holds, then asks the preflight why
+		h.d.startFailed(ctx, "", h.d.nextSeqForTest()) // the second in a row: holds, then asks the preflight why
 	}()
 	<-entered
-	h.d.startWorked(ctx) // a healthy task settles meanwhile
+	h.d.startWorked(ctx, h.d.nextSeqForTest()) // a healthy task settles meanwhile
 	require.Equal(t, ConnectionRunning, connectionOf(t, h.ledger).State)
 	close(release)
 	<-done
@@ -187,8 +187,8 @@ func TestAnOldWorkerCheckCannotClearANewerHold(t *testing.T) {
 		}
 	})
 	ctx := context.Background()
-	h.d.startFailed(ctx, "")
-	h.d.startFailed(ctx, "") // hold 1, and its reason (preflight call 1)
+	h.d.startFailed(ctx, "", h.d.nextSeqForTest())
+	h.d.startFailed(ctx, "", h.d.nextSeqForTest()) // hold 1, and its reason (preflight call 1)
 	h.d.mu.Lock()
 	first := h.d.holds
 	h.d.mu.Unlock()
@@ -198,15 +198,47 @@ func TestAnOldWorkerCheckCannotClearANewerHold(t *testing.T) {
 		h.d.checkHeldWorker(ctx, first) // preflight call 2, held open
 	}()
 	<-entered
-	h.d.startWorked(ctx) // a healthy task clears hold 1
-	h.d.startFailed(ctx, "")
-	h.d.startFailed(ctx, "") // hold 2, and its reason (preflight call 3)
+	h.d.startWorked(ctx, h.d.nextSeqForTest()) // a healthy task clears hold 1
+	h.d.startFailed(ctx, "", h.d.nextSeqForTest())
+	h.d.startFailed(ctx, "", h.d.nextSeqForTest()) // hold 2, and its reason (preflight call 3)
 	require.True(t, h.d.startsHeld())
 	close(release) // hold 1's check passes, late
 	<-done
 
 	assert.True(t, h.d.startsHeld(), "the newer hold stands")
 	assert.Equal(t, ConnectionNotTakingWork, connectionOf(t, h.ledger).State)
+}
+
+// nextSeqForTest is the next launch's number, as start takes it.
+func (d *Dispatcher) nextSeqForTest() uint64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.launches++
+	return d.launches
+}
+
+// A task launched before the failures, that finishes after them, started on a
+// computer that has changed since: it doesn't clear the hold they made
+// (Codex on #794).
+func TestAnOlderLaunchThatWorkedDoesNotClearANewerHold(t *testing.T) {
+	h := newDispatchHarness(t, newFakeDriver(), func(o *DispatcherOptions) {
+		o.Preflight = func(context.Context) driver.Preflight {
+			return driver.Preflight{Product: "Claude Code", Checks: []driver.PreflightCheck{{Name: driver.PreflightStarts,
+				Status: driver.PreflightFail, Message: "claude isn't on PATH"}}}
+		}
+	})
+	ctx := context.Background()
+	older := h.d.nextSeqForTest() // task A launches, and picks its request up
+	h.d.startFailed(ctx, "", h.d.nextSeqForTest())
+	h.d.startFailed(ctx, "", h.d.nextSeqForTest()) // B and C, launched later, fail: held
+	require.True(t, h.d.startsHeld())
+
+	h.d.startWorked(ctx, older) // A finishes
+	assert.True(t, h.d.startsHeld(), "A's start says nothing about B and C")
+	assert.Equal(t, ConnectionNotTakingWork, connectionOf(t, h.ledger).State)
+
+	h.d.startWorked(ctx, h.d.nextSeqForTest()) // a launch after them that works
+	assert.False(t, h.d.startsHeld())
 }
 
 // Two starts in a row that never ran hold new work: the next record waits,
