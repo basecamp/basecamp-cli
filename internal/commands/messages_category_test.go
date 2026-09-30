@@ -139,7 +139,7 @@ func TestMessagesCreateCategoryExactMatchBeatsCaseInsensitive(t *testing.T) {
 }
 
 func TestMessagesCreateCategoryRejectsBlankAndNonPositive(t *testing.T) {
-	for _, value := range []string{"", "  ", "0", "-3"} {
+	for _, value := range []string{"", "  ", "0", "-3", "9223372036854775808", "-9223372036854775809"} {
 		t.Run(value, func(t *testing.T) {
 			app, transport := setupMessageCreateCategoryApp(t, defaultMessageCategories)
 
@@ -209,4 +209,17 @@ func TestMessagesUpdateCategoryNotFound(t *testing.T) {
 	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
 	assert.Equal(t, output.CodeNotFound, e.Code)
 	requireNoMessageWrite(t, transport)
+}
+
+func TestMessagesUpdateCategoryRejectsOutOfRangeID(t *testing.T) {
+	for _, value := range []string{"0", "9223372036854775808", "-9223372036854775809"} {
+		t.Run(value, func(t *testing.T) {
+			app, transport := setupMessageUpdateCategoryApp(t, defaultMessageCategories)
+
+			err := executeRecordingCommand(NewMessagesCmd(), app, "update", "789", "--category", value)
+
+			requireMessagesUsageError(t, err, "--category")
+			assert.Empty(t, transport.recorded())
+		})
+	}
 }

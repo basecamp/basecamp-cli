@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -930,7 +931,7 @@ func validateMessageCategoryFlag(category string) error {
 		return output.ErrUsageHint("--category needs a message type ID or name",
 			"List message types with: basecamp messagetypes list --in <project>")
 	}
-	if id, err := strconv.ParseInt(value, 10, 64); err == nil && id <= 0 {
+	if id, err := strconv.ParseInt(value, 10, 64); (err == nil && id <= 0) || errors.Is(err, strconv.ErrRange) {
 		return output.ErrUsage("--category must be a positive message type ID or a name")
 	}
 	return nil
