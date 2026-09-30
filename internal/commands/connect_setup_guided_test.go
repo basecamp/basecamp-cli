@@ -4,6 +4,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -88,7 +89,10 @@ var brokenLauncher = driver.Preflight{Product: "Claude Code", Checks: []driver.P
 func workerAnswers(t *testing.T, p driver.Preflight) {
 	t.Helper()
 	prev := connectWorkerPreflight
-	connectWorkerPreflight = func(context.Context, setup.File) (driver.Preflight, bool) { return p, true }
+	// As the real one: the acp driver has no spawn preflight.
+	connectWorkerPreflight = func(_ context.Context, f setup.File) (driver.Preflight, bool) {
+		return p, f.Driver != setup.DriverACP
+	}
 	t.Cleanup(func() { connectWorkerPreflight = prev })
 }
 
@@ -226,6 +230,32 @@ func TestGuidedConnectSetupResumedRefusesAReadOnlyCredential(t *testing.T) {
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"))
 	require.Error(t, err, out)
 	assert.Contains(t, err.Error(), "not full access")
+	assert.NotContains(t, out, "is set up on this computer")
+}
+
+// A worker with no preflight of its own (the acp driver) is still checked,
+// as doctor checks it: its pinned adapter must be installed, or setup says so
+// instead of calling the agent set up (Codex on #794).
+func TestGuidedConnectSetupChecksAnACPWorker(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	ownedByTheOperator(s)
+	s.agentProjects = projectsNamed(setupProject)
+	path := connectSetupPath(t, "agent")
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(raw, &doc))
+	doc["driver"] = setup.DriverACP
+	raw, err = json.Marshal(doc)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, raw, 0o600))
+	t.Setenv("XDG_DATA_HOME", t.TempDir()) // no adapters installed
+	guided(t, &scriptedPrompter{})
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"))
+	require.Error(t, err, out)
+	assert.Contains(t, err.Error(), "adapter")
 	assert.NotContains(t, out, "is set up on this computer")
 }
 

@@ -505,7 +505,7 @@ func chooseGuidedProjects(w io.Writer, agent guidedAgent) ([]guidedProject, erro
 func checkGuidedWorker(ctx context.Context, w io.Writer, r *output.Renderer, file setup.File) error {
 	p, ok := connectWorkerPreflight(ctx, file)
 	if !ok {
-		return nil
+		return checkGuidedWorkerBinary(w, r, file)
 	}
 	for _, c := range p.Checks {
 		if c.Status == driver.PreflightWarn {
@@ -523,6 +523,21 @@ func checkGuidedWorker(ctx context.Context, w io.Writer, r *output.Renderer, fil
 	}
 	hint := strings.TrimSpace(failed.Hint + " Then run this again: basecamp connect setup")
 	return output.ErrUsageHint(richtext.SanitizeSingleLine(failed.Message), richtext.SanitizeSingleLine(hint))
+}
+
+// checkGuidedWorkerBinary checks a worker whose driver has no spawn preflight
+// (the acp driver) as doctor does: where the driver would find it.
+func checkGuidedWorkerBinary(w io.Writer, r *output.Renderer, file setup.File) error {
+	for _, c := range workerBinaryChecks(file) {
+		switch c.Status {
+		case setup.StatusWarn:
+			fmt.Fprintln(w, r.Warning.Render(richtext.SanitizeSingleLine(c.Message)))
+		case setup.StatusFail:
+			hint := strings.TrimSpace(c.Hint + " Then run this again: basecamp connect setup")
+			return output.ErrUsageHint(richtext.SanitizeSingleLine(c.Message), richtext.SanitizeSingleLine(hint))
+		}
+	}
+	return nil
 }
 
 // connectorRunning reports whether a connector for this setup is running:
