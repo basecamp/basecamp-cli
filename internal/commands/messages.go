@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -438,7 +437,8 @@ func newMessagesCreateCmd(project *string, messageBoard *string) *cobra.Command 
 Use - as the body argument to read the body from stdin:
   printf 'Long **Markdown** body' | basecamp messages create "Title" -
 
-Use --category to file the message under a message type, by ID or name:
+Use --category to file the message under a message type, by ID or name
+(digits alone are an ID; anything else is a name):
   basecamp messages create "Launch" "We shipped" --category Announcement
 List a project's message types with: basecamp messagetypes list --in <project>`,
 		// Bounded so a stray third token is a usage error rather than being
@@ -635,7 +635,7 @@ List a project's message types with: basecamp messagetypes list --in <project>`,
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the message visible to clients on the project (omit for the server default; client-authenticated callers always post client-visible)")
-	cmd.Flags().StringVar(&category, "category", "", "Message type (category) ID or name; a value of digits alone is an ID. See 'basecamp messagetypes list'")
+	cmd.Flags().StringVar(&category, "category", "", "Message type (category) ID or name; digits alone are an ID, anything else a name. See 'basecamp messagetypes list'")
 
 	allowDash(cmd, "arg:1")
 
@@ -659,8 +659,8 @@ You can pass either a message ID or a Basecamp URL:
   basecamp messages update 789 --category Announcement
   basecamp messages update 789 --no-category
 
---category takes a message type ID or name, matched against the message's
-project. List a project's message types with: basecamp messagetypes list --in <project>`,
+--category takes a message type ID or name: digits alone are an ID, and
+anything else is a name matched against the message's project. List a project's message types with: basecamp messagetypes list --in <project>`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			categoryChanged := cmd.Flags().Changed("category")
@@ -755,7 +755,7 @@ project. List a project's message types with: basecamp messagetypes list --in <p
 
 	cmd.Flags().StringVarP(&title, "title", "t", "", "New title")
 	cmd.Flags().StringVarP(&body, "body", "b", "", "New body content; use - to read from stdin")
-	cmd.Flags().StringVar(&category, "category", "", "Message type (category) ID or name; a value of digits alone is an ID. See 'basecamp messagetypes list'")
+	cmd.Flags().StringVar(&category, "category", "", "Message type (category) ID or name; digits alone are an ID, anything else a name. See 'basecamp messagetypes list'")
 	cmd.Flags().BoolVar(&noCategory, "no-category", false, "Remove the message's category")
 
 	allowDash(cmd, "flag:body")
@@ -930,8 +930,10 @@ func validateMessageCategoryFlag(category string) error {
 		return output.ErrUsageHint("--category needs a message type ID or name",
 			"List message types with: basecamp messagetypes list --in <project>")
 	}
-	if id, err := strconv.ParseInt(category, 10, 64); (err == nil && id <= 0) || errors.Is(err, strconv.ErrRange) {
-		return output.ErrUsage("--category must be a positive message type ID or a name")
+	if isNumericID(category) {
+		if id, err := strconv.ParseInt(category, 10, 64); err != nil || id <= 0 {
+			return output.ErrUsage("--category must be a positive message type ID or a name")
+		}
 	}
 	return nil
 }
@@ -976,16 +978,19 @@ func resolveCreatedMessageCategory(ctx context.Context, app *appctx.App, project
 	return resolveMessageCategory(ctx, app, projectID, category)
 }
 
-// numericMessageCategory reports whether --category is an ID: digits and
-// nothing else. The value is not trimmed, because a padded one such as " 42 "
-// can be a real name (messagetypes create keeps surrounding spaces).
+// numericMessageCategory reports whether --category is an ID. Digits alone are
+// an ID; any other value — signed, padded, anything — is a name, since
+// messagetypes create accepts all of those as names.
 func numericMessageCategory(category string) (int64, bool) {
+	if !isNumericID(category) {
+		return 0, false
+	}
 	id, err := strconv.ParseInt(category, 10, 64)
 	return id, err == nil && id > 0
 }
 
-// resolveMessageCategory turns a --category value into a message type ID. A
-// positive integer is taken as the ID as given. Anything else is a name,
+// resolveMessageCategory turns a --category value into a message type ID.
+// Digits alone are taken as the ID as given. Anything else is a name,
 // matched against the project's message types: an exact match first, then a
 // case-insensitive one. There is no partial matching — a guessed category is a
 // silent mislabel on a post everyone on the project can see.

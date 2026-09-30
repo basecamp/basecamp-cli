@@ -139,7 +139,7 @@ func TestMessagesCreateCategoryExactMatchBeatsCaseInsensitive(t *testing.T) {
 }
 
 func TestMessagesCreateCategoryRejectsBlankAndNonPositive(t *testing.T) {
-	for _, value := range []string{"", "  ", "0", "-3", "9223372036854775808", "-9223372036854775809"} {
+	for _, value := range []string{"", "  ", "0", "00", "9223372036854775808"} {
 		t.Run(value, func(t *testing.T) {
 			app, transport := setupMessageCreateCategoryApp(t, defaultMessageCategories)
 
@@ -212,7 +212,7 @@ func TestMessagesUpdateCategoryNotFound(t *testing.T) {
 }
 
 func TestMessagesUpdateCategoryRejectsOutOfRangeID(t *testing.T) {
-	for _, value := range []string{"0", "9223372036854775808", "-9223372036854775809"} {
+	for _, value := range []string{"0", "9223372036854775808"} {
 		t.Run(value, func(t *testing.T) {
 			app, transport := setupMessageUpdateCategoryApp(t, defaultMessageCategories)
 
@@ -292,4 +292,65 @@ func TestMessagesCategoryPaddedDigitsAreAName(t *testing.T) {
 		body := sentMessageBody(t, transport, http.MethodPut, messageUpdatePath)
 		assert.Equal(t, map[string]any{"category_id": float64(7)}, body)
 	})
+}
+
+// Digits alone are an ID; every other value is a name, looked up exactly and
+// then case-insensitively. A sign or padding makes a value a name, because
+// messagetypes create accepts any of these as a type's name.
+func TestMessagesCategoryDigitsAloneAreAnID(t *testing.T) {
+	const categories = `[` +
+		`{"id":5,"name":"+42","icon":"a"},` +
+		`{"id":6,"name":"-3","icon":"b"},` +
+		`{"id":9,"name":"+0","icon":"c"},` +
+		`{"id":7,"name":" 42 ","icon":"d"},` +
+		`{"id":42,"name":"Other","icon":"e"},` +
+		`{"id":11,"name":"Announcement","icon":"f"}]`
+
+	cases := []struct {
+		value  string
+		wantID int64 // 0 means a usage error
+		lookup bool  // whether the project's types are fetched
+	}{
+		{"42", 42, false},
+		{"+42", 5, true},
+		{"-3", 6, true},
+		{"+0", 9, true},
+		{" 42 ", 7, true},
+		{"9223372036854775808", 0, false},
+		{"announcement", 11, true},
+	}
+
+	for _, tc := range cases {
+		t.Run("create "+tc.value, func(t *testing.T) {
+			app, transport := setupMessageCreateCategoryApp(t, categories)
+
+			err := executeRecordingCommand(NewMessagesCmd(), app, "create", "Hello", "--category", tc.value)
+
+			if tc.wantID == 0 {
+				requireMessagesUsageError(t, err, "--category")
+				requireNoMessageWrite(t, transport)
+			} else {
+				require.NoError(t, err)
+				body := sentMessageBody(t, transport, http.MethodPost, messageCreatePath)
+				assert.Equal(t, float64(tc.wantID), body["category_id"])
+			}
+			assert.Equal(t, tc.lookup, len(messagesRequestsTo(transport, messageCategoriesPath)) > 0)
+		})
+
+		t.Run("update "+tc.value, func(t *testing.T) {
+			app, transport := setupMessageUpdateCategoryApp(t, categories)
+
+			err := executeRecordingCommand(NewMessagesCmd(), app, "update", "789", "--category", tc.value)
+
+			if tc.wantID == 0 {
+				requireMessagesUsageError(t, err, "--category")
+				assert.Empty(t, transport.recorded())
+			} else {
+				require.NoError(t, err)
+				body := sentMessageBody(t, transport, http.MethodPut, messageUpdatePath)
+				assert.Equal(t, map[string]any{"category_id": float64(tc.wantID)}, body)
+			}
+			assert.Equal(t, tc.lookup, len(messagesRequestsTo(transport, messageCategoriesPath)) > 0)
+		})
+	}
 }
