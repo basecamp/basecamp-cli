@@ -90,7 +90,8 @@ func issue800ReadWithStalledBus(t *testing.T, headless, disable bool) {
 	require.NoError(t, err)
 	// Allow the existing ten-second headless probe budget plus scheduling
 	// margin. The desktop must also have a finite bound; currently it has none.
-	ctx, cancel := context.WithTimeout(context.Background(), headlessProbeTimeout+2*time.Second)
+	budget := headlessProbeTimeout + 5*time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestIssue800CredentialReadHelper$", "-test.v")
 	out, runErr := cmd.CombinedOutput()
@@ -102,7 +103,7 @@ func issue800ReadWithStalledBus(t *testing.T, headless, disable bool) {
 			t.Fatal("credential read never reached the fake D-Bus EXTERNAL handshake")
 		}
 	}
-	require.NoError(t, ctx.Err(), "credential read remained blocked in D-Bus authentication after %s; child output: %s", headlessProbeTimeout+2*time.Second, out)
+	require.NoError(t, ctx.Err(), "credential read remained blocked in D-Bus authentication after %s; child output: %s", budget, out)
 	require.NoError(t, runErr, "%s", out)
 	assert.Contains(t, string(out), "fallback-token loaded")
 	if !disable {

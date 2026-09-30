@@ -387,7 +387,8 @@ func TestDoctorDoesNotCallAnUnreadableStoreAMissingLogin(t *testing.T) {
 	// A directory where the credential file should be is a read failure,
 	// not a missing credential. The same branch reports keyring timeouts.
 	require.NoError(t, os.MkdirAll(filepath.Join(config.GlobalConfigDir(), "credentials.json"), 0700))
-	check := checkCredentials(context.Background(), app, false)
+	check, unreadable := checkStoredCredentials(context.Background(), app, false)
+	assert.True(t, unreadable, "doctor must not skip authentication as if there were no credentials")
 	assert.Equal(t, "fail", check.Status)
 	assert.Contains(t, check.Message, "Could not read stored credentials")
 	assert.NotContains(t, check.Message, "No credentials found")

@@ -192,7 +192,7 @@ func (s *Store) load(origin string, req lockRequest) (*Credentials, error) {
 		if isMissingCredential(err) {
 			return nil, fmt.Errorf("%w: %w", ErrNoCredential, err)
 		}
-		return nil, keyringOperationError(err)
+		return nil, s.operationError(err)
 	}
 	var creds Credentials
 	if err := json.Unmarshal(data, &creds); err != nil {
@@ -245,13 +245,13 @@ func (s *Store) save(under func(func() error) error, origin string, creds *Crede
 	if err != nil {
 		return err
 	}
-	return keyringOperationError(under(func() error { return s.ensure().Save(origin, data) }))
+	return s.operationError(under(func() error { return s.ensure().Save(origin, data) }))
 }
 
 // Delete removes credentials for the given origin. Locked for the same
 // reason Save is: the file backend rewrites the whole document.
 func (s *Store) Delete(origin string) error {
-	return keyringOperationError(s.withStoreLock(func() error { return s.ensure().Delete(origin) }))
+	return s.operationError(s.withStoreLock(func() error { return s.ensure().Delete(origin) }))
 }
 
 // MigrateToKeyring migrates credentials from file to keyring. It reads
@@ -269,11 +269,22 @@ func (s *Store) Delete(origin string) error {
 // migration can therefore be re-saved from the file copy — one stale
 // credential, one login to repair, against a deadlock in the common path.
 func (s *Store) MigrateToKeyring() error {
-	return keyringOperationError(s.withStoreFileLock(func() error { return s.ensure().MigrateToKeyring() }))
+	return s.operationError(s.withStoreFileLock(func() error { return s.ensure().MigrateToKeyring() }))
 }
 
 // UsingKeyring returns true if the store is using the system keyring.
 func (s *Store) UsingKeyring() bool { return s.ensure().UsingKeyring() }
+
+// operationError offers the file-storage remedy only while the keyring is the
+// store in use. After a failed initial probe the store is already on the file
+// backend, whose errors carry the probe's timeout but which the remedy
+// cannot fix.
+func (s *Store) operationError(err error) error {
+	if err == nil || !s.ensure().UsingKeyring() {
+		return err
+	}
+	return keyringOperationError(err)
+}
 
 // A keyring operation timeout is not a missing login. Keep the wrapped error
 // and offer the explicit, warned choice of file storage rather than silently
