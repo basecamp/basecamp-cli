@@ -21,6 +21,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
@@ -238,6 +239,11 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	client := connectSDKClient(app, tokens)
 	accountClient := client.ForAccount(account)
 	me, err := (setup.SDKReader{Client: accountClient}).Me(ctx)
+	if errors.Is(err, auth.ErrAgentCredentialRefused) {
+		// Disconnected while the connector wasn't running: said the way a
+		// running connector says it, with no name, since reading it failed.
+		return errAgentDisconnected("", name)
+	}
 	if err != nil {
 		return output.ErrAuth(fmt.Sprintf("Could not read who profile %q is: %s", name, setup.ErrorText(err)))
 	}
@@ -523,16 +529,20 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 // another computer — is said in their words; anything else is returned as it
 // is.
 func connectorStoppedBy(err error, agent, profile string) (state, detail string, exit error) {
-	if !feedRefusedTheAgent(err) {
+	if !agentWasRefused(err) {
 		return connector.ConnectionStopped, "", err
 	}
 	disconnected := errAgentDisconnected(agent, profile)
 	return connector.ConnectionDisconnected, disconnected.Message, disconnected
 }
 
-// feedRefusedTheAgent reports whether err is the event feed ending because
-// Basecamp refused the agent's credential.
-func feedRefusedTheAgent(err error) bool {
+// agentWasRefused reports whether err is Basecamp refusing the agent's
+// credential: the event feed ending on it, or a token renewal it refused,
+// however the feed classed that renewal (mint or poll).
+func agentWasRefused(err error) bool {
+	if errors.Is(err, auth.ErrAgentCredentialRefused) {
+		return true
+	}
 	var terminal *eventfeed.TerminalError
 	return errors.As(err, &terminal) && terminal.Reason == eventfeed.ReasonAuthorizationFailed
 }
@@ -541,7 +551,11 @@ func feedRefusedTheAgent(err error) bool {
 // disconnected, in the words guided setup uses for the same thing, and how to
 // reconnect.
 func errAgentDisconnected(agent, profile string) *output.Error {
-	e := output.ErrAuth(richtext.SanitizeSingleLine(agent) + " was disconnected in Basecamp, or connected on another computer")
+	who := richtext.SanitizeSingleLine(agent)
+	if who == "" {
+		who = "Your agent"
+	}
+	e := output.ErrAuth(who + " was disconnected in Basecamp, or connected on another computer")
 	e.Hint = "Reconnect it: basecamp connect setup -P " + richtext.ShellQuote(profile)
 	return e
 }

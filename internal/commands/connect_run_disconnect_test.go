@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
@@ -40,6 +41,28 @@ func TestTheConnectorSaysPlainlyWhenItsAgentWasDisconnected(t *testing.T) {
 	require.ErrorAs(t, err, &e)
 	assert.NotContains(t, e.Message, "\n")
 	assert.Equal(t, "Reconnect it: basecamp connect setup -P 'my agent'", e.Hint)
+}
+
+// A token renewal Basecamp refuses is the same disconnect, whether the feed
+// classed it as a failed mint or a failed poll (Codex on #806).
+func TestARefusedTokenRenewalIsTheSameDisconnect(t *testing.T) {
+	refused := output.ErrAuth("Minting an agent token was refused (invalid_client)")
+	refused.Cause = auth.ErrAgentCredentialRefused
+	for _, reason := range []eventfeed.TerminalReason{eventfeed.ReasonMintFailed, eventfeed.ReasonPollFailed} {
+		err := fmt.Errorf("intake: %w", &eventfeed.TerminalError{Reason: reason, Err: fmt.Errorf("renew the token: %w", refused)})
+		state, _, got := connectorStoppedBy(err, "Ryan Singer (agent)", "agent")
+		var e *output.Error
+		require.ErrorAs(t, got, &e, reason)
+		assert.Equal(t, "Ryan Singer (agent) was disconnected in Basecamp, or connected on another computer", e.Message, reason)
+		assert.Equal(t, connector.ConnectionDisconnected, state, reason)
+	}
+}
+
+// With no name to give, the message still reads as a sentence.
+func TestADisconnectWithoutTheAgentsNameSaysYourAgent(t *testing.T) {
+	e := errAgentDisconnected("", "agent")
+	assert.Equal(t, "Your agent was disconnected in Basecamp, or connected on another computer", e.Message)
+	assert.Equal(t, "Reconnect it: basecamp connect setup -P agent", e.Hint)
 }
 
 // Every other way a part can stop the connector keeps its own words.
