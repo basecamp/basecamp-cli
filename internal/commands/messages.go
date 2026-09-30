@@ -1000,7 +1000,9 @@ func resolveMessageCategory(ctx context.Context, app *appctx.App, projectID, cat
 		return 0, convertSDKError(err)
 	}
 
-	name := strings.TrimSpace(category)
+	// Names are compared as given, untrimmed: messagetypes create keeps
+	// surrounding spaces, so "Memo" and "Memo " can both exist.
+	name := category
 	var folded []basecamp.MessageType
 	for _, t := range result.MessageTypes {
 		if t.Name == name {

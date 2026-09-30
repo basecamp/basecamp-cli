@@ -259,3 +259,13 @@ func TestMessagesCreateCategoryNameRefusesBoardOfUnknownProject(t *testing.T) {
 	requireNoMessageWrite(t, transport)
 	assert.Empty(t, messagesRequestsTo(transport, messageCategoriesPath))
 }
+
+func TestMessagesCreateCategoryNameIsNotTrimmed(t *testing.T) {
+	app, transport := setupMessageCreateCategoryApp(t,
+		`[{"id":7,"name":"Memo","icon":"📢"},{"id":8,"name":"Memo ","icon":"✨"}]`)
+
+	require.NoError(t, executeRecordingCommand(NewMessagesCmd(), app, "create", "Hello", "--category", "Memo "))
+
+	body := sentMessageBody(t, transport, http.MethodPost, messageCreatePath)
+	assert.Equal(t, float64(8), body["category_id"])
+}
