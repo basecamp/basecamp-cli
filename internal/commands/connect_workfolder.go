@@ -6,29 +6,45 @@ import (
 	"path/filepath"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // workFolderCheck says which folder workers run in: the one the connector is
 // started from (connector.DispatcherOptions.WorkDir), which setup and doctor
 // take to be the one they run in. Workers may change files there without
-// asking, so the home directory, or the filesystem's root, is a warning.
+// asking, so the home directory, or a filesystem root, is a warning.
 func workFolderCheck() setup.Check {
 	c := setup.Check{Name: "Work folder"}
 	dir, err := os.Getwd()
 	if err != nil {
 		c.Status = setup.StatusWarn
-		c.Message = "Couldn't tell which folder this is: " + err.Error()
+		c.Message = "Couldn't tell which folder this is: " + richtext.SanitizeSingleLine(err.Error())
 		return c
 	}
-	if home, err := os.UserHomeDir(); (err == nil && samePath(dir, home)) || samePath(dir, string(filepath.Separator)) {
+	// The path is shown on one line: a folder name can carry newlines or
+	// terminal escapes, and check messages are printed as they are.
+	shown := richtext.SanitizeSingleLine(dir)
+	switch home, err := os.UserHomeDir(); {
+	case err == nil && samePath(dir, home):
 		c.Status = setup.StatusWarn
-		c.Message = fmt.Sprintf("Started from here, the agent works in %s, your home folder, and may change files anywhere in it without asking", dir)
-		c.Hint = "Start the connector from a folder made for the agent, or from the project it should work on."
+		c.Message = fmt.Sprintf("Started from here, the agent works in %s, your home folder, and may change files anywhere in it without asking", shown)
+	case isFilesystemRoot(dir):
+		c.Status = setup.StatusWarn
+		c.Message = fmt.Sprintf("Started from here, the agent works in %s, the root of the filesystem, and may change any file it can reach without asking", shown)
+	default:
+		c.Status = setup.StatusPass
+		c.Message = fmt.Sprintf("Started from here, the agent works in %s and may change files in it without asking", shown)
 		return c
 	}
-	c.Status = setup.StatusPass
-	c.Message = fmt.Sprintf("Started from here, the agent works in %s and may change files in it without asking", dir)
+	c.Hint = "Start the connector from a folder made for the agent, or from the project it should work on."
 	return c
+}
+
+// isFilesystemRoot reports whether dir is a root: / on Unix, a volume root
+// such as C:\ or a UNC share on Windows. A root is its own parent.
+func isFilesystemRoot(dir string) bool {
+	clean := filepath.Clean(dir)
+	return filepath.Dir(clean) == clean
 }
 
 // samePath reports whether two paths name the same folder, through symlinks.
