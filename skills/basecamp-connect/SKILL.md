@@ -475,12 +475,15 @@ the person wants it to work on. Never suggest their home directory, and if the
 connector is already running from it, say so.
 
 Stopping it is safe: Ctrl-C (a SIGINT) cancels live workers, posts their
-completions and exits. Nothing is lost while it is stopped: started again, it
-catches up on what people asked in the meantime. On a server, the person can
-keep it running in `tmux` or `screen`.
+completions and exits. Once it has run and read the feed, it keeps its place:
+started again, it catches up on what people asked while it was stopped. Its
+very first start has no place to resume from, so it begins at that moment, and
+anything asked before then is not picked up. On a server, the person can keep
+it running in `tmux` or `screen`.
 
 There is no background service yet. If someone asks for one, say it isn't
-available, and that the connector catches up whenever it is started again.
+available, and that once it has run, the connector catches up whenever it is
+started again.
 
 Pass the run's shape to the connector itself: `--project <id>` (repeatable) to
 hear only some projects, `--shadow` to admit and log without dispatching or
@@ -495,8 +498,10 @@ Quote the profile, as everywhere else in this skill.
 
 **What it has heard and run** is `basecamp connect status -P '<profile>'`,
 which reads the ledger. That is the answer to "is it working", "what is it
-holding", "did that mention get picked up". It also says whether a connector
-holds the ledger, which is whether one is running.
+holding", "did that mention get picked up". It also shows what the last
+connector wrote beside its lock, but that is a hint, not an answer: a crashed
+connector leaves it behind, and a process id can since belong to something
+else. Whether the connector is running is in the person's terminal: ask them.
 
 ### The pointer lines
 
