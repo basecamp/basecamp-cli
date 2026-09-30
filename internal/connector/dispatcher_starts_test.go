@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -142,6 +143,29 @@ func TestAHoldClearedWhileItsPreflightRunsLeavesStatusRunning(t *testing.T) {
 
 	assert.Equal(t, ConnectionRunning, connectionOf(t, h.ledger).State, "the hold was cleared before its reason arrived")
 	assert.False(t, h.d.startsHeld())
+}
+
+// A session that can't even be prepared — its directory can't be made — is a
+// start that never ran, like a driver's refusal: two in a row hold new work
+// rather than failing every queued request (Codex on #794).
+func TestSessionsThatCannotBePreparedHoldNewWork(t *testing.T) {
+	fake := newFakeDriver()
+	var calls atomic.Int32
+	startsOf(fake, &calls)
+	h := newDispatchHarness(t, fake, func(o *DispatcherOptions) { o.Concurrency = 1 })
+	for id := int64(1); id <= 4; id++ {
+		admitOn(t, h.ledger, id, fmt.Sprintf("recording:%d", id))
+	}
+	require.NoError(t, os.RemoveAll(h.d.opts.PrivateDir)) // every session's directory now fails
+	stop := h.run(t)
+
+	require.Eventually(t, func() bool { return connectionOf(t, h.ledger).State == ConnectionNotTakingWork }, 10*time.Second, 10*time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
+	stop()
+	assert.Zero(t, calls.Load(), "no session reached the driver")
+	for id := int64(1); id <= 4; id++ {
+		assert.Equal(t, StateAdmitted, stateOf(t, h.ledger, id), "record %d waits, its automatic retry unspent, for a start that can work", id)
+	}
 }
 
 // Two starts in a row that never ran hold new work: the next record waits,

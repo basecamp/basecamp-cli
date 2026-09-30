@@ -729,7 +729,12 @@ func (d *Dispatcher) start(ctx context.Context, record Record) error {
 	if err != nil {
 		// Nothing was asked of the driver: no process exists.
 		log.Warn("connector: could not prepare a session", "task_id", launch.TaskID, "error", err)
-		d.release(settleCtx, launch, driver.Process{}, TokenHolder{}, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true, NoAutomaticRetry: d.opts.NoAutomaticRetry}, nil)
+		settlement, settled := d.release(settleCtx, launch, driver.Process{}, TokenHolder{}, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true, NoAutomaticRetry: d.opts.NoAutomaticRetry}, nil)
+		// A start that ran nothing, as a driver's refusal is: it counts
+		// toward holding new work.
+		if settled {
+			d.noteStart(settleCtx, settlement, err.Error())
+		}
 		return nil //nolint:nilerr // settled as a start that ran nothing
 	}
 	session, err := d.opts.Driver.NewSession(ctx, cfg)
