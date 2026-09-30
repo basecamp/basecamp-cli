@@ -8,12 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/connector"
+	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -67,6 +69,29 @@ func TestAnAuthorizationFailureTheCredentialSurvivesIsNotCalledADisconnect(t *te
 	assert.Same(t, err, got)
 	assert.Equal(t, connector.ConnectionStopped, state)
 	assert.Empty(t, detail)
+}
+
+// A connector started after a disconnect meets it reading who it is: as a
+// refused token renewal, or as a 401 for a token minted before the
+// disconnect, which is still cached (Copilot on #806). A bot user's login
+// keeps its own error.
+func TestADisconnectMetAtStartIsRecognisedForAnAgentOnly(t *testing.T) {
+	refused := output.ErrAuth("Minting an agent token was refused (invalid_client)")
+	refused.Cause = auth.ErrAgentCredentialRefused
+	unauthorized := &basecamp.Error{Code: basecamp.CodeAuth, Message: "unauthorized", HTTPStatus: 401}
+	serverError := &basecamp.Error{Code: basecamp.CodeAPI, Message: "oops", HTTPStatus: 500}
+
+	assert.True(t, agentDisconnectedAtStart(setup.KindAgent, refused))
+	assert.True(t, agentDisconnectedAtStart(setup.KindAgent, fmt.Errorf("read me: %w", unauthorized)))
+	assert.False(t, agentDisconnectedAtStart(setup.KindAgent, serverError))
+	assert.False(t, agentDisconnectedAtStart(setup.KindAgent, nil))
+	assert.False(t, agentDisconnectedAtStart(setup.KindBotUser, unauthorized), "a bot user's login keeps its own error")
+}
+
+// Only an Agent's credential is checked after the feed's authorization
+// failure: a bot user is never told it was disconnected (Copilot on #806).
+func TestABotUserIsNeverAskedAboutADisconnect(t *testing.T) {
+	assert.False(t, confirmAgentRefused(t.Context(), nil, setup.KindBotUser, "bot"))
 }
 
 // With no name to give, the message still reads as a sentence.

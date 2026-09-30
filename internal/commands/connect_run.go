@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -239,7 +240,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	client := connectSDKClient(app, tokens)
 	accountClient := client.ForAccount(account)
 	me, err := (setup.SDKReader{Client: accountClient}).Me(ctx)
-	if errors.Is(err, auth.ErrAgentCredentialRefused) {
+	if agentDisconnectedAtStart(kind, err) {
 		// Disconnected while the connector wasn't running: said the way a
 		// running connector says it, with no name, since reading it failed.
 		return errAgentDisconnected("", name)
@@ -512,12 +513,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return output.ErrTerminated("connector terminated")
 	case firstErr != nil:
 		var err error
-		refused := func() bool {
-			checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-			defer cancel()
-			refused, _ := agentCredentialRefused(checkCtx, app, name)
-			return refused
-		}
+		refused := func() bool { return confirmAgentRefused(context.WithoutCancel(ctx), app, kind, name) }
 		stopState, stopDetail, err = connectorStoppedBy(firstErr, me.Name, name, refused)
 		if err != firstErr { //nolint:errorlint // identity: was firstErr put in the person's words
 			logger.Error("connector: Basecamp refused the agent's credential", "error", firstErr)
@@ -543,6 +539,33 @@ func connectorStoppedBy(err error, agent, profile string, refused func() bool) (
 	}
 	e := errAgentDisconnected(agent, profile)
 	return connector.ConnectionDisconnected, e.Message, e
+}
+
+// agentDisconnectedAtStart reports whether the connector's first read of who
+// it is failed because Basecamp refused an Agent's credential: a token
+// renewal it refused, or a token minted before the disconnect that it no
+// longer takes (disconnecting doesn't revoke tokens, so one can still be
+// cached). A bot user's login keeps its own error.
+func agentDisconnectedAtStart(kind string, err error) bool {
+	if kind != setup.KindAgent || err == nil {
+		return false
+	}
+	var apiErr *basecamp.Error
+	return errors.Is(err, auth.ErrAgentCredentialRefused) ||
+		(errors.As(err, &apiErr) && apiErr.HTTPStatus == http.StatusUnauthorized)
+}
+
+// confirmAgentRefused asks Basecamp whether it still takes the profile's
+// Agent credential. Only an Agent is asked: a bot user whose login was
+// revoked keeps its own error and remedy.
+func confirmAgentRefused(ctx context.Context, app *appctx.App, kind, name string) bool {
+	if kind != setup.KindAgent {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	refused, _ := agentCredentialRefused(ctx, app, name)
+	return refused
 }
 
 // feedAuthorizationFailed reports whether err is the event feed ending on
