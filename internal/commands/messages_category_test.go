@@ -223,3 +223,23 @@ func TestMessagesUpdateCategoryRejectsOutOfRangeID(t *testing.T) {
 		})
 	}
 }
+
+// An explicit --message-board may belong to a different project than --in;
+// the message lands on that board, so a category name is matched against the
+// board's own project.
+func TestMessagesCreateCategoryNameUsesExplicitBoardProject(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		projectsRoute(),
+		stubRoute{method: http.MethodGet, path: "/99999/message_boards/555", status: http.StatusOK, body: `{"id":555,"bucket":{"id":456,"name":"Other Project","type":"Project"}}`},
+		messageCategoriesRoute(defaultMessageCategories),
+		stubRoute{method: http.MethodGet, path: "/99999/buckets/456/categories.json", status: http.StatusOK, body: `[{"id":70,"name":"Announcement","icon":"📢"}]`},
+		stubRoute{method: http.MethodPost, path: "/99999/message_boards/555/messages.json", status: http.StatusCreated, body: `{"id":999,"subject":"Hello","status":"active"}`},
+	)
+	app.Config.ProjectID = "123"
+
+	require.NoError(t, executeRecordingCommand(NewMessagesCmd(), app, "create", "Hello", "--message-board", "555", "--category", "Announcement"))
+
+	body := sentMessageBody(t, transport, http.MethodPost, "/99999/message_boards/555/messages.json")
+	assert.Equal(t, float64(70), body["category_id"])
+	assert.Empty(t, messagesRequestsTo(transport, messageCategoriesPath), "the --in project's types are not the board's")
+}

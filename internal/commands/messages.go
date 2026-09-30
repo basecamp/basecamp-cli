@@ -546,7 +546,7 @@ List a project's message types with: basecamp messagetypes list --in <project>`,
 
 			var categoryID int64
 			if cmd.Flags().Changed("category") {
-				categoryID, err = resolveMessageCategory(cmd.Context(), app, resolvedProjectID, category)
+				categoryID, err = resolveCreatedMessageCategory(cmd.Context(), app, resolvedProjectID, *messageBoard, boardID, category)
 				if err != nil {
 					return err
 				}
@@ -953,6 +953,26 @@ func resolveUpdatedMessageCategory(ctx context.Context, app *appctx.App, message
 			"Pass the message type ID instead: basecamp messagetypes list --in <project>")
 	}
 	return resolveMessageCategory(ctx, app, strconv.FormatInt(message.Bucket.ID, 10), category)
+}
+
+// resolveCreatedMessageCategory resolves --category for messages create. A
+// name is matched against the project the message lands in: the --in project,
+// unless an explicit --message-board says otherwise, since that board is taken
+// as given and may belong to another project.
+func resolveCreatedMessageCategory(ctx context.Context, app *appctx.App, projectID, explicitBoard string, boardID int64, category string) (int64, error) {
+	if id, ok := numericMessageCategory(category); ok {
+		return id, nil
+	}
+	if explicitBoard != "" {
+		board, err := app.Account().MessageBoards().Get(ctx, boardID)
+		if err != nil {
+			return 0, convertSDKError(err)
+		}
+		if board.Bucket != nil && board.Bucket.ID != 0 {
+			projectID = strconv.FormatInt(board.Bucket.ID, 10)
+		}
+	}
+	return resolveMessageCategory(ctx, app, projectID, category)
 }
 
 func numericMessageCategory(category string) (int64, bool) {
