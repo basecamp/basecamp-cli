@@ -142,13 +142,13 @@ func runGuidedConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupF
 		}
 		worker = *file
 	}
-	if err := checkGuidedWorker(ctx, w, r, worker); err != nil {
+	if err := checkGuidedWorker(ctx, w, r, worker, name); err != nil {
 		return err
 	}
 	if file == nil {
 		err := setUpGuidedConnectFile(cmd, app, w, r, agent, f)
 		if errors.Is(err, errNoProjectsYet) {
-			renderNoProjectsYet(w, agent)
+			renderNoProjectsYet(w, agent, name)
 			return nil
 		}
 		if err != nil {
@@ -177,7 +177,7 @@ func checkGuidedScope(ctx context.Context, app *appctx.App, name string) error {
 		return nil
 	}
 	return output.ErrUsageHint(richtext.SanitizeSingleLine(c.Message),
-		"Reconnect with full access: basecamp auth agent connect -P "+richtext.ShellQuote(name)+". Then run this again: basecamp connect setup")
+		"Reconnect with full access: basecamp auth agent connect -P "+richtext.ShellQuote(name)+". "+runGuidedSetupAgain(name))
 }
 
 // guidedSetupProfile is the profile the guided setup works on: the one named
@@ -532,10 +532,10 @@ func chooseGuidedProjects(w io.Writer, agent guidedAgent) ([]guidedProject, erro
 // anything is written or anyone is told the agent is set up: an agent whose
 // AI cannot start fails every request it is given, and the person who
 // mentioned it is the last to be able to fix that.
-func checkGuidedWorker(ctx context.Context, w io.Writer, r *output.Renderer, file setup.File) error {
+func checkGuidedWorker(ctx context.Context, w io.Writer, r *output.Renderer, file setup.File, name string) error {
 	p, ok := connectWorkerPreflight(ctx, file)
 	if !ok {
-		return checkGuidedWorkerBinary(w, r, file)
+		return checkGuidedWorkerBinary(w, r, file, name)
 	}
 	for _, c := range p.Checks {
 		if c.Status == driver.PreflightWarn {
@@ -551,19 +551,19 @@ func checkGuidedWorker(ctx context.Context, w io.Writer, r *output.Renderer, fil
 		fmt.Fprintln(w, r.Success.Render("✓ "+richtext.SanitizeSingleLine(named)+" is ready"))
 		return nil
 	}
-	hint := strings.TrimSpace(failed.Hint + " Then run this again: basecamp connect setup")
+	hint := strings.TrimSpace(failed.Hint + " " + runGuidedSetupAgain(name))
 	return output.ErrUsageHint(richtext.SanitizeSingleLine(failed.Message), richtext.SanitizeSingleLine(hint))
 }
 
 // checkGuidedWorkerBinary checks a worker whose driver has no spawn preflight
 // (the acp driver) as doctor does: where the driver would find it.
-func checkGuidedWorkerBinary(w io.Writer, r *output.Renderer, file setup.File) error {
+func checkGuidedWorkerBinary(w io.Writer, r *output.Renderer, file setup.File, name string) error {
 	for _, c := range workerBinaryChecks(file) {
 		switch c.Status {
 		case setup.StatusWarn:
 			fmt.Fprintln(w, r.Warning.Render(richtext.SanitizeSingleLine(c.Message)))
 		case setup.StatusFail:
-			hint := strings.TrimSpace(c.Hint + " Then run this again: basecamp connect setup")
+			hint := strings.TrimSpace(c.Hint + " " + runGuidedSetupAgain(name))
 			return output.ErrUsageHint(richtext.SanitizeSingleLine(c.Message), richtext.SanitizeSingleLine(hint))
 		}
 	}
@@ -625,11 +625,17 @@ func renderGuidedChecks(w io.Writer, checks []setup.Check) {
 
 // renderNoProjectsYet is the step after connecting an agent that is in no
 // projects: adding it to some, in Basecamp.
-func renderNoProjectsYet(w io.Writer, agent guidedAgent) {
+func renderNoProjectsYet(w io.Writer, agent guidedAgent, profile string) {
 	name := richtext.SanitizeSingleLine(agent.Me.Name)
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "%s isn't in any projects yet, so there's nothing for it to work on.\n", name)
-	fmt.Fprintf(w, "Next: add it to the projects it should work in (in Basecamp, Adminland → Manage agents → %s → Edit), then run `basecamp connect setup` again.\n", name)
+	fmt.Fprintf(w, "Next: add it to the projects it should work in (in Basecamp, Adminland → Manage agents → %s → Edit), then run `basecamp connect setup -P %s` again.\n", name, richtext.ShellQuote(profile))
+}
+
+// runGuidedSetupAgain is how a person picks setup up where it stopped: on the
+// profile it was working on, which a bare `connect setup` may not choose again.
+func runGuidedSetupAgain(name string) string {
+	return "Then run this again: basecamp connect setup -P " + richtext.ShellQuote(name)
 }
 
 func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, file setup.File, running bool, name string) {

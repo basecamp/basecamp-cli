@@ -371,7 +371,7 @@ func TestGuidedConnectSetupStopsWhenTheAgentIsInNoProjects(t *testing.T) {
 	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"))
 	require.NoError(t, err, out)
 	assert.Contains(t, out, "Marie Chef isn't in any projects yet")
-	assert.Contains(t, out, "Next: add it to the projects it should work in (in Basecamp, Adminland → Manage agents → Marie Chef → Edit), then run `basecamp connect setup` again.")
+	assert.Contains(t, out, "Next: add it to the projects it should work in (in Basecamp, Adminland → Manage agents → Marie Chef → Edit), then run `basecamp connect setup -P agent` again.")
 	assert.NotContains(t, out, "is set up on this computer")
 	assertNotWritten(t, "agent")
 }
@@ -387,15 +387,19 @@ func TestGuidedConnectSetupStopsWhenTheWorkerCannotStart(t *testing.T) {
 	guided(t, p)
 	workerAnswers(t, brokenLauncher)
 
-	out, err := runConnectSetupCmd(t, bareSetupApp(t, s, "agent"))
+	app := bareSetupApp(t, s, "work")
+	app.Flags.Profile = "work"
+	out, err := runConnectSetupCmd(t, app)
 	require.Error(t, err, out)
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, brokenLauncher.Checks[0].Message, apiErr.Message)
-	assert.Equal(t, "Reinstall Claude Code, or fix the launcher at /home/me/.local/bin/claude. Then run this again: basecamp connect setup", apiErr.Hint)
+	// The profile it was working on, which a bare `connect setup` may not
+	// choose again (Codex on #794).
+	assert.Equal(t, "Reinstall Claude Code, or fix the launcher at /home/me/.local/bin/claude. Then run this again: basecamp connect setup -P work", apiErr.Hint)
 	assert.Empty(t, p.asked, "nothing is asked of a person whose AI cannot start")
 	assert.NotContains(t, out, "is set up on this computer")
-	assertNotWritten(t, "agent")
+	assertNotWritten(t, "work")
 }
 
 // A finished setup whose AI has since stopped starting is not called set up.
@@ -416,7 +420,7 @@ func TestGuidedConnectSetupOnAFinishedSetupChecksTheWorker(t *testing.T) {
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, "Claude Code is logged out on this computer — run `claude` and log in", apiErr.Message)
-	assert.Equal(t, "Then run this again: basecamp connect setup", apiErr.Hint)
+	assert.Equal(t, "Then run this again: basecamp connect setup -P agent", apiErr.Hint)
 	assert.NotContains(t, out, "is set up on this computer")
 }
 
