@@ -5,12 +5,15 @@ import (
 	"context"
 	"debug/pe"
 	"encoding/binary"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -298,7 +301,7 @@ func TestValidateConfigFile(t *testing.T) {
 
 func TestBuildDoctorBreadcrumbs(t *testing.T) {
 	checks := []Check{
-		{Name: "Credentials", Status: "fail"},
+		{Name: "Credentials", Status: "fail", Hint: "Run: basecamp auth login"},
 		{Name: "Authentication", Status: "fail"},
 		{Name: "API Connectivity", Status: "pass"},
 	}
@@ -313,7 +316,7 @@ func TestBuildDoctorBreadcrumbs(t *testing.T) {
 func TestBuildDoctorBreadcrumbsDeduplication(t *testing.T) {
 	// Both Credentials and Authentication fail - should only suggest login once
 	checks := []Check{
-		{Name: "Credentials", Status: "fail"},
+		{Name: "Credentials", Status: "fail", Hint: "Run: basecamp auth login"},
 		{Name: "Authentication", Status: "fail"},
 	}
 
@@ -377,6 +380,64 @@ func executeDoctorCommand(cmd *cobra.Command, app *appctx.App, args ...string) e
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
 	return cmd.Execute()
+}
+
+func TestDoctorDoesNotCallAnUnreadableStoreAMissingLogin(t *testing.T) {
+	app, _ := setupDoctorTestApp(t, "12345")
+	// A directory where the credential file should be is a read failure,
+	// not a missing credential. The same branch reports keyring timeouts.
+	require.NoError(t, os.MkdirAll(filepath.Join(config.GlobalConfigDir(), "credentials.json"), 0700))
+	check, unreadable := checkStoredCredentials(context.Background(), app, false)
+	assert.True(t, unreadable, "doctor must not skip authentication as if there were no credentials")
+	assert.Equal(t, "fail", check.Status)
+	assert.Contains(t, check.Message, "Could not read stored credentials")
+	assert.NotContains(t, check.Message, "No credentials found")
+	assert.Empty(t, check.Hint, "an unreadable store must not prescribe another OAuth login")
+
+	checks := runDoctorChecks(context.Background(), app, false)
+	for _, crumb := range buildDoctorBreadcrumbs(checks, app.Auth.LoginCommand()) {
+		assert.NotEqual(t, "login", crumb.Action, "an unreadable store must not prescribe login through a breadcrumb either")
+	}
+}
+
+func TestDoctorLegacyKeyringProbeIsBounded(t *testing.T) {
+	original := legacyKeyringGet
+	t.Cleanup(func() { legacyKeyringGet = original })
+	var calls atomic.Int32
+	release, finished := make(chan struct{}), make(chan struct{})
+	legacyKeyringGet = func(string, string) (string, error) {
+		calls.Add(1)
+		<-release
+		defer close(finished)
+		return "", errors.New("unavailable")
+	}
+	t.Cleanup(func() { close(release); <-finished })
+	result := make(chan bool, 1)
+	go func() {
+		result <- legacyKeyringEntryExists(context.Background(), []string{"first", "second"}, 40*time.Millisecond)
+	}()
+	select {
+	case found := <-result:
+		assert.False(t, found)
+	case <-time.After(time.Second):
+		t.Fatal("doctor's legacy keyring lookup ignored its deadline")
+	}
+	assert.EqualValues(t, 1, calls.Load())
+}
+
+func TestDoctorLegacyKeyringProbeFindsHealthyEntries(t *testing.T) {
+	original := legacyKeyringGet
+	t.Cleanup(func() { legacyKeyringGet = original })
+	legacyKeyringGet = func(service, key string) (string, error) {
+		assert.Equal(t, "bcq", service)
+		if key == "bcq::second" {
+			return "token", nil
+		}
+		return "", errors.New("not found")
+	}
+	assert.True(t, legacyKeyringEntryExists(context.Background(), []string{"first", "second"}, time.Second))
+	assert.True(t, legacyKeyringEntryExists(context.Background(), []string{"first", "second"}, 0))
+	assert.False(t, legacyKeyringEntryExists(context.Background(), []string{"first"}, time.Second))
 }
 
 func TestDoctorCommandCreation(t *testing.T) {
@@ -466,7 +527,7 @@ func TestCheckLegacyInstall_DetectsLegacyCache(t *testing.T) {
 	// Create legacy cache dir
 	require.NoError(t, os.MkdirAll(filepath.Join(cacheBase, "bcq"), 0700))
 
-	check := checkLegacyInstall()
+	check := checkLegacyInstall(context.Background())
 	require.NotNil(t, check, "should detect legacy cache dir")
 	assert.Equal(t, "warn", check.Status)
 	assert.Contains(t, check.Message, filepath.Join(cacheBase, "bcq"))
@@ -483,7 +544,7 @@ func TestCheckLegacyInstall_DetectsLegacyTheme(t *testing.T) {
 	// Create legacy theme dir
 	require.NoError(t, os.MkdirAll(filepath.Join(configBase, "bcq", "theme"), 0700))
 
-	check := checkLegacyInstall()
+	check := checkLegacyInstall(context.Background())
 	require.NotNil(t, check, "should detect legacy theme dir")
 	assert.Equal(t, "warn", check.Status)
 	assert.Contains(t, check.Message, filepath.Join(configBase, "bcq", "theme"))
@@ -499,7 +560,7 @@ func TestCheckLegacyInstall_DetectsBothArtifacts(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(cacheBase, "bcq"), 0700))
 	require.NoError(t, os.MkdirAll(filepath.Join(configBase, "bcq", "theme"), 0700))
 
-	check := checkLegacyInstall()
+	check := checkLegacyInstall(context.Background())
 	require.NotNil(t, check)
 	assert.Contains(t, check.Message, "bcq")
 	assert.Contains(t, check.Message, "theme")
@@ -510,7 +571,7 @@ func TestCheckLegacyInstall_NilWhenClean(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
-	check := checkLegacyInstall()
+	check := checkLegacyInstall(context.Background())
 	assert.Nil(t, check, "should return nil when no legacy artifacts exist")
 }
 
@@ -529,7 +590,7 @@ func TestCheckLegacyInstall_NilWhenAlreadyMigrated(t *testing.T) {
 	require.NoError(t, os.MkdirAll(markerDir, 0700))
 	require.NoError(t, os.WriteFile(filepath.Join(markerDir, ".migrated"), []byte("migrated\n"), 0600))
 
-	check := checkLegacyInstall()
+	check := checkLegacyInstall(context.Background())
 	assert.Nil(t, check, "should return nil when .migrated marker exists")
 }
 
@@ -856,7 +917,7 @@ func TestCheckLegacyInstall_SkipsKeyringWhenNoKeyring(t *testing.T) {
 
 	// With BASECAMP_NO_KEYRING set, even if legacy keyring entries existed,
 	// the function should not probe the keyring and should return nil
-	check := checkLegacyInstall()
+	check := checkLegacyInstall(context.Background())
 	assert.Nil(t, check)
 }
 
@@ -871,7 +932,7 @@ func TestDoctorVerboseHidesLaunchpadScope(t *testing.T) {
 		Scope:       "read",
 	}))
 
-	check := checkCredentials(app, true)
+	check := checkCredentials(context.Background(), app, true)
 	assert.Equal(t, "pass", check.Status)
 	assert.NotContains(t, check.Message, "scope:", "Launchpad scope should not appear in verbose output")
 	assert.Contains(t, check.Message, "type: launchpad")
@@ -888,7 +949,7 @@ func TestDoctorVerboseShowsBC3Scope(t *testing.T) {
 		Scope:       "read",
 	}))
 
-	check := checkCredentials(app, true)
+	check := checkCredentials(context.Background(), app, true)
 	assert.Equal(t, "pass", check.Status)
 	assert.Contains(t, check.Message, "scope: read", "BC3 scope should appear in verbose output")
 	assert.Contains(t, check.Message, "type: bc3")
@@ -927,4 +988,22 @@ func TestAttachGitHubAuthFallsBackToGithubToken(t *testing.T) {
 // interactive login, for the cases that are not about which login.
 func buildDoctorBreadcrumbsForTest(checks []Check) []output.Breadcrumb {
 	return buildDoctorBreadcrumbs(checks, "basecamp auth login")
+}
+
+// TestDoctorStillPrescribesLoginForMissingCredentials: the unreadable-store
+// guard must not swallow the breadcrumb for a store that was read and held
+// nothing — that is exactly the case a login repairs.
+func TestDoctorStillPrescribesLoginForMissingCredentials(t *testing.T) {
+	app, _ := setupDoctorTestApp(t, "12345")
+	t.Setenv("BASECAMP_TOKEN", "")
+
+	checks := runDoctorChecks(context.Background(), app, false)
+	var logins []string
+	for _, crumb := range buildDoctorBreadcrumbs(checks, app.Auth.LoginCommand()) {
+		if crumb.Action == "login" {
+			logins = append(logins, crumb.Cmd)
+		}
+	}
+	require.Len(t, logins, 1, "a missing credential must still offer exactly one login")
+	assert.Equal(t, app.Auth.LoginCommand(), logins[0])
 }

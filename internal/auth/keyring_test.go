@@ -1,8 +1,11 @@
 package auth
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -73,13 +76,22 @@ func ensureOptions(t *testing.T, headless bool) credstore.StoreOptions {
 	return got
 }
 
-// Headless sessions can never answer a keychain unlock prompt, so the probe
-// must be bounded there — the #568 incident class. Interactive sessions keep
-// the unbounded probe so a legitimate unlock prompt is never cut off
-// mid-answer (which would silently degrade to plaintext file storage).
-func TestEnsureBoundsProbeOnlyWhenHeadless(t *testing.T) {
-	assert.Equal(t, headlessProbeTimeout, ensureOptions(t, true).ProbeTimeout)
-	assert.Zero(t, ensureOptions(t, false).ProbeTimeout)
+// Linux must bound a D-Bus stall independently of GUI/TTY availability.
+// Other platforms retain the headless-only probe bound and do not opt in
+// to operation timeouts, so their interactive unlock prompts are unchanged.
+func TestEnsureBoundsLinuxKeyringAndHeadlessProbes(t *testing.T) {
+	headless := ensureOptions(t, true)
+	interactive := ensureOptions(t, false)
+	assert.Equal(t, headlessProbeTimeout, headless.ProbeTimeout)
+	if runtime.GOOS == "linux" {
+		assert.Equal(t, headlessProbeTimeout, interactive.ProbeTimeout)
+		assert.Equal(t, headlessProbeTimeout, headless.OperationTimeout)
+		assert.Equal(t, headlessProbeTimeout, interactive.OperationTimeout)
+	} else {
+		assert.Zero(t, interactive.ProbeTimeout)
+		assert.Zero(t, headless.OperationTimeout)
+		assert.Zero(t, interactive.OperationTimeout)
+	}
 }
 
 // fallenBackStore stands in for a credstore.Store whose keyring probe failed
@@ -92,6 +104,52 @@ func (f *fallenBackStore) Delete(string) error         { return nil }
 func (f *fallenBackStore) MigrateToKeyring() error     { return nil }
 func (f *fallenBackStore) UsingKeyring() bool          { return false }
 func (f *fallenBackStore) FallbackWarning() string     { return f.warning }
+
+type timedOutKeyringStore struct{ fallenBackStore }
+
+func (*timedOutKeyringStore) Load(string) ([]byte, error) { return nil, keyringTimeoutForTest() }
+func (*timedOutKeyringStore) Save(string, []byte) error   { return keyringTimeoutForTest() }
+func (*timedOutKeyringStore) Delete(string) error         { return keyringTimeoutForTest() }
+func (*timedOutKeyringStore) MigrateToKeyring() error     { return keyringTimeoutForTest() }
+func (*timedOutKeyringStore) UsingKeyring() bool          { return true }
+
+func keyringTimeoutForTest() error {
+	return fmt.Errorf("keyring operation timed out: %w", context.DeadlineExceeded)
+}
+
+func TestKeyringTimeoutIsAnErrorWithAnExplicitFileStorageRemedy(t *testing.T) {
+	swapNewCredStore(t, func(credstore.StoreOptions) credStore { return &timedOutKeyringStore{} })
+	store := NewStore(t.TempDir())
+	load := func() error { _, err := store.Load("work"); return err }
+	save := func() error { return store.Save("work", &Credentials{AccessToken: "token"}) }
+	del := func() error { return store.Delete("work") }
+	for _, operation := range []func() error{load, save, del, store.MigrateToKeyring} {
+		err := operation()
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.NotErrorIs(t, err, ErrNoCredential)
+		assert.ErrorContains(t, err, "BASECAMP_NO_KEYRING=1")
+		assert.ErrorContains(t, err, "plaintext")
+	}
+	assert.True(t, store.UsingKeyring())
+	assert.ErrorIs(t, keyringOperationError(context.DeadlineExceeded), context.DeadlineExceeded)
+	assert.NotContains(t, keyringOperationError(context.DeadlineExceeded).Error(), "BASECAMP_NO_KEYRING")
+}
+
+// timedOutProbeFileStore is the file backend after a keyring probe timeout:
+// its failures carry the probe's deadline, but the keyring is not in use.
+type timedOutProbeFileStore struct{ fallenBackStore }
+
+func (*timedOutProbeFileStore) Load(string) ([]byte, error) {
+	return nil, fmt.Errorf("reading credentials.json: permission denied (%w)", keyringTimeoutForTest())
+}
+
+func TestFileStoreErrorsAfterAProbeTimeoutOmitTheFileStorageRemedy(t *testing.T) {
+	swapNewCredStore(t, func(credstore.StoreOptions) credStore { return &timedOutProbeFileStore{} })
+	store := NewStore(t.TempDir())
+	_, err := store.Load("work")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.NotContains(t, err.Error(), "BASECAMP_NO_KEYRING")
+}
 
 // captureStderr returns what the callback wrote to os.Stderr.
 func captureStderr(t *testing.T, fn func()) string {

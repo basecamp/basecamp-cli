@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -114,9 +115,10 @@ var sessionIsHeadless = func() bool {
 // piped installers, ssh without a TTY) can never answer a keychain unlock
 // prompt, so an unavailable keyring must fall back to file storage instead
 // of hanging forever in an uncancellable `security` child — the #568
-// incident class. Interactive sessions keep the unbounded probe: a locked
-// keychain there raises an unlock prompt, and cutting it off mid-answer
-// would silently degrade the user to plaintext file storage.
+// incident class. Linux bounds probes and later operations even with a GUI
+// or TTY: the Secret Service D-Bus exchange can stall independently of any
+// unlock prompt (#800). Other platforms keep their interactive probe
+// unbounded so an unlock prompt is not cut off mid-answer.
 const headlessProbeTimeout = 10 * time.Second
 
 // NewStore creates a credential store. The OS keyring is not touched until
@@ -135,7 +137,10 @@ func (s *Store) ensure() credStore {
 			DisableEnvVar: "BASECAMP_NO_KEYRING",
 			FallbackDir:   s.fallbackDir,
 		}
-		if sessionIsHeadless() {
+		if runtime.GOOS == "linux" {
+			opts.ProbeTimeout = headlessProbeTimeout
+			opts.OperationTimeout = headlessProbeTimeout
+		} else if sessionIsHeadless() {
 			opts.ProbeTimeout = headlessProbeTimeout
 		}
 		s.inner = newCredStore(opts)
@@ -187,7 +192,7 @@ func (s *Store) load(origin string, req lockRequest) (*Credentials, error) {
 		if isMissingCredential(err) {
 			return nil, fmt.Errorf("%w: %w", ErrNoCredential, err)
 		}
-		return nil, err
+		return nil, s.operationError(err)
 	}
 	var creds Credentials
 	if err := json.Unmarshal(data, &creds); err != nil {
@@ -240,13 +245,13 @@ func (s *Store) save(under func(func() error) error, origin string, creds *Crede
 	if err != nil {
 		return err
 	}
-	return under(func() error { return s.ensure().Save(origin, data) })
+	return s.operationError(under(func() error { return s.ensure().Save(origin, data) }))
 }
 
 // Delete removes credentials for the given origin. Locked for the same
 // reason Save is: the file backend rewrites the whole document.
 func (s *Store) Delete(origin string) error {
-	return s.withStoreLock(func() error { return s.ensure().Delete(origin) })
+	return s.operationError(s.withStoreLock(func() error { return s.ensure().Delete(origin) }))
 }
 
 // MigrateToKeyring migrates credentials from file to keyring. It reads
@@ -264,8 +269,29 @@ func (s *Store) Delete(origin string) error {
 // migration can therefore be re-saved from the file copy — one stale
 // credential, one login to repair, against a deadlock in the common path.
 func (s *Store) MigrateToKeyring() error {
-	return s.withStoreFileLock(func() error { return s.ensure().MigrateToKeyring() })
+	return s.operationError(s.withStoreFileLock(func() error { return s.ensure().MigrateToKeyring() }))
 }
 
 // UsingKeyring returns true if the store is using the system keyring.
 func (s *Store) UsingKeyring() bool { return s.ensure().UsingKeyring() }
+
+// operationError offers the file-storage remedy only while the keyring is the
+// store in use. After a failed initial probe the store is already on the file
+// backend, whose errors carry the probe's timeout but which the remedy
+// cannot fix.
+func (s *Store) operationError(err error) error {
+	if err == nil || !s.ensure().UsingKeyring() {
+		return err
+	}
+	return keyringOperationError(err)
+}
+
+// A keyring operation timeout is not a missing login. Keep the wrapped error
+// and offer the explicit, warned choice of file storage rather than silently
+// switching away from a keyring whose write may still complete.
+func keyringOperationError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) && strings.Contains(err.Error(), "keyring") {
+		return fmt.Errorf("%w; to use plaintext credential storage explicitly, set BASECAMP_NO_KEYRING=1", err)
+	}
+	return err
+}

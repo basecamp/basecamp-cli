@@ -1,12 +1,17 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zalando/go-keyring"
@@ -77,8 +82,11 @@ func runMigrate(cmd *cobra.Command, force bool) error {
 
 	result := &MigrateResult{}
 
-	// 1. Migrate keyring entries
-	migrateKeyring(result, configDir)
+	// 1. Migrate keyring entries, unless the keyring is bypassed
+	keyringSkipped := os.Getenv("BASECAMP_NO_KEYRING") != ""
+	if !keyringSkipped {
+		migrateKeyring(result, configDir)
+	}
 
 	// 2. Migrate cache directory
 	migrateCache(result)
@@ -100,11 +108,15 @@ func runMigrate(cmd *cobra.Command, force bool) error {
 	if result.ThemeMoved {
 		parts = append(parts, "theme migrated")
 	}
+	if keyringSkipped {
+		parts = append(parts, "keyring skipped (BASECAMP_NO_KEYRING set)")
+	}
 
-	// Only write marker when something actually migrated and no errors occurred
+	// Only write marker when something actually migrated, no errors occurred,
+	// and the keyring step ran: a skipped keyring may still hold bcq entries.
 	migrated := result.KeyringMigrated > 0 || result.CacheMoved || result.ThemeMoved
 	hasErrors := len(result.KeyringErrors) > 0
-	if migrated && !hasErrors {
+	if migrated && !hasErrors && !keyringSkipped {
 		if err := os.MkdirAll(configDir, 0700); err == nil {
 			_ = os.WriteFile(markerPath, []byte("migrated\n"), 0600)
 		}
@@ -148,38 +160,109 @@ type keyringFuncs struct {
 	delete func(service, key string) error
 }
 
+// legacyKeyringTimeout bounds the direct go-keyring calls made for the bcq
+// legacy entries: each call in migrate, the whole lookup in doctor. A Linux
+// Secret Service call can stall on D-Bus forever (#800); other platforms keep
+// their interactive unlock prompts unbounded.
+var legacyKeyringTimeout = func() time.Duration {
+	if runtime.GOOS == "linux" {
+		return 10 * time.Second
+	}
+	return 0
+}()
+
+var errLegacyKeyringTimeout = fmt.Errorf("keyring operation timed out: %w; set BASECAMP_NO_KEYRING=1 to skip the keyring", context.DeadlineExceeded)
+
+// bounded returns ops whose calls give up after timeout. Once one call times
+// out every later call fails at once: a stalled D-Bus connection does not
+// recover within the process, and each call would wait out the full budget.
+func (ops keyringFuncs) bounded(timeout time.Duration) keyringFuncs {
+	if timeout <= 0 {
+		return ops
+	}
+	var stalled atomic.Bool
+	run := func(fn func() error) error {
+		if stalled.Load() {
+			return errLegacyKeyringTimeout
+		}
+		done := make(chan error, 1)
+		go func() { done <- fn() }()
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		select {
+		case err := <-done:
+			return err
+		case <-timer.C:
+			stalled.Store(true)
+			return errLegacyKeyringTimeout
+		}
+	}
+	return keyringFuncs{
+		get: func(service, key string) (string, error) {
+			var data string
+			err := run(func() error {
+				var err error
+				data, err = ops.get(service, key)
+				return err
+			})
+			if err != nil {
+				return "", err
+			}
+			return data, nil
+		},
+		set: func(service, key, data string) error {
+			return run(func() error { return ops.set(service, key, data) })
+		},
+		delete: func(service, key string) error {
+			return run(func() error { return ops.delete(service, key) })
+		},
+	}
+}
+
 // migrateKeyring migrates credentials from legacy "bcq" service to "basecamp" service.
 func migrateKeyring(result *MigrateResult, configDir string) {
 	origins := collectKnownOrigins(configDir)
+	ops := keyringOps.bounded(legacyKeyringTimeout)
 
 	for _, origin := range origins {
 		legacyKey := fmt.Sprintf("bcq::%s", origin)
 		newKey := fmt.Sprintf("basecamp::%s", origin)
 
 		// Read from legacy service
-		data, err := keyringOps.get(legacyServiceName, legacyKey)
+		data, err := ops.get(legacyServiceName, legacyKey)
+		if errors.Is(err, context.DeadlineExceeded) {
+			result.KeyringErrors = append(result.KeyringErrors,
+				fmt.Sprintf("failed to read %s: %v", origin, err))
+			return
+		}
 		if err != nil {
 			// No legacy entry for this origin — skip silently
 			continue
 		}
 
 		// Check if new entry already exists
-		if _, err := keyringOps.get("basecamp", newKey); err == nil {
+		_, err = ops.get("basecamp", newKey)
+		if errors.Is(err, context.DeadlineExceeded) {
+			result.KeyringErrors = append(result.KeyringErrors,
+				fmt.Sprintf("failed to read %s: %v", origin, err))
+			return
+		}
+		if err == nil {
 			// Already migrated — just clean up the legacy key
-			_ = keyringOps.delete(legacyServiceName, legacyKey)
+			_ = ops.delete(legacyServiceName, legacyKey)
 			result.KeyringMigrated++
 			continue
 		}
 
 		// Write to new service
-		if err := keyringOps.set("basecamp", newKey, data); err != nil {
+		if err := ops.set("basecamp", newKey, data); err != nil {
 			result.KeyringErrors = append(result.KeyringErrors,
 				fmt.Sprintf("failed to write %s: %v", origin, err))
 			continue
 		}
 
 		// Delete old entry (best-effort)
-		_ = keyringOps.delete(legacyServiceName, legacyKey)
+		_ = ops.delete(legacyServiceName, legacyKey)
 
 		result.KeyringMigrated++
 	}

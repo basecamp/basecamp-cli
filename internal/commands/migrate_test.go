@@ -1,14 +1,19 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/config"
 )
 
 func TestMigrateCache_NoLegacyDir(t *testing.T) {
@@ -382,4 +387,90 @@ func TestMigrateKeyring_MultipleOrigins(t *testing.T) {
 
 	assert.Equal(t, 2, result.KeyringMigrated)
 	assert.Empty(t, result.KeyringErrors)
+}
+
+func TestMigrateKeyring_StalledKeyringIsBounded(t *testing.T) {
+	origTimeout := legacyKeyringTimeout
+	legacyKeyringTimeout = 40 * time.Millisecond
+	t.Cleanup(func() { legacyKeyringTimeout = origTimeout })
+
+	var calls atomic.Int32
+	release, finished := make(chan struct{}), make(chan struct{})
+	orig := keyringOps
+	keyringOps = keyringFuncs{
+		get: func(string, string) (string, error) {
+			calls.Add(1)
+			<-release
+			defer close(finished)
+			return `{"token":"secret"}`, nil
+		},
+		set:    func(string, string, string) error { t.Error("set after a stalled read"); return nil },
+		delete: func(string, string) error { t.Error("delete after a stalled read"); return nil },
+	}
+	t.Cleanup(func() { keyringOps = orig; close(release); <-finished })
+
+	configDir := t.TempDir()
+	creds := map[string]any{"https://custom.basecampapi.com": map[string]string{"token": "x"}}
+	data, _ := json.Marshal(creds)
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "credentials.json"), data, 0600))
+
+	done := make(chan *MigrateResult, 1)
+	go func() {
+		result := &MigrateResult{}
+		migrateKeyring(result, configDir)
+		done <- result
+	}()
+	select {
+	case result := <-done:
+		assert.Equal(t, 0, result.KeyringMigrated)
+		require.Len(t, result.KeyringErrors, 1)
+		assert.Contains(t, result.KeyringErrors[0], "timed out")
+		assert.Contains(t, result.KeyringErrors[0], "BASECAMP_NO_KEYRING=1")
+	case <-time.After(time.Second):
+		t.Fatal("keyring migration ignored its deadline")
+	}
+	assert.EqualValues(t, 1, calls.Load())
+}
+
+func TestMigrateSkipsKeyringWhenNoKeyring(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	orig := keyringOps
+	keyringOps = keyringFuncs{
+		get: func(string, string) (string, error) {
+			t.Error("keyring read with BASECAMP_NO_KEYRING set")
+			return "", nil
+		},
+		set:    func(string, string, string) error { t.Error("keyring write with BASECAMP_NO_KEYRING set"); return nil },
+		delete: func(string, string) error { t.Error("keyring delete with BASECAMP_NO_KEYRING set"); return nil },
+	}
+	t.Cleanup(func() { keyringOps = orig })
+
+	cmd := NewMigrateCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs(nil)
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, out.String(), `"keyring_migrated": 0`)
+}
+
+func TestMigrateMarker_NotWrittenWhenKeyringSkipped(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	configBase := t.TempDir()
+	cacheBase := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configBase)
+	t.Setenv("XDG_CACHE_HOME", cacheBase)
+	require.NoError(t, os.MkdirAll(filepath.Join(cacheBase, "bcq"), 0700))
+
+	cmd := NewMigrateCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs(nil)
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, out.String(), `"cache_moved": true`)
+
+	_, err := os.Stat(filepath.Join(config.GlobalConfigDir(), migratedMarker))
+	assert.True(t, os.IsNotExist(err), "marker must not be written while bcq keyring entries may remain")
 }

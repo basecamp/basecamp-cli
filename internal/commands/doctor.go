@@ -90,6 +90,11 @@ The doctor command helps troubleshoot common issues by checking:
   - Cache directory health
   - Shell completion status
 
+If the system keyring stalls, set BASECAMP_NO_KEYRING=1 before running doctor.
+This explicitly selects plaintext credential storage (credentials.json, mode
+0600); it does not copy credentials out of the keyring. Linux keyring checks
+have a 10-second deadline, including the best-effort legacy-install lookup.
+
 Examples:
   basecamp doctor              # Run all diagnostic checks
   basecamp doctor --json       # Output results as JSON
@@ -157,7 +162,7 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 	}
 
 	// 6. Credentials check
-	credCheck := checkCredentials(app, verbose)
+	credCheck, unreadable := checkStoredCredentials(ctx, app, verbose)
 	checks = append(checks, credCheck)
 
 	// 7. Authentication check (only if credentials exist)
@@ -166,6 +171,12 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 		authCheck := checkAuthentication(ctx, app, verbose)
 		checks = append(checks, authCheck)
 		canTestAPI = authCheck.Status == "pass" || authCheck.Status == "warn"
+	} else if unreadable {
+		checks = append(checks, Check{
+			Name:    "Authentication",
+			Status:  "skip",
+			Message: "Skipped (credentials could not be read)",
+		})
 	} else {
 		checks = append(checks, Check{
 			Name:    "Authentication",
@@ -215,7 +226,7 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 	checks = append(checks, checkShellCompletion(verbose))
 
 	// 12. Legacy bcq detection
-	if legacyCheck := checkLegacyInstall(); legacyCheck != nil {
+	if legacyCheck := checkLegacyInstall(ctx); legacyCheck != nil {
 		checks = append(checks, *legacyCheck)
 	}
 
@@ -702,7 +713,15 @@ func validateConfigFile(path, name string, verbose bool) Check {
 }
 
 // checkCredentials checks for stored credentials.
-func checkCredentials(app *appctx.App, verbose bool) Check {
+func checkCredentials(ctx context.Context, app *appctx.App, verbose bool) Check {
+	check, _ := checkStoredCredentials(ctx, app, verbose)
+	return check
+}
+
+// checkStoredCredentials is checkCredentials that also reports whether the
+// failure was a store that could not be read, as opposed to a missing or
+// unusable credential that a login would repair.
+func checkStoredCredentials(ctx context.Context, app *appctx.App, verbose bool) (Check, bool) {
 	check := Check{
 		Name: "Credentials",
 	}
@@ -711,26 +730,40 @@ func checkCredentials(app *appctx.App, verbose bool) Check {
 	if envToken := os.Getenv("BASECAMP_TOKEN"); envToken != "" {
 		check.Status = "pass"
 		check.Message = "Using BASECAMP_TOKEN environment variable"
-		return check
+		return check, false
 	}
 
-	// Check if authenticated (works for both keyring and file storage)
-	if !app.Auth.IsAuthenticated() {
+	// An unreadable store is not a missing login: preserve a keyring timeout
+	// and its explicit file-storage workaround instead of asking for OAuth.
+	authenticated, authErr := app.Auth.CheckAuthenticated(ctx)
+	if authErr != nil {
+		problem := output.AsError(authErr)
+		check.Status = "fail"
+		check.Message = "Could not read stored credentials: " + problem.Message
+		check.Hint = problem.Hint
+		if problem.Code == output.CodeAuth {
+			// A stored but unusable credential already carries the remedy
+			// for its kind; it is not a failure to read the store.
+			check.Message = problem.Message
+			return check, false
+		}
+		return check, true
+	}
+	if !authenticated {
 		check.Status = "fail"
 		check.Message = "No credentials found"
 		check.Hint = app.Auth.LoginHint()
-		return check
+		return check, false
 	}
 
 	// Try to load credentials for details
 	credKey := app.Auth.CredentialKey()
 	store := app.Auth.GetStore()
-	creds, err := store.Load(credKey)
+	creds, err := store.LoadContext(ctx, credKey)
 	if err != nil {
-		// Authenticated but can't load details - still pass but note the issue
-		check.Status = "pass"
-		check.Message = "Stored (via system keyring)"
-		return check
+		check.Status = "fail"
+		check.Message = "Could not read stored credentials: " + err.Error()
+		return check, true
 	}
 
 	check.Status = "pass"
@@ -756,7 +789,7 @@ func checkCredentials(app *appctx.App, verbose bool) Check {
 			check.Message = credsPath
 		}
 	}
-	return check
+	return check, false
 }
 
 // checkAuthentication checks token validity.
@@ -1127,6 +1160,12 @@ func buildDoctorBreadcrumbs(checks []Check, login string) []output.Breadcrumb {
 
 		switch c.Name {
 		case "Credentials", "Authentication":
+			// Credential checks carry a login hint only when the store was
+			// readable and a login would repair what it reported. Do not
+			// invent that remedy for a timeout or another read failure.
+			if c.Name == "Credentials" && !strings.Contains(c.Hint, login) {
+				continue
+			}
 			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 				Action:      "login",
 				Cmd:         login,
@@ -1311,7 +1350,7 @@ func checkSkillVersion() Check {
 
 // checkLegacyInstall detects stale bcq artifacts and suggests migration.
 // Returns nil if no legacy artifacts are found (to avoid noisy output).
-func checkLegacyInstall() *Check {
+func checkLegacyInstall(ctx context.Context) *Check {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
@@ -1355,12 +1394,8 @@ func checkLegacyInstall() *Check {
 	// Skip when BASECAMP_NO_KEYRING is set (headless/CI environments)
 	if os.Getenv("BASECAMP_NO_KEYRING") == "" {
 		configDir := filepath.Join(configBase, "basecamp")
-		for _, origin := range collectKnownOrigins(configDir) {
-			legacyKey := fmt.Sprintf("bcq::%s", origin)
-			if _, err := keyring.Get("bcq", legacyKey); err == nil {
-				found = append(found, "keyring(bcq::*)")
-				break
-			}
+		if legacyKeyringEntryExists(ctx, collectKnownOrigins(configDir), legacyKeyringTimeout) {
+			found = append(found, "keyring(bcq::*)")
 		}
 	}
 
@@ -1373,6 +1408,43 @@ func checkLegacyInstall() *Check {
 		Status:  "warn",
 		Message: fmt.Sprintf("Found legacy bcq data: %s", strings.Join(found, ", ")),
 		Hint:    "Run: basecamp migrate",
+	}
+}
+
+var legacyKeyringGet = keyring.Get
+
+// legacyKeyringEntryExists is best-effort: doctor must not hang in its legacy
+// probe after the active credential store has already timed out. A single
+// budget covers all origins, and a late read never starts the next lookup.
+func legacyKeyringEntryExists(ctx context.Context, origins []string, timeout time.Duration) bool {
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	get := legacyKeyringGet
+	lookup := func() bool {
+		for _, origin := range origins {
+			if ctx.Err() != nil {
+				return false
+			}
+			legacyKey := "bcq::" + origin
+			if _, err := get("bcq", legacyKey); err == nil {
+				return true
+			}
+		}
+		return false
+	}
+	if timeout <= 0 {
+		return lookup()
+	}
+	done := make(chan bool, 1)
+	go func() { done <- lookup() }()
+	select {
+	case found := <-done:
+		return found
+	case <-ctx.Done():
+		return false
 	}
 }
 
