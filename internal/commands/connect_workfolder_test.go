@@ -174,3 +174,24 @@ func accountHome(t *testing.T, home string, err error) {
 	accountHomeFolder = func() (string, error) { return home, err }
 	t.Cleanup(func() { accountHomeFolder = prev })
 }
+
+// A folder whose path can't be reached is one no worker can start in, even
+// if the shell is still inside it.
+func TestWorkFolderCheckFailsWhenThePathCantBeReached(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions")
+	}
+	setHome(t, t.TempDir())
+	parent := filepath.Join(t.TempDir(), "shared")
+	work := filepath.Join(parent, "work")
+	require.NoError(t, os.MkdirAll(work, 0o700))
+	t.Chdir(work)
+	require.NoError(t, os.Chmod(parent, 0))
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o700) })
+	if _, err := os.Stat(work); err == nil {
+		t.Skip("permissions aren't enforced here (running as root?)")
+	}
+
+	c := workFolderCheck()
+	assert.Equal(t, setup.StatusFail, c.Status)
+}
