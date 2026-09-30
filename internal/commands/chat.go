@@ -425,7 +425,7 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		if contentType == "" {
 			mentionInput = richtext.MarkdownToHTML(content)
 		}
-		result, resolveErr := resolveMentions(cmd.Context(), app.Names, mentionInput)
+		result, resolveErr := resolveMentions(cmd.Context(), app.Names, mentionScope(app, resolvedProjectID, project, app.Flags.Project), mentionInput)
 		if resolveErr != nil {
 			return resolveErr
 		}
@@ -1025,7 +1025,7 @@ edit to rich text.`,
 				if ct == "" {
 					messageContent = richtext.MarkdownToHTML(messageContent)
 				}
-				result, resolveErr := resolveMentions(cmd.Context(), app.Names, messageContent)
+				result, resolveErr := resolveMentions(cmd.Context(), app.Names, mentionScope(app, urlProjectID, *project, app.Flags.Project), messageContent)
 				if resolveErr != nil {
 					return resolveErr
 				}

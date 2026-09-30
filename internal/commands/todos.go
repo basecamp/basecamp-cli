@@ -2010,7 +2010,7 @@ Examples:
 				if pipelineErr != nil {
 					return pipelineErr
 				}
-				mentionResult, pipelineErr := resolveMentions(cmd.Context(), app.Names, commentHTML)
+				mentionResult, pipelineErr := resolveMentions(cmd.Context(), app.Names, mentionScope(app, project), commentHTML)
 				if pipelineErr != nil {
 					return pipelineErr
 				}

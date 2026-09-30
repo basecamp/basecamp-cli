@@ -36,6 +36,7 @@ type Resolver struct {
 	projects  []Project
 	people    []Person
 	pingable  []Person              // cached /people/pingable.json
+	agents    map[int64][]Person    // agents on a project, keyed by project ID
 	todolists map[string][]Todolist // keyed by project ID
 	me        *Person               // cached /my/profile.json result
 }
@@ -69,6 +70,7 @@ func NewResolver(sdkClient *basecamp.Client, authMgr *auth.Manager, accountID st
 		auth:      authMgr,
 		accountID: accountID,
 		todolists: make(map[string][]Todolist),
+		agents:    make(map[int64][]Person),
 	}
 }
 
@@ -83,6 +85,7 @@ func (r *Resolver) SetAccountID(accountID string) {
 		r.projects = nil
 		r.people = nil
 		r.pingable = nil
+		r.agents = make(map[int64][]Person)
 		r.me = nil
 		r.todolists = make(map[string][]Todolist)
 	}
@@ -367,6 +370,7 @@ func (r *Resolver) ClearCache() {
 	r.projects = nil
 	r.people = nil
 	r.pingable = nil
+	r.agents = make(map[int64][]Person)
 	r.me = nil
 	r.todolists = make(map[string][]Todolist)
 }

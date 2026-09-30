@@ -1051,7 +1051,7 @@ as backslash-n.`,
 
 			// Extract comment ID from URL if provided
 			// Uses extractCommentWithProject to prefer CommentID from URL fragments
-			commentIDStr, _ := extractCommentWithProject(args[0])
+			commentIDStr, urlProjectID := extractCommentWithProject(args[0])
 
 			commentID, err := strconv.ParseInt(commentIDStr, 10, 64)
 			if err != nil {
@@ -1084,7 +1084,7 @@ as backslash-n.`,
 			}
 
 			// Resolve @mentions
-			mentionResult, err := resolveMentions(cmd.Context(), app.Names, html)
+			mentionResult, err := resolveMentions(cmd.Context(), app.Names, mentionScope(app, urlProjectID, projectFlagValue(cmd), app.Flags.Project), html)
 			if err != nil {
 				return err
 			}
@@ -1231,7 +1231,7 @@ busybox-ash) it posts a literal leading $ and keeps \n as backslash-n:
 			}
 
 			// Resolve @mentions (e.g., @John, @John.Doe → clickable mention tags)
-			mentionResult, err := resolveMentions(cmd.Context(), app.Names, html)
+			mentionResult, err := resolveMentions(cmd.Context(), app.Names, mentionScope(app, sharedURLProject(recordingArg), projectFlagValue(cmd), app.Flags.Project), html)
 			if err != nil {
 				return err
 			}

@@ -961,6 +961,9 @@ func (t *mockChatMultiMentionTransport) RoundTrip(req *http.Request) (*http.Resp
 		switch {
 		case strings.Contains(req.URL.Path, "/projects.json"):
 			body = `[{"id": 123, "name": "Test Project"}]`
+		case strings.HasSuffix(req.URL.Path, "/projects/123/people.json"):
+			// The project's people, where an unpingable agent would be found.
+			body = `[{"id": 42000, "name": "Jane Smith", "attachable_sgid": "sgid-jane", "personable_type": "User"}]`
 		case strings.Contains(req.URL.Path, "/projects/"):
 			body = `{"id": 123, "dock": [{"name": "chat", "id": 789, "enabled": true}]}`
 		case strings.Contains(req.URL.Path, "/circles/people.json") || strings.Contains(req.URL.Path, "/people/pingable.json"):

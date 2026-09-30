@@ -982,7 +982,7 @@ Use - as the body argument to read the body from stdin:
 				if err != nil {
 					return err
 				}
-				mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, content)
+				mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, mentionScope(app, resolvedProjectID), content)
 				if mentionErr != nil {
 					return mentionErr
 				}
@@ -1101,7 +1101,7 @@ You can pass either a card ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			cardIDStr := extractID(args[0])
+			cardIDStr, urlProjectID := extractWithProject(args[0])
 
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
@@ -1157,7 +1157,7 @@ You can pass either a card ID or a Basecamp URL:
 				if err != nil {
 					return err
 				}
-				mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, html)
+				mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, mentionScope(app, urlProjectID, projectFlagValue(cmd), app.Flags.Project), html)
 				if mentionErr != nil {
 					return mentionErr
 				}

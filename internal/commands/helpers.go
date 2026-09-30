@@ -632,19 +632,26 @@ func applySubscribeFlags(ctx context.Context, resolver *names.Resolver, subscrib
 // resolveMentions scans HTML for mention syntax and replaces matches with
 // Basecamp mention attachment tags. Supports three syntaxes:
 //   - [@Name](mention:SGID) — zero API calls (SGID embedded directly)
-//   - [@Name](person:ID) — one API call (ID→SGID via pingable set)
-//   - @Name / @First.Last — fuzzy name resolution via pingable set
+//   - [@Name](person:ID) — one API call (ID→SGID via pingable set; an agent's
+//     ID costs one more, a person lookup)
+//   - @Name / @First.Last — fuzzy name resolution via pingable set, then the
+//     agents on the project in scope
 //
 // Also supports @sgid:VALUE inline syntax for pipeline composability.
 // Silently returns unchanged HTML if no mentions are found.
 //
+// Agents cannot be pinged, so the pingable set never holds them. scope names
+// the project whose agents a fuzzy @Name may reach; it is consulted only when
+// the pingable set has no exact answer, and may be nil when the command has
+// no project in scope.
+//
 // Fuzzy @Name mentions that cannot be resolved (not found or ambiguous) are
 // left as plain text; their names are returned in the Unresolved slice.
 // Deterministic syntaxes (mention:SGID, person:ID) still hard-fail on error.
-func resolveMentions(ctx context.Context, resolver *names.Resolver, html string) (richtext.MentionResult, error) {
+func resolveMentions(ctx context.Context, resolver *names.Resolver, scope names.ProjectScope, html string) (richtext.MentionResult, error) {
 	return richtext.ResolveMentions(html,
 		func(name string) (string, string, error) {
-			person, err := resolver.ResolvePersonByName(ctx, name)
+			person, err := resolver.ResolveMentionByName(ctx, name, scope)
 			if err != nil {
 				// Downgrade resolver-level not-found and ambiguous to skip — leave
 				// as plain text. Only match errors without an HTTP status; API-level
@@ -667,7 +674,7 @@ func resolveMentions(ctx context.Context, resolver *names.Resolver, html string)
 			if err != nil {
 				return "", "", output.ErrUsage(fmt.Sprintf("invalid person ID %q — must be numeric", id))
 			}
-			person, err := resolver.ResolvePersonByID(ctx, personID)
+			person, err := resolver.ResolveMentionByID(ctx, personID)
 			if err != nil {
 				return "", "", err
 			}
@@ -679,12 +686,68 @@ func resolveMentions(ctx context.Context, resolver *names.Resolver, html string)
 	)
 }
 
+// mentionScope returns the project a fuzzy @mention may draw agents from: the
+// first non-blank candidate, in the caller's order of precedence — typically
+// a project the command already resolved, a URL's bucket, then --in. A
+// numeric ID is used as-is; a name is resolved only when the scope is
+// consulted. Returns nil when every candidate is blank.
+func mentionScope(app *appctx.App, candidates ...string) names.ProjectScope {
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if scope := names.ParseProjectScope(candidate); scope != nil {
+			return scope
+		}
+		return func(ctx context.Context) (int64, error) {
+			id, _, err := app.Names.ResolveProject(ctx, candidate)
+			if err != nil {
+				return 0, err
+			}
+			return strconv.ParseInt(id, 10, 64)
+		}
+	}
+	return nil
+}
+
+// sharedURLProject returns the bucket named by every URL in a comma-separated
+// target list, or "" when the list holds no URL or its URLs disagree.
+func sharedURLProject(targets string) string {
+	shared := ""
+	for part := range strings.SplitSeq(targets, ",") {
+		_, projectID := extractWithProject(strings.TrimSpace(part))
+		if projectID == "" {
+			continue
+		}
+		if shared != "" && shared != projectID {
+			return ""
+		}
+		shared = projectID
+	}
+	return shared
+}
+
 // unresolvedMentionWarning formats a warning string for unresolved mentions.
+// The hint names the one reach a fuzzy @Name has for agents, since a
+// mention meant for an agent is the miss a reader cannot otherwise explain.
 func unresolvedMentionWarning(unresolved []string) string {
 	if len(unresolved) == 0 {
 		return ""
 	}
-	return "Unresolved mentions left as text: " + strings.Join(unresolved, ", ")
+	return "Unresolved mentions left as text: " + strings.Join(unresolved, ", ") +
+		" (agents match by name only on the project from --in or a URL; [@Name](person:ID) needs no project)"
+}
+
+// projectFlagValue returns the --project/--in value visible to cmd, including
+// one a parent command group defines, or "" when neither flag exists.
+func projectFlagValue(cmd *cobra.Command) string {
+	for _, name := range []string{"project", "in"} {
+		if f := cmd.Flags().Lookup(name); f != nil && f.Value.String() != "" {
+			return f.Value.String()
+		}
+	}
+	return ""
 }
 
 // projectFlagChanged reports whether the user explicitly passed --project or

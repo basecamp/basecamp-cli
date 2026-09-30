@@ -93,9 +93,9 @@ Full CLI coverage: 195 tracked in-scope endpoints across todos, cards, messages,
 4. **Check context** via `.basecamp/config.json` before assuming project
 5. **Content fields accept Markdown, and most accept @mentions** — the CLI converts these rich-text fields from Markdown to HTML: message bodies, document bodies, comment content, todo descriptions, card bodies, schedule entry descriptions, upload descriptions, check-in answers and notes. Two rich-text fields are sent as written, so give them HTML: todolist descriptions and gauge needle descriptions. Chat is different again: `chat post` sends plain text unless you pass `--content-type text/html` or the line carries a mention. Use Markdown formatting (lists, bold, links, code blocks, tables) for rich content. @mentions resolve in message bodies, comment content, card bodies, schedule descriptions and chat lines — not in todo descriptions, documents, uploads, check-ins or notes. Four mention syntaxes are available (prefer deterministic for agents):
    - **`[@Name](mention:SGID)`** — zero API calls, embeds SGID directly (preferred for agents)
-   - **`[@Name](person:ID)`** — one API call, resolves person ID to SGID via pingable set
+   - **`[@Name](person:ID)`** — one API call, resolves person ID to SGID via pingable set (an agent's ID takes one more lookup and needs no project)
    - **`@sgid:VALUE`** — inline SGID embed for pipeline composability
-   - **`@Name` / `@First.Last`** — fuzzy name resolution (may be ambiguous)
+   - **`@Name` / `@First.Last`** — fuzzy name resolution (may be ambiguous). People match from the pingable set; agents are never pingable, so they match from the people on the command's project (from `--in` or the item URL) — with no project in scope, an agent's name is left as text
 
    Raw HTML is also accepted, but it is all-or-nothing per field: a tag the CLI detects as HTML (`<p>`, `<ul>`, `<strong>`, `<a>`, `<img>`, `<table>` and the other common formatting tags) outside a backtick code span or backtick fence (a `~~~` fence does not hide it) skips Markdown conversion for the whole field, so any Markdown alongside it — `![alt](/local/path)` included — is sent literally. The HTML itself goes through as written, except that an empty separator paragraph is inserted between directly adjacent `<p>` blocks so they render with spacing; a local path in a raw `<img src>` is still uploaded and replaced with an attachment in every converted field except notes, which take no attachments. Titles (a todo's content argument, card and message titles) are plain text and never converted.
 
@@ -418,6 +418,9 @@ basecamp comments create 123 "Hey [@Jane Smith](person:42000), check this" --in 
 basecamp comments create <id> "@Jane.Smith, please review this" --in <project>
 basecamp messages create "Update" "cc @Jane, @Alex" --in <project>
 basecamp chat post "@Jane, done!" --in <project>
+
+# Agents match by name among the project's people, so name the project
+basecamp comments create https://3.basecamp.com/<account>/buckets/<project>/todos/<id> "@Quincy, over to you"
 
 # Ambiguous names return an error with suggestions
 # Use @First.Last for disambiguation

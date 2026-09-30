@@ -537,7 +537,7 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 		if err != nil {
 			return err
 		}
-		mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, description)
+		mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, mentionScope(app, resolvedProjectID), description)
 		if mentionErr != nil {
 			return mentionErr
 		}
@@ -723,7 +723,7 @@ You can pass either an entry ID or a Basecamp URL:
 				if err != nil {
 					return err
 				}
-				mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, html)
+				mentionResult, mentionErr := resolveMentions(cmd.Context(), app.Names, mentionScope(app, resolvedProjectID), html)
 				if mentionErr != nil {
 					return mentionErr
 				}

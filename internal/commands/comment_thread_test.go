@@ -229,7 +229,7 @@ func TestFocusMentionRoundTripsThroughResolveMentions(t *testing.T) {
 			// embedded SGID must resolve to a mention attachment with zero
 			// lookups — even when the display label came from a hostile name.
 			html := richtext.MarkdownToHTML(syntax)
-			result, err := resolveMentions(context.Background(), nil, html)
+			result, err := resolveMentions(context.Background(), nil, nil, html)
 			require.NoError(t, err)
 			assert.Contains(t, result.HTML, "BAh7CEkiCG")
 			assert.Contains(t, result.HTML, "application/vnd.basecamp.mention")

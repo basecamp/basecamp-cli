@@ -544,7 +544,7 @@ Use - as the body argument to read the body from stdin:
 			}
 
 			// Resolve @mentions
-			mentionResult, err := resolveMentions(cmd.Context(), app.Names, html)
+			mentionResult, err := resolveMentions(cmd.Context(), app.Names, mentionScope(app, resolvedProjectID), html)
 			if err != nil {
 				return err
 			}
@@ -640,7 +640,7 @@ You can pass either a message ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			messageIDStr := extractID(args[0])
+			messageIDStr, urlProjectID := extractWithProject(args[0])
 
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
@@ -672,7 +672,7 @@ You can pass either a message ID or a Basecamp URL:
 			}
 
 			// Resolve @mentions
-			mentionResult, err := resolveMentions(cmd.Context(), app.Names, html)
+			mentionResult, err := resolveMentions(cmd.Context(), app.Names, mentionScope(app, urlProjectID, projectFlagValue(cmd), app.Flags.Project), html)
 			if err != nil {
 				return err
 			}
