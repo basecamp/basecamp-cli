@@ -2,8 +2,11 @@ package commands
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -54,7 +57,7 @@ func tokenEndpointFeed(t *testing.T, answer func(http.ResponseWriter)) (*eventfe
 		ExpiresAt:     time.Now().Add(-time.Minute).Unix(),
 	}))
 
-	live, err := eventfeed.NewLive(&basecamp.Config{BaseURL: srv.URL}, &managerTokens{mgr: mgr}, "555", eventfeed.AccountLane, connectSDKOptions()...)
+	live, err := eventfeed.NewLive(&basecamp.Config{BaseURL: srv.URL}, &feedTokens{managerTokens{mgr: mgr}}, "555", eventfeed.AccountLane, connectSDKOptions()...)
 	require.NoError(t, err)
 	return live, mints.Load
 }
@@ -199,23 +202,49 @@ func TestAnAbsurdRetryAfterIsBounded(t *testing.T) {
 	assert.Positive(t, mintErr.RetryAfter)
 }
 
-// A rate limit that carries no number — a hold the CLI keeps itself, say —
-// is still retryable; a failure that is not retryable, got no answer, or is
-// already the SDK's, passes through untouched.
-func TestOnlyARetryableCLIFailureIsTranslated(t *testing.T) {
-	var sdkErr *basecamp.Error
-	held := retryableInSDKTerms(output.ErrRateLimit(30))
-	require.ErrorAs(t, held, &sdkErr)
-	assert.True(t, sdkErr.Retryable)
-	assert.Equal(t, http.StatusTooManyRequests, sdkErr.HTTPStatus)
+// Every failure reaches the feed already classified: a rate limit that
+// carries no number — a hold the CLI keeps itself, say — and a request that
+// got no response are retryable; anything else carries no status, so the
+// feed ends on it rather than counting it as an authorization failure.
+func TestTheFeedSeesEveryFailureClassified(t *testing.T) {
+	assert.Nil(t, tokenFailureInSDKTerms(nil))
 
+	held := tokenFailureInSDKTerms(output.ErrRateLimit(30))
+	assert.True(t, held.Retryable)
+	assert.Equal(t, http.StatusTooManyRequests, held.HTTPStatus)
+
+	network := tokenFailureInSDKTerms(fmt.Errorf("minting an agent token: %w", &url.Error{Op: "Post", URL: "https://example.test/oauth/tokens", Err: io.EOF}))
+	assert.True(t, network.Retryable)
+	assert.Equal(t, basecamp.CodeNetwork, network.Code)
+	assert.Zero(t, network.HTTPStatus)
+
+	refused := output.ErrAuth("Minting an agent token was refused (HTTP 401)")
+	refused.HTTPStatus = http.StatusUnauthorized
+	refused.Cause = auth.ErrAgentCredentialRefused
 	for _, err := range []error{
-		nil,
-		output.ErrNetwork(errors.New("connection reset")),
+		refused,
 		output.ErrAPI(http.StatusNotFound, "minting an agent token: the server answered HTTP 404"),
-		&basecamp.Error{Code: basecamp.CodeAPI, HTTPStatus: 503, Retryable: true},
 		errors.New("the store could not be read"),
 	} {
-		assert.Equal(t, err, retryableInSDKTerms(err))
+		e := tokenFailureInSDKTerms(err)
+		assert.False(t, e.Retryable, "%v", err)
+		assert.Zero(t, e.HTTPStatus, "%v", err)
+		assert.ErrorIs(t, e, err)
 	}
+}
+
+// The feed goes by the same rule as the start: a truncated 401 ends it as a
+// refusal, a truncated 503 is waited out.
+func TestTheFeedClassifiesATruncatedResponseByItsStatus(t *testing.T) {
+	live, _ := tokenEndpointFeed(t, truncatedAnswer(t, http.StatusUnauthorized))
+	_, err := live.Minter().MintStreamTicket(t.Context())
+	var mintErr *eventfeed.MintError
+	require.ErrorAs(t, err, &mintErr)
+	assert.Equal(t, eventfeed.MintUnrecoverable, mintErr.Kind, "%v", err)
+	assert.ErrorIs(t, err, auth.ErrAgentCredentialRefused)
+
+	live, _ = tokenEndpointFeed(t, truncatedAnswer(t, http.StatusServiceUnavailable))
+	_, err = live.Minter().MintStreamTicket(t.Context())
+	require.ErrorAs(t, err, &mintErr)
+	assert.Equal(t, eventfeed.MintTransient, mintErr.Kind, "%v", err)
 }

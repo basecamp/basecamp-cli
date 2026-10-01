@@ -358,7 +358,15 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 		return nil, hold, err
 	}
 	if err != nil {
-		return nil, nil, wrapOAuthError("minting an agent token", err)
+		// A status that arrived is the verdict even when its body did not
+		// follow: a 401 is still a refusal, a 5xx still retryable. Only a
+		// 200 cut short has none — the token never arrived — and it is the
+		// transport failure it is.
+		if resp.StatusCode != http.StatusOK {
+			hold, err := m.agentMintRefusal(resp, nil, mint)
+			return nil, hold, err
+		}
+		return nil, nil, transportFailure("minting an agent token", err)
 	}
 	if int64(len(body)) > maxAgentTokenBytes {
 		return nil, nil, output.ErrAPI(resp.StatusCode,

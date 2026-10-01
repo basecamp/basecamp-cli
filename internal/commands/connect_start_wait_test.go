@@ -2,6 +2,8 @@ package commands
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -241,26 +243,118 @@ func TestTheStartBacksOffAsTheFeedDoes(t *testing.T) {
 }
 
 // What no wait can change is not retried: a URL the egress policy refused,
-// or one the client could not send at all. A request that got no answer is.
-func TestOnlyATransportFailureWithoutAnAnswerIsRetried(t *testing.T) {
-	wrap := func(err error) error {
-		return fmt.Errorf("minting an agent token: %w", &url.Error{Op: "Post", URL: "https://example.test/oauth/tokens", Err: err})
+// or one the client could not send at all. A request that got no response
+// is, a misconfigured TLS or proxy included.
+func TestOnlyARequestThatGotNoResponseIsRetried(t *testing.T) {
+	wrap := func(target string, err error) error {
+		return fmt.Errorf("minting an agent token: %w", &url.Error{Op: "Post", URL: target, Err: err})
 	}
+	const endpoint = "https://example.test/oauth/tokens"
 	for name, err := range map[string]error{
-		"blocked by policy":  wrap(&net.OpError{Op: "dial", Net: "tcp", Err: surfguard.ErrBlocked}),
-		"unsupported scheme": wrap(errors.New("unsupported protocol scheme \"ftp\"")),
+		"blocked by policy":  wrap(endpoint, &net.OpError{Op: "dial", Net: "tcp", Err: surfguard.ErrBlocked}),
+		"unsupported scheme": wrap("ftp://example.test/oauth/tokens", errors.New(`unsupported protocol scheme "ftp"`)),
+		"no host":            wrap("https:///oauth/tokens", errors.New("http: no Host in request URL")),
 	} {
 		_, ok := tokenRetry(err)
 		assert.False(t, ok, name)
 	}
 	for name, err := range map[string]error{
-		"refused": wrap(&net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}),
-		"dropped": wrap(io.EOF),
-		"no name": wrap(&net.DNSError{Err: "no such host", Name: "example.test", IsNotFound: true}),
-		"cut off": wrap(io.ErrUnexpectedEOF),
+		"refused":       wrap(endpoint, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}),
+		"dropped":       wrap(endpoint, io.EOF),
+		"no name":       wrap(endpoint, &net.DNSError{Err: "no such host", Name: "example.test", IsNotFound: true}),
+		"cut off":       wrap(endpoint, io.ErrUnexpectedEOF),
+		"untrusted TLS": wrap(endpoint, &tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{}}),
+		"proxy":         wrap(endpoint, &net.OpError{Op: "proxyconnect", Net: "tcp", Err: syscall.ECONNREFUSED}),
 	} {
-		_, ok := tokenRetry(err)
+		wait, ok := tokenRetry(err)
 		assert.True(t, ok, name)
+		assert.Zero(t, wait, name)
+	}
+}
+
+// A token endpoint whose certificate is not trusted got no response to
+// classify, and the start keeps waiting — saying why each time — rather
+// than exiting.
+func TestAStartKeepsWaitingOnAnUntrustedCertificate(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_TOKEN", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("a request got through an untrusted certificate")
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &config.Config{AccountID: "555", BaseURL: srv.URL, ActiveProfile: "agent", Sources: map[string]string{}}
+	mgr := auth.NewManager(cfg, &http.Client{})
+	store := auth.NewStore(config.GlobalConfigDir())
+	mgr.SetStore(store)
+	require.NoError(t, store.Save("profile:agent", &auth.Credentials{
+		AccessToken: "bc_at_expired", OAuthType: "agent", ClientID: "agent-client", ClientSecret: "agent-secret",
+		TokenEndpoint: srv.URL + "/oauth/tokens", ExpiresAt: time.Now().Add(-time.Minute).Unix(),
+	}))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	var lines []string
+	waits := 0
+	err := awaitConnectToken(ctx, &managerTokens{mgr: mgr}, connectStartWait{
+		Log: func(line string) { lines = append(lines, line) },
+		Sleep: func(context.Context, time.Duration) error {
+			if waits++; waits == 2 {
+				cancel()
+			}
+			return nil
+		},
+	})
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 2, waits)
+	require.NotEmpty(t, lines)
+	assert.Contains(t, lines[0], "certificate")
+}
+
+// truncatedAnswer sends status and headers promising more body than it
+// sends, then drops the connection.
+func truncatedAnswer(t *testing.T, status int) func(http.ResponseWriter) {
+	return func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "500")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(`{"error":`))
+		hj, ok := w.(http.Hijacker)
+		if !assert.True(t, ok) {
+			return
+		}
+		conn, _, err := hj.Hijack()
+		if !assert.NoError(t, err) {
+			return
+		}
+		_ = conn.Close()
+	}
+}
+
+// A response classifies by its status even when its body is cut off: a
+// truncated 401 is still a refusal, and ends the start as a disconnect.
+func TestATruncatedRefusalStillEndsTheStart(t *testing.T) {
+	tokens, mints := startingAgent(t, truncatedAnswer(t, http.StatusUnauthorized))
+	var w startWaits
+
+	err := awaitConnectToken(t.Context(), tokens, w.options())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, auth.ErrAgentCredentialRefused)
+	assert.Equal(t, errAgentDisconnected("", "agent"), connectStartFailure(setup.KindAgent, "agent", err))
+	assert.Empty(t, w.waits)
+	assert.Equal(t, 1, mints())
+}
+
+// A truncated 503 is still the server's own trouble, and is waited out; a
+// truncated 200 never delivered its token, and is waited out too.
+func TestATruncatedServerFaultIsWaitedOut(t *testing.T) {
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusOK} {
+		tokens, mints := startingAgent(t, truncatedAnswer(t, status), answerStatus(http.StatusOK, nil, mintedToken))
+		var w startWaits
+
+		require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options()), status)
+		assert.Len(t, w.waits, 1, status)
+		assert.Equal(t, 2, mints(), status)
 	}
 }
 
