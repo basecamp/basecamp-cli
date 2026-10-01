@@ -320,7 +320,7 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 		status.Tasks[i].Worker = recordedWorkerState(t)
 		status.Tasks[i].Taker = recordedTakerState(t)
 	}
-	report := connectStatusReport{Profile: p.name, Shadow: shadow, Dangerous: p.file.Dangerous, Status: status}
+	report := connectStatusReport{Profile: p.name, Shadow: shadow, Dangerous: p.file.Dangerous && !shadow, Status: status}
 	if holder, ok := connector.InstanceHolder(dir, p.file.AccountID, p.file.Agent.PersonID); ok {
 		report.LockHolder = &connectLockHolder{PID: holder.PID, StartedAt: holder.StartedAt, PIDStatus: processPresence(holder.PID)}
 	}
@@ -360,6 +360,8 @@ func (r connectStatusReport) dangerousUnused() string {
 func connectStatusSummary(r connectStatusReport) string {
 	parts := []string{}
 	switch {
+	case r.Dangerous && r.Status.Connection != nil && r.Status.Connection.Detail == dangerousOffThisRun:
+		parts = append(parts, "dangerous mode on but not in use until a restart after other people's waiting requests finish")
 	case r.Dangerous && r.dangerousUnused() != "":
 		parts = append(parts, "dangerous mode on but not in use until a restart")
 	case r.Dangerous:

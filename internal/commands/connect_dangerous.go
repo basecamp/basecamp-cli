@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync/atomic"
 
 	"github.com/spf13/cobra"
 
@@ -82,10 +83,21 @@ func dangerousModeCheck(name string) setup.Check {
 // dangerousLaunches is whether the connector's next launch runs in dangerous
 // mode: this run may use it at all (allowed, decided once at start by
 // dangerousAllowedThisRun), and connect.json has it on now (fileSaysOn, read
-// fresh at each launch, so turning it off needs no restart).
+// fresh at each launch, so turning it off needs no restart). Once it reads
+// off, it stays off for the run: turning it back on takes a restart, as
+// setup says, and a worker cut off when it went off is never fed again.
 func dangerousLaunches(allowed bool, fileSaysOn func() bool) func() bool {
+	var off atomic.Bool
+	off.Store(!allowed)
 	return func() bool {
-		return allowed && fileSaysOn()
+		if off.Load() {
+			return false
+		}
+		if !fileSaysOn() {
+			off.Store(true)
+			return false
+		}
+		return true
 	}
 }
 

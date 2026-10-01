@@ -91,6 +91,7 @@ func TestAWorkerThatIsNotReadyAtStartHoldsWorkUntilItIs(t *testing.T) {
 		o.Concurrency = 1
 		o.Logger = slog.New(slog.NewTextHandler(&logs, nil))
 		o.HoldCheck = 300 * time.Millisecond
+		o.RunningNote = "dangerous mode on"
 		o.Preflight = func(context.Context) driver.Preflight {
 			p := driver.Preflight{Product: "Claude Code"}
 			if checks.Add(1) == 1 {
@@ -111,6 +112,7 @@ func TestAWorkerThatIsNotReadyAtStartHoldsWorkUntilItIs(t *testing.T) {
 
 	require.Eventually(t, func() bool { return calls.Load() == 1 }, 10*time.Second, 10*time.Millisecond, "a check that passes takes work")
 	require.Eventually(t, func() bool { return connectionOf(t, h.ledger).State == ConnectionRunning }, 5*time.Second, 10*time.Millisecond)
+	assert.Equal(t, "dangerous mode on", connectionOf(t, h.ledger).Detail, "the run's own note survives the hold (Copilot on #810)")
 }
 
 // A hold's reason is recorded only while the hold stands. Its preflight runs

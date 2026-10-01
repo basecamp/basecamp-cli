@@ -409,10 +409,6 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if !isValidProfileName(name) {
 		return output.ErrUsage(fmt.Sprintf("Invalid profile name %q: use only letters, numbers, hyphens, and underscores", name))
 	}
-	if os.Getenv("BASECAMP_TOKEN") != "" {
-		return errEnvTokenShadows("connect setup cannot check the agent while BASECAMP_TOKEN is set")
-	}
-
 	changes, err := f.changes(cmd)
 	if err != nil {
 		return err
@@ -459,6 +455,9 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	// credential Basecamp no longer takes.
 	if exists && dangerousOffOnly(cmd) {
 		return turnDangerousModeOff(cmd, app, name, path, existing)
+	}
+	if os.Getenv("BASECAMP_TOKEN") != "" {
+		return errEnvTokenShadows("connect setup cannot check the agent while BASECAMP_TOKEN is set")
 	}
 	// Guided setup makes connect.json only where there was none. One written
 	// while it was asking is another setup's, and its trust may not be what

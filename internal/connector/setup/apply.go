@@ -124,7 +124,7 @@ func Apply(f File, ch Changes) (File, error) {
 // having turned it on for them. A first setup, with no operator yet, is not a
 // change. Setup calls it once the operator is resolved.
 func CheckDangerousOperator(before, after File) error {
-	if after.Dangerous && before.Trust.OperatorID != 0 && after.Trust.OperatorID != before.Trust.OperatorID {
+	if before.Dangerous && after.Dangerous && before.Trust.OperatorID != 0 && after.Trust.OperatorID != before.Trust.OperatorID {
 		return ErrDangerousOperatorChange
 	}
 	return nil

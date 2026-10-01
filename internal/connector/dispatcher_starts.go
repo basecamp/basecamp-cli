@@ -288,7 +288,7 @@ func (d *Dispatcher) takeWorkAgain(ctx context.Context, why string) {
 		return // held again since: its own reason stands
 	}
 	d.log.Info("connector: taking work again: " + why)
-	if err := d.ledger.NoteConnection(ctx, ConnectionRunning, ""); err != nil {
+	if err := d.ledger.NoteConnection(ctx, ConnectionRunning, d.opts.RunningNote); err != nil {
 		d.log.Warn("connector: could not record that work is being taken again, for status", "error", err)
 	}
 }

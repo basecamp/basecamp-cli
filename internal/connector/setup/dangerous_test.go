@@ -86,5 +86,7 @@ func TestAHandEditedDangerousFileIsRefusedOnRead(t *testing.T) {
 func TestDangerousModeOffIsNotWritten(t *testing.T) {
 	data, err := json.Marshal(validFile(t))
 	require.NoError(t, err)
-	assert.NotContains(t, string(data), "dangerous")
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &fields))
+	assert.NotContains(t, fields, "dangerous")
 }

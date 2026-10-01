@@ -107,6 +107,10 @@ type ReplyLister interface {
 // DispatcherOptions configures the dispatcher.
 type DispatcherOptions struct {
 	Ledger *Ledger
+	// RunningNote is what the run notes beside ConnectionRunning for status
+	// (dangerous mode's state, for one), written again when work is taken
+	// after a hold clears so the note isn't lost.
+	RunningNote string
 	// Driver starts workers.
 	Driver driver.Driver
 	// Served is connect.json's served projects as they are now, by project

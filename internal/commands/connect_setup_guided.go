@@ -671,6 +671,9 @@ func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, fil
 	if agent.HasOwner {
 		fmt.Fprintf(w, "  Works for: %s\n", richtext.SanitizeSingleLine(agent.Owner.Name))
 	}
+	if file.Dangerous {
+		fmt.Fprintln(w, "  Dangerous: on — it can run any command on this computer, as you, without asking")
+	}
 	if len(served) == 0 {
 		// Every project was taken out of connect.json: a mention anywhere
 		// gets a holding reply, so there is nowhere to try it.
@@ -680,9 +683,6 @@ func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, fil
 		return
 	}
 	fmt.Fprintf(w, "  Works in:  %s\n", strings.Join(served, ", "))
-	if file.Dangerous {
-		fmt.Fprintln(w, "  Dangerous: on — it can run any command on this computer, as you, without asking")
-	}
 	if running {
 		fmt.Fprintln(w, "  Running:   yes")
 		fmt.Fprintf(w, "\nMention %s in one of those projects to try it.\n", agentName)

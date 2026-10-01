@@ -157,6 +157,8 @@ func TestDangerousLaunchesFollowTheFileWithinWhatTheRunAllows(t *testing.T) {
 	launches := dangerousLaunches(true, file)
 	fileOn = false
 	assert.False(t, launches(), "turning it off takes effect at the next launch")
+	fileOn = true
+	assert.False(t, launches(), "turning it back on takes a restart")
 }
 
 // A run may use dangerous mode only when connect.json has it on, trusts the
@@ -206,6 +208,13 @@ func TestTheOperatorCantChangeWhileDangerousModeIsOn(t *testing.T) {
 	require.NoError(t, setup.CheckDangerousOperator(before, after), "turned off in the same run")
 	first := setup.File{}
 	require.NoError(t, setup.CheckDangerousOperator(first, before), "a first setup has no operator to change")
+
+	// Turned on for a new operator in one run: the person typed yes to it.
+	off := before
+	off.Dangerous = false
+	on := off
+	on.Dangerous, on.Trust.OperatorID = true, 222
+	require.NoError(t, setup.CheckDangerousOperator(off, on), "turned on, not swapped while on")
 }
 
 // The off switch works with Basecamp out of reach: turning dangerous mode off
@@ -228,6 +237,23 @@ func TestTurningDangerousModeOffNeedsNoBasecamp(t *testing.T) {
 	out, err = runConnectSetupCmd(t, app, "--dangerous=false")
 	require.NoError(t, err, out)
 	assert.Contains(t, out, "already off")
+}
+
+// The off switch works with BASECAMP_TOKEN set, which stops every other
+// setup (cubic on #810).
+func TestTurningDangerousModeOffWorksWithAnEnvironmentToken(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	guided(t, &scriptedPrompter{inputs: []string{"yes"}})
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--dangerous")
+	require.NoError(t, err, out)
+
+	t.Setenv("BASECAMP_TOKEN", "a-token")
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--dangerous=false")
+	require.NoError(t, err, out)
+	assert.False(t, loadAgentFile(t).Dangerous)
+	_, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--dangerous")
+	require.Error(t, err, "anything else still stops at the token")
 }
 
 // Dangerous mode is read fresh for every decision, and only for the operator
@@ -277,7 +303,7 @@ func TestConnectStatusSaysWhenThisRunIsNotUsingDangerousMode(t *testing.T) {
 	renderConnectStatus(&out, report)
 	assert.Contains(t, out.String(), "the running connector isn't using it: requests from other people")
 	assert.NotContains(t, out.String(), "Dangerous mode is on: the agent can run any command")
-	assert.Equal(t, "dangerous mode on but not in use until a restart", strings.SplitN(connectStatusSummary(report), ",", 2)[0])
+	assert.Equal(t, "dangerous mode on but not in use until a restart after other people's waiting requests finish", strings.SplitN(connectStatusSummary(report), ",", 2)[0])
 
 	// Turned on while it was already running, without dangerous mode.
 	report.Status.Connection.Detail = ""

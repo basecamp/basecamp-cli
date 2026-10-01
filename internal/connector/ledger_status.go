@@ -629,16 +629,19 @@ FROM task_events WHERE task_id = ? ORDER BY event_id`, taskID)
 }
 
 // UnfinishedFromOthers counts the records not yet finished that someone other
-// than operatorID asked for: admitted, queued, blocked, held or dispatched,
-// by the person admission trusted at the gate (the performer, else the
-// creator). A record only seen is judged again under the trust the
-// connector runs with now, so it isn't counted.
+// than operatorID asked for: admitted, queued, held or dispatched, or blocked
+// after its worker failed to start, by the person admission trusted at the
+// gate (the performer, else the creator). A record only seen, or blocked on
+// any other reason, is judged again under the trust the connector runs with
+// now, so it isn't counted: one stuck request from someone else would
+// otherwise keep dangerous mode off for good.
 func (l *Ledger) UnfinishedFromOthers(ctx context.Context, operatorID int64) (int, error) {
 	var n int
 	err := l.db.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM events
-WHERE state IN (?, ?, ?, ?, ?)
+WHERE (state IN (?, ?, ?, ?) OR (state = ? AND reason = ?))
   AND COALESCE(performed_by_id, creator_id) <> ?`,
-		string(StateAdmitted), string(StateQueued), string(StateBlocked), string(StateHeld), string(StateDispatched), operatorID).Scan(&n)
+		string(StateAdmitted), string(StateQueued), string(StateHeld), string(StateDispatched),
+		string(StateBlocked), ReasonSpawnFailed, operatorID).Scan(&n)
 	return n, err
 }

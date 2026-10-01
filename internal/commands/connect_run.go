@@ -287,6 +287,14 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if err != nil {
 		return err
 	}
+	// What status reads back about dangerous mode while this run takes work.
+	runningDetail := ""
+	switch {
+	case file.Dangerous && dangerousAllowed:
+		runningDetail = dangerousOnThisRun
+	case file.Dangerous:
+		runningDetail = dangerousOffThisRun
+	}
 	if f.hold {
 		// Before intake starts: nothing this run admits may dispatch ahead of
 		// the marker.
@@ -399,8 +407,9 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			// trusting its operator alone: trust is read once, at start, and
 			// a connector admitting other people must never run their work
 			// with a shell, whatever connect.json says now.
-			Dangerous: dangerousLaunches(dangerousAllowed, func() bool { return served.DangerousFor(file.Trust.OperatorID) }),
-			Profile:   name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
+			Dangerous:   dangerousLaunches(dangerousAllowed, func() bool { return served.DangerousFor(file.Trust.OperatorID) }),
+			RunningNote: runningDetail,
+			Profile:     name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
 			// Replies are listed with their words, so the connector's own
 			// notices are left out even before their receipts are known, and
 			// no reply is ever adopted from one. That is the whole filter:
@@ -495,13 +504,6 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		if err != nil && runCtx.Err() == nil {
 			return err
 		}
-	}
-	runningDetail := ""
-	switch {
-	case file.Dangerous && dangerousAllowed:
-		runningDetail = dangerousOnThisRun
-	case file.Dangerous:
-		runningDetail = dangerousOffThisRun
 	}
 	if err := ledger.NoteConnection(ctx, connector.ConnectionRunning, runningDetail); err != nil {
 		logger.Warn("connector: could not record that it runs, for status", "error", err)
@@ -848,6 +850,8 @@ type connectDispatch struct {
 	Authorize func() (map[int64]admission.Project, func(), error)
 	// Dangerous is whether the next launch runs in dangerous mode.
 	Dangerous func() bool
+	// RunningNote is the run's note for status while it takes work.
+	RunningNote string
 
 	Profile     string
 	Executable  string
@@ -879,6 +883,7 @@ func connectDispatcherOptions(d connectDispatch) connector.DispatcherOptions {
 		Lines:              d.Lines,
 		Logger:             d.Logger,
 		StillRunning:       connector.DefaultStillRunning,
+		RunningNote:        d.RunningNote,
 		Preflight:          workerPreflight(d.Driver),
 		Policy: func() driver.PermissionPolicy {
 			return connector.PolicyFor(d.Dangerous != nil && d.Dangerous())
