@@ -71,7 +71,7 @@ type startWaits struct {
 func (w *startWaits) options() connectStartWait {
 	return connectStartWait{
 		Log: func(line string) { w.lines = append(w.lines, line) },
-		Sleep: func(_ context.Context, _ <-chan os.Signal, d time.Duration) error {
+		Sleep: func(_ context.Context, d time.Duration) error {
 			w.waits = append(w.waits, d)
 			return nil
 		},
@@ -182,6 +182,41 @@ func TestAStartStopsPromptlyWhileItWaits(t *testing.T) {
 			assert.Less(t, time.Since(start), 5*time.Second)
 		})
 	}
+}
+
+// A stop that arrives while a renewal is in flight cancels it; one that
+// arrives as the renewal succeeds still stops the start.
+func TestAStopDuringARenewalStopsTheStart(t *testing.T) {
+	t.Run("hung renewal", func(t *testing.T) {
+		release := make(chan struct{})
+		tokens, _ := startingAgent(t, func(w http.ResponseWriter) {
+			<-release
+			answerStatus(http.StatusOK, nil, mintedToken)(w)
+		})
+		// After the server's own cleanup is registered, so it runs first:
+		// the server cannot close while its handler is held.
+		t.Cleanup(func() { close(release) })
+		signals := make(chan os.Signal, 1)
+		time.AfterFunc(50*time.Millisecond, func() { signals <- syscall.SIGTERM })
+		start := time.Now()
+		err := awaitConnectToken(t.Context(), tokens, connectStartWait{Log: func(string) {}, Signals: signals})
+		var e *output.Error
+		require.ErrorAs(t, err, &e)
+		assert.Equal(t, output.CodeTerminated, e.Code)
+		assert.Less(t, time.Since(start), 5*time.Second)
+	})
+
+	t.Run("renewal succeeds", func(t *testing.T) {
+		signals := make(chan os.Signal, 1)
+		tokens, _ := startingAgent(t, func(w http.ResponseWriter) {
+			signals <- os.Interrupt
+			answerStatus(http.StatusOK, nil, mintedToken)(w)
+		})
+		err := awaitConnectToken(t.Context(), tokens, connectStartWait{Log: func(string) {}, Signals: signals})
+		var e *output.Error
+		require.ErrorAs(t, err, &e)
+		assert.Equal(t, output.CodeInterrupted, e.Code)
+	})
 }
 
 // The start's backoff is the feed's: a full-jitter draw under an envelope

@@ -176,6 +176,12 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	startSignals, stopStartSignals := connector.NotifyShutdown()
 	err = awaitConnectToken(ctx, tokens, connectStartWait{Log: func(line string) { logger.Warn(line) }, Signals: startSignals})
 	stopStartSignals()
+	select {
+	case sig := <-startSignals:
+		// Delivered after the wait had finished, before the stop took.
+		return connectStoppedBySignal(sig)
+	default:
+	}
 	if agentDisconnectedAtStart(kind, err) {
 		return errAgentDisconnected("", name)
 	}
