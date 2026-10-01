@@ -1,72 +1,113 @@
 ---
 name: basecamp-connect
 description: |
-  Connect a Basecamp agent to this computer and manage the local agent
-  connector's setup: the agent's credential (basecamp auth agent connect),
-  connect.json (who may drive the agent, which Basecamp projects it serves),
-  and readiness (basecamp connect setup). Explains every setup
-  result and failure. Also reads what the connector ran (status, doctor) and
-  carries out a person's decisions on its records (redispatch, discard,
-  release, the cutover's shadow promote and import). Tells the person how to
-  start the connector in the folder it should work in, and reads the pointer
-  lines it writes.
-  Use when asked to connect an agent, set up or change the connector, add or
-  remove a project, change who can drive the agent, find out why setup says
-  the connector is not ready, or see, retry, close or release what the
-  connector holds.
+  Drive your own Claude Code session from Basecamp. Starts the local connector
+  (basecamp connect), which listens to the account's event feed as a Basecamp
+  agent and prints one line per trusted request: a mention, an assignment, a
+  comment on a thread the agent follows. This session acknowledges each one
+  within seconds (a boost in its own words), picks the repo for the project,
+  and hands the request to a background subagent that reads the context, does
+  the work with your settings and tools, and replies as the agent. The session
+  stays free to take the next request, and you can keep using it.
+  Also connects an agent to this computer and manages its setup: the agent's
+  credential (basecamp auth agent connect), who may give it work, and which
+  projects it serves (basecamp connect setup), plus status and doctor.
+  Use when asked to connect an agent, drive agents from Basecamp, watch
+  Basecamp for an agent's mentions, start or stop the connector, or change
+  who can give the agent work or which projects it serves.
 triggers:
   - /basecamp-connect
   - connect an agent
-  - set up the connector
-  - basecamp connect setup
-  - basecamp auth agent connect
-  - connect.json
-  - serve a project
-  - who can drive the agent
-  - connector not ready
-  - basecamp connect status
-  - basecamp connect doctor
-  - redispatch an event
-  - held records
-  - release the hold
+  - drive agents from basecamp
+  - watch basecamp for agent commands
   - start the connector
   - stop the connector
   - is the connector running
+  - set up the connector
+  - basecamp connect setup
+  - basecamp auth agent connect
+  - serve a project
+  - who can give the agent work
+  - connector not ready
+  - basecamp connect status
+  - basecamp connect doctor
 ---
 
-# Basecamp connector: connect an agent and manage its setup
+# /basecamp-connect: drive your agent from Basecamp
 
-The local agent connector lets people in Basecamp hand work to a coding agent on
-this computer. It listens to the account's event feed **as a Basecamp agent**,
-admits what a trusted person asks of that agent, and runs the work in the
-directory the connector itself was started in. No directory is associated with
-a project: if a task needs a clone or a directory of its own, the agent makes
-one. The agent replies in Basecamp as itself.
+Someone @mentions the agent in Basecamp (or assigns it a card or to-do). This
+session acknowledges it as the agent within seconds, a background subagent
+does the work in the right repo with your own Claude Code setup, and the agent
+replies in place.
 
-You manage it for the person. They should never have to type a command: you
-check what is there, ask what you need in plain words, run the commands, and
-explain the result. This skill is the reference you do that from.
+Three pieces:
 
-## Two commands, two jobs
+- **The agent**: a Basecamp person of its own, owned by you, connected to this
+  computer under a CLI profile (often named after the agent).
+- **The connector**: `basecamp connect -P '<profile>'`. It listens to the
+  account's event feed as the agent, checks each event against who may give the
+  agent work and which projects it serves, and prints one line per trusted
+  request. It does nothing else: no workers, no acknowledgements, no replies.
+- **This session**: the orchestrator. It watches those lines, acknowledges each
+  request, chooses the repo, and dispatches one background subagent per
+  request. It never does the work itself.
 
-| Command | Owns | Run it when |
-|---------|------|-------------|
-| `basecamp auth agent connect -P '<profile>'` | The agent's **credential**, stored under a CLI profile | The profile does not exist yet, or the person agrees to replace its Agent credential |
-| `basecamp connect setup -P '<profile>'` | **Policy and readiness**: connect.json and the checks | First setup after the credential, and every change to trust or served projects |
+Claude Code only. The connector runs on Linux and macOS.
 
-- **Order on first setup:** connect, confirm who the credential is, then setup.
-  Setup does not obtain a credential.
-- **Setup never touches the credential.** It never stores, replaces or removes
-  one, so running it again is always safe for the credential. (An access token
-  that expires is minted or renewed as by any command.)
-- **Changing the credential means running connect again, not setup.** Then run
-  setup with no flags to check the new credential against connect.json.
-  Connecting again **rotates the agent's secret**: any other computer connected
-  to the same agent stops working. Do it only when the person agrees.
-- `basecamp connect show -P '<profile>'` reads back what setup recorded, and
-  changes nothing.
-- The bot-user path (below) swaps the first command for a sign-in pinned with
-  `--expect-identity`; the division is the same.
+## Invocation
+
+**The arguments are natural language, not a grammar.** Pull out the agent, the
+projects, and any wishes about who may give it work, and translate them into
+the commands below. Never make the person restate them as flags.
+
+```
+/basecamp-connect                                        # the last agent used, confirmed first
+/basecamp-connect as Marie                               # start the connector for that agent
+/basecamp-connect as Marie, and let anyone in "Launch" give it work
+/basecamp-connect connect my new agent and serve the Redesign project
+```
+
+Each becomes a flag on setup (*First-time setup*, step 4):
+
+| They say | Setup flag |
+|---|---|
+| "only me" (the default) | `--trust operator` |
+| "me and Jane" | `--allow <jane's person id>` (and everyone else who stays: the list is replaced) |
+| "anyone in the project" | `--trust project` |
+| "also work in project X" | `--serve <id of X>` |
+| "stop working in X" | `--unserve <id of X>` |
+
+Then:
+
+1. **Which agent.** Use the profile they name. With none, read
+   `~/.config/basecamp-connect/last.json` (below) and confirm it. With neither,
+   list profiles (`basecamp profile list --json`) and ask.
+2. **Set up, if needed.** `basecamp connect show -P '<profile>' --json`. A
+   `not_found` or `unknown profile` error means it isn't set up: follow
+   *First-time setup*. If they asked for a change, run setup with it.
+3. **Start the connector** (*Running the connector*) and watch it.
+4. **Handle each request** (*For each request*), until they ask you to stop.
+
+Trust and served projects are read when the connector starts. After any setup
+change while it runs, stop it and start it again.
+
+### Remembered settings
+
+After every successful start, write `~/.config/basecamp-connect/last.json`
+(create the directory if needed):
+
+```json
+{
+  "profile": "marie",
+  "repos": { "48699913": { "name": "Bring your agents to Basecamp", "path": "/home/me/code/agents" } },
+  "saved_at": "2026-10-01T15:00:00Z"
+}
+```
+
+`repos` maps a project's id to the local repo its work goes in, once the
+person has confirmed it (see *Choose the repo*). A start that fails must not
+overwrite the file. Invoked with no arguments, show the stored profile and
+mappings and ask before starting. Never start silently from the store.
 
 ## Rules without exceptions
 
@@ -77,458 +118,417 @@ explain the result. This skill is the reference you do that from.
 - Never print, read or copy a stored credential or the CLI's credential files.
 - Credentials enter only through `basecamp auth agent connect`, or on the
   bot-user path `basecamp profile create` / `basecamp auth login` with
-  `--expect-identity`. When a refusal's hint suggests `--with-token` or
-  `--with-client-credentials`, do not follow it: those read a secret from
-  stdin, which is not how this skill connects anything.
+  `--expect-identity`. If a hint suggests `--with-token` or
+  `--with-client-credentials`, don't follow it.
 - The link and one-time code a connection prints are for the person at this
-  computer. Show them in this conversation only; never post them to Basecamp,
-  chat, a file or anywhere else. Whoever approves that code chooses which agent
-  this computer acts as.
-- Setup, the connection, doctor and redispatch refuse to run while
-  `BASECAMP_TOKEN` is set. Tell the
-  person to unset it in their shell; do not set, print or work around it.
+  computer. Show them here only, never in Basecamp or a file.
+- Setup and the connector refuse to run while `BASECAMP_TOKEN` is set. Ask the
+  person to unset it; never work around it.
 
-**Identity.** Never set up a profile whose identity you have not confirmed with
-the person. Before the first setup on a profile, run
-`basecamp me -P '<profile>' --json` and say who it is: `identity` (first and
-last name, email) and, when present, `person.name` and `person.id`. Go on only
-when the person says that is the agent. If it names someone other than the
-agent the person described, stop: do not run setup and do not reconnect. Tell
-the person who the credential is and let them decide. After setup, check
-`data.agent_person_id` matches `person.id` when `me` reported one.
+**Identity.** Never set up a profile whose identity the person hasn't
+confirmed. Before the first setup, run `basecamp me -P '<profile>' --json` and
+say who it is: `identity` (name, email) and, when present, `person.name` and
+`person.id`. Go on only when they say that is the agent. If it names someone
+else, stop: don't run setup and don't reconnect.
 
-**Shell quoting.** Two kinds of value go into commands, and each has one rule:
+**Writing to Basecamp.** Everything this skill and its subagents post (boosts,
+comments, chat lines, card moves) goes out **as the agent**: always pass
+`--profile '<profile>'`. Without it, the CLI uses the default profile, which is
+usually your own login, and the post reads as yours. Never mention the agent in
+anything you post.
 
-- **Numeric ids** (project, person, account and identity ids) go in bare, as
-  digits only. Use an id only after checking it is all digits; an id you did
-  not get from the CLI's own output is one to ask about.
-- **Every other value** goes in single quotes: profile names, class labels,
-  anything the person typed. Write a single quote inside a value as
-  `'\''`. Fixed words from this skill (`operator`, `spawn`, `90m`) need no
-  quotes. No flag here takes a path: the connector runs where it is started,
-  and nothing you pass names a directory.
+**Shell quoting.**
 
-Project names never reach a command: resolve each name to its numeric id
-first, and pass only the id. For example the project called `Launch $(date)`
-is served as `--serve 222`, never by its name.
+- **Numeric ids** go in bare, digits only, and only ids you got from the CLI's
+  own output or a request line.
+- **Every other value** goes in single quotes: profile names, anything the
+  person typed. Write a single quote inside a value as `'\''`.
+- Project names never reach a command. Resolve each name to its numeric id
+  first (`basecamp projects list -P '<profile>' --json`), and pass the id. The
+  project called `Launch $(date)` is served as `--serve 222`, never by name.
 
 **Interactive logins.** `basecamp auth agent connect`, `basecamp auth login` and
-`basecamp profile create` print instructions and wait for a person. Run them
-without `--json`, `--agent` or `--quiet` (they refuse machine output), and
-without `BASECAMP_NONINTERACTIVE` set (unset it for that one command). Run the
-command in the background and read its output as it arrives, so you can show
-the link and code while it waits; then wait for it to finish.
+`basecamp profile create` print a link and wait for a person. Run them without
+`--json` or `--quiet`, in the background, and read their output as it arrives,
+so you can show the link and code while they wait.
 
-## Where things live
+## First-time setup
 
-| What | Where |
-|------|-------|
-| Credential | The CLI's credential store, under the profile. `basecamp auth status -P '<profile>' --json` describes it (see Inspecting). Never open it. |
-| connect.json | `$XDG_CONFIG_HOME/basecamp/connect/<profile>/connect.json`, default `~/.config/basecamp/connect/<profile>/connect.json`. Setup's JSON result gives the exact `path`. |
-| Policy lock | `.connect.lock` beside connect.json. Three callers, and knowing which one holds it is how you read a `busy`. `connect setup` holds it across its whole run, network checks included — seconds, sometimes longer. `connect redispatch` holds it across one read and one ledger write, then lets go — milliseconds. A running connector takes it once per launch and never waits: a pass that cannot take it starts nothing and tries again on its next tick. Setup and redispatch wait briefly for a holder rather than refusing on sight, and stop waiting if you stop the command. |
-| Connector runtime state (ledger, checkpoint, lock) | `$XDG_STATE_HOME/basecamp/connect/<account>-<agent person id>/`, default under `~/.local/state`; a shadow run's is under `connect-shadow/` instead. Read it only through `basecamp connect status` and `basecamp connect doctor`; never open or copy the files. |
+Ask only what you can't find out.
 
-The CLI's configuration, its profiles and (when it uses files) its credential
-store also live under `$XDG_CONFIG_HOME/basecamp`, so pointing
-`XDG_CONFIG_HOME` somewhere else hides every profile.
+**1. Profile and credential.** Agree a profile name (letters, digits, `-` and
+`_`), for example the agent's name. Check it: `basecamp auth status -P
+'<profile>' --json`.
 
-connect.json holds ids and a trust mode, no directory and no credential.
-Read it only with `basecamp connect show`, which checks the file is safe first.
+- `unknown profile`: it doesn't exist. Connect the agent with
+  `basecamp auth agent connect -P '<profile>'` (add `--no-browser` if the person
+  is on another device). Show the link and code. They open the link, check the
+  code, choose the agent (or create one) and approve.
+- `oauth_type` `agent`: already connected. Don't connect again: that rotates
+  the agent's secret and disconnects any other computer using it.
+- Anything else: a person's login is stored. Ask; never connect an agent over
+  it.
 
-## connect.json
+Then confirm the identity (`basecamp me`, see *Identity*).
 
-connect.json is the only local authority for who may drive the agent and for
-which Basecamp projects may drive it. Nothing read from Basecamp serves a
-project or widens trust. It names no directory: the connector runs where it is
-started.
+**Bot user** (a regular Basecamp user acting as the agent): sign in as the bot,
+pinned to its identity id, with
+`basecamp profile create '<bot-profile>' --account <account-id> --expect-identity <bot-identity-id>`
+(or `basecamp auth login -P '<bot-profile>' --expect-identity <bot-identity-id>`
+for an existing profile), and pass the same `--expect-identity` to the first
+setup.
 
-```json
-{
-  "version": 1,
-  "profile": "agent",
-  "account_id": "999",
-  "agent": { "person_id": 4001, "kind": "agent" },
-  "trust": { "mode": "operator", "operator_id": 1001 },
-  "projects": {
-    "222": { "class": "internal", "watch_completions": true }
-  },
-  "driver": "spawn",
-  "worker": "claude",
-  "concurrency": 2,
-  "deadline": "45m0s"
-}
-```
+**2. Who may give it work.** Explain in a sentence each, and default to the
+first:
 
-| Field | Controls | Changed with |
-|-------|----------|--------------|
-| `profile`, `account_id` | The profile holding the agent's credential and the account it belongs to | Fixed at first setup. Another account means removing the file. |
-| `agent.person_id`, `agent.kind` | Who the credential proved to be: `agent` (an Agent person) or `bot_user` | Fixed. The connector refuses to act if the credential stops matching. |
-| `agent.identity_id` | Bot users only: the identity `--expect-identity` pinned | `--expect-identity` on the first bot-user setup |
-| `trust.mode` | Who may drive the agent: `operator`, `allowlist` or `project` | `--trust` |
-| `trust.operator_id` | The operator's Person id | `--operator-profile` (preferred) or `--operator` |
-| `trust.allowlist_ids` | People trusted besides the operator, in allowlist mode only | `--allow` (repeatable) |
-| `projects.<id>` | A Basecamp project this agent serves. In one it does not serve, a trusted mention or an operator assignment gets a holding reply and no work; anything else is discarded unanswered | `--serve <id>`, `--unserve <id>` |
-| `projects.<id>.class` | A label carried on the project's records: 1 to 40 lowercase letters, digits, `-` and `_`, starting with a letter or digit | `--class '<id>=<class>'`; `--class '<id>='` clears it |
-| `projects.<id>.watch_completions` | Every trusted completion in the project reaches the agent, without assigning it | `--watch-completions <id>`, `--no-watch-completions <id>` |
-| `driver` | How workers are run: `spawn` (default) or `acp` | `--driver` |
-| `worker` | Which coding agent a spawn worker is: `claude` (default) or `codex` | `--worker` |
-| `concurrency` | Workers at once, 1 to 32 (default 2) | `--concurrency` |
-| `deadline` | Time limit per task, 1m to 24h (default 45m) | `--deadline 90m` |
+- **operator**: only the operator, which for a personal agent is its owner (you).
+- **allowlist**: the operator plus people you name.
+- **project**: the operator plus anyone in the project who isn't a client.
 
-**Never edit connect.json by hand.** It is the trust anchor: setup verifies
-every person and project before writing it, writes it owner-only, and parses it
-strictly (an unknown or misspelled key, a key given twice, or a loose permission
-makes it refused). Every change goes through setup.
+Assignments count only from the operator, in every mode. For a personal agent
+pass no operator flag: setup takes its owner. For any other agent, name the
+operator by their own CLI profile with `--operator-profile '<profile>'`. For
+allowlist, look up each person's id (`basecamp people list --json`) and pass
+`--allow <id>` for each.
 
-## Trust, in a sentence each
+**3. Projects, by name.** List them (`basecamp projects list -P '<profile>'
+--json`; if that's refused under an Agent identity, list them with the person's
+own profile instead). Show the names, let them choose, and map each to its id
+yourself. When a name matches more than one project, ask. The agent must be a
+member of each project it serves.
 
-Explain the modes this way when you ask:
-
-- **operator** (default): only the operator can drive the agent.
-- **allowlist**: the operator plus specific people you name.
-- **project**: the operator plus anyone in the project who is not a client.
-
-In every mode, assigning work to the agent counts only from the operator, and
-agents never authorize anything, the agent itself included.
-
-**The operator** is the person the agent takes instructions from. A personal
-agent's operator is its owner, whom Basecamp names in the agent's own profile:
-for one, pass no operator flag and setup takes the owner. For any other agent,
-name them by their own CLI profile with `--operator-profile '<profile>'`: setup reads who
-that profile is through its own login, which proves it. `--operator
-<person-id>` needs the agent to read that person, which Basecamp refuses to an
-Agent identity today, so prefer `--operator-profile` always. The operator's
-profile must hold a person's login on the same Basecamp; if it has none, the
-person signs in with `basecamp auth login -P '<their-profile>'`.
-
-## Inspecting the current setup
-
-Check before you change anything, and before you ask the person anything you
-could look up:
-
-1. **Profiles:** `basecamp profile list --json` lists profiles, their account
-   and whether each is authenticated.
-2. **Credential:** `basecamp auth status -P '<profile>' --json`.
-   - An `unknown profile` error: the profile does not exist. The connection
-     creates it.
-   - `authenticated` false and no `oauth_type`: nothing usable is stored.
-   - `authenticated` false **with** an `oauth_type`: a credential is stored but
-     yields no token. Do not connect over it; tell the person what kind it is
-     and ask.
-   - `oauth_type` `agent`: an Agent person. Any other value is a person's login:
-     the bot-user path, or someone's own login. Ask which.
-   - `storage` `env`: the answer describes `BASECAMP_TOKEN`, not the profile.
-     Have the person unset it and check again.
-3. **Who it is:** `basecamp me -P '<profile>' --json` (see Identity above).
-4. **Policy:** `basecamp connect show -P '<profile>' --json` prints connect.json
-   as setup recorded it, changing nothing and making no request. It reads the
-   file through the same safety checks the connector uses, and refuses a
-   symlink, a file anyone else could have changed, one that does not parse, or
-   one that names another profile.
-   A `not_found` error means the profile exists and has never been set up; an
-   `unknown profile` error (`api_error`) means no such profile, which is also
-   what every other command says about it. **Never read
-   connect.json directly** (no `cat`, no file read): that skips those checks.
-   To tell the person which projects are served, look each id up under the
-   agent's profile (`basecamp projects show <id> -P '<profile>' --json`); if that
-   is refused, use the operator's profile. Say names, not ids.
-5. **Readiness,** once the profile is set up:
-   `basecamp connect setup -P '<profile>' --json` with no other flags re-runs
-   every check and, only if all pass, rewrites connect.json with what it already
-   holds. It changes nothing else, and writes nothing when a check fails. There
-   is no separate dry-run flag; do not invent one.
-
-## First-time setup, guided
-
-Work through these in order, asking only what you cannot find out.
-
-**1. Profile and credential.** Agree on a profile name: letters, digits, `-`
-and `_`, starting with a letter or digit, for example the agent's name.
-Inspect it, all five steps above. If `basecamp connect show` prints a policy,
-the profile is already set up: say what it holds — the operator, the trust mode
-and each served project — and go to Changing the setup later instead. Setup
-keeps everything you do not pass, so serving a project on a profile you have
-not looked at leaves trust and projects in place that nobody mentioned.
-
-- **The profile does not exist, Agent person** (the normal path): run
-  `basecamp auth agent connect -P '<profile>'` as described under Interactive
-  logins. Show the person the link and one-time code. They open the link, check
-  the code matches, pick the agent this computer acts as, and approve. Add
-  `--no-browser` when the person is on another device.
-- **The profile exists with an Agent credential:** do not connect again. Confirm
-  its identity with `basecamp me`. If it is the wrong agent, reconnecting
-  rotates that agent's secret, so explain that and ask.
-- **The profile exists with anything else:** ask. Never connect an agent over a
-  person's login.
-- **Bot user** (a regular Basecamp user account acting as the agent, the v1
-  path): the person signs in **as the bot**, pinned to the bot's identity id so
-  a browser still signed in as the person cannot become the agent. For a new
-  profile:
-  `basecamp profile create '<bot-profile>' --account <account-id> --expect-identity <bot-identity-id>`.
-  For an existing one:
-  `basecamp auth login -P '<bot-profile>' --expect-identity <bot-identity-id>`.
-  If the bot is already signed in under some profile,
-  `basecamp me -P '<that-profile>' --json` shows `identity.id`; confirm the name
-  and email with the person before using it. Pass the same `--expect-identity`
-  to the first setup.
-
-Then confirm the identity (`basecamp me`) with the person before going on.
-
-**2. Operator.** For a personal agent (one that works for a person), pass no
-operator flag: setup takes its owner. Otherwise find the person's own profile in
-`basecamp profile list --json` (not the agent's) and confirm it is theirs. Use
-`--operator-profile`.
-
-**3. Trust mode.** Explain the three modes in a sentence each and ask. Default
-to `operator`. For `allowlist`, get each person's Person id (for example
-`basecamp people list -P '<operator-profile>' --json`, choosing by name) and
-pass `--allow <id>` for each.
-
-**4. Projects, by name.** Never ask for a project id.
-
-- List the projects: `basecamp projects list -P '<agent-profile>' --json`. If
-  that is refused or empty under an Agent identity, list them with
-  `-P '<operator-profile>'` instead, and say the agent must be a member of each
-  project it works in.
-- Show the names, let the person choose, and map each choice to its numeric
-  `id` yourself. When a name matches more than one project, ask which.
-- Do not ask where a project's work lives. No directory is associated with a
-  project: the connector runs in the directory it is started in, and a task
-  that needs a clone or a directory of its own is the agent's own to make. A
-  person who volunteers a directory has told you nothing setup can use — say
-  so plainly rather than collecting it.
-- Offer `--watch-completions` only when the person wants the agent to act on
-  every completed to-do or card in a project without being assigned. Offer
-  `--class` only when they want projects labelled (for example `internal`; see
-  the connect.json table for what a label may contain).
-  Leave `--driver`, `--concurrency` and `--deadline` at their defaults unless
-  asked.
-
-**5. Confirm, then run setup.** Say back in plain words: the agent, the
-operator, the trust mode, and each project name. Then run, quoting values by
-the Shell quoting rule:
+**4. Confirm, then run setup.** Say back the agent, who may give it work, and
+each project by name. Then:
 
 ```bash
-basecamp connect setup -P '<profile>' --operator-profile '<operator-profile>' \
-  --serve <project-id> --serve <project-id> --json
+basecamp connect setup -P '<profile>' --serve <project-id> --serve <project-id> --json
 ```
 
-adding `--trust`, `--allow`, `--watch-completions` or `--class`
-as chosen, and on the bot-user path `--expect-identity <bot-identity-id>`.
+adding `--trust`, `--allow` or `--operator-profile` as chosen, and on the
+bot-user path `--expect-identity <bot-identity-id>`.
 
-**6. Read the result** (next section) and tell the person what it means. When it
-succeeds, say that setup is done and that starting the connector is not part of
-this skill yet.
+### Reading setup's result
 
-## Changing the setup later
+Success is `{"ok": true, "data": {...}}` with `data.ready` and `data.written`
+true and a list of `checks`. A `warn` check is usable; mention it. After the
+first setup, check `data.agent_person_id` matches the `person.id` that `me`
+reported.
 
-Run setup again with only what changes; everything not passed is kept. Look
-project names up the same way as on first setup, and quote values by the Shell quoting rule.
+A failure is `{"ok": false, "error", "code", "hint"}` and **nothing was
+written**. Explain the `error` in plain words, and follow the `hint` only when
+these rules allow it.
 
-| To | Run |
-|----|-----|
-| Serve a project | `basecamp connect setup -P '<profile>' --serve <id> --json` |
-| Stop serving a project | `basecamp connect setup -P '<profile>' --unserve <id> --json` |
-| Watch, or stop watching, a project's completions | `--watch-completions <id>` / `--no-watch-completions <id>` |
-| Label a project, or clear its label | `--class '<id>=<class>'` / `--class '<id>='` |
-| Trust only the operator, or project members | `--trust operator` / `--trust project` (leaving allowlist mode drops the list) |
-| Trust specific people | `--allow <person-id>` for each; the list you pass **replaces** the old one, so pass everyone who stays |
-| Change the operator | `--operator-profile '<profile>'` |
-| Change workers | `--driver`, `--worker claude` / `--worker codex`, `--concurrency`, `--deadline` |
-| Replace the agent's credential (only with the person's consent: it rotates the secret) | `basecamp auth agent connect -P '<profile>'`, then setup with no flags to re-check |
+| `code` | Means | Next |
+|---|---|---|
+| `usage` | A bad value, or a person trust refuses (an agent, a client) | Fix what the message names |
+| `auth_required` | No usable credential, or not the agent connect.json names | Connect it (step 1), or confirm which agent this profile should be |
+| `api_error` | Usually `unknown profile` | Connect the agent first |
+| `not_ready` | A readiness check failed; `error` lists each | Explain each (below) |
+| `busy` | Another setup holds the profile | Run it again in a moment |
 
-A class or watch setting needs the project served first, in the same run or an
-earlier one. A project cannot be served and removed in one run.
+Failed checks worth knowing:
 
-**Unserving the last project is allowed**, and is how the agent is turned off
-without touching connect.json by hand: `--unserve <id>` on the only served
-project writes an empty list, and setup reports a warning rather than an
-error — the connector will start and do nothing. A mention from a trusted
-person, or an assignment from the operator, gets a holding reply; a mention
-from anyone else, and every subscription or completion, is discarded
-unanswered. Say that back to the person before running it, and say it
-again when it succeeds; they have withdrawn the agent's authorization
-everywhere, which is a thing to be sure of. Serving one again is
-`--serve <id>`. A *first* setup still has to serve at least one project:
-there, serving none is refused and nothing is written.
+- **Project `<id>`: reading the project was refused, and Basecamp refuses this
+  read to an Agent identity today.** First check the agent is a member. If it
+  is, the way to run today is the bot-user path above. Explain, and let the
+  person decide.
+- **Project `<id>`: refused, without that message.** The agent can't see the
+  project. Add it to the project in Basecamp and run setup again.
+- **Stream ticket refused.** The account event feed isn't enabled for this
+  account or agent. That's a Basecamp setting the person has to ask for.
+- **Scope: not full access.** The agent couldn't reply. Connect again with full
+  access, with the person's consent, since it rotates the secret.
 
-Some changes setup refuses on purpose, because connect.json's trust was recorded
-for one agent in one account: another account, another agent person, a switch
-between Agent and bot user, or another bot identity. Each refusal names
-connect.json. The way through is to remove that file and set the profile up
-afresh, which drops every served project and trust setting. Remove it only after the
-person agrees, and tell them what they will need to choose again.
-
-## Reading setup's result
-
-With `--json`, success is `{"ok": true, "data": {...}, "summary": ...}` with
-`data.ready` true, `data.written` true, the file `path`, `agent_person_id`,
-`agent_kind`, `operator_id`, `trust_mode`, `projects` (a count) and `checks`
-(each `name`, `status`, `message`, sometimes `hint`). A `warn` check is usable;
-mention it.
-
-A failure is `{"ok": false, "error": ..., "code": ..., "hint": ...}` and a
-non-zero exit. **When setup fails, connect.json was not written**: the previous
-file, if any, is unchanged. Explain the `error` in plain words. Follow the
-`hint` only when it is a step these rules allow. Always read `code`, not only
-the exit status: exit 7 is shared.
-
-| `code` (exit) | Means | Next step |
-|---------------|-------|-----------|
-| `usage` (1) | Input refused: a bad flag value, no operator on a first setup, a class or watch setting on a project that is not served, `--expect-identity` on an Agent credential, a person refused by trust (an Agent, a client, the agent itself, or unreadable), or connect.json itself unusable | Fix the input the message names and run again. |
-| `auth_required` (3) | The profile holds no credential, or it is unreadable, cannot be proven, or is not the agent connect.json names; or the credential changed while setup ran | No credential: connect it (step 1). Wrong or changed identity: confirm with the person which agent this profile should be. Changed mid-run: run setup again. |
-| `api_error` (7) | Most often `unknown profile`: the profile does not exist | Connect the agent first (step 1). |
-| `not_ready` (7) | A readiness check failed. `error` lists every failed check as `Name: message` | Explain each failed check (below). |
-| `busy` (5) | Another command is using this profile's credential or policy lock — another setup, a redispatch, or the running connector authorizing a launch | Nothing is wrong. Run the command again when it has finished. |
-| `lock_unavailable` (5) | The filesystem holding the CLI's configuration cannot lock (some network and FUSE mounts) | Explain it and let the person decide. The fix is a local filesystem for `XDG_CONFIG_HOME`, and moving it hides every profile and stored file credential. After such a move do not reconnect the agent: that rotates its secret. |
-
-A setup the person stops also writes nothing.
-
-### Failed readiness checks
-
-Every run checks every served project, including the ones it keeps. A kept
-project that fails blocks the whole write, so fix it or stop serving it before
-other changes can land.
-
-- **Projects: No project is served.** A *failure* only on a first setup, where
-  it means the profile has not been set up: serve a project (step 4). On a
-  profile already set up it is a *warning*, not a failure — connect.json is
-  written, and the agent is left doing nothing until a project is served
-  again.
-- **Project `<id>`: reading the project was refused, and the message says
-  Basecamp refuses this read to an Agent identity today.** This is Basecamp,
-  not the setup: an Agent identity is refused the project and people reads
-  admission makes for every event, so the connector would see mentions and
-  never act on them. First check the agent is a member of the project. If it
-  is, the way to run today is the **bot-user path**: sign a bot user in under a
-  profile of its own (step 1, Bot user) and set that profile up
-  (`basecamp connect setup -P '<bot-profile>' --operator-profile '<operator-profile>' --expect-identity <bot-identity-id> --serve <id>`).
-  The Agent profile's credential stays as it is. Explain this and let the
-  person decide before starting a bot-user sign-in: it needs a bot user account
-  and its identity id.
-- **Project `<id>`: refused, without the Agent message.** The agent (a bot
-  user) cannot see the project. Add it to the project in Basecamp and run setup
-  again.
-- **Stream ticket: Basecamp refused the ticket mint.** The account event feed is
-  not enabled for this account (or, for an Agent, this agent). That is a
-  Basecamp-side setting; the person has to ask for it to be enabled.
-- **Scope: not full access.** The agent could not reply. For an Agent profile,
-  connect again with full access (`basecamp auth agent connect -P '<profile>'`,
-  approving full access), with the person's consent since it rotates the
-  secret. For a bot user, sign in again with full access and the same pin
-  (`basecamp auth login -P '<bot-profile>' --expect-identity <bot-identity-id>`).
-  Never switch a bot-user profile to an Agent connection.
-
-Other messages worth knowing: *Operator profile holds no credential* (the
-operator signs in with `basecamp auth login -P '<their-profile>'`), *Operator
-profile holds an Agent's credential* (pick the person's own profile), *profile
-is bound to account X, and this command named account Y* (drop `--account`), and
-*Profile holds a person's login, not an Agent's credential* (either it is a bot
-user and needs `--expect-identity`, or the wrong login is stored: ask).
-
-## Seeing and deciding what the connector ran
-
-These read or change the connector's own ledger for a set-up profile. They are
-the person's decisions, so run the deciding ones only when the person asks for
-that record or that step.
-
-- `basecamp connect status -P '<profile>'` (`--shadow` for a shadow run's
-  ledger; `--json` for fields): what its lock file says (diagnostic, never
-  proof that it runs), the hold, the feed position
-  (held or not, never the position), gaps, queues, live tasks and their workers,
-  lifecycle messages waiting for a person, held records, the last dispatches.
-  Read-only and safe while the connector runs. It shows no content. When the
-  worker failed to start twice in a row, the connector stops taking new work
-  and status opens with "Not taking work:" and the reason. Explain the
-  reason. New work waits and nothing is lost. The connector takes work again
-  once the worker starts cleanly, or when it restarts. When the connector
-  stopped because the agent was disconnected in Basecamp or connected on
-  another computer, status opens with "Disconnected:"; `basecamp connect setup
-  -P '<profile>'` reconnects it.
-- `basecamp connect doctor -P '<profile>'`: token, identity, ticket mint, feed
-  poll, the ledger, the worker (started as the connector would start it, and
-  asked whether it knows the connector's flags and is logged in, with no model
-  call), and a handshake with the agent's MCP server. It writes nothing to the
-  ledger and posts nothing to Basecamp, though it may renew the profile's
-  credential as any command does.
-- `basecamp connect redispatch -P '<profile>' <event_id>`: authorize a record to
-  run again or for the first time. Accepted for an unknown or failed outcome
-  (one whose task is still running waits for that task to end), a blocked
-  record and a held one; refused for a success, a discarded record and a record
-  that is itself still on its way to a worker. It stops the replaced worker
-  only when that process is provably still it, and says what became of it.
-- `basecamp connect discard -P '<profile>' <event_id>`: close a held, blocked
-  or unknown record without running it.
-- `basecamp connect release -P '<profile>'`: clear the hold that a start with
-  `--hold` or a shadow promote set. Held records stay held until each is
-  redispatched or discarded.
-- Cutover only: `basecamp connect shadow promote -P '<profile>'` makes the
-  shadow ledger the connector's, held, and needs both the shadow run and the
-  connector stopped; `basecamp connect import -P '<profile>' <file>` applies a
-  reconciliation file and needs the connector stopped. Run these only when the
-  person is doing a cutover and asks for them.
-
-Doctor exits `not_ready` (exit 7) when a check fails; explain each failed check.
-Follow a hint from these commands only as the rules above allow: a hint that
-says to reconnect the agent's profile rotates its secret and needs the person's
-consent.
+**Never edit connect.json by hand**, and never read it directly: use
+`basecamp connect show -P '<profile>' --json`, which checks the file is safe
+first. Every change goes through setup, which keeps whatever you don't pass.
 
 ## Running the connector
 
-**Never run `basecamp connect` yourself.** It runs in the foreground until it
-is interrupted, so a session that starts it never gets its turn back, and a
-connector that lives only as long as your session dies with it. The person
-runs it, in a terminal of their own, and leaves it running:
+### 1. Start it, and watch its output
 
-    cd '<folder>' && basecamp connect -P '<profile>'
+Only one connector per agent can run at a time. If it's already running
+elsewhere, it refuses to start and says so: tell the person, and don't start a
+second.
 
-**The folder is the agent's workspace.** Every worker runs there and may change
-files in it without asking. Suggest a folder made for the agent, or the project
-the person wants it to work on. Never suggest their home directory, and if the
-connector is already running from it, say so.
+Start it in the background with the Bash tool (`run_in_background: true`), and
+note the output file the harness reports:
 
-Stopping it is safe: Ctrl-C (a SIGINT) cancels live workers, posts their
-completions and exits. Once it has run and read the feed, it keeps its place:
-started again, it catches up on what people asked while it was stopped. Its
-very first start has no place to resume from, so it begins at that moment, and
-anything asked before then is not picked up. On a server, the person can keep
-it running in `tmux` or `screen`.
+```bash
+basecamp connect -P '<profile>'
+```
 
-There is no background service yet. If someone asks for one, say it isn't
-available, and that once it has run, the connector catches up whenever it is
-started again.
+It runs until stopped. Its folder doesn't matter: every subagent works in the
+repo you choose for it. Read the output once after a few seconds. You should
+see `connector: running` in its log. If it exited instead, explain the error
+(see *When the connector stops*), and stop.
 
-Pass the run's shape to the connector itself: `--project <id>` (repeatable) to
-hear only some projects, `--shadow` to admit and log without dispatching or
-posting anything, `--hold` to run with the durable hold set.
+Then arm a persistent monitor on that file with the Monitor tool
+(`persistent: true`), replaying from the start so nothing that arrived between
+the start and the monitor is missed:
 
-Linux and macOS only: on any other system the connector refuses to start,
-and says so.
+```bash
+tail -f -n +1 <connector-output-file> | grep --line-buffered -F '"type":"request"'
+```
 
-Quote the profile, as everywhere else in this skill.
+Each notification is one request: handle it with *For each request*. A request
+that arrives while you're waiting on the person is not their reply.
 
-### Seeing what it is doing
+The connector starts from the present. Anything asked while it wasn't running
+is not picked up. If someone says the agent ignored them, that's the first
+thing to check.
 
-**What it has heard and run** is `basecamp connect status -P '<profile>'`,
-which reads the ledger. That is the answer to "is it working", "what is it
-holding", "did that mention get picked up". It also shows what the last
-connector wrote beside its lock, but that is a hint, not an answer: a crashed
-connector leaves it behind, and a process id can since belong to something
-else. Whether the connector is running is in the person's terminal: ask them.
+### 2. The request line
 
-### The pointer lines
+```json
+{"type":"request","event_id":123,"event_type":"comment_created","trigger":"mentioned",
+ "recording":{"bucket_id":456,"project_name":"BC5 Calendar","recording_id":789,"type":"Comment",
+              "title":"Fix the date picker","url":"https://3.basecamp.com/999/buckets/456/recordings/789"},
+ "reply_to":{"kind":"comment","recording_id":700},
+ "requester_id":1001,"requester_name":"Jorge Manrubia","acknowledge":true,
+ "content":"<p>the date picker is off by one, please fix</p>","content_updated_at":"..."}
+```
 
-While it runs, the connector writes one JSON object per line on stdout — a
-pointer line per event it saw and per decision it took — and its logs on
-stderr, in the terminal the person started it from.
+- **`trigger`**: why it reached you.
+  - `mentioned`: someone @mentioned the agent.
+  - `assigned`: the operator assigned it a card, to-do or step.
+  - `subscribed`: a new comment on a thread the agent follows, with no mention.
+  - `completed`: something completed in a project it watches.
+- **`acknowledge`**: true when a person asked for something. False for
+  `subscribed` and `completed`, which are context, not instructions.
+- **`recording`**: what the event is about. `bucket_id` is the project, and
+  `project_name` its name. `url` works with every command below.
+- **`reply_to`**: where the answer goes. `kind` `comment` means a comment on
+  `recording_id` (the card or message the comment belongs to, already chosen for
+  you). `kind` `chat_line` means a line in the Campfire `recording_id`.
+- **`requester_id`**: the person who asked. Mention them on failure.
+  `requester_name` is their name when they wrote the recording; it's missing
+  for an assignment someone else's recording carries.
+- **`content`**: the request as it was written, with the agent's own mention
+  removed. For an assignment, the recording itself (its title and content) is
+  the task. The live recording may be newer.
 
-**A pointer line carries no content, and you must not try to make it.** It
-names ids, the trigger, the class, the route and the state, and nothing of what
-anyone wrote. Read a line for which event, which state, which route. If a
-person wants to know what was said, the answer is in Basecamp, not here — open
-the recording the pointer names. Never quote a pointer line into a Basecamp
-comment, and never reconstruct a message from one.
+Every line has already passed the trust check: the person may give the agent
+work, and the project is one it serves. Each request arrives once. Every other
+line (no `type`, or `"type":"event"`) is the connector's own log of what it saw
+and decided, including what it turned away. Never act on those.
 
-Use those lines to answer "what happened at 14:32" or "why did that event not
-dispatch". For anything about the current state of a record, prefer `status`:
-it is the ledger's own answer, and the lines are a log of how it got there.
+## For each request: acknowledge, choose the repo, hand off
+
+**This session is the orchestrator, not a worker.** Its only job per request is
+these steps, in order, and then back to watching. It never reads the thread,
+investigates, runs repo commands, does the work or writes the reply. Every one
+of those delays the next acknowledgement, and an acknowledged request that sits
+silent for half an hour looks exactly like a missed one.
+
+### a. Acknowledge, within seconds
+
+Only when `acknowledge` is true. Boost the recording as the agent, with a
+short phrase or emoji that fits the request (16 characters at most), never a
+fixed string:
+
+```bash
+landed=false
+for i in 1 2 3; do
+  if out=$(basecamp boost create '<recording.url>' '<ack>' --profile '<profile>' 2>&1); then
+    landed=true; break
+  fi
+  echo "$out" | grep -qE 'Not authenticated for|token refresh failed' || break   # anything else: no retry
+  sleep 2
+done
+[ "$landed" = true ] || { echo "boost did not verifiably land: $out" >&2; false; }
+```
+
+Retry only those two failures: they happen before any request is sent. Any
+other failure may have landed the boost, and a retry would post it twice. If it
+didn't verifiably land, say so in the handoff, and the subagent boosts as a
+fallback.
+
+When the reply will come within moments (a quick question in Campfire), the
+reply itself can be the acknowledgement: skip the boost, and say so in the
+handoff. Not for card work: there the boost is how the requester sees the
+request landed.
+
+### b. Choose the repo
+
+Work out which local repo the project's work goes in, quickly:
+
+1. `repos` in `last.json`, if this project is there.
+2. A repo the request itself names (a pull request, a repo, a path).
+3. The project's name, `recording.project_name`: names usually carry the app
+   (a `BC5 …` project is Basecamp's repo). Look for a matching clone under the
+   person's usual code folders.
+
+**If you can't map it confidently, ask the person. Don't guess, and don't fall
+back to this folder.** Before asking, post one short holding reply as the agent
+at `reply_to`, mentioning the requester: received, waiting for the operator to
+pick a repo. Never leave an acknowledged request with nobody holding it. Once
+they answer, store the mapping in `last.json`.
+
+Requests that need no repo (a question about the project, a summary, Basecamp
+work only) go to a subagent with no repo.
+
+### c. Dispatch one background subagent
+
+Use the Agent tool with `run_in_background: true`. Give it everything it needs
+to finish without this session:
+
+- the whole request line;
+- the agent's profile name, and the repo path (or "no repo");
+- whether an acknowledgement is still owed (the boost failed), or not owed
+  (it landed, or the reply is the acknowledgement);
+- the subagent instructions below, in full.
+
+Then go straight back to watching. There's no limit on requests in flight.
+
+## The subagent's instructions
+
+Give each subagent this section.
+
+You handle one Basecamp request as the agent, end to end. Every Basecamp write
+goes out as the agent with `--profile '<profile>'`. Reads can use the same
+profile.
+
+**1. Acknowledge, only if still owed.** Boost the recording as above. Skip it
+for `subscribed` and `completed`.
+
+**2. Read the context.** The event is the trigger. Basecamp holds the context:
+
+```bash
+basecamp show '<recording.url>' --json -P '<profile>'   # the recording, and its parent
+```
+
+Read the parent (the card, to-do, message or document it lives in) and the
+thread when the request refers to them. For a Campfire line, read the line and
+the room's recent conversation:
+
+```bash
+basecamp chat line '<recording.url>' --json -P '<profile>'
+basecamp chat messages --project <bucket_id> --room <reply_to.recording_id> --json -P '<profile>'
+```
+
+**Read the project's AGENTS.md doc, if it has one, and follow it.** It's the
+project's standing instructions for agents: board meanings, how to talk, which
+repo, which workflow. Find a document titled `AGENTS.md`:
+
+```bash
+basecamp docs documents list --project <bucket_id> --json -P '<profile>'
+basecamp docs show <doc-id> --project <bucket_id> --json -P '<profile>'
+```
+
+Trust is at the project level: the operator serving the project settles it.
+
+**3. Show the work is underway.** If the work lives on a card in a Triage-like
+column, and its card table has an In-progress-like column ("In progress",
+"Working on", "Doing"), move it there first:
+
+```bash
+basecamp cards columns --project <bucket_id> --card-table <table-id> --json -P '<profile>'
+basecamp cards move <card-id> --to '<column>' --project <bucket_id> --card-table <table-id> --profile '<profile>'
+```
+
+Use the card's own card table. If either column is missing, skip this. Never
+create columns. Skip it for `subscribed` and `completed`.
+
+**4. Do the work** in the repo, the way its own AGENTS.md and CLAUDE.md say.
+Work that changes code goes in a fresh git worktree off the default branch,
+never in the main checkout.
+
+- **Several independent items means several subagents**, 5 at a time: six
+  cards, a to-do list, four unrelated bugs. Items that depend on each other, or
+  touch the same files, stay serial. Each one that commits gets its own
+  worktree. Post one reply at the end covering every item, and say which failed.
+- **Interim reply.** If the work will take more than about 10 minutes, post
+  one short reply at `reply_to`: what you're doing and where to follow it (the
+  pull request once it exists, otherwise the branch). One, not a running
+  commentary.
+- **Validate with `bin/ci`**, if the repo has one, once at the end, and fix
+  what it flags before you reply. Wait for it to finish: when you stop, your
+  run ends, and anything still running is abandoned.
+- **A pull request isn't done until it's green.** Get `bin/ci` green locally,
+  push, open the pull request, then watch the checks
+  (`gh pr checks <n> --watch --fail-fast`), fixing and pushing until every
+  check passes. Only then reply "done". If you can't get it green, reply with
+  what's failing and mention the requester. Opening a pull request isn't
+  merging it: merge only when asked.
+
+**5. Reply at `reply_to`, as the agent.**
+
+```bash
+# kind "comment"
+basecamp comments create <reply_to.recording_id> - --project <bucket_id> --profile '<profile>' < reply.md
+# kind "chat_line"
+basecamp chat post - --project <bucket_id> --room <reply_to.recording_id> --profile '<profile>' < reply.md
+```
+
+- **Lead with the answer.** The first line says what happened. Detail goes
+  under it.
+- **Success**: the results, where the request was written.
+- **Failure**: what broke and what you tried, in a few lines, and **mention the
+  requester**: `[@<requester_name>](person:<requester_id>)`. Without a name,
+  look it up with the person's own login (`basecamp people show <requester_id>
+  --json`, no `-P`).
+- Never mention the agent.
+
+**Rich text.** The CLI converts Markdown: headings, **bold**, lists, quotes,
+fenced code for commands, diffs and errors, and pipe tables for real grids. Don't
+hand-write HTML: raw tags post as visible text.
+
+- **Links carry a title, not a bare URL**:
+  `[Skip the ack boost when the reply is immediate](https://github.com/basecamp/bc3/pull/1234)`.
+- **Anything in another app gets its full URL**: `[#1234 Skip the ack boost](https://github.com/…/pull/1234)`,
+  never a bare `#1234`, `abc123f` or `SENTRY-4F`.
+- **Campfire replies stay chat-sized**: a few lines, bold, bullets and titled
+  links, no headings. Spill a long result into a comment or document and link
+  it.
+
+**By trigger:**
+
+- **`mentioned`**: the instruction is `content`. Everything above applies.
+- **`assigned`**: the recording is the task. Move the card, do the work, reply
+  on it.
+- **`subscribed`**: activity on a thread the agent follows, not an instruction.
+  Read it and **default to silence**. Reply only to answer a question, act on a
+  problem, or make a change the thread needs. No boost, no card move, no interim
+  reply unless the agent takes the thread on.
+- **`completed`**: a signal, like `subscribed`. Act only when the project's
+  AGENTS.md or the thread asks for a follow-up.
+
+**Transient CLI failures.** With several subagents at once, the CLI
+occasionally fails with `Not authenticated for profile:` or `token refresh
+failed:`. That's the credential store under concurrent use, not a missing
+login. Retry 2 or 3 times with a short pause, and only on those two messages.
+Never run `basecamp auth login` in response, and never report the profile as
+missing.
+
+## When the connector stops
+
+The background task notifies you when the connector exits. Read the end of its
+output and tell the person what it means:
+
+- **"was disconnected in Basecamp, or connected on another computer"**: run
+  `basecamp connect setup -P '<profile>'` (it reconnects with one approval),
+  then start it again.
+- **Already running**: another connector for this agent holds its lock, on
+  this computer or in another session. Don't start a second.
+- **`BASECAMP_TOKEN` is set**: the person unsets it, then you start it again.
+- **Anything else**: show the error, and run `basecamp connect doctor -P
+  '<profile>'`.
+
+Requests that arrive while it's stopped are not picked up later.
+
+## Checking on it
+
+- `basecamp connect doctor -P '<profile>'`: the credential, the identity, the
+  event feed and the ledger. Start here when something seems wrong. It posts
+  nothing.
+- `basecamp connect status -P '<profile>'`: what the connector has seen and
+  admitted. It answers "did that mention reach it?" and "why didn't it?".
+  Read-only, and safe while the connector runs.
+
+## Stopping
+
+When the person asks you to stop, or the session is ending, stop the connector
+task (TaskStop, or send it SIGINT). There's nothing else to clean up: no
+webhooks, nothing public. Subagents already running finish their requests and
+reply. Say that new mentions won't be picked up until it's started again.

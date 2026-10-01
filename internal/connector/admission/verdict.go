@@ -52,6 +52,11 @@ type Snapshot struct {
 	AppURL    string    `json:"app_url"`
 	Content   string    `json:"content"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// ProjectName and RequesterName are what the session reading the
+	// handoff calls them, so it need not ask Basecamp as the agent.
+	// RequesterName is known only when the requester wrote the recording.
+	ProjectName   string `json:"project_name,omitempty"`
+	RequesterName string `json:"requester_name,omitempty"`
 }
 
 // Verdict is admission's decision about one event.
@@ -366,6 +371,12 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		AppURL:    summary.AppURL,
 		Content:   summary.Content,
 		UpdatedAt: summary.UpdatedAt,
+	}
+	if summary.Bucket != nil {
+		v.Snapshot.ProjectName = summary.Bucket.Name
+	}
+	if summary.Creator != nil && summary.Creator.ID == v.RequesterID {
+		v.Snapshot.RequesterName = summary.Creator.Name
 	}
 	return v, nil
 }

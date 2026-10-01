@@ -145,15 +145,6 @@ func connectSessionsPath(file setup.File) string {
 	return filepath.Join(base, "bcc-"+connector.StateDirName(file.AccountID, file.Agent.PersonID))
 }
 
-// connectShutdownFlush bounds how long a stopping connector spends posting
-// the completion notices of the attempts it stopped. What it cannot post in
-// time stays pending in the outbox and goes out on the next start.
-const connectShutdownFlush = 15 * time.Second
-
-// connectStartBound bounds how long a starting connector spends settling the
-// lifecycle messages a previous process left, before intake and dispatch run.
-const connectStartBound = 2 * time.Minute
-
 // connectDriver is the driver connect.json (or --driver) names for its
 // worker. The acp driver runs the worker's pinned ACP adapter, found where it
 // was installed; nothing is downloaded here.
@@ -209,13 +200,6 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q is not set up as a connector", name), "Run: basecamp connect setup -P "+shellQuote(name))
 	case err != nil:
 		return output.ErrUsage("connect.json cannot be used: " + err.Error())
-	}
-	driverName := file.Driver
-	if f.driver != "" {
-		driverName = f.driver
-	}
-	if !f.shadow && driverName != setup.DriverSpawn && driverName != setup.DriverACP {
-		return output.ErrUsage(fmt.Sprintf("driver %q is not %q or %q", driverName, setup.DriverSpawn, setup.DriverACP))
 	}
 
 	account, err := connectAccount(app, name)
@@ -282,19 +266,6 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	defer func() { _ = ledger.Close() }()
 
 	logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
-	// Decided once, before anything runs: see dangerousAllowedThisRun.
-	dangerousAllowed, err := dangerousAllowedThisRun(ctx, ledger, file)
-	if err != nil {
-		return err
-	}
-	// What status reads back about dangerous mode while this run takes work.
-	runningDetail := ""
-	switch {
-	case file.Dangerous && dangerousAllowed:
-		runningDetail = dangerousOnThisRun
-	case file.Dangerous:
-		runningDetail = dangerousOffThisRun
-	}
 	if f.hold {
 		// Before intake starts: nothing this run admits may dispatch ahead of
 		// the marker.
@@ -369,61 +340,6 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return output.ErrUsage(err.Error())
 	}
 
-	var (
-		dispatcher *connector.Dispatcher
-		outbox     *connector.Outbox
-	)
-	if !f.shadow {
-		// Lifecycle messages: the hooks write each intent in its transition's
-		// transaction, so they are installed before anything transitions. A
-		// shadow run installs none: it posts nothing, and a shadow ledger
-		// promoted later must carry nothing to send.
-		ledger.SetHooks(connector.LifecycleHooks(ledger, connector.LifecycleOptions{}))
-		poster, err := connector.NewBasecampPoster(accountClient, agentID)
-		if err != nil {
-			return err
-		}
-		outbox, err = connector.NewOutbox(connector.OutboxOptions{Ledger: ledger, Poster: poster, Paused: ledger.Held, Lines: lines, Logger: logger})
-		if err != nil {
-			return err
-		}
-		exe, err := os.Executable()
-		if err != nil {
-			return fmt.Errorf("locate this binary for the worker's MCP server: %w", err)
-		}
-		sessions, err := connectSessionsDir(file)
-		if err != nil {
-			return err
-		}
-		worker, err := connectDriver(driverName, file.WorkerName(), f.adapters)
-		if err != nil {
-			return output.ErrUsage(err.Error())
-		}
-		options := connectDispatcherOptions(connectDispatch{
-			File: file, Buckets: buckets, Ledger: ledger, Driver: worker,
-			Served: served.Current, Authorize: served.Authorize,
-			// Dangerous mode is read at every launch, so turning it off
-			// needs no restart. It is honored only in a connector started
-			// trusting its operator alone: trust is read once, at start, and
-			// a connector admitting other people must never run their work
-			// with a shell, whatever connect.json says now.
-			Dangerous:   dangerousLaunches(dangerousAllowed, func() bool { return served.DangerousFor(file.Trust.OperatorID) }),
-			RunningNote: runningDetail,
-			Profile:     name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
-			// Replies are listed with their words, so the connector's own
-			// notices are left out even before their receipts are known, and
-			// no reply is ever adopted from one. That is the whole filter:
-			// an id-only predicate beside it would ask the ledger again for
-			// every reply, outside the adoption budget, for nothing.
-			Replies: connector.LifecycleFilteredReplies{Lister: poster, Ledger: ledger},
-			Lines:   lines, Logger: logger,
-		})
-		dispatcher, err = connector.NewDispatcher(options)
-		if err != nil {
-			return err
-		}
-	}
-
 	signals, stopSignals := connector.NotifyShutdown()
 	defer stopSignals()
 	runCtx, cancel := context.WithCancel(ctx)
@@ -438,7 +354,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			mu.Lock()
 			received = sig
 			mu.Unlock()
-			logger.Info("connector: shutting down; workers are being canceled and settled", "signal", sig.String())
+			logger.Info("connector: shutting down", "signal", sig.String())
 			cancel()
 		case <-runCtx.Done():
 			return
@@ -457,12 +373,6 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		// Whatever ended the run, status says it is not running any more.
 		_ = ledger.NoteConnection(context.WithoutCancel(ctx), stopState, stopDetail)
 	}()
-	switch {
-	case file.Dangerous && dangerousAllowed:
-		logger.Warn("connector: dangerous mode is on: the agent can run any command on this computer, as you, without asking. Turn it off: basecamp connect setup -P " + richtext.ShellQuote(name) + " --dangerous=false")
-	case file.Dangerous:
-		logger.Warn("connector: dangerous mode is off for this run: requests from other people are still waiting from when they could give the agent work, and they never run with it. They run as usual; restart the connector once they're done to turn dangerous mode on.")
-	}
 	logger.Info("connector: running", "profile", richtext.SanitizeSingleLine(name), "account", account,
 		"agent_person_id", agentID, "shadow", f.shadow, "projects", len(buckets), "state", richtext.SanitizeSingleLine(stateDir))
 
@@ -491,43 +401,25 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			cancel()
 		})
 	}
-	if outbox != nil {
-		// On start, before anything transitions: settle what a previous
-		// process left sending and send what is due, so no stale notice
-		// waits behind new work. Bounded, so a slow Basecamp delays the
-		// connector's start rather than stopping it; what is left, Run
-		// carries on with. A ledger that cannot settle an intent stops the
-		// start.
-		startCtx, stopStart := context.WithTimeout(runCtx, connectStartBound)
-		err := outbox.Start(startCtx)
-		stopStart()
-		if err != nil && runCtx.Err() == nil {
-			return err
-		}
-	}
-	if err := ledger.NoteConnection(ctx, connector.ConnectionRunning, runningDetail); err != nil {
+	if err := ledger.NoteConnection(ctx, connector.ConnectionRunning, ""); err != nil {
 		logger.Warn("connector: could not record that it runs, for status", "error", err)
 	}
 	runPart("intake", intake.Run)
 	runPart("admission", func(ctx context.Context) error {
 		return connector.RunAdmission(ctx, connector.AdmissionOptions{Ledger: ledger, Queue: queue, Admitter: admitter, Lines: lines, Logger: logger})
 	})
-	if dispatcher != nil {
-		runPart("dispatch", dispatcher.Run)
-	}
-	if outbox != nil {
-		runPart("outbox", outbox.Run)
+	if !f.shadow {
+		// Each trusted request goes to stdout for the session that started
+		// the connector, and the connector is done with it.
+		started := time.Now()
+		runPart("handoff", func(ctx context.Context) error {
+			return connector.RunHandoff(ctx, connector.HandoffOptions{
+				Ledger: ledger, Served: served.Current, Buckets: buckets, AgentID: agentID,
+				Lines: lines, Logger: logger, Started: started,
+			})
+		})
 	}
 	wg.Wait()
-	if outbox != nil {
-		// The dispatcher has settled every attempt it stopped; their
-		// completion notices go out now, within a bound.
-		flushCtx, stopFlush := context.WithTimeout(context.WithoutCancel(ctx), connectShutdownFlush)
-		if err := outbox.Flush(flushCtx); err != nil {
-			logger.Warn("connector: posting lifecycle messages on the way out", "error", err)
-		}
-		stopFlush()
-	}
 
 	mu.Lock()
 	sig := received
