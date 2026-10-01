@@ -356,8 +356,9 @@ func (p dangerousPolicy) Rules() driver.PermissionRules {
 }
 
 // Dangerous mode gives the worker every built-in tool, Bash among them, and
-// asks nobody: bypassPermissions. Nothing else about the command line
-// changes — no host settings, no other MCP servers, no secret in argv.
+// asks nobody: bypassPermissions. It loads the user's and project's settings,
+// so the worker gets CLAUDE.md, skills and the output style, but never local
+// settings, no other MCP servers, and no secret in argv.
 func TestArgsInDangerousModeGiveEveryToolAndAskNobody(t *testing.T) {
 	f := newFixture(t, "ok")
 	f.cfg.Policy = dangerousPolicy{}
@@ -366,7 +367,7 @@ func TestArgsInDangerousModeGiveEveryToolAndAskNobody(t *testing.T) {
 	assert.Equal(t, "bypassPermissions", argAfter(args, "--permission-mode"))
 	assert.Equal(t, "default", argAfter(args, "--tools"))
 	assert.Equal(t, "none", argAfter(args, "--permission-prompts"))
-	assert.Equal(t, "", argAfter(args, "--setting-sources"))
+	assert.Equal(t, "user,project", argAfter(args, "--setting-sources"))
 	assert.Contains(t, args, "--strict-mcp-config")
 	assert.Equal(t, "mcp__basecamp", argAfter(args, "--allowed-tools"))
 	assert.NotContains(t, strings.Join(args, " "), "test-token-not-real")

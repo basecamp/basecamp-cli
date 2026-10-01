@@ -1362,6 +1362,11 @@ func (r *taskRun) supervise(ctx context.Context) {
 func (r *taskRun) promptLoop(ctx context.Context, deadline, stillRunning <-chan time.Time) StopReason {
 	d := r.d
 	prompt := DispatchPrompt(r.launch, r.record)
+	if r.dangerous {
+		// Only a dangerous-mode worker loads the host's skills: point it at
+		// the playbook this CLI ships, if it is installed.
+		prompt = strings.Replace(prompt, "3. Do the work,", "3. Load the basecamp-connect-worker skill if present. Do the work,", 1)
+	}
 	for {
 		result, stop, done := r.turn(ctx, prompt, deadline, stillRunning)
 		if done {

@@ -7,7 +7,8 @@
 // result message. The permission policy is frozen into flags before the
 // process starts and verified on the first turn: the init message must report
 // the permission mode asked for, or the session is ended as unsafe. The host's
-// own Claude Code settings and MCP servers are not loaded, and the built-in
+// own Claude Code settings and MCP servers are not loaded (dangerous mode
+// loads the user's and project's settings, still no MCP servers), and the built-in
 // tools are limited to the ones the policy allows, so a tool the policy
 // refuses does not exist in the session at all.
 package claude
@@ -154,9 +155,16 @@ func Args(cfg driver.SessionConfig, sessionID string, resume bool, mcpConfigPath
 		allowed = append(allowed, "mcp__"+server)
 	}
 	toolList := strings.Join(tools, ",")
+	// The host's settings (a defaultMode of bypassPermissions, allow rules,
+	// hooks) are not this session's.
+	settingSources := ""
 	if rules.Mode == driver.ModeAnything {
-		// Dangerous mode: every built-in tool, Bash among them.
+		// Dangerous mode: every built-in tool, Bash among them. The user's and
+		// the project's settings load too — CLAUDE.md, AGENTS.md, skills, the
+		// output style — since nothing in them can widen a session that
+		// already allows everything.
 		toolList = "default"
+		settingSources = "user,project"
 	}
 
 	args := []string{
@@ -164,9 +172,7 @@ func Args(cfg driver.SessionConfig, sessionID string, resume bool, mcpConfigPath
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--verbose",
-		// The host's settings (a defaultMode of bypassPermissions, allow
-		// rules, hooks) are not this session's.
-		"--setting-sources", "",
+		"--setting-sources", settingSources,
 		"--permission-mode", mode,
 		// Nobody answers a prompt: what the rules do not allow is refused.
 		"--permission-prompts", "none",
