@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -352,7 +353,7 @@ func TestATruncatedRefusalStillEndsTheStart(t *testing.T) {
 	err := awaitConnectToken(t.Context(), tokens, w.options(tokens))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, auth.ErrAgentCredentialRefused)
-	assert.Equal(t, errAgentDisconnected("", "agent"), connectStartFailure(setup.KindAgent, "agent", err))
+	assert.Equal(t, errAgentDisconnected("", "agent"), connectStartFailure(t.Context(), setup.KindAgent, "agent", err))
 	assert.Empty(t, w.waits)
 	assert.Equal(t, 1, mints())
 }
@@ -387,12 +388,22 @@ func TestAStartFailureKeepsItsFraming(t *testing.T) {
 	refused.Cause = auth.ErrAgentCredentialRefused
 	terminated := output.ErrTerminated("connector terminated")
 
-	assert.Same(t, terminated, connectStartFailure(setup.KindAgent, "agent", terminated))
-	assert.ErrorIs(t, connectStartFailure(setup.KindAgent, "agent", context.Canceled), context.Canceled)
-	assert.Equal(t, errAgentDisconnected("", "agent"), connectStartFailure(setup.KindAgent, "agent", refused))
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	assert.Same(t, terminated, connectStartFailure(t.Context(), setup.KindAgent, "agent", terminated))
+	assert.ErrorIs(t, connectStartFailure(canceled, setup.KindAgent, "agent", context.Canceled), context.Canceled)
+	assert.Equal(t, errAgentDisconnected("", "agent"), connectStartFailure(t.Context(), setup.KindAgent, "agent", refused))
+
+	// A request's own timeout, while the connector is not stopping, is a
+	// failure to read who the profile is like any other.
+	timedOut := &basecamp.Error{Code: basecamp.CodeNetwork, Message: "request timed out", Retryable: true, Cause: context.DeadlineExceeded}
+	var framed *output.Error
+	require.ErrorAs(t, connectStartFailure(t.Context(), setup.KindAgent, "agent", timedOut), &framed)
+	assert.Equal(t, output.CodeAuth, framed.Code)
+	assert.Contains(t, framed.Message, `Could not read who profile "agent" is`)
 
 	var e *output.Error
-	require.ErrorAs(t, connectStartFailure(setup.KindAgent, "agent", output.ErrAPI(404, "minting an agent token: the server answered HTTP 404")), &e)
+	require.ErrorAs(t, connectStartFailure(t.Context(), setup.KindAgent, "agent", output.ErrAPI(404, "minting an agent token: the server answered HTTP 404")), &e)
 	assert.Equal(t, output.CodeAuth, e.Code)
 	assert.Equal(t, `Could not read who profile "agent" is: minting an agent token: the server answered HTTP 404`, e.Message)
 }
@@ -455,4 +466,16 @@ func TestAStartWaitsOutAStoredRateLimitHold(t *testing.T) {
 	assert.InDelta(t, 45*time.Second, waits[1], float64(2*time.Second), "waited %s, not what is left of the hold", waits[1])
 	assert.Equal(t, 1, mints(), "the second attempt was the stored hold's to answer")
 
+}
+
+// A server fault whose body is larger than any token response — a proxy's
+// error page, say — is still classified by its status, and waited out.
+func TestAnOversizedServerFaultIsWaitedOut(t *testing.T) {
+	page := strings.Repeat("x", 2<<20)
+	tokens, mints := startingAgent(t, answerStatus(http.StatusServiceUnavailable, nil, page), answerStatus(http.StatusOK, nil, mintedToken))
+	var w startWaits
+
+	require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options(tokens)))
+	assert.Len(t, w.waits, 1)
+	assert.Equal(t, 2, mints())
 }

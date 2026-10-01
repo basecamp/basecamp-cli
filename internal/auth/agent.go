@@ -351,21 +351,17 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxAgentTokenBytes+1))
-	if resp.StatusCode == http.StatusTooManyRequests && (err != nil || int64(len(body)) > maxAgentTokenBytes) {
-		// A 429's status and Retry-After are all its hold needs, and a
-		// body that could not be read must not cost the hold.
+	if resp.StatusCode != http.StatusOK && (err != nil || int64(len(body)) > maxAgentTokenBytes) {
+		// A status that arrived is the verdict even when its body could
+		// not be read, or was too large to: a 401 is still a refusal, a
+		// 429 still sets its hold from its status and Retry-After, a 5xx
+		// — a proxy's error page, say — is still retryable.
 		hold, err := m.agentMintRefusal(resp, nil, mint)
 		return nil, hold, err
 	}
 	if err != nil {
-		// A status that arrived is the verdict even when its body did not
-		// follow: a 401 is still a refusal, a 5xx still retryable. Only a
-		// 200 cut short has none — the token never arrived — and it is the
-		// transport failure it is.
-		if resp.StatusCode != http.StatusOK {
-			hold, err := m.agentMintRefusal(resp, nil, mint)
-			return nil, hold, err
-		}
+		// Only a 200 cut short has no verdict — the token never arrived —
+		// and it is the transport failure it is.
 		return nil, nil, transportFailure("minting an agent token", err)
 	}
 	if int64(len(body)) > maxAgentTokenBytes {

@@ -183,13 +183,13 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	default:
 	}
 	if err != nil {
-		return connectStartFailure(kind, name, err)
+		return connectStartFailure(ctx, kind, name, err)
 	}
 	client := connectSDKClient(app, tokens)
 	accountClient := client.ForAccount(account)
 	me, err := (setup.SDKReader{Client: accountClient}).Me(ctx)
 	if err != nil {
-		return connectStartFailure(kind, name, err)
+		return connectStartFailure(ctx, kind, name, err)
 	}
 	if _, err := checkConnectIdentity(ctx, app, client, kind, creds.OAuthType, me, file.Agent.IdentityID); err != nil {
 		return err
@@ -393,14 +393,15 @@ func connectorStoppedBy(err error, agent, profile string, refused func() bool) (
 }
 
 // connectStartFailure is what a start that could not learn who it is exits
-// with. Stopped by a signal or a canceled context, it says so as it is.
+// with. Stopped by a signal, or because ctx itself ended, it says so as it
+// is; a request's own timeout is not the connector stopping.
 // Disconnected while the connector wasn't running, it is said the way a
 // running connector says it, with no name, since reading it failed.
 // Anything else is a failure to read who the profile is.
-func connectStartFailure(kind, profile string, err error) error {
+func connectStartFailure(ctx context.Context, kind, profile string, err error) error {
 	var e *output.Error
 	switch {
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded),
+	case ctx.Err() != nil,
 		errors.As(err, &e) && (e.Code == output.CodeTerminated || e.Code == output.CodeInterrupted):
 		return err
 	case agentDisconnectedAtStart(kind, err):
