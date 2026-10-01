@@ -75,7 +75,9 @@ func answerStatus(status int, header map[string]string, body string) func(http.R
 
 // A token endpoint that rate-limits the Agent is a wait, not the end of the
 // connector: the feed is told to back off for the Retry-After the endpoint
-// named, on the mint lane and the poll lane alike.
+// named, on the mint lane and the poll lane alike. The second is answered
+// by the stored hold, which names what is left of the same wait — the
+// deadline, rounded up to the second it is stored in.
 func TestARateLimitedTokenRenewalThrottlesTheFeed(t *testing.T) {
 	live, mints := tokenEndpointFeed(t, answerStatus(http.StatusTooManyRequests, map[string]string{"Retry-After": "42"}, `{"error":"slow_down"}`))
 
@@ -83,15 +85,15 @@ func TestARateLimitedTokenRenewalThrottlesTheFeed(t *testing.T) {
 	var mintErr *eventfeed.MintError
 	require.ErrorAs(t, err, &mintErr)
 	assert.Equal(t, eventfeed.MintThrottled, mintErr.Kind, "%v", err)
-	assert.Equal(t, 42*time.Second, mintErr.RetryAfter)
+	assert.InDelta(t, 42*time.Second, mintErr.RetryAfter, float64(time.Second))
 
 	_, err = live.Polls().Poll(t.Context(), eventfeed.Cursor{Since: "now"}, eventfeed.Filters{})
 	var pollErr *eventfeed.PollError
 	require.ErrorAs(t, err, &pollErr)
 	assert.Equal(t, eventfeed.PollThrottled, pollErr.Kind, "%v", err)
-	assert.Equal(t, 42*time.Second, pollErr.RetryAfter)
+	assert.InDelta(t, 42*time.Second, pollErr.RetryAfter, float64(time.Second))
 
-	assert.Equal(t, int32(2), mints())
+	assert.Equal(t, int32(1), mints(), "the poll's renewal was the stored hold's to answer")
 }
 
 // A wait named as an HTTP date is honored as surely as one named in seconds.
@@ -106,15 +108,16 @@ func TestARateLimitUntilADateThrottlesTheFeed(t *testing.T) {
 	assert.InDelta(t, 2*time.Minute, mintErr.RetryAfter, float64(2*time.Second))
 }
 
-// A rate limit that names no wait is still a wait: the feed's own backoff
-// governs.
-func TestARateLimitWithoutRetryAfterIsTransient(t *testing.T) {
+// A rate limit that names no wait is held for the default, and the feed
+// waits that out rather than backing off into the hold.
+func TestARateLimitWithoutRetryAfterWaitsOutTheDefaultHold(t *testing.T) {
 	live, _ := tokenEndpointFeed(t, answerStatus(http.StatusTooManyRequests, nil, ""))
 
 	_, err := live.Minter().MintStreamTicket(t.Context())
 	var mintErr *eventfeed.MintError
 	require.ErrorAs(t, err, &mintErr)
-	assert.Equal(t, eventfeed.MintTransient, mintErr.Kind, "%v", err)
+	assert.Equal(t, eventfeed.MintThrottled, mintErr.Kind, "%v", err)
+	assert.InDelta(t, time.Minute, mintErr.RetryAfter, float64(time.Second))
 }
 
 // The token endpoint's own trouble is retryable: the feed reconnects or

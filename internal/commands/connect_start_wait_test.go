@@ -31,9 +31,16 @@ import (
 
 const mintedToken = `{"access_token":"bc_at_minted","token_type":"bearer","expires_in":3600}`
 
+// startTokens is a starting agent's tokens over a clock the test drives,
+// so a wait spent in a fake sleep is time the mint hold sees pass.
+type startTokens struct {
+	managerTokens
+	now *time.Time
+}
+
 // startingAgent is an Agent whose token has expired, against a token
 // endpoint that gives the answers in order, the last one from then on.
-func startingAgent(t *testing.T, answers ...func(http.ResponseWriter)) (*managerTokens, func() int) {
+func startingAgent(t *testing.T, answers ...func(http.ResponseWriter)) (*startTokens, func() int) {
 	t.Helper()
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 	t.Setenv("BASECAMP_TOKEN", "")
@@ -67,7 +74,11 @@ func startingAgent(t *testing.T, answers ...func(http.ResponseWriter)) (*manager
 		TokenEndpoint: srv.URL + "/oauth/tokens",
 		ExpiresAt:     time.Now().Add(-time.Minute).Unix(),
 	}))
-	return &managerTokens{mgr: mgr}, func() int { mu.Lock(); defer mu.Unlock(); return mints }
+	// On a whole second, as a hold's deadline is stored: a wait read back
+	// from it is then exactly the one the endpoint named.
+	now := time.Now().Truncate(time.Second)
+	mgr.SetClock(func() time.Time { return now })
+	return &startTokens{managerTokens: managerTokens{mgr: mgr}, now: &now}, func() int { mu.Lock(); defer mu.Unlock(); return mints }
 }
 
 // startWaits records the waits a start takes, and the words it logs for
@@ -77,11 +88,12 @@ type startWaits struct {
 	lines []string
 }
 
-func (w *startWaits) options() connectStartWait {
+func (w *startWaits) options(tokens *startTokens) connectStartWait {
 	return connectStartWait{
 		Log: func(line string) { w.lines = append(w.lines, line) },
 		Sleep: func(_ context.Context, d time.Duration) error {
 			w.waits = append(w.waits, d)
+			*tokens.now = tokens.now.Add(d)
 			return nil
 		},
 	}
@@ -95,7 +107,7 @@ func TestAStartWaitsOutARateLimitAndComesUp(t *testing.T) {
 		answerStatus(http.StatusOK, nil, mintedToken))
 	var w startWaits
 
-	require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options()))
+	require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options(tokens)))
 	assert.Equal(t, []time.Duration{42 * time.Second}, w.waits)
 	require.Len(t, w.lines, 1)
 	assert.Contains(t, w.lines[0], "42s")
@@ -113,7 +125,7 @@ func TestAStartRidesOutServerFaults(t *testing.T) {
 	tokens, mints := startingAgent(t, unavailable, unavailable, unavailable, answerStatus(http.StatusOK, nil, mintedToken))
 	var w startWaits
 
-	require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options()))
+	require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options(tokens)))
 	require.Len(t, w.waits, 3)
 	for _, d := range w.waits {
 		assert.True(t, d > 0 && d <= time.Minute, "%s is within the feed's backoff", d)
@@ -141,7 +153,7 @@ func TestAStartRidesOutAnUnreachableTokenEndpoint(t *testing.T) {
 	tokens, _ := startingAgent(t, dropped, answerStatus(http.StatusOK, nil, mintedToken))
 	var w startWaits
 
-	require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options()))
+	require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options(tokens)))
 	assert.Len(t, w.waits, 1)
 }
 
@@ -157,7 +169,7 @@ func TestAStartEndsAtOnceOnARefusedCredential(t *testing.T) {
 		tokens, mints := startingAgent(t, answer)
 		var w startWaits
 
-		err := awaitConnectToken(t.Context(), tokens, w.options())
+		err := awaitConnectToken(t.Context(), tokens, w.options(tokens))
 		require.Error(t, err, name)
 		assert.True(t, errors.Is(err, auth.ErrAgentCredentialRefused), name)
 		assert.True(t, agentDisconnectedAtStart(setup.KindAgent, err), name)
@@ -337,7 +349,7 @@ func TestATruncatedRefusalStillEndsTheStart(t *testing.T) {
 	tokens, mints := startingAgent(t, truncatedAnswer(t, http.StatusUnauthorized))
 	var w startWaits
 
-	err := awaitConnectToken(t.Context(), tokens, w.options())
+	err := awaitConnectToken(t.Context(), tokens, w.options(tokens))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, auth.ErrAgentCredentialRefused)
 	assert.Equal(t, errAgentDisconnected("", "agent"), connectStartFailure(setup.KindAgent, "agent", err))
@@ -352,7 +364,7 @@ func TestATruncatedServerFaultIsWaitedOut(t *testing.T) {
 		tokens, mints := startingAgent(t, truncatedAnswer(t, status), answerStatus(http.StatusOK, nil, mintedToken))
 		var w startWaits
 
-		require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options()), status)
+		require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options(tokens)), status)
 		assert.Len(t, w.waits, 1, status)
 		assert.Equal(t, 2, mints(), status)
 	}
@@ -417,4 +429,30 @@ func TestASecondSignalForcesAStuckStartToEnd(t *testing.T) {
 	var e *output.Error
 	require.ErrorAs(t, <-result, &e)
 	assert.Equal(t, output.CodeTerminated, e.Code)
+}
+
+// A rate limit the CLI holds itself is waited out to its stored deadline,
+// not on backoff: the hold answers locally until then, so any earlier
+// attempt is spent for nothing.
+func TestAStartWaitsOutAStoredRateLimitHold(t *testing.T) {
+	tokens, mints := startingAgent(t, answerStatus(http.StatusTooManyRequests, map[string]string{"Retry-After": "90"}, ""))
+	ctx, cancel := context.WithCancel(t.Context())
+	var waits []time.Duration
+	err := awaitConnectToken(ctx, tokens, connectStartWait{
+		Log: func(string) {},
+		Sleep: func(_ context.Context, d time.Duration) error {
+			if waits = append(waits, d); len(waits) == 2 {
+				cancel()
+			}
+			// Short of the deadline: the hold, not the endpoint, answers next.
+			*tokens.now = tokens.now.Add(d / 2)
+			return nil
+		},
+	})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Len(t, waits, 2)
+	assert.InDelta(t, 90*time.Second, waits[0], float64(2*time.Second), "waited %s, not the hold's deadline", waits[0])
+	assert.InDelta(t, 45*time.Second, waits[1], float64(2*time.Second), "waited %s, not what is left of the hold", waits[1])
+	assert.Equal(t, 1, mints(), "the second attempt was the stored hold's to answer")
+
 }

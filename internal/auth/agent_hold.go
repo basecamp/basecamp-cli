@@ -184,10 +184,16 @@ func holdWait(hold *MintHold, now time.Time) int {
 }
 
 // holdRateLimitError is the rate-limit error for a rate_limited hold,
-// whether the 429 that set it or a later mint it held.
+// whether the 429 that set it or a later mint it held. It carries the
+// hold's wait, read from its deadline, for a caller that reschedules the
+// mint itself (RetryAfter): one sent any sooner is answered by the hold.
 func holdRateLimitError(hold *MintHold, now time.Time, message string) *output.Error {
-	e := output.ErrRateLimit(holdWait(hold, now))
+	wait := holdWait(hold, now)
+	e := output.ErrRateLimit(wait)
 	e.Message = message
+	if wait > 0 {
+		e.Cause = retryAfterError(wait)
+	}
 	return e
 }
 
@@ -209,7 +215,7 @@ func (m *Manager) heldMint(creds *Credentials) error {
 	switch hold.Kind {
 	case mintHoldRateLimited:
 		e := holdRateLimitError(hold, now, fmt.Sprintf("Minting an agent token is held until %s: the token endpoint rate-limited the last attempt (%s)", when, hold.Detail))
-		e.Cause = errMintHeld
+		e.Cause = errors.Join(e.Cause, errMintHeld)
 		return e
 	case mintHoldRefused:
 		msg := "Minting an agent token was refused (" + hold.Detail + ")"

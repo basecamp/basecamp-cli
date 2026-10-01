@@ -1976,3 +1976,9 @@ func (m *Manager) GetStore() *Store {
 func (m *Manager) SetStore(s *Store) {
 	m.store = s
 }
+
+// SetClock sets the time a remembered mint verdict is read and written
+// against, for a caller that drives time itself; nil means time.Now.
+func (m *Manager) SetClock(clock func() time.Time) {
+	m.clock = clock
+}
