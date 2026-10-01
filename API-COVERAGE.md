@@ -18,8 +18,8 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 basecamp/bc3#13098 added — `PUT /projects/:id/people/client_users.json` and
 `POST`/`DELETE /projects/:id/client_enablement.json` — land as `people clients`.
 SDK v0.16.0 adds the three to-do
-list template-library operations, available through `templates library`,
-`templates copy`, and `templates copy-status`. The previous last gap — `GET
+list template-library operations, available through `templates todolists list`,
+`templates todolists duplicate`, and `templates todolists duplication`. The previous last gap — `GET
 /uploads/:id/versions.json` — closed with the v0.14.0 SDK bump. The command
 (`files versions`) was written earlier but held: the SDK's
 `UploadsService.ListVersions` decoded the response as `[]Upload` when the API

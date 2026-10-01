@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -608,4 +609,88 @@ func TestTemplatesArchiveRejectsANonNumericID(t *testing.T) {
 	require.Error(t, err)
 
 	assert.Empty(t, transport.recorded(), "a bad ID is caught before any request goes out")
+}
+
+// runDeprecatedTemplates runs the templates command and returns what it wrote
+// to stderr, where the deprecation line goes.
+func runDeprecatedTemplates(t *testing.T, app *appctx.App, args ...string) (string, error) {
+	t.Helper()
+	cmd := NewTemplatesCmd()
+	cmd.SetArgs(args)
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(stderr)
+	err := cmd.Execute()
+	return stderr.String(), err
+}
+
+// The flat spellings from before templates was grouped by kind still run the
+// grouped command, say on stderr which spelling to use, and leave the JSON on
+// stdout as the grouped command writes it.
+func TestFlatTemplatesSpellingsStillWorkAndSayTheyAreDeprecated(t *testing.T) {
+	cases := []struct {
+		args        []string
+		route       stubRoute
+		replacement string
+		path        string
+	}{
+		{
+			args:        []string{"library"},
+			route:       stubRoute{method: http.MethodGet, path: "/99999/template_library/todolists.json", status: http.StatusOK, body: templateLibraryJSON},
+			replacement: "templates todolists list",
+			path:        "/99999/template_library/todolists.json",
+		},
+		{
+			args:        []string{"copy", "3", "--in", "Test Project"},
+			route:       stubRoute{method: http.MethodPost, path: "/99999/template_library/copies.json", status: http.StatusCreated, body: templateCopyPendingJSON},
+			replacement: "templates todolists duplicate",
+			path:        "/99999/template_library/copies.json",
+		},
+		{
+			args:        []string{"copy-status", "5"},
+			route:       stubRoute{method: http.MethodGet, path: "/99999/template_library/copies/5", status: http.StatusOK, body: templateCopyPendingJSON},
+			replacement: "templates todolists duplication",
+			path:        "/99999/template_library/copies/5",
+		},
+		{
+			args:        []string{"construct", "2085958507", "--name", "Marketing Campaign"},
+			route:       stubRoute{method: http.MethodPost, path: "/99999/templates/2085958507/project_constructions.json", status: http.StatusCreated, body: `{"id":598194962,"status":"pending","url":"https://example.test/constructions/598194962.json"}`},
+			replacement: "templates projects construct",
+			path:        "/99999/templates/2085958507/project_constructions.json",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.args[0], func(t *testing.T) {
+			app, transport := setupRecordingTestApp(t, projectsRoute(), tc.route)
+			buf := captureTemplateOutput(app)
+
+			stderr, err := runDeprecatedTemplates(t, app, tc.args...)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.path, transport.last(t).Path, "runs the grouped command")
+			assert.Equal(t, fmt.Sprintf("%q is deprecated; use %q\n", "basecamp templates "+tc.args[0], "basecamp "+tc.replacement), stderr)
+			assert.True(t, json.Valid(buf.Bytes()), "stdout is still only the JSON envelope")
+		})
+	}
+}
+
+// templates list is templates projects list: its own validation answers.
+func TestFlatTemplatesListIsTheProjectTemplatesList(t *testing.T) {
+	app, _ := setupRecordingTestApp(t)
+	stderr, err := runDeprecatedTemplates(t, app, "list", "--status", "someday")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown --status value")
+	assert.Contains(t, stderr, `"basecamp templates list" is deprecated; use "basecamp templates projects list"`)
+}
+
+// The flat spellings stay out of help and completion: only the kinds show.
+func TestFlatTemplatesSpellingsAreHidden(t *testing.T) {
+	visible := []string{}
+	for _, sub := range NewTemplatesCmd().Commands() {
+		if sub.IsAvailableCommand() {
+			visible = append(visible, sub.Name())
+		}
+	}
+	assert.ElementsMatch(t, []string{"projects", "todolists", "card-tables"}, visible)
 }

@@ -41,13 +41,19 @@ the canonical `<group> <action>` form (`cards create`, `todos create`,
 existing group noun is not allowed.
 
 Where a group is split by the kind of thing it holds, every verb lives under the
-kind it acts on. `templates` has `projects`, `todolists`, and `card-tables`; the
+kind it acts on. `templates` has `projects`, `todolists`, and `card-tables`. Use
+`templates projects delete`, never `templates delete` — a flat verb cannot say
+which kind it acts on, and the three kinds hit different endpoints.
+
+When a regrouping retires spellings that have shipped, hide and deprecate them
+rather than removing them: scripts and older skill copies still call them. The
 flat pre-grouping spellings (`templates list`, `templates show`, `templates
 create`, `templates update`, `templates delete`, `templates construct`,
 `templates construction`, `templates library`, `templates copy`,
-`templates copy-status`) have been removed. Use `templates projects delete`,
-never `templates delete` — a flat verb cannot say which kind it acts on, and the
-three kinds hit different endpoints.
+`templates copy-status`) still run their grouped command, hidden from help and
+completion, and print one deprecation line to stderr naming the replacement.
+They are out of `.surface` because hidden commands are, so their entries in
+`.surface-breaking` stay. Never document or suggest a deprecated spelling.
 
 Shortcut commands without a sibling plural group — `search`, `url`,
 `recordings`, `timesheet`, `assignments`, `notifications`, `setup`, `completion`

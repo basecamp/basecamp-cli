@@ -39,7 +39,49 @@ templates delete.`,
 		newTemplatesTodolistsCmd(),
 		newTemplatesCardTablesCmd(),
 	)
+	cmd.AddCommand(deprecatedFlatTemplatesCmds()...)
 
+	return cmd
+}
+
+// deprecatedFlatTemplatesCmds keeps the flat spellings that shipped before
+// templates was grouped by kind (list … construction since v0.1.0, library,
+// copy and copy-status since v0.10.0) working for the scripts and older
+// skill copies that still use them. Each is the grouped command under its old
+// name: hidden from help and completion, it says once on stderr which
+// spelling to use instead, and leaves stdout alone so --json is unchanged.
+func deprecatedFlatTemplatesCmds() []*cobra.Command {
+	todolists := todolistTemplateKind()
+	return []*cobra.Command{
+		deprecatedTemplatesAlias("list", "templates projects list", newTemplatesListCmd()),
+		deprecatedTemplatesAlias("show", "templates projects show", newTemplatesShowCmd()),
+		deprecatedTemplatesAlias("create", "templates projects create", newTemplatesCreateCmd()),
+		deprecatedTemplatesAlias("update", "templates projects update", newTemplatesUpdateCmd()),
+		deprecatedTemplatesAlias("delete", "templates projects delete", newTemplatesDeleteCmd()),
+		deprecatedTemplatesAlias("construct", "templates projects construct", newTemplatesConstructCmd()),
+		deprecatedTemplatesAlias("construction", "templates projects construction", newTemplatesConstructionCmd()),
+		deprecatedTemplatesAlias("library", "templates todolists list", newTemplatesLibraryListCmd()),
+		deprecatedTemplatesAlias("copy", "templates todolists duplicate", newTemplatesDuplicateCmd(todolists, "duplicate <template_id>")),
+		deprecatedTemplatesAlias("copy-status", "templates todolists duplication", newTemplatesDuplicationCmd(todolists, "duplication <duplication_id>")),
+	}
+}
+
+// deprecatedTemplatesAlias renames cmd to the old spelling, hides it, and has
+// it name its replacement on stderr before running.
+func deprecatedTemplatesAlias(old, replacement string, cmd *cobra.Command) *cobra.Command {
+	use := old
+	if _, rest, ok := strings.Cut(cmd.Use, " "); ok {
+		use += " " + rest
+	}
+	cmd.Use = use
+	cmd.Aliases = nil
+	cmd.Hidden = true
+	cmd.Short = "Deprecated: use " + replacement
+	run := cmd.RunE
+	cmd.RunE = func(c *cobra.Command, args []string) error {
+		fmt.Fprintf(c.ErrOrStderr(), "%q is deprecated; use %q\n", "basecamp templates "+old, "basecamp "+replacement)
+		return run(c, args)
+	}
 	return cmd
 }
 
@@ -1047,7 +1089,7 @@ func newTemplatesConstructCmd() *cobra.Command {
 		Long: `Create a new project from a template.
 
 This is an asynchronous operation. The command returns a construction ID
-which can be polled via 'templates construction' until the status is "completed".
+which can be polled via 'templates projects construction' until the status is "completed".
 
 A template's dates are relative to the start of its first week, and template
 weeks start on a Sunday. --start-date anchors them to the Sunday on or before

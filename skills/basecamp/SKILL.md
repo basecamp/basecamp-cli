@@ -1044,8 +1044,9 @@ templates land in the project's To-dos tool, which `--todoset` can pin.
 **Every verb lives under its kind.** The flat pre-grouping spellings
 (`templates list`, `templates show`, `templates create`, `templates update`,
 `templates delete`, `templates construct`, `templates construction`,
-`templates library`, `templates copy`, `templates copy-status`) have been
-removed — use `templates projects delete`, not `templates delete`. `copy` and
+`templates library`, `templates copy`, `templates copy-status`) are deprecated:
+they still run, with a notice on stderr, for older scripts. Don't use them —
+use `templates projects delete`, not `templates delete`. `copy` and
 `copy-status` still work inside `templates todolists` and
 `templates card-tables` as aliases of `duplicate` and `duplication`.
 
