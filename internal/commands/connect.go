@@ -387,7 +387,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if !isValidProfileName(name) {
 		return output.ErrUsage(fmt.Sprintf("Invalid profile name %q: use only letters, numbers, hyphens, and underscores", name))
 	}
-	changes, err := f.changes(cmd)
+	changes, err := f.changes()
 	if err != nil {
 		return err
 	}
@@ -777,7 +777,7 @@ func canonicalAccount(raw string) (string, error) {
 }
 
 // changes turns setup's flags into the changes connect.json takes.
-func (f *connectSetupFlags) changes(cmd *cobra.Command) (setup.Changes, error) {
+func (f *connectSetupFlags) changes() (setup.Changes, error) {
 	var ch setup.Changes
 	if f.trust != "" {
 		ch.Trust = admission.TrustMode(f.trust)

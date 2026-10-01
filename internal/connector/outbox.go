@@ -5,11 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
-
-	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
 
 // The outbox: every message the connector itself posts to Basecamp — the
@@ -383,60 +380,6 @@ type Intent struct {
 	ReconcileAt       *time.Time
 }
 
-// Intent keys.
-func guardKey(eventID int64) string {
-	return string(IntentGuardAck) + ":event:" + strconv.FormatInt(eventID, 10)
-}
-
-func holdingKey(eventID int64) string {
-	return string(IntentHoldingReply) + ":event:" + strconv.FormatInt(eventID, 10)
-}
-
-// legacyRefusedStartKey is the key a connector that made worktrees gave the
-// holding reply for a record whose directory could take no worktree. Nothing
-// writes one now — the refusal that called for it went with worktrees — but
-// an upgraded ledger still holds the ones that build wrote, pending or sent,
-// over records still blocked legacyReasonRouteUnusable. They are read as they
-// were written; only new rows are written the new way.
-func legacyRefusedStartKey(eventID int64) string {
-	return string(IntentHoldingReply) + ":refused:event:" + strconv.FormatInt(eventID, 10)
-}
-
-// legacyReasonRouteUnusable is the blocked reason those records carry.
-// Nothing blocks a record with it any more, and nothing clears it on their
-// behalf: a record an upgraded ledger carries is still waiting for the person
-// its notice asked, and both the send and the retraction have to know that.
-const legacyReasonRouteUnusable = "route_unusable"
-
-// holdingReplyReason is the blocked reason a holding reply answers for. Its
-// key says which: the one an older build wrote answers route_unusable, and
-// everything written now answers no_route. Reading every holding reply as
-// no_route cancels a legacy reply that is still called for, and tells a
-// person an ask is answered while its record is still blocked on it — a
-// redispatch of a blocked record leaves it blocked, so the reason is the
-// whole of the question.
-func holdingReplyReason(in Intent) string {
-	if in.Key == legacyRefusedStartKey(in.EventID) {
-		return legacyReasonRouteUnusable
-	}
-	return string(admission.ReasonNoRoute)
-}
-
-func completionKey(attemptID string) string {
-	return string(IntentCompletion) + ":attempt:" + attemptID
-}
-
-func stillRunningKey(attemptID string, occurrence int) string {
-	return string(IntentStillRunning) + ":attempt:" + attemptID + ":" + strconv.Itoa(occurrence)
-}
-
-// retractionKey names the posted message and the event whose ask in it is
-// answered: one message can ask for two events and have each answered on its
-// own day.
-func retractionKey(intentID, eventID int64) string {
-	return string(IntentRetraction) + ":outbox:" + strconv.FormatInt(intentID, 10) + ":event:" + strconv.FormatInt(eventID, 10)
-}
-
 // Errors from the outbox.
 var (
 	// ErrNoSuchIntent is an intent id the ledger does not hold.
@@ -448,53 +391,11 @@ var (
 	ErrReceiptOwned = errors.New("the receipt belongs to another intent")
 )
 
-// newIntent is an intent a hook writes.
-type newIntent struct {
-	key         string
-	kind        IntentKind
-	eventID     int64
-	taskID      int64
-	attemptID   string
-	occurrence  int
-	retracts    int64
-	destination Destination
-	body        string
-	notBefore   time.Time
-}
-
-// writeIntent inserts an intent in tx unless its key already exists.
-func writeIntent(ctx context.Context, tx Tx, now time.Time, in newIntent) error {
-	if in.destination.RecordingID <= 0 || in.body == "" {
-		return nil
-	}
-	if in.notBefore.IsZero() {
-		in.notBefore = now
-	}
-	_, err := tx.ExecContext(ctx, `
-INSERT INTO outbox (intent_key, kind, event_id, task_id, attempt_id, occurrence, bucket_id, message_kind, recording_id, body, created_at, not_before, retracts)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT (intent_key) DO NOTHING`,
-		in.key, string(in.kind), nullableID64(in.eventID), nullableID64(in.taskID), nullableString(in.attemptID), in.occurrence,
-		in.destination.BucketID, string(in.destination.Kind), in.destination.RecordingID, in.body, stamp(now), stamp(in.notBefore),
-		nullableID64(in.retracts))
-	if err != nil {
-		return fmt.Errorf("connector: write outbox intent %s: %w", in.key, err)
-	}
-	return nil
-}
-
 func nullableID64(id int64) any {
 	if id == 0 {
 		return nil
 	}
 	return id
-}
-
-func nullableString(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
 }
 
 const selectIntents = `
@@ -726,35 +627,6 @@ WHERE id = ? AND (state = 'indeterminate' OR (state = 'canceled' AND note = '` +
 
 // RefusedNote is the note on an intent Basecamp refused.
 const RefusedNote = "the request was refused; no message was created"
-
-// refuse settles a sending intent Basecamp refused. The request created
-// nothing, so the intent is canceled rather than left uncertain, and no later
-// task event is written fired for it. Task events the claim already marked
-// fired stay fired (invariant 9).
-func (l *Ledger) refuse(ctx context.Context, in Intent, note string) (Intent, error) {
-	err := retryBusy(func() error {
-		tx, err := l.db.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("connector: begin refusal of %d: %w", in.ID, err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		res, err := tx.ExecContext(ctx, `UPDATE outbox SET state = 'canceled', finished_at = ?, note = ? WHERE id = ? AND state = 'sending'`,
-			l.timestamp(), note, in.ID)
-		if err != nil {
-			return fmt.Errorf("connector: refuse intent %d: %w", in.ID, err)
-		}
-		if n, err := res.RowsAffected(); err != nil {
-			return err
-		} else if n == 0 {
-			return fmt.Errorf("connector: refuse intent %d: it is not sending", in.ID)
-		}
-		return tx.Commit()
-	})
-	if err != nil {
-		return Intent{}, err
-	}
-	return l.Intent(ctx, in.ID)
-}
 
 func isUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")

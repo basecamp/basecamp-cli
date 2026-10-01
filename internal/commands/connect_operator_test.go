@@ -419,23 +419,3 @@ func TestTheDecisionCommandsSpeakSnakeCase(t *testing.T) {
 	assert.Contains(t, out, `"still_held"`)
 	assert.NotContains(t, out, `"StillHeld"`)
 }
-
-// preflightCheck is the row acpPreflightCheck adds to doctor's worker
-// checks, found by the name a person reads rather than by position.
-func preflightCheck(t *testing.T, checks []setup.Check) (setup.Check, bool) {
-	t.Helper()
-	for _, c := range checks {
-		if strings.HasSuffix(c.Name, " preflight") {
-			return c, true
-		}
-	}
-	return setup.Check{}, false
-}
-
-func writeCodexConfig(t *testing.T, dir, body string) string {
-	t.Helper()
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".codex"), 0o755))
-	path := filepath.Join(dir, ".codex", "config.toml")
-	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
-	return path
-}

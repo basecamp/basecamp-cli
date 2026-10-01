@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 )
 
 // admitOn writes an admitted record on a conversation key.

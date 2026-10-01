@@ -654,11 +654,6 @@ type AttemptProcess struct {
 	SessionID    string
 }
 
-// recordedProcess is p as the ledger records it.
-func recordedProcess(p driver.Process, sessionID string) AttemptProcess {
-	return AttemptProcess{PID: p.PID, PGID: p.PGID, StartedAt: p.StartedAt, StartedExact: p.StartedExact, SessionID: sessionID}
-}
-
 // Identity is the process the record names, for the one-owner rule. A start
 // time in the ledger is the kernel's, since nothing else is written.
 func (p AttemptProcess) Identity() driver.Process {
