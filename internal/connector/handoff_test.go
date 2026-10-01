@@ -174,3 +174,20 @@ func TestTheLineCarriesNoTerminalControlSequences(t *testing.T) {
 	}
 	assert.Contains(t, lines[0].Content, "fix it")
 }
+
+// A task the worker connector left open, by a crash, doesn't keep requests on
+// its conversation from being handed off, a follow-up joined to it included
+// (Copilot on #814).
+func TestATaskLeftOpenByTheWorkerConnectorBlocksNothing(t *testing.T) {
+	ledger := newTestLedger(t)
+	admitOn(t, ledger, 1, "recording:1")
+	launch(t, ledger, 1) // the old dispatcher started a task, then crashed
+	admitOn(t, ledger, 2, "recording:1")
+	var out bytes.Buffer
+
+	require.NoError(t, handOffReady(context.Background(), handoffOptions(ledger, &out)))
+
+	lines := handedOffLines(t, &out)
+	require.Len(t, lines, 1)
+	assert.Equal(t, int64(2), lines[0].EventID)
+}

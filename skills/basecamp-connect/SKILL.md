@@ -311,7 +311,9 @@ thing to check.
   the task. The live recording may be newer.
 
 Every line has already passed the trust check: the person may give the agent
-work, and the project is one it serves. Each request arrives once. Every other
+work, and the project is one it serves. A request arrives once, except in one
+case: if the connector crashes right after printing a line, it can print it
+again when restarted within a minute. Skip an `event_id` you've already handled. Every other
 line (no `type`, or `"type":"event"`) is the connector's own log of what it saw
 and decided, including what it turned away. Never act on those.
 
@@ -476,7 +478,9 @@ basecamp chat post - --project <bucket_id> --room <reply_to.recording_id> --prof
   --json`, no `-P`).
   Basecamp may refuse an agent's comment that mentions someone ("Basecamp
   doesn't let agents do this"). If it does, post the same reply without the
-  mention, and tell the main session so it can tell the person directly.
+  mention, and tell the main session so it can tell the person directly. The
+  same goes for every reply that mentions someone, the main session's holding
+  reply included.
 - Never mention the agent.
 
 **Rich text.** The CLI converts Markdown: headings, **bold**, lists, quotes,

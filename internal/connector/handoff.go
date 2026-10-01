@@ -146,7 +146,7 @@ func handOffReady(ctx context.Context, opts HandoffOptions) error {
 		if len(opts.Buckets) > 0 {
 			buckets = slices.DeleteFunc(buckets, func(b int64) bool { return !slices.Contains(opts.Buckets, b) })
 		}
-		records, err := opts.Ledger.StartableRecordsWhere(ctx, StartableFilter{Served: buckets, Limit: 50})
+		records, err := opts.Ledger.handoffRecords(ctx, buckets, 50)
 		if err != nil {
 			return err
 		}
@@ -221,4 +221,57 @@ func handoffLine(record Record, agentID int64) (HandoffLine, error) {
 		Content:          richtext.SanitizeTerminal(StripMentionsOf(snapshot.Content, agentID)),
 		ContentUpdatedAt: snapshot.UpdatedAt,
 	}, nil
+}
+
+// handoffRecords lists the records waiting to be handed off in buckets,
+// oldest first. Unlike the startable query a worker used, nothing here waits
+// on a task: a ledger from the worker connector can hold a task its crash
+// left open, or a follow-up joined to one, and neither may keep a request
+// from being handed off. The hold still pauses everything.
+func (l *Ledger) handoffRecords(ctx context.Context, buckets []int64, limit int) ([]Record, error) {
+	if len(buckets) == 0 {
+		return nil, nil
+	}
+	buckets = slices.Clone(buckets)
+	slices.Sort(buckets)
+	buckets = slices.Compact(buckets)
+	args := make([]any, 0, len(buckets)+1)
+	for _, b := range buckets {
+		args = append(args, b)
+	}
+	args = append(args, limit)
+	//nolint:gosec // G202: only placeholders are built into the query
+	query := `
+SELECT e.id FROM events e
+WHERE e.state IN ('admitted', 'queued') AND e.content_dropped = 0 AND e.snapshot IS NOT NULL
+  AND e.served = 1 AND e.bucket_id IN (` + placeholders(len(buckets)) + `)
+  AND NOT EXISTS (SELECT 1 FROM hold_marker)
+ORDER BY e.id LIMIT ?`
+	rows, err := l.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("connector: records to hand off: %w", err)
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	out := make([]Record, 0, len(ids))
+	for _, id := range ids {
+		r, ok, err := l.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
