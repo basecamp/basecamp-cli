@@ -100,6 +100,12 @@ const defaultAgentRateLimitHold = 60 * time.Second
 // the safe direction to fail in.
 const maxAgentMintHold = time.Hour
 
+// MaxServerWait is the longest any wait a server names is waited, whatever
+// the status or the token path: the same bound as a mint hold, so a held
+// rate limit and every other named wait agree. A connector that waited a
+// server's word for years would be a hang, not a wait.
+const MaxServerWait = maxAgentMintHold
+
 // MintHold is the token endpoint's last refusal of an agent credential's
 // client, remembered so the next mint can answer it without asking again.
 //

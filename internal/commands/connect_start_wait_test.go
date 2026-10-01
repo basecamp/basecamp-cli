@@ -665,3 +665,49 @@ func startWaitsFor(t *testing.T, first func(http.ResponseWriter)) []time.Duratio
 	require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options(tokens)))
 	return w.waits
 }
+
+// A server can name any wait; the connector waits it, never longer than
+// the one cap. A 503 asking for three years is waited out for the cap, and
+// the log says both.
+func TestAnAbsurdServerWaitIsCapped(t *testing.T) {
+	absurd := answerStatus(http.StatusServiceUnavailable, map[string]string{"Retry-After": "99999999"}, "")
+	tokens, _ := startingAgent(t, absurd, answerStatus(http.StatusOK, nil, mintedToken))
+	var w startWaits
+	require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options(tokens)))
+	assert.Equal(t, []time.Duration{auth.MaxServerWait}, w.waits)
+	require.Len(t, w.lines, 1)
+	assert.Contains(t, w.lines[0], "asked to wait 27777h46m39s")
+	assert.Contains(t, w.lines[0], "waiting "+auth.MaxServerWait.String())
+
+	// A bot user's OAuth refresh carries its wait on the SDK's error.
+	refresh := &output.Error{Code: output.CodeRateLimit, Message: "token refresh failed", HTTPStatus: 429, Retryable: true,
+		Cause: basecamp.ErrRateLimit(99999999)}
+	wait, ok := tokenRetry(refresh)
+	assert.True(t, ok)
+	assert.Equal(t, auth.MaxServerWait, wait)
+
+	// The feed is handed the same cap.
+	live, _ := tokenEndpointFeed(t, absurd)
+	_, err := live.Minter().MintStreamTicket(t.Context())
+	var mintErr *eventfeed.MintError
+	require.ErrorAs(t, err, &mintErr)
+	assert.Equal(t, eventfeed.MintThrottled, mintErr.Kind, "%v", err)
+	assert.Equal(t, auth.MaxServerWait, mintErr.RetryAfter)
+}
+
+// The feed is told the cap too, and says once that the server asked for
+// longer.
+func TestTheFeedSaysWhenItCapsAWait(t *testing.T) {
+	absurd := answerStatus(http.StatusServiceUnavailable, map[string]string{"Retry-After": "99999999"}, "")
+	start, _ := startingAgent(t, absurd)
+	var lines []string
+	tokens := &feedTokens{managerTokens: start.managerTokens, log: func(line string) { lines = append(lines, line) }}
+
+	_, err := tokens.AccessToken(t.Context())
+	var sdkErr *basecamp.Error
+	require.ErrorAs(t, err, &sdkErr)
+	assert.Equal(t, auth.MaxServerWait, time.Duration(sdkErr.RetryAfter)*time.Second)
+	require.Len(t, lines, 1)
+	assert.Contains(t, lines[0], "asked to wait 27777h46m39s")
+	assert.Contains(t, lines[0], "waiting "+auth.MaxServerWait.String())
+}

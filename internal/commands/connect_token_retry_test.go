@@ -57,7 +57,7 @@ func tokenEndpointFeed(t *testing.T, answer func(http.ResponseWriter)) (*eventfe
 		ExpiresAt:     time.Now().Add(-time.Minute).Unix(),
 	}))
 
-	live, err := eventfeed.NewLive(&basecamp.Config{BaseURL: srv.URL}, &feedTokens{managerTokens{mgr: mgr}}, "555", eventfeed.AccountLane, connectSDKOptions()...)
+	live, err := eventfeed.NewLive(&basecamp.Config{BaseURL: srv.URL}, &feedTokens{managerTokens: managerTokens{mgr: mgr}}, "555", eventfeed.AccountLane, connectSDKOptions()...)
 	require.NoError(t, err)
 	return live, mints.Load
 }

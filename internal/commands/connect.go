@@ -1121,14 +1121,23 @@ func (t *managerTokens) AccessToken(ctx context.Context) (string, error) {
 // does not recognize its own way, so every failure is handed over already
 // classified by tokenRetry — the same rule a starting connector waits by,
 // so the two cannot drift apart.
-type feedTokens struct{ managerTokens }
+type feedTokens struct {
+	managerTokens
+	// log says a wait the server named past the cap, once per answer that
+	// named it; nothing is said when nil.
+	log func(string)
+}
 
 func (t *feedTokens) AccessToken(ctx context.Context) (string, error) {
 	token, err := t.mgr.AccessToken(ctx)
-	if e := tokenFailureInSDKTerms(err); e != nil {
-		return token, e
+	e := tokenFailureInSDKTerms(err)
+	if e == nil {
+		return token, err
 	}
-	return token, err
+	if named, wait := serverNamedWait(err), time.Duration(e.RetryAfter)*time.Second; e.Retryable && named > wait && t.log != nil {
+		t.log(connectWaitLine(output.AsError(err).Message, named, wait))
+	}
+	return token, e
 }
 
 // tokenFailureInSDKTerms is a failed renewal as the SDK's error, classified
@@ -1175,27 +1184,34 @@ func tokenFailureInSDKTerms(err error) *basecamp.Error {
 // where exiting would only have a supervisor give up sooner, knowing less.
 // Two things are never retried, because no wait changes them: a URL the
 // egress policy refused, and one the client could not send at all. The
-// wait is the agent mint's own, or that of the SDK error an OAuth refresh
-// carries; both are bounded where they are parsed.
+// wait is what the server named, never longer than auth.MaxServerWait.
 func tokenRetry(err error) (time.Duration, bool) {
 	if errors.Is(err, surfguard.ErrBlocked) || cannotBeSent(err) {
 		return 0, false
 	}
+	var cliErr *output.Error
+	switch {
+	case errors.As(err, &cliErr) && cliErr.Retryable:
+		// Exactly what the server named, never longer than the one cap,
+		// or nothing, which leaves it to the backoff: never a default
+		// wait from anywhere else.
+		return min(serverNamedWait(err), auth.MaxServerWait), true
+	case gotNoResponse(err):
+		return 0, true
+	}
+	return 0, false
+}
+
+// serverNamedWait is the wait the server named for err, as it named it:
+// the agent mint's own, or that of the SDK error an OAuth refresh carries.
+// Zero when it named none.
+func serverNamedWait(err error) time.Duration {
 	seconds := auth.RetryAfter(err)
 	var sdkErr *basecamp.Error
 	if errors.As(err, &sdkErr) {
 		seconds = max(seconds, sdkErr.RetryAfter)
 	}
-	var cliErr *output.Error
-	switch {
-	case errors.As(err, &cliErr) && cliErr.Retryable:
-		// Exactly what the server named, or nothing, which leaves it to
-		// the backoff: never a default wait from anywhere else.
-		return time.Duration(max(seconds, 0)) * time.Second, true
-	case gotNoResponse(err):
-		return 0, true
-	}
-	return 0, false
+	return time.Duration(max(seconds, 0)) * time.Second
 }
 
 // gotNoResponse reports a request that failed on the way, with no response

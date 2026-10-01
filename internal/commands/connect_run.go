@@ -253,7 +253,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if err != nil {
 		return err
 	}
-	live, err := eventfeed.NewLive(&basecamp.Config{BaseURL: app.Config.BaseURL}, &feedTokens{*tokens}, account, eventfeed.AccountLane, connectSDKOptions()...)
+	live, err := eventfeed.NewLive(&basecamp.Config{BaseURL: app.Config.BaseURL}, &feedTokens{managerTokens: *tokens, log: func(line string) { logger.Warn(line) }}, account, eventfeed.AccountLane, connectSDKOptions()...)
 	if err != nil {
 		return err
 	}

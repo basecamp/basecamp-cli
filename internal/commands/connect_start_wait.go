@@ -126,7 +126,7 @@ func awaitToken(ctx context.Context, tokens basecamp.TokenProvider, w connectSta
 		if wait <= 0 {
 			wait = connectStartBackoff(attempt)
 		}
-		w.log(fmt.Sprintf("connector: could not get the agent's token yet (%s); trying again in %s", output.AsError(err).Message, max(wait.Round(time.Second), time.Second)))
+		w.log(connectWaitLine(output.AsError(err).Message, serverNamedWait(err), wait))
 		if err := sleep(ctx, wait); err != nil {
 			return err
 		}
@@ -161,4 +161,14 @@ func connectStoppedBySignal(sig os.Signal) error {
 		return output.ErrTerminated("connector terminated")
 	}
 	return output.ErrInterrupted("connector interrupted")
+}
+
+// connectWaitLine says, once per wait, why the start is waiting and for how
+// long, and when the server asked for longer than the cap, both.
+func connectWaitLine(reason string, named, wait time.Duration) string {
+	line := fmt.Sprintf("connector: could not get the agent's token yet (%s); ", reason)
+	if named > wait {
+		return line + fmt.Sprintf("the server asked to wait %s, longer than the connector waits; waiting %s", named, wait)
+	}
+	return line + fmt.Sprintf("trying again in %s", max(wait.Round(time.Second), time.Second))
 }
