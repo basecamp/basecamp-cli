@@ -340,9 +340,29 @@ func notTakingWork(s connector.Status) (string, bool) {
 	return s.Connection.Detail, true
 }
 
+// dangerousUnused is why a running connector isn't using the dangerous mode
+// connect.json has on, or "" when it is (or none runs).
+func (r connectStatusReport) dangerousUnused() string {
+	c := r.Status.Connection
+	if !r.Dangerous || c == nil || c.State != connector.ConnectionRunning {
+		return ""
+	}
+	switch c.Detail {
+	case dangerousOnThisRun:
+		return ""
+	case dangerousOffThisRun:
+		return "requests from other people were still waiting when it started. Restart it once they're done"
+	default:
+		return "it was started before dangerous mode was turned on. Restart it for dangerous mode to take effect"
+	}
+}
+
 func connectStatusSummary(r connectStatusReport) string {
 	parts := []string{}
-	if r.Dangerous {
+	switch {
+	case r.Dangerous && r.dangerousUnused() != "":
+		parts = append(parts, "dangerous mode on but not in use until a restart")
+	case r.Dangerous:
 		parts = append(parts, "dangerous mode on")
 	}
 	if _, ok := notTakingWork(r.Status); ok {
@@ -374,8 +394,8 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 		fmt.Fprintf(w, "  Not taking work: %s. %s\n\n", clean(why), connector.NotTakingWorkFix)
 	}
 	switch {
-	case r.Dangerous && s.Connection != nil && s.Connection.State == connector.ConnectionRunning && s.Connection.Detail == dangerousOffThisRun:
-		fmt.Fprintf(w, "  Dangerous mode is on in connect.json, but the running connector isn't using it: requests from other people were still waiting when it started. Restart it once they're done.\n\n")
+	case r.dangerousUnused() != "":
+		fmt.Fprintf(w, "  Dangerous mode is on in connect.json, but the running connector isn't using it: %s.\n\n", r.dangerousUnused())
 	case r.Dangerous:
 		fmt.Fprintf(w, "  Dangerous mode is on: the agent can run any command on this computer, as you. Turn it off: basecamp connect setup -P %s --dangerous=false\n\n", richtext.ShellQuote(r.name()))
 	}

@@ -497,7 +497,10 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		}
 	}
 	runningDetail := ""
-	if file.Dangerous && !dangerousAllowed {
+	switch {
+	case file.Dangerous && dangerousAllowed:
+		runningDetail = dangerousOnThisRun
+	case file.Dangerous:
 		runningDetail = dangerousOffThisRun
 	}
 	if err := ledger.NoteConnection(ctx, connector.ConnectionRunning, runningDetail); err != nil {

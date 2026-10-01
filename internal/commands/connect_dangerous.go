@@ -126,6 +126,11 @@ func noteDangerousChange(w io.Writer, before, after setup.File, name string) {
 // dangerous mode on but this run is not using it, for status.
 const dangerousOffThisRun = "dangerous mode is off for this run: requests from other people were still waiting when it started"
 
+// dangerousOnThisRun is the running connector's note that it started with
+// dangerous mode on. A run without it was started before dangerous mode was
+// turned on, and needs a restart to use it.
+const dangerousOnThisRun = "dangerous mode on"
+
 // dangerousOffOnly reports whether the run asks for nothing but turning
 // dangerous mode off.
 func dangerousOffOnly(cmd *cobra.Command) bool {
@@ -161,7 +166,7 @@ func turnDangerousModeOff(cmd *cobra.Command, app *appctx.App, name, path string
 	if err != nil {
 		return classifyWriteError(name, err)
 	}
-	fmt.Fprintln(w, "Dangerous mode is off: from its next task the agent can only read and change files in its folder again.")
+	fmt.Fprintln(w, "Dangerous mode is off: from its next task the agent is back to its usual permissions.")
 	noteDangerousChange(cmd.ErrOrStderr(), existing, next, name)
 	return nil
 }

@@ -132,7 +132,7 @@ func TestSharingWhileDangerousIsRefusedWithTheReasons(t *testing.T) {
 // Status leads with dangerous mode while it's on.
 func TestConnectStatusSaysWhenDangerousModeIsOn(t *testing.T) {
 	report := connectStatusReport{Profile: "agent", Dangerous: true, Status: connector.Status{Connection: &connector.ConnectionStatus{
-		State: connector.ConnectionRunning, PID: 42, ChangedAt: time.Now(),
+		State: connector.ConnectionRunning, PID: 42, ChangedAt: time.Now(), Detail: dangerousOnThisRun,
 	}}}
 	var out bytes.Buffer
 	renderConnectStatus(&out, report)
@@ -275,8 +275,17 @@ func TestConnectStatusSaysWhenThisRunIsNotUsingDangerousMode(t *testing.T) {
 	}}}
 	var out bytes.Buffer
 	renderConnectStatus(&out, report)
-	assert.Contains(t, out.String(), "the running connector isn't using it")
+	assert.Contains(t, out.String(), "the running connector isn't using it: requests from other people")
 	assert.NotContains(t, out.String(), "Dangerous mode is on: the agent can run any command")
+	assert.Equal(t, "dangerous mode on but not in use until a restart", strings.SplitN(connectStatusSummary(report), ",", 2)[0])
+
+	// Turned on while it was already running, without dangerous mode.
+	report.Status.Connection.Detail = ""
+	out.Reset()
+	renderConnectStatus(&out, report)
+	assert.Contains(t, out.String(), "the running connector isn't using it: it was started before dangerous mode was turned on. Restart it")
+	assert.NotContains(t, out.String(), "Dangerous mode is on: the agent can run any command")
+	assert.Equal(t, "dangerous mode on but not in use until a restart", strings.SplitN(connectStatusSummary(report), ",", 2)[0])
 }
 
 // The fixes refusals print are commands that run as printed.

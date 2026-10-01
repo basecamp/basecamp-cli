@@ -1678,8 +1678,9 @@ func TestAnUnreadableConfigClaimsNoWaitingWorkOnAnEmptyLedger(t *testing.T) {
 }
 
 // A worker started in dangerous mode is handed nothing more once the owner
-// turns it off: a follow-up on its conversation waits, and runs in a worker
-// of its own without dangerous mode (Codex on the dangerous-mode review).
+// turns it off: a follow-up on its conversation waits, unjoined, so it is not
+// one get_dispatch away mid-turn, and runs in a worker of its own without
+// dangerous mode (Codex on the dangerous-mode review).
 func TestAFollowUpDoesNotReachADangerousWorkerOnceItIsTurnedOff(t *testing.T) {
 	fake := newFakeDriver()
 	release := make(chan struct{})
@@ -1700,6 +1701,8 @@ func TestAFollowUpDoesNotReachADangerousWorkerOnceItIsTurnedOff(t *testing.T) {
 
 	dangerous.Store(false)
 	admitOn(t, h.ledger, 2, "recording:1")
+	time.Sleep(150 * time.Millisecond)
+	assert.Equal(t, StateQueued, getRecord(t, h.ledger, 2).State, "not joined to the dangerous worker's task mid-turn")
 	close(release)
 	h.attemptsEnded(t, 1)
 	assert.Len(t, first.promptList(), 1, "the dangerous worker got nothing more")

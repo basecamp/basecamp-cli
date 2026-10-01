@@ -531,6 +531,12 @@ func (d *Dispatcher) dispatchReady(ctx context.Context) error {
 		if servedErr != nil || !r.authorizedIn(served) {
 			continue
 		}
+		// Nor to a worker started in dangerous mode once it is off: joined,
+		// an event is one get_dispatch away from a worker with a shell. Left
+		// unjoined, it starts a task of its own once this one ends.
+		if r.dangerousTurnedOff() {
+			continue
+		}
 		if _, err := d.ledger.JoinConversation(ctx, r.launch.TaskID, served); err != nil {
 			return err
 		}
@@ -1393,6 +1399,12 @@ func (r *taskRun) promptLoop(ctx context.Context, deadline, stillRunning <-chan 
 	}
 }
 
+// dangerousTurnedOff is whether the worker was started in dangerous mode and
+// the owner has turned it off since. The policy is read fresh each time.
+func (r *taskRun) dangerousTurnedOff() bool {
+	return r.dangerous && r.d.opts.Policy().Rules().Mode != driver.ModeAnything
+}
+
 // nextFollowUp exposes the next event on the task not yet handed to the
 // worker, and returns it. Nothing joins or is exposed once the reader says
 // connect.json has stopped serving the task's project: the reader, so within
@@ -1402,7 +1414,7 @@ func (r *taskRun) nextFollowUp(ctx context.Context) (int64, bool, error) {
 	// A worker started in dangerous mode is handed nothing more once the
 	// owner has turned it off: what it is doing now finishes as it started,
 	// and nothing new reaches it with a shell.
-	if r.dangerous && r.d.opts.Policy().Rules().Mode != driver.ModeAnything {
+	if r.dangerousTurnedOff() {
 		r.log.Warn("connector: dangerous mode was turned off; no more instructions are handed to this worker, which was started with it",
 			"task_id", r.launch.TaskID)
 		return 0, false, nil
