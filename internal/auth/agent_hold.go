@@ -147,12 +147,8 @@ func mintHoldFor(mint *agentMint, resp *http.Response, detail, code string, refu
 	}
 	switch {
 	case resp.StatusCode == http.StatusTooManyRequests:
-		wait := retryAfter(resp.Header, now)
-		if wait <= 0 {
-			wait = defaultAgentRateLimitHold
-		}
 		hold.Kind = mintHoldRateLimited
-		hold.Until = ceilUnix(now.Add(min(wait, maxAgentMintHold)))
+		hold.Until = ceilUnix(now.Add(rateLimitHold(resp.Header, now)))
 	case refused && code == "invalid_client":
 		// Permanent for this secret; see agentRefusalRecheck.
 		hold.Kind = mintHoldRefused
@@ -163,6 +159,16 @@ func mintHoldFor(mint *agentMint, resp *http.Response, detail, code string, refu
 		return nil
 	}
 	return hold
+}
+
+// rateLimitHold is how long a 429 holds the mint: its Retry-After, or
+// defaultAgentRateLimitHold when it has none, never past maxAgentMintHold.
+func rateLimitHold(header http.Header, now time.Time) time.Duration {
+	wait := retryAfter(header, now)
+	if wait <= 0 {
+		wait = defaultAgentRateLimitHold
+	}
+	return min(wait, maxAgentMintHold)
 }
 
 // ceilUnix is t in Unix seconds, rounded up: a deadline stored in whole

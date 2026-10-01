@@ -229,14 +229,19 @@ func TestARateLimitHoldIsBounded(t *testing.T) {
 			m, key, now := heldManager(t, e)
 			e.answer = func(int) (int, http.Header, string) { return http.StatusTooManyRequests, c.header(*now), `{}` }
 
-			_, err := m.AccessToken(context.Background())
-			require.Error(t, err)
+			_, mintErr := m.AccessToken(context.Background())
+			require.Error(t, mintErr)
 
 			stored, err := m.store.Load(key)
 			require.NoError(t, err)
 			require.NotNil(t, stored.MintHold)
 			assert.Equal(t, mintHoldRateLimited, stored.MintHold.Kind)
 			assert.InDelta(t, now.Add(c.want).Unix(), stored.MintHold.Until, 2)
+
+			// The refusal itself names the wait the hold will keep.
+			first := output.AsError(mintErr)
+			assert.Equal(t, output.CodeRateLimit, first.Code)
+			assert.Equal(t, fmt.Sprintf("Try again in %d seconds", int(c.want.Seconds())), first.Hint)
 			assert.LessOrEqual(t, stored.MintHold.Until, now.Add(maxAgentMintHold).Unix())
 		})
 	}

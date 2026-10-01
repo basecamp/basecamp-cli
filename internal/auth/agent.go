@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -464,7 +465,17 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 	// makes it a server saying two things at once, of which the status is
 	// the one that says what to do next.
 	if resp.StatusCode < 400 || resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
-		return mintHoldFor(mint, resp, detail, code, false, m.now()), statusFailure("minting an agent token: "+detail, resp)
+		now := m.now()
+		hold := mintHoldFor(mint, resp, detail, code, false, now)
+		if hold != nil && hold.Kind == mintHoldRateLimited {
+			// The wait this error names is the hold's — with its default
+			// and its cap — so the caller is told the same deadline the
+			// next mint will be held to.
+			e := output.ErrRateLimit(int(math.Ceil(rateLimitHold(resp.Header, now).Seconds())))
+			e.Message = "minting an agent token: " + detail
+			return hold, e
+		}
+		return hold, statusFailure("minting an agent token: "+detail, resp)
 	}
 
 	// Among the remaining 4xx: when the server NAMED its reason, that name
