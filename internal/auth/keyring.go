@@ -45,7 +45,7 @@ type Credentials struct {
 	// credential's client — a refused secret, or a rate limit — kept so
 	// the next mint answers it locally instead of asking again (see
 	// agent_hold.go). Nil for every other kind of credential, and for an
-	// agent's whose last mint succeeded.
+	// agent whose last mint succeeded.
 	MintHold *MintHold `json:"mint_hold,omitempty"`
 
 	// Issuer is the RFC 8414 issuer of the authorization server that minted

@@ -189,8 +189,10 @@ func TestRefusedMintIsAnAuthErrorAndAServerFaultIsNot(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid_client")
 
 	// The refusal is remembered now, so the server fault needs a
-	// credential the server has not already refused.
-	storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute)))
+	// credential the server has not already refused: a new secret.
+	fresh := agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute))
+	fresh.ClientSecret = "a-new-secret"
+	storeAgent(t, m, fresh)
 	as.token = func(int) (int, string) { return http.StatusBadGateway, `no json here` }
 	_, err = m.AccessToken(context.Background())
 	require.Error(t, err)
@@ -862,6 +864,10 @@ func TestARateLimitedMintKeepsItsRetryAfter(t *testing.T) {
 	defer srv.Close()
 
 	m := newDeviceTestManager(t, srv.URL)
+	// Half a second in: the hold's deadline is stored rounded up to the
+	// whole second, and the wait the error names is read from it.
+	now := time.Now().Truncate(time.Second).Add(500 * time.Millisecond)
+	m.clock = func() time.Time { return now }
 	storeAgent(t, m, agentCredential(srv.URL+"/oauth/tokens", time.Now().Add(-time.Minute)))
 
 	_, err := m.AccessToken(context.Background())
@@ -869,7 +875,7 @@ func TestARateLimitedMintKeepsItsRetryAfter(t *testing.T) {
 	e := output.AsError(err)
 	assert.Equal(t, output.CodeRateLimit, e.Code)
 	assert.True(t, e.Retryable)
-	assert.Contains(t, e.Hint, "30 seconds")
+	assert.Equal(t, "Try again in 31 seconds", e.Hint)
 	assert.NotContains(t, e.Hint, "--with-client-credentials")
 }
 

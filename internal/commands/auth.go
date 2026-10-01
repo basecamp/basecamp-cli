@@ -353,11 +353,18 @@ func authStatusReport(ctx context.Context, app *appctx.App) (*authStatus, error)
 	// Asking what a renewal would do also tells the manager what this
 	// credential IS, so every remedy from here names the right login.
 	refusal := app.Auth.RefreshRefusal(creds)
-	// A rate limit the token endpoint set on an agent's mint is held only
-	// until its deadline, and the renewal goes out on its own after it, so
-	// the credential is still refreshable; the hold is reported beside it.
-	rateLimited := refusal != nil && output.AsError(refusal).Code == output.CodeRateLimit
-	refreshable := refusal == nil || rateLimited
+	// The report says what a renewal sent now would meet. A stored hold
+	// that ends on its own — a rate limit, a refusal rechecked hourly —
+	// leaves the credential refreshable once it ends; only a permanent
+	// one does not. renewal_refused is the stored hold and nothing else:
+	// a credential that cannot mint for a local reason has no hold.
+	hold := app.Auth.MintHoldStatus(creds)
+	timeLimited := hold != nil && !hold.Permanent()
+	refreshable := refusal == nil || timeLimited
+
+	if hold != nil {
+		report.data["renewal_refused"] = hold
+	}
 
 	if creds.AccessToken == "" {
 		report.data["authenticated"] = false
@@ -365,6 +372,9 @@ func authStatusReport(ctx context.Context, app *appctx.App) (*authStatus, error)
 		report.data["refreshable"] = refreshable
 		report.summary = "Not logged in to " + baseURL
 		report.hint = app.Auth.LoginHint()
+		if timeLimited {
+			report.hint = hold.Hint
+		}
 		return report, nil
 	}
 
@@ -387,13 +397,6 @@ func authStatusReport(ctx context.Context, app *appctx.App) (*authStatus, error)
 	report.data["source"] = source
 	report.data["oauth_type"] = creds.OAuthType
 	report.data["refreshable"] = refreshable
-	if refusal != nil && creds.OAuthType == "agent" {
-		// Why an agent cannot renew now — a refusal the token endpoint
-		// gave that is being remembered, or a rate limit still running,
-		// and until when — for a caller reading the JSON rather than the
-		// token line.
-		report.data["renewal_refused"] = output.AsError(refusal).Message
-	}
 	report.data["storage"] = storage
 	if scope != "" {
 		report.data["scope"] = scope
@@ -436,8 +439,9 @@ func authStatusReport(ctx context.Context, app *appctx.App) (*authStatus, error)
 		report.data["expires_in"] = expiresIn.Round(time.Second).String()
 		report.data["expired"] = expired
 		held := ""
-		if rateLimited {
-			held = " (" + output.AsError(refusal).Message + ")"
+		if timeLimited {
+			held = " (" + hold.Message + ")"
+			report.hint = hold.Hint
 		}
 		switch {
 		case !expired && refreshable:
@@ -454,7 +458,7 @@ func authStatusReport(ctx context.Context, app *appctx.App) (*authStatus, error)
 		case creds.OAuthType == "agent":
 			// An agent's renewal can be refused by a verdict the token
 			// endpoint already gave — a secret it refused — and that says
-			// why, and until when, where "expired" alone would not.
+			// why, where "expired" alone would not.
 			expiry = "expired, and the renewal would be refused: " + output.AsError(refusal).Message
 			report.hint = remedyFor(app, refusal)
 		default:

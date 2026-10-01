@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -71,12 +72,89 @@ func TestAuthStatusOnABrokenAgentOffersTheAgentLogin(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 
 	var envelope struct {
-		Notice string `json:"notice"`
+		Notice string         `json:"notice"`
+		Data   map[string]any `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
 	assert.Contains(t, envelope.Notice, "--with-client-credentials")
 	assert.Contains(t, envelope.Notice, "--client-id agent-client")
 	assert.NotContains(t, envelope.Notice, "Run: basecamp auth login -P")
+	assert.NotContains(t, envelope.Data, "renewal_refused", "a secret missing locally is not a hold the token endpoint set")
+}
+
+// agentStatusReport is `auth status --json` for the clawdito profile after
+// one renewal of creds was answered by the token endpoint with status,
+// header and body: the hold that answer left, as the report shows it.
+type agentStatusReport struct {
+	Notice string `json:"notice"`
+	Data   struct {
+		Authenticated  bool                 `json:"authenticated"`
+		Refreshable    bool                 `json:"refreshable"`
+		Expired        bool                 `json:"expired"`
+		RenewalRefused *auth.MintHoldStatus `json:"renewal_refused"`
+	} `json:"data"`
+	raw string
+}
+
+func agentStatusAfterRefusal(t *testing.T, creds *auth.Credentials, status int, header http.Header, body string) agentStatusReport {
+	t.Helper()
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_TOKEN", "")
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		for k, v := range header {
+			w.Header()[k] = v
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &config.Config{BaseURL: srv.URL, ActiveProfile: "clawdito", Sources: map[string]string{}}
+	authMgr := auth.NewManager(cfg, srv.Client())
+	store := auth.NewStore(config.GlobalConfigDir())
+	authMgr.SetStore(store)
+	creds.OAuthType = "agent"
+	creds.ClientID = "agent-client"
+	creds.ClientSecret = "rotated-away"
+	creds.TokenEndpoint = srv.URL + "/oauth/tokens"
+	if creds.ExpiresAt == 0 {
+		creds.ExpiresAt = time.Now().Add(-time.Minute).Unix()
+	}
+	require.NoError(t, store.Save("profile:clawdito", creds))
+
+	// The refusal that is remembered.
+	_, err := authMgr.AccessToken(context.Background())
+	require.Error(t, err)
+	require.EqualValues(t, 1, calls.Load())
+
+	buf := &bytes.Buffer{}
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		Output: output.New(output.Options{Format: output.FormatJSON, Writer: buf}),
+	}
+	app.Flags.JSON = true
+
+	cmd := NewAuthCmd()
+	cmd.SetArgs([]string{"status"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	require.NoError(t, cmd.Execute())
+	assert.EqualValues(t, 1, calls.Load(), "the report asked the token endpoint")
+
+	report := agentStatusReport{raw: buf.String()}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &report), buf.String())
+	assert.NotContains(t, report.raw, "rotated-away")
+	return report
 }
 
 // TestAuthStatusSaysARefusalIsRemembered: an agent whose secret the token
@@ -84,138 +162,64 @@ func TestAuthStatusOnABrokenAgentOffersTheAgentLogin(t *testing.T) {
 // again. The report is where someone looks to find out why the agent went
 // quiet, so it says so — and what replaces the secret.
 func TestAuthStatusSaysARefusalIsRemembered(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-	t.Setenv("BASECAMP_TOKEN", "")
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
+	report := agentStatusAfterRefusal(t, &auth.Credentials{AccessToken: "spent"},
+		http.StatusUnauthorized, nil, `{"error":"invalid_client"}`)
 
-	var calls int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls++
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
-	}))
-	defer srv.Close()
-
-	cfg := &config.Config{BaseURL: srv.URL, ActiveProfile: "clawdito", Sources: map[string]string{}}
-	authMgr := auth.NewManager(cfg, srv.Client())
-	store := auth.NewStore(config.GlobalConfigDir())
-	authMgr.SetStore(store)
-	require.NoError(t, store.Save("profile:clawdito", &auth.Credentials{
-		AccessToken:   "spent",
-		OAuthType:     "agent",
-		ClientID:      "agent-client",
-		ClientSecret:  "rotated-away",
-		TokenEndpoint: srv.URL + "/oauth/tokens",
-		ExpiresAt:     time.Now().Add(-time.Minute).Unix(),
-	}))
-
-	// The refusal that is remembered.
-	_, err := authMgr.AccessToken(context.Background())
-	require.Error(t, err)
-	require.Equal(t, 1, calls)
-
-	buf := &bytes.Buffer{}
-	app := &appctx.App{
-		Config: cfg,
-		Auth:   authMgr,
-		Output: output.New(output.Options{Format: output.FormatJSON, Writer: buf}),
-	}
-	app.Flags.JSON = true
-
-	cmd := NewAuthCmd()
-	cmd.SetArgs([]string{"status"})
-	cmd.SetContext(appctx.WithApp(context.Background(), app))
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-	cmd.SilenceErrors = true
-	cmd.SilenceUsage = true
-	require.NoError(t, cmd.Execute())
-
-	assert.Equal(t, 1, calls, "the report asked the token endpoint")
-
-	var envelope struct {
-		Notice string `json:"notice"`
-		Data   struct {
-			RenewalRefused string `json:"renewal_refused"`
-		} `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
-	assert.Contains(t, envelope.Data.RenewalRefused, "the refusal is remembered")
-	assert.Contains(t, envelope.Data.RenewalRefused, "invalid_client")
-	assert.Contains(t, envelope.Notice, "--with-client-credentials")
-	assert.NotContains(t, buf.String(), "rotated-away")
+	hold := report.Data.RenewalRefused
+	require.NotNil(t, hold)
+	assert.Equal(t, "refused", hold.Kind)
+	assert.Equal(t, "token error: invalid_client", hold.Detail)
+	assert.Empty(t, hold.Until, "invalid_client never ends with this secret")
+	assert.Contains(t, hold.Message, "the refusal is remembered")
+	assert.False(t, report.Data.Refreshable)
+	assert.Contains(t, report.Notice, "--with-client-credentials")
 }
 
-// TestAuthStatusKeepsARateLimitedAgentRefreshable: a 429 on an agent's
-// mint is held only until its Retry-After, and the renewal goes out on its
-// own after that. The report says so, and does not call a token inside
-// the refresh window expired as if nothing could renew it.
-func TestAuthStatusKeepsARateLimitedAgentRefreshable(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-	t.Setenv("BASECAMP_TOKEN", "")
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
+// TestAuthStatusReportsATimeLimitedHoldAsRefreshable: a hold that ends on
+// its own — a 429 until its Retry-After, a refusal rechecked hourly — is
+// what a renewal sent now would meet, and nothing more. The credential is
+// refreshable, the hold and its deadline are reported, and the advice is to
+// wait, not to replace the secret.
+func TestAuthStatusReportsATimeLimitedHoldAsRefreshable(t *testing.T) {
+	for name, c := range map[string]struct {
+		status int
+		header http.Header
+		body   string
+		kind   string
+		hint   string
+	}{
+		"a rate limit":  {http.StatusTooManyRequests, http.Header{"Retry-After": {"300"}}, `{}`, "rate_limited", "Try again in"},
+		"invalid_grant": {http.StatusBadRequest, nil, `{"error":"invalid_grant"}`, "refused", "Wait until"},
+		"a bare 401":    {http.StatusUnauthorized, nil, `nothing useful`, "refused", "Wait until"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			// Inside the refresh window, so a renewal is due and is held.
+			report := agentStatusAfterRefusal(t, &auth.Credentials{
+				AccessToken: "still-good",
+				ExpiresAt:   time.Now().Add(2 * time.Minute).Unix(),
+			}, c.status, c.header, c.body)
 
-	var calls int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls++
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Retry-After", "300")
-		w.WriteHeader(http.StatusTooManyRequests)
-	}))
-	defer srv.Close()
-
-	cfg := &config.Config{BaseURL: srv.URL, ActiveProfile: "clawdito", Sources: map[string]string{}}
-	authMgr := auth.NewManager(cfg, srv.Client())
-	store := auth.NewStore(config.GlobalConfigDir())
-	authMgr.SetStore(store)
-	require.NoError(t, store.Save("profile:clawdito", &auth.Credentials{
-		AccessToken:   "still-good",
-		OAuthType:     "agent",
-		ClientID:      "agent-client",
-		ClientSecret:  "agent-secret",
-		TokenEndpoint: srv.URL + "/oauth/tokens",
-		// Inside the refresh window, so a renewal is due and is held.
-		ExpiresAt: time.Now().Add(2 * time.Minute).Unix(),
-	}))
-
-	_, err := authMgr.AccessToken(context.Background())
-	require.Error(t, err)
-	require.Equal(t, 1, calls)
-
-	buf := &bytes.Buffer{}
-	app := &appctx.App{
-		Config: cfg,
-		Auth:   authMgr,
-		Output: output.New(output.Options{Format: output.FormatJSON, Writer: buf}),
+			hold := report.Data.RenewalRefused
+			require.NotNil(t, hold)
+			assert.Equal(t, c.kind, hold.Kind)
+			assert.NotEmpty(t, hold.Until)
+			assert.True(t, report.Data.Refreshable, "a hold that ends on its own was reported as unrenewable")
+			assert.False(t, report.Data.Expired)
+			assert.Contains(t, report.Notice, c.hint)
+			assert.NotContains(t, report.raw, "--with-client-credentials", "a hold that ends on its own is not a reason to replace the secret")
+		})
 	}
-	app.Flags.JSON = true
+}
 
-	cmd := NewAuthCmd()
-	cmd.SetArgs([]string{"status"})
-	cmd.SetContext(appctx.WithApp(context.Background(), app))
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-	cmd.SilenceErrors = true
-	cmd.SilenceUsage = true
-	require.NoError(t, cmd.Execute())
+// TestAuthStatusReportsAHoldWithoutAnAccessToken: the stored hold is
+// reported whether or not a token is stored beside it.
+func TestAuthStatusReportsAHoldWithoutAnAccessToken(t *testing.T) {
+	report := agentStatusAfterRefusal(t, &auth.Credentials{},
+		http.StatusUnauthorized, nil, `{"error":"invalid_client"}`)
 
-	assert.Equal(t, 1, calls, "the report asked the token endpoint")
-
-	var envelope struct {
-		Data struct {
-			Refreshable    bool   `json:"refreshable"`
-			Expired        bool   `json:"expired"`
-			RenewalRefused string `json:"renewal_refused"`
-		} `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
-	assert.True(t, envelope.Data.Refreshable, "a rate limit that ends on its own was reported as unrenewable")
-	assert.False(t, envelope.Data.Expired)
-	assert.Contains(t, envelope.Data.RenewalRefused, "held until")
-	assert.NotContains(t, buf.String(), "--with-client-credentials", "a rate limit is not a refused secret")
+	assert.False(t, report.Data.Authenticated)
+	require.NotNil(t, report.Data.RenewalRefused)
+	assert.Equal(t, "refused", report.Data.RenewalRefused.Kind)
 }
 
 // TestDoctorOffersTheAgentLoginForABrokenAgent: doctor is the diagnostic

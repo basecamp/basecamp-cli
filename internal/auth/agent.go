@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -468,12 +467,7 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 		now := m.now()
 		hold := mintHoldFor(mint, resp, detail, code, false, now)
 		if hold != nil && hold.Kind == mintHoldRateLimited {
-			// The wait this error names is the hold's — with its default
-			// and its cap — so the caller is told the same deadline the
-			// next mint will be held to.
-			e := output.ErrRateLimit(int(math.Ceil(rateLimitHold(resp.Header, now).Seconds())))
-			e.Message = "minting an agent token: " + detail
-			return hold, e
+			return hold, holdRateLimitError(hold, now, "minting an agent token: "+detail)
 		}
 		return hold, statusFailure("minting an agent token: "+detail, resp)
 	}

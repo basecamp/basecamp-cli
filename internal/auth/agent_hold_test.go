@@ -77,7 +77,7 @@ func TestARefusedSecretIsNeverSentAgain(t *testing.T) {
 	require.NoError(t, loadErr)
 	require.NotNil(t, stored.MintHold)
 	assert.Zero(t, stored.MintHold.Until, "invalid_client is permanent for the secret it refused")
-	assert.NotContains(t, stored.MintHold.Client, "agent-secret")
+	assert.Equal(t, agentClientFingerprint("agent-client", "agent-secret"), stored.MintHold.Client)
 
 	*now = now.Add(30 * 24 * time.Hour)
 	for range 3 {
@@ -241,7 +241,7 @@ func TestARateLimitHoldIsBounded(t *testing.T) {
 			// The refusal itself names the wait the hold will keep.
 			first := output.AsError(mintErr)
 			assert.Equal(t, output.CodeRateLimit, first.Code)
-			assert.Equal(t, fmt.Sprintf("Try again in %d seconds", int(c.want.Seconds())), first.Hint)
+			assert.Equal(t, fmt.Sprintf("Try again in %d seconds", stored.MintHold.Until-now.Unix()), first.Hint)
 			assert.LessOrEqual(t, stored.MintHold.Until, now.Add(maxAgentMintHold).Unix())
 		})
 	}
@@ -387,6 +387,53 @@ func TestAHoldTooFarOutIsNotBelieved(t *testing.T) {
 			_, err = m.AccessToken(context.Background())
 			require.NoError(t, err)
 			assert.EqualValues(t, 1, e.calls.Load())
+		})
+	}
+}
+
+// TestEveryHoldDeadlineIsRoundedUpAndEveryWaitReadFromIt: the stored
+// deadline is the one source of truth. Set from partway through a second,
+// it is rounded up for a refusal as for a rate limit, and the wait each
+// error names is the time left to it, rounded up — so a caller that retries
+// when it was told to is never held locally.
+func TestEveryHoldDeadlineIsRoundedUpAndEveryWaitReadFromIt(t *testing.T) {
+	for name, c := range map[string]struct {
+		status int
+		header http.Header
+		body   string
+		want   time.Duration
+	}{
+		"a rate limit": {http.StatusTooManyRequests, http.Header{"Retry-After": {"300"}}, `{}`, 300 * time.Second},
+		// A full hour, the longest any hold lasts: rounded up, it is
+		// still believed.
+		"invalid_grant": {http.StatusBadRequest, nil, `{"error":"invalid_grant"}`, agentRefusalRecheck},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := startMintEndpoint(t)
+			e.answer = func(int) (int, http.Header, string) { return c.status, c.header, c.body }
+			m, key, now := heldManager(t, e)
+			*now = now.Add(500 * time.Millisecond)
+
+			_, err := m.AccessToken(context.Background())
+			require.Error(t, err)
+
+			stored, loadErr := m.store.Load(key)
+			require.NoError(t, loadErr)
+			require.NotNil(t, stored.MintHold)
+			assert.Equal(t, now.Truncate(time.Second).Add(c.want+time.Second).Unix(), stored.MintHold.Until, "the deadline was not rounded up")
+
+			// Believed at once, though rounding put it past the bound.
+			_, err = m.AccessToken(context.Background())
+			require.Error(t, err)
+			assert.EqualValues(t, 1, e.calls.Load(), "a rounded-up hold was not believed")
+
+			*now = now.Add(c.want - 300*time.Millisecond)
+			_, err = m.AccessToken(context.Background())
+			require.Error(t, err)
+			assert.EqualValues(t, 1, e.calls.Load())
+			held := output.AsError(err)
+			assert.Contains(t, held.Hint, "1 seconds", "the wait was not read from the stored deadline")
+			assert.NotContains(t, held.Hint, "--with-client-credentials", "a hold that ends on its own is waited out")
 		})
 	}
 }

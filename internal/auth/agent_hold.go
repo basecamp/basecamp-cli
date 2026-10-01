@@ -90,7 +90,8 @@ const invalidClientDetail = "token error: invalid_client"
 // resilience.GatingHooks.OnRequestEnd).
 const defaultAgentRateLimitHold = 60 * time.Second
 
-// maxAgentMintHold bounds any hold that expires. No hold is written past it
+// maxAgentMintHold bounds any hold that expires, both measured to the whole
+// second rounded up, as every stored deadline is. No hold is written past it
 // (retryAfter already caps a Retry-After at maxAgentConnectLifetime, below
 // it), and a stored expiry further out than this from now —
 // a clock that stepped back, a damaged record — is not believed at all:
@@ -154,7 +155,7 @@ func mintHoldFor(mint *agentMint, resp *http.Response, detail, code string, refu
 		hold.Kind = mintHoldRefused
 	case refused:
 		hold.Kind = mintHoldRefused
-		hold.Until = now.Add(agentRefusalRecheck).Unix()
+		hold.Until = ceilUnix(now.Add(agentRefusalRecheck))
 	default:
 		return nil
 	}
@@ -177,6 +178,22 @@ func ceilUnix(t time.Time) int64 {
 	return t.Add(time.Second - time.Nanosecond).Unix()
 }
 
+// holdWait is the wait a hold names, in whole seconds: from now to its
+// stored deadline, rounded up. The stored deadline is the one source of
+// truth; every wait reported for a hold is read from it, so a caller that
+// retries after the wait it was told is never held locally.
+func holdWait(hold *MintHold, now time.Time) int {
+	return int(math.Ceil(time.Unix(hold.Until, 0).Sub(now).Seconds()))
+}
+
+// holdRateLimitError is the rate-limit error for a rate_limited hold,
+// whether the 429 that set it or a later mint it held.
+func holdRateLimitError(hold *MintHold, now time.Time, message string) *output.Error {
+	e := output.ErrRateLimit(holdWait(hold, now))
+	e.Message = message
+	return e
+}
+
 // heldMint is the error a remembered verdict answers a mint with, or nil
 // when the mint may be sent. It reads nothing but creds, so a report can
 // ask it too.
@@ -190,9 +207,7 @@ func (m *Manager) heldMint(creds *Credentials) error {
 
 	switch hold.Kind {
 	case mintHoldRateLimited:
-		e := output.ErrRateLimit(int(math.Ceil(time.Unix(hold.Until, 0).Sub(now).Seconds())))
-		e.Message = fmt.Sprintf("Minting an agent token is held until %s: the token endpoint rate-limited the last attempt (%s)", when, hold.Detail)
-		return e
+		return holdRateLimitError(hold, now, fmt.Sprintf("Minting an agent token is held until %s: the token endpoint rate-limited the last attempt (%s)", when, hold.Detail))
 	case mintHoldRefused:
 		msg := "Minting an agent token was refused (" + hold.Detail + ")"
 		if hold.Until == 0 {
@@ -202,9 +217,54 @@ func (m *Manager) heldMint(creds *Credentials) error {
 		}
 		e := output.ErrAuth(msg)
 		e.Cause = ErrAgentCredentialRefused
+		if hold.Until != 0 {
+			// The hold ends on its own, so the remedy is to wait for it.
+			e.Hint = fmt.Sprintf("Wait until %s (%d seconds); the next mint after that sends this client secret once more", when, holdWait(hold, now))
+		}
 		return e
 	}
 	return nil
+}
+
+// MintHoldStatus is a stored mint hold as a report shows it: what would
+// happen to a renewal sent now.
+type MintHoldStatus struct {
+	// Kind is "refused" or "rate_limited".
+	Kind string `json:"kind"`
+
+	// Detail is what the server said: "token error: invalid_client", or
+	// "the server answered HTTP 401".
+	Detail string `json:"detail"`
+
+	// Until is when the hold ends, RFC 3339 in UTC. Empty for a hold that
+	// never ends with these client credentials.
+	Until string `json:"until,omitempty"`
+
+	// Message and Hint are the error a mint held now would return.
+	Message string `json:"message"`
+	Hint    string `json:"hint,omitempty"`
+}
+
+// Permanent reports whether the hold never ends with these client
+// credentials — only a login with a new secret replaces it.
+func (s *MintHoldStatus) Permanent() bool { return s.Until == "" }
+
+// MintHoldStatus is the stored hold a renewal sent now would be answered
+// with, or nil when there is none: not an agent credential, no hold, or a
+// hold this version does not believe (see holds).
+func (m *Manager) MintHoldStatus(creds *Credentials) *MintHoldStatus {
+	if creds == nil || creds.OAuthType != oauthTypeAgent || !creds.MintHold.holds(creds, m.now()) {
+		return nil
+	}
+	hold := creds.MintHold
+	status := &MintHoldStatus{Kind: hold.Kind, Detail: hold.Detail}
+	if hold.Until != 0 {
+		status.Until = time.Unix(hold.Until, 0).UTC().Format(time.RFC3339)
+	}
+	if e := output.AsError(m.agentRemedy(m.heldMint(creds), creds.ClientID, creds.Scope)); e != nil {
+		status.Message, status.Hint = e.Message, e.Hint
+	}
+	return status
 }
 
 // holds reports whether a stored hold is one this version believes: about
@@ -219,8 +279,10 @@ func (hold *MintHold) holds(creds *Credentials, now time.Time) bool {
 	case hold.Kind == mintHoldRefused && hold.Until == 0:
 		return hold.Detail == invalidClientDetail
 	case hold.Kind == mintHoldRefused, hold.Kind == mintHoldRateLimited:
-		until := time.Unix(hold.Until, 0)
-		return hold.Until > 0 && now.Before(until) && until.Sub(now) <= maxAgentMintHold
+		// The bound is rounded up as a stored deadline is, so a hold of
+		// the full maxAgentMintHold set partway through a second is
+		// believed.
+		return hold.Until > 0 && now.Before(time.Unix(hold.Until, 0)) && hold.Until <= ceilUnix(now.Add(maxAgentMintHold))
 	default:
 		return false
 	}
