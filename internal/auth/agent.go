@@ -474,6 +474,11 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 	// makes it a server saying two things at once, of which the status is
 	// the one that says what to do next.
 	if resp.StatusCode < 400 || resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
+		if resp.StatusCode == http.StatusTooManyRequests {
+			// The status decided, so the hold and its errors say only the
+			// status: a code beside it would name a verdict not given.
+			detail = fmt.Sprintf("the server answered HTTP %d", resp.StatusCode)
+		}
 		now := m.now()
 		hold := mintHoldFor(mint, resp, detail, code, false, now)
 		if hold != nil && hold.Kind == mintHoldRateLimited {
