@@ -358,6 +358,57 @@ func TestBoostListEventWithoutIDAsksForAnID(t *testing.T) {
 	assert.Empty(t, transport.recorded())
 }
 
+// A comment's link is its parent's URL plus #__recording_<comment id>, on the
+// host app_url actually returns. Boosting or listing through it must reach the
+// comment; the parent's own link must still reach the parent.
+func TestBoostCommentLinkTargetsTheComment(t *testing.T) {
+	const card = "https://app.basecamp.com/99999/buckets/123/card_tables/cards/456"
+	boost := `{"id":2,"content":"👍","created_at":"2024-01-01T00:00:00Z"}`
+
+	cases := []struct {
+		name  string
+		args  []string
+		route stubRoute
+	}{
+		{
+			name:  "create on a comment link boosts the comment",
+			args:  []string{"create", card + "#__recording_789", "👍"},
+			route: stubRoute{method: http.MethodPost, path: "/99999/recordings/789/boosts.json", status: http.StatusCreated, body: boost},
+		},
+		{
+			name:  "create on the card link boosts the card",
+			args:  []string{"create", card, "👍"},
+			route: stubRoute{method: http.MethodPost, path: "/99999/recordings/456/boosts.json", status: http.StatusCreated, body: boost},
+		},
+		{
+			name:  "list on a comment link lists the comment's boosts",
+			args:  []string{"list", card + "#__recording_789"},
+			route: stubRoute{method: http.MethodGet, path: "/99999/recordings/789/boosts.json", status: http.StatusOK, body: "[" + boost + "]"},
+		},
+		{
+			name:  "list on the card link lists the card's boosts",
+			args:  []string{"list", card},
+			route: stubRoute{method: http.MethodGet, path: "/99999/recordings/456/boosts.json", status: http.StatusOK, body: "[" + boost + "]"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app, transport := setupRecordingTestApp(t, projectsRoute(), tc.route)
+
+			require.NoError(t, executeBoostCommand(NewBoostsCmd(), app, tc.args...))
+
+			var boostCalls []string
+			for _, call := range transport.recorded() {
+				if strings.Contains(call.Path, "/recordings/") {
+					boostCalls = append(boostCalls, call.Method+" "+call.Path)
+				}
+			}
+			assert.Equal(t, []string{tc.route.method + " " + tc.route.path}, boostCalls)
+		})
+	}
+}
+
 // mockBoostNilBoosterTransport returns a boost with no booster field.
 type mockBoostNilBoosterTransport struct{}
 

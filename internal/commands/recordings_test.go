@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -206,4 +207,103 @@ func TestRecordingsListAssigneeFlagIsHidden(t *testing.T) {
 	flag := listCmd.Flags().Lookup("assignee")
 	require.NotNil(t, flag, "expected --assignee flag to exist on list subcommand")
 	assert.True(t, flag.Hidden, "expected --assignee flag to be hidden on list subcommand")
+}
+
+// A comment's link is its parent's URL plus #__recording_<comment id>. Trashing,
+// archiving or restoring through it with recordings or comments must change the
+// comment, never the item it sits on and every other comment there; the parent's
+// own link given to recordings must still reach the parent.
+func TestRecordingsStatusCommentLinkTargetsTheComment(t *testing.T) {
+	const card = "https://app.basecamp.com/99999/buckets/123/card_tables/cards/456"
+
+	cases := []struct {
+		group, name, link, id string
+		cmd                   func() *cobra.Command
+	}{
+		{"recordings", "comment link", card + "#__recording_789", "789", NewRecordingsCmd},
+		{"recordings", "card link", card, "456", NewRecordingsCmd},
+		{"comments", "comment link", card + "#__recording_789", "789", NewCommentsCmd},
+	}
+
+	for _, c := range cases {
+		for _, v := range recordingStatusVerbs {
+			t.Run(c.group+" "+v.verb+" on a "+c.name, func(t *testing.T) {
+				path := "/99999/recordings/" + c.id + "/status/" + v.status + ".json"
+				app, transport := setupRecordingTestApp(t, stubRoute{method: http.MethodPut, path: path, status: http.StatusNoContent})
+
+				require.NoError(t, executeRecordingCommand(c.cmd(), app, v.verb, c.link))
+
+				calls := transport.recorded()
+				require.Len(t, calls, 1)
+				assert.Equal(t, http.MethodPut, calls[0].Method)
+				assert.Equal(t, path, calls[0].Path)
+			})
+		}
+	}
+}
+
+// A typed noun names the item: cards trash on a comment link trashes the card,
+// the same recording cards show reads from that link, not the comment.
+func TestRecordableStatusCommentLinkActsOnTheItem(t *testing.T) {
+	const bucket = "https://app.basecamp.com/99999/buckets/123/"
+
+	groups := []struct {
+		name string
+		cmd  func() *cobra.Command
+		item string
+	}{
+		{"cards", NewCardsCmd, "card_tables/cards/456"},
+		{"messages", NewMessagesCmd, "messages/456"},
+		{"todos", NewTodosCmd, "todos/456"},
+		{"todolists", NewTodolistsCmd, "todolists/456"},
+		{"files", NewFilesCmd, "uploads/456"},
+	}
+
+	for _, g := range groups {
+		for _, v := range recordingStatusVerbs {
+			t.Run(g.name+" "+v.verb+" on a comment link", func(t *testing.T) {
+				path := "/99999/recordings/456/status/" + v.status + ".json"
+				app, transport := setupRecordingTestApp(t, stubRoute{method: http.MethodPut, path: path, status: http.StatusNoContent})
+
+				require.NoError(t, executeRecordingCommand(g.cmd(), app, v.verb, bucket+g.item+"#__recording_789"))
+
+				calls := transport.recorded()
+				require.Len(t, calls, 1)
+				assert.Equal(t, http.MethodPut, calls[0].Method)
+				assert.Equal(t, path, calls[0].Path)
+			})
+		}
+	}
+}
+
+var recordingStatusVerbs = []struct{ verb, status string }{
+	{"trash", "trashed"},
+	{"archive", "archived"},
+	{"restore", "active"},
+}
+
+// A project URL names no recording, so its project id must never go out as one.
+func TestRecordingsStatusProjectURLIsRefused(t *testing.T) {
+	groups := []struct {
+		name string
+		cmd  func() *cobra.Command
+	}{
+		{"recordings", NewRecordingsCmd},
+		{"comments", NewCommentsCmd},
+		{"cards", NewCardsCmd},
+	}
+
+	for _, g := range groups {
+		t.Run(g.name, func(t *testing.T) {
+			app, transport := setupRecordingTestApp(t)
+
+			err := executeRecordingCommand(g.cmd(), app, "trash", "https://app.basecamp.com/99999/projects/123")
+
+			require.Error(t, err)
+			var e *output.Error
+			require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+			assert.Equal(t, output.CodeUsage, e.Code)
+			assert.Empty(t, transport.recorded(), "a project URL must not reach the API")
+		})
+	}
 }

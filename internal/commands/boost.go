@@ -58,6 +58,8 @@ You can pass either an ID or a Basecamp URL:
   basecamp boost list 789 --project my-project
   basecamp boost list https://3.basecamp.com/123/buckets/456/todos/789
 
+A comment's URL (…#__recording_<id>) lists that comment's boosts.
+
 Use --event to list boosts on a specific event within the item.
 
 Boosts hang off a single item, so an item ID is required: there is no
@@ -108,7 +110,7 @@ func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, event
 	// and the SDK dropped Everything().Boosts() with it in v0.11.0
 	// (basecamp/basecamp-sdk#504). When it returns, this is where the
 	// account-wide branch goes back, along with --all-projects.
-	recordingID, urlProjectID := extractWithProject(recording)
+	recordingID, urlProjectID := extractCommentWithProject(recording)
 
 	projectID := project
 	if projectID == "" && urlProjectID != "" {
@@ -267,6 +269,8 @@ You can pass either an ID or a Basecamp URL:
   basecamp boost create 789 "🎉" --project my-project
   basecamp boost create https://3.basecamp.com/123/buckets/456/todos/789 "👍"
 
+A comment's URL (…#__recording_<id>) boosts that comment.
+
 Use --event to boost a specific event within the item.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -275,7 +279,7 @@ Use --event to boost a specific event within the item.`,
 			// Both identifiers are decidable from the arguments alone, so they
 			// are checked before the pipe is drained; runBoostCreate parses
 			// them again once the project is known.
-			recordingID, _ := extractWithProject(args[0])
+			recordingID, _ := extractCommentWithProject(args[0])
 			if _, err := strconv.ParseInt(recordingID, 10, 64); err != nil {
 				return output.ErrUsage("Invalid ID")
 			}
@@ -308,7 +312,7 @@ func runBoostCreate(cmd *cobra.Command, app *appctx.App, recording, project, con
 		return output.ErrUsage(fmt.Sprintf("Boost content too long (%d characters, max 16)", n))
 	}
 
-	recordingID, urlProjectID := extractWithProject(recording)
+	recordingID, urlProjectID := extractCommentWithProject(recording)
 
 	projectID := project
 	if projectID == "" && urlProjectID != "" {

@@ -270,11 +270,13 @@ func newRecordingsTrashCmd() *cobra.Command {
 
 You can pass either an ID or a Basecamp URL:
   basecamp recordings trash 789
-  basecamp recordings trash https://3.basecamp.com/123/buckets/456/recordings/789`,
+  basecamp recordings trash https://3.basecamp.com/123/buckets/456/recordings/789
+
+A comment's URL (…#__recording_<id>) trashes that comment.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			return runRecordingsStatus(cmd, app, args[0], "trashed")
+			return runRecordingsStatus(cmd, app, args[0], "trashed", true)
 		},
 	}
 	return cmd
@@ -289,11 +291,13 @@ func newRecordingsArchiveCmd() *cobra.Command {
 
 You can pass either an ID or a Basecamp URL:
   basecamp recordings archive 789
-  basecamp recordings archive https://3.basecamp.com/123/buckets/456/recordings/789`,
+  basecamp recordings archive https://3.basecamp.com/123/buckets/456/recordings/789
+
+A comment's URL (…#__recording_<id>) archives that comment.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			return runRecordingsStatus(cmd, app, args[0], "archived")
+			return runRecordingsStatus(cmd, app, args[0], "archived", true)
 		},
 	}
 	return cmd
@@ -308,23 +312,32 @@ func newRecordingsRestoreCmd() *cobra.Command {
 
 You can pass either an ID or a Basecamp URL:
   basecamp recordings restore 789
-  basecamp recordings restore https://3.basecamp.com/123/buckets/456/recordings/789`,
+  basecamp recordings restore https://3.basecamp.com/123/buckets/456/recordings/789
+
+A comment's URL (…#__recording_<id>) restores that comment.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			return runRecordingsStatus(cmd, app, args[0], "active")
+			return runRecordingsStatus(cmd, app, args[0], "active", true)
 		},
 	}
 	return cmd
 }
 
-func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, newStatus string) error {
+// runRecordingsStatus moves a recording to newStatus. followComment says
+// whether a comment link (…#__recording_<id>) names the comment: true for
+// recordings and comments, false for a typed noun such as cards, which acts
+// on the item the link names, as that noun's show does.
+func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, newStatus string, followComment bool) error {
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Extract ID from URL if provided
-	recordingIDStr = extractID(recordingIDStr)
+	extract := extractWithProject
+	if followComment {
+		extract = extractCommentWithProject
+	}
+	recordingIDStr, _ = extract(recordingIDStr)
 
 	// Parse recording ID
 	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
@@ -456,11 +469,13 @@ func newRecordableTrashCmd(noun string) *cobra.Command {
 		Long: fmt.Sprintf(`Move a %s to the trash.
 
 You can pass either an ID or a Basecamp URL:
-  basecamp %ss trash 789`, noun, noun),
+  basecamp %ss trash 789
+
+%s`, noun, noun, recordableCommentLinkNote(noun, "trash")),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			return runRecordingsStatus(cmd, app, args[0], "trashed")
+			return runRecordingsStatus(cmd, app, args[0], "trashed", noun == "comment")
 		},
 	}
 }
@@ -473,11 +488,13 @@ func newRecordableArchiveCmd(noun string) *cobra.Command {
 		Long: fmt.Sprintf(`Archive a %s to remove it from active view.
 
 You can pass either an ID or a Basecamp URL:
-  basecamp %ss archive 789`, noun, noun),
+  basecamp %ss archive 789
+
+%s`, noun, noun, recordableCommentLinkNote(noun, "archive")),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			return runRecordingsStatus(cmd, app, args[0], "archived")
+			return runRecordingsStatus(cmd, app, args[0], "archived", noun == "comment")
 		},
 	}
 }
@@ -490,13 +507,24 @@ func newRecordableRestoreCmd(noun string) *cobra.Command {
 		Long: fmt.Sprintf(`Restore a %s from trash or archive to active status.
 
 You can pass either an ID or a Basecamp URL:
-  basecamp %ss restore 789`, noun, noun),
+  basecamp %ss restore 789
+
+%s`, noun, noun, recordableCommentLinkNote(noun, "restore")),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			return runRecordingsStatus(cmd, app, args[0], "active")
+			return runRecordingsStatus(cmd, app, args[0], "active", noun == "comment")
 		},
 	}
+}
+
+// recordableCommentLinkNote says, for a typed noun's trash, archive or
+// restore help, which recording a comment link (…#__recording_<id>) reaches.
+func recordableCommentLinkNote(noun, verb string) string {
+	if noun == "comment" {
+		return "A comment's URL (…#__recording_<id>) acts on that comment."
+	}
+	return fmt.Sprintf("A comment's URL (…#__recording_<id>) acts on the %s it sits on, not the\ncomment; use basecamp comments %s for the comment.", noun, verb)
 }
 
 // recordingDisplayName maps SDK recording type names to human-friendly display names.
