@@ -251,7 +251,7 @@ basecamp <cmd> --page 1     # First page only, no auto-pagination
 | Post message | `basecamp messages create "Title" "Body" --in <project> --json` |
 | Post with @mention | `basecamp messages create "Title" "Hey @First.Last, ..." --in <project> --json` |
 | Post silently | `basecamp messages create "Title" "Body" --no-subscribe --in <project> --json` |
-| Post to chat | `basecamp chat post "Message" --in <project> --json` |
+| Post to chat | `basecamp chat post "Message" --in <project> --json` (formatted HTML: add `--content-type text/html`) |
 | List pings | `basecamp notifications --json --jq '.data.reads[]? | select(.section == "pings")'` |
 | Read ping thread | `basecamp api get "/buckets/<circle_id>/chats/<chat_id>/lines.json" --agent` |
 | Post to ping thread | `basecamp api post "/buckets/<circle_id>/chats/<chat_id>/lines.json" --data '{"content":"<div>message</div>","content_type":"text/html"}' --json` |
@@ -1254,10 +1254,13 @@ basecamp chat --in <project> --json           # List chats
 basecamp chat messages --in <project> --json  # List messages
 basecamp chat post "Hello!" --in <project>
 basecamp chat post "@Jane.Smith, check this" --in <project>  # With @mention (auto text/html)
+basecamp chat post "<div><strong>Deployed</strong><br>v2.3 is live</div>" --in <project> --content-type text/html  # Formatted
 basecamp chat line <line_id> --in <project>   # Show line
 basecamp chat update <line_id> "edited content" --in <project>  # Edit existing message in place
 basecamp chat delete <line_id> --in <project> --force # Delete line (permanent, not trashable; --force required)
 ```
+
+`chat post` sends plain text unless the message @mentions someone. For formatted content, pass HTML with `--content-type text/html`; without it, tags and Markdown show literally.
 
 ### Pings (Direct Messages)
 
