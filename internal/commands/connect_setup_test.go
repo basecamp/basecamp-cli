@@ -388,11 +388,10 @@ func TestConnectSetupOnAConnectedProfile(t *testing.T) {
 	// A second run uses the connected profile as it is, and keeps what it
 	// is not told to change.
 	app = newConnectSetupApp(t, s, "agent")
-	out, err = runConnectSetupCmd(t, app, "--concurrency", "4")
+	out, err = runConnectSetupCmd(t, app, "--trust", "operator")
 	require.NoError(t, err, out)
 	again, err := setup.Load(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
-	assert.Equal(t, 4, again.Concurrency)
 	assert.Equal(t, f.Projects, again.Projects)
 	assert.Equal(t, f.Trust, again.Trust)
 }
@@ -470,11 +469,6 @@ func TestConnectSetupRefusesBadInput(t *testing.T) {
 		"class without a served project": {"--operator", op, "--class", fmt.Sprintf("%d=internal", setupProject)},
 		"bad trust mode":                 {"--operator", op, "--trust", "domain"},
 		"allow outside allowlist":        {"--operator", op, "--trust", "project", "--allow", "7"},
-		"bad driver":                     {"--operator", op, "--driver", "fork"},
-		"bad concurrency":                {"--operator", op, "--concurrency", "100"},
-		"zero concurrency":               {"--operator", op, "--concurrency", "0"},
-		"bad deadline":                   {"--operator", op, "--deadline", "5s"},
-		"zero deadline":                  {"--operator", op, "--deadline", "0"},
 		"malformed serve":                {"--operator", op, "--serve", "not-a-number"},
 		"zero serve":                     {"--operator", op, "--serve", "0"},
 		"no operator":                    {serveArg()},
@@ -539,7 +533,7 @@ func TestConnectSetupWorksInTheProfilesOwnAccount(t *testing.T) {
 	app = newConnectSetupApp(t, s, "agent")
 	app.Config.AccountID = "1000"
 	app.Config.Sources["account_id"] = string(config.SourceFlag)
-	out, err = runConnectSetupCmd(t, app, "--concurrency", "3")
+	out, err = runConnectSetupCmd(t, app, "--trust", "operator")
 	require.Error(t, err, out)
 	assert.Contains(t, err.Error(), "bound to account 999")
 }
@@ -617,7 +611,7 @@ func TestConnectSetupRefusesAConnectJSONOthersCanWrite(t *testing.T) {
 	before, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--concurrency", "3")
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--trust", "operator")
 	require.Error(t, err, out)
 	assert.Contains(t, err.Error(), "not private")
 	after, err := os.ReadFile(path)
@@ -734,7 +728,7 @@ func TestConnectSetupOnTheBotUserPath(t *testing.T) {
 	assert.Equal(t, setup.Agent{PersonID: setupBotPerson, Kind: setup.KindBotUser, IdentityID: setupBotIdentity}, f.Agent)
 
 	// The pinned identity is remembered: a rerun need not restate it.
-	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), "--concurrency", "3")
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"), "--trust", "operator")
 	require.NoError(t, err, out)
 }
 
@@ -923,7 +917,7 @@ func TestConnectSetupJSONOutput(t *testing.T) {
 	app := newConnectSetupApp(t, s, "agent")
 	var buf bytes.Buffer
 	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: &buf})
-	out, err := runConnectSetupCmd(t, app, "--concurrency", "3")
+	out, err := runConnectSetupCmd(t, app, "--trust", "operator")
 	require.NoError(t, err, out)
 
 	var envelope struct {
@@ -1249,7 +1243,7 @@ func TestConnectSetupClassifiesAnUnlockableHost(t *testing.T) {
 	require.NoError(t, os.Chmod(lockPath, 0o000))
 	t.Cleanup(func() { _ = os.Chmod(lockPath, 0o600) })
 
-	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--concurrency", "3")
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--trust", "operator")
 	require.Error(t, err, out)
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
@@ -1324,7 +1318,6 @@ func TestConnectShowPrintsWhatSetupRecorded(t *testing.T) {
 			Agent    setup.Agent                 `json:"agent"`
 			Trust    admission.Trust             `json:"trust"`
 			Projects map[int64]admission.Project `json:"projects"`
-			Deadline string                      `json:"deadline"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
@@ -1334,7 +1327,6 @@ func TestConnectShowPrintsWhatSetupRecorded(t *testing.T) {
 	assert.Equal(t, setup.Agent{PersonID: setupAgentPerson, Kind: setup.KindAgent}, envelope.Data.Agent)
 	assert.Equal(t, setupOperatorPerson, envelope.Data.Trust.OperatorID)
 	assert.Contains(t, envelope.Data.Projects, setupProject)
-	assert.Equal(t, "45m0s", envelope.Data.Deadline)
 	assert.NotContains(t, buf.String(), fakeConnectSecret)
 
 	after, err := os.ReadFile(path)
@@ -1416,7 +1408,6 @@ func TestConnectShowTellsAPersonEverySetting(t *testing.T) {
 			"operator",
 			fmt.Sprintf("Project %d", setupProject),
 			"1 served",
-			"deadline 45m0s",
 		} {
 			assert.Contains(t, shown, want, "format %v", format)
 		}
@@ -1475,18 +1466,4 @@ func TestConnectShowShowsTheFilePathLiterally(t *testing.T) {
 func TestMarkdownCodeKeepsBackticksInside(t *testing.T) {
 	assert.Equal(t, "` /a/b `", markdownCode("/a/b"))
 	assert.Equal(t, "``` /a``b ```", markdownCode("/a``b"))
-}
-
-// Copilot on #738: show formatted the workers line from the driver alone, so
-// the worker connect.json records was invisible — including the default a
-// file written before the field existed still means.
-func TestConnectShowNamesTheWorkerTheDriverRuns(t *testing.T) {
-	f := setup.New("agent")
-	f.AccountID = "999"
-	f.Agent = setup.Agent{PersonID: 4001, Kind: setup.KindAgent}
-	assert.Contains(t, connectShowDisplay("/x/connect.json", f, false)["workers"].(string), setup.DefaultWorker)
-
-	f.Worker = ""
-	assert.Contains(t, connectShowDisplay("/x/connect.json", f, false)["workers"].(string), setup.DefaultWorker,
-		"a legacy file with no worker shows the default it means")
 }

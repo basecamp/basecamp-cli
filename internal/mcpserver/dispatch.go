@@ -56,8 +56,7 @@ var _ API = (*basecamp.AccountClient)(nil)
 // request body property. The describe action serves the schema for all
 // three. Failures are in-band isError results per MCP convention.
 type dispatcher struct {
-	api     API
-	connect Dispatch
+	api API
 }
 
 func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.Operation, params map[string]any) (*mcp.CallToolResult, error) {
@@ -68,11 +67,6 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 	full, ok := domain.Operation(op.Action)
 	if !ok {
 		return gateway.ErrorResult("internal error: action %q not in domain %q", op.Action, dom.Name()), nil
-	}
-
-	// The connector's own domain is served from its ledger, never Basecamp.
-	if dom.Name() == connectDomainKey {
-		return d.handleConnect(ctx, full, params)
 	}
 
 	// Composite actions are SDK compositions, not model operations: they

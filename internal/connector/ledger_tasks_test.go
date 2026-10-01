@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -585,4 +586,15 @@ func TestTheAdoptionBoundaryIsTheConversationsNotTheTasks(t *testing.T) {
 	assert.False(t, candidates[0].NextAckAt.IsZero(),
 		"the later task's acknowledgement bounds what the lost event may adopt")
 	assert.False(t, candidates[0].NextAckAt.Before(candidates[0].DeliveredAt))
+}
+
+// ledgerCommitWithBucket admits v and moves its record to another bucket, so
+// tests can have several served projects.
+func (l *Ledger) ledgerCommitWithBucket(v admission.Verdict, bucket int64) (admission.State, error) {
+	state, err := l.Admission().Commit(context.Background(), v)
+	if err != nil {
+		return state, err
+	}
+	_, err = l.db.ExecContext(context.Background(), `UPDATE events SET bucket_id = ? WHERE id = ?`, bucket, v.EventID)
+	return state, err
 }

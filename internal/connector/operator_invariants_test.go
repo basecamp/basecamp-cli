@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
-	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 )
 
 // The operator decisions and the hold (ledger_hold.go). Each test names the
@@ -314,7 +313,6 @@ func TestRedispatchOfARecordHeldOverAReasonRerunsIt(t *testing.T) {
 // the verdict says so, so no guard acknowledgement is called for.
 func TestInvariant1AReviewTaggedSeenRecordIsHeldNotDispatched(t *testing.T) {
 	l := newTestLedger(t)
-	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
 	ctx := context.Background()
 	seenRecord(t, l, 1)
 	_, err := l.SetHold(ctx, opBy, HoldByOperator)
@@ -418,52 +416,6 @@ func TestInvariant2AHeldLedgerSurvivesRestartUntilRelease(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, held)
 	launchOf(t, l, 1)
-}
-
-// Invariant 2: nothing moves to sending under the hold.
-func TestInvariant2NothingIsPostedUnderTheHold(t *testing.T) {
-	l := newTestLedger(t)
-	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
-	ctx := context.Background()
-	seenRecord(t, l, 1)
-	v := blockedVerdict(1, 0, admission.ReasonNoRoute)
-	v.Trigger, v.Acknowledge = admission.TriggerMentioned, true
-	v.Reply = &admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 10304028989}
-	_, err := l.Admission().Commit(ctx, v)
-	require.NoError(t, err)
-	pending, err := l.Intents(ctx, IntentFilter{States: []IntentState{IntentPending}})
-	require.NoError(t, err)
-	require.Len(t, pending, 1)
-
-	_, err = l.SetHold(ctx, opBy, HoldByOperator)
-	require.NoError(t, err)
-	_, _, err = l.claimIntent(ctx)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "held")
-
-	_, err = l.Release(ctx, opBy)
-	require.NoError(t, err)
-	claimed, ok, err := l.claimIntent(ctx)
-	require.NoError(t, err)
-	require.True(t, ok)
-	assert.Equal(t, IntentSending, claimed.State)
-}
-
-// A held record's pending guard acknowledgement is not sent later.
-func TestHoldingARecordCancelsItsPendingGuard(t *testing.T) {
-	l := newTestLedger(t)
-	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
-	ctx := context.Background()
-	opAdmit(t, l, 1, "recording:1")
-	guards, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentGuardAck}, States: []IntentState{IntentPending}})
-	require.NoError(t, err)
-	require.Len(t, guards, 1)
-
-	_, err = l.SetHold(ctx, opBy, HoldByOperator)
-	require.NoError(t, err)
-	guard, err := l.Intent(ctx, guards[0].ID)
-	require.NoError(t, err)
-	assert.Equal(t, IntentCanceled, guard.State)
 }
 
 // Invariant 4: a terminal record leaves its state only with a decision
@@ -617,26 +569,6 @@ func TestDiscard(t *testing.T) {
 	}
 }
 
-// A discard cancels the lifecycle messages still pending for the record.
-func TestDiscardCancelsAPendingHoldingReply(t *testing.T) {
-	l := newTestLedger(t)
-	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
-	ctx := context.Background()
-	seenRecord(t, l, 1)
-	v := blockedVerdict(1, 0, admission.ReasonNoRoute)
-	v.Trigger, v.Acknowledge = admission.TriggerMentioned, true
-	v.Reply = &admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 10304028989}
-	_, err := l.Admission().Commit(ctx, v)
-	require.NoError(t, err)
-
-	got, err := l.Discard(ctx, 1, opBy)
-	require.NoError(t, err)
-	assert.Equal(t, 1, got.Canceled)
-	pending, err := l.Intents(ctx, IntentFilter{States: []IntentState{IntentPending}})
-	require.NoError(t, err)
-	assert.Empty(t, pending)
-}
-
 // rawDecision writes a decisions row directly, as something other than this
 // package could.
 func rawDecision(t *testing.T, l *Ledger, eventID int64, action, at string) int64 {
@@ -781,28 +713,10 @@ func TestRedispatchQueuesAHeldRecordBehindALiveConversation(t *testing.T) {
 	assert.False(t, got.Admitted)
 }
 
-// A completion notice asks nothing of a person who has already decided the
-// record: the notice says what happened, and no more.
-func TestACompletionNoticeAsksNothingOfADecidedRecord(t *testing.T) {
-	l := newTestLedger(t)
-	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
-	ctx := context.Background()
-	launch := pendingRedispatch(t, l)
-
-	_, err := l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
-	require.NoError(t, err)
-	intents, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentCompletion}})
-	require.NoError(t, err)
-	require.Len(t, intents, 1)
-	assert.Contains(t, MessageText(intents[0].Body), "Something went wrong and I couldn't finish this.")
-	assert.NotContains(t, intents[0].Body, "Mention me again", "a person already redispatched it")
-}
-
 // An import that closes a record does not leave it a lifecycle message that
 // asks for a redispatch the ledger would refuse.
 func TestImportCancelsTheMessagesOfARecordItCloses(t *testing.T) {
 	l := newTestLedger(t)
-	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
 	ctx := context.Background()
 	seenRecord(t, l, 1)
 	v := blockedVerdict(1, 0, admission.ReasonNoRoute)
@@ -816,31 +730,6 @@ func TestImportCancelsTheMessagesOfARecordItCloses(t *testing.T) {
 	pending, err := l.Intents(ctx, IntentFilter{States: []IntentState{IntentPending}})
 	require.NoError(t, err)
 	assert.Empty(t, pending, "nothing is posted about a record a person closed")
-}
-
-// A completion notice waiting in the outbox is rendered again when it is
-// claimed: a record a person decided in between asks nothing of them.
-func TestACompletionNoticeIsRenderedAgainWhenItIsClaimed(t *testing.T) {
-	l := newTestLedger(t)
-	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
-	ctx := context.Background()
-	opAdmit(t, l, 1, "recording:1")
-	launch := launchOf(t, l, 1)
-	_, err := l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
-	require.NoError(t, err)
-	notices, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentCompletion}})
-	require.NoError(t, err)
-	require.Len(t, notices, 1)
-	require.Contains(t, notices[0].Body, "If I didn&#39;t, mention me again to try again.")
-
-	_, err = l.Discard(ctx, 1, opBy)
-	require.NoError(t, err)
-	claimed, ok, err := l.claimIntent(ctx)
-	require.NoError(t, err)
-	require.True(t, ok)
-	assert.Equal(t, IntentSending, claimed.State)
-	assert.Contains(t, claimed.Body, "may not have finished this.")
-	assert.NotContains(t, claimed.Body, "Mention me again", "a person already decided it")
 }
 
 // Invariant 2, at the database: a task takes no follow-up while the hold
@@ -860,91 +749,11 @@ func TestInvariant2ATaskTakesNoFollowUpUnderTheHold(t *testing.T) {
 	assert.Equal(t, StateQueued, stateOf(t, l, 2))
 }
 
-// A record a person authorized is decided too, though it stays blocked until
-// its prerequisite runs: the notice claimed meanwhile asks nothing more. A
-// record blocked on its start asks the person who runs the agent, not the
-// thread, so neither notice suggests a mention.
-func TestACompletionNoticeAsksNothingOfAnAuthorizedBlockedRecord(t *testing.T) {
-	l := newTestLedger(t)
-	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
-	ctx := context.Background()
-	opAdmit(t, l, 1, "recording:1")
-	for range 2 {
-		launch := launchOf(t, l, 1)
-		_, err := l.EndAttempt(ctx, AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true})
-		require.NoError(t, err)
-	}
-	require.Equal(t, StateBlocked, stateOf(t, l, 1))
-	notices, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentCompletion}})
-	require.NoError(t, err)
-	require.Len(t, notices, 1)
-	require.Contains(t, notices[0].Body, "The person who runs me needs to check it.")
-	require.NotContains(t, notices[0].Body, "Mention me again")
-
-	got, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
-	require.NoError(t, err)
-	require.True(t, got.Rerun)
-	claimed, ok, err := l.claimIntent(ctx)
-	require.NoError(t, err)
-	require.True(t, ok)
-	assert.NotContains(t, claimed.Body, "Mention me again")
-}
-
-// An authorization answers for the outcome it was made on. When the attempt it
-// led to ends unknown again the notice asks again, and when it cannot start the
-// notice asks the person who runs the agent.
-func TestAnEarlierAuthorizationDoesNotSilenceALaterNotice(t *testing.T) {
-	asks := map[string]string{
-		"unknown again":        "If I didn&#39;t, mention me again to try again.",
-		"blocked on its start": "The person who runs me needs to check it.",
-	}
-	for name, second := range map[string]func(t *testing.T, l *Ledger){
-		"unknown again": func(t *testing.T, l *Ledger) {
-			launch := launchOf(t, l, 1)
-			_, err := l.EndAttempt(context.Background(), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopLost})
-			require.NoError(t, err)
-		},
-		"blocked on its start": func(t *testing.T, l *Ledger) {
-			for range 2 {
-				launch := launchOf(t, l, 1)
-				_, err := l.EndAttempt(context.Background(), AttemptEnd{AttemptID: launch.AttemptID, Stop: StopFailed, SpawnFailed: true})
-				require.NoError(t, err)
-			}
-			ids, err := l.AuthorizedBlocked(context.Background(), 10)
-			require.NoError(t, err)
-			assert.Empty(t, ids, "the old authorization does not stand for the new block")
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			l := newTestLedger(t)
-			l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
-			ctx := context.Background()
-			first := unknownOutcome(t, l, 1)
-			_, err := l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
-			require.NoError(t, err)
-			second(t, l)
-
-			notices, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentCompletion}})
-			require.NoError(t, err)
-			var latest Intent
-			for _, n := range notices {
-				if n.AttemptID != first.AttemptID {
-					latest = n
-					break
-				}
-			}
-			require.NotZero(t, latest.ID)
-			assert.Contains(t, latest.Body, asks[name], "a person is asked again")
-		})
-	}
-}
-
 // An import's done decision closes an unknown or failed outcome for good: no
 // redispatch is accepted for it and no notice asks for one. A success stays
 // as it was.
 func TestImportDoneClosesAnOutcomeThatWaitedForAPerson(t *testing.T) {
 	l := newTestLedger(t)
-	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
 	ctx := context.Background()
 	unknownOutcome(t, l, 1)
 	opAdmit(t, l, 2, "recording:2")
@@ -974,11 +783,6 @@ func TestImportDoneClosesAnOutcomeThatWaitedForAPerson(t *testing.T) {
 	assert.Equal(t, string(StateCompleted), recordedAs, "the audit says what happened, not what would have")
 	_, err = l.Redispatch(ctx, 1, opBy, []int64{adapterBucketID})
 	assert.ErrorIs(t, err, ErrDecisionRefused)
-	claimed, ok, err := l.claimIntent(ctx)
-	require.NoError(t, err)
-	if ok {
-		assert.NotContains(t, claimed.Body, "redispatch 1")
-	}
 }
 
 // A record held over a blocking reason and redispatched is authorized for the
@@ -1023,24 +827,6 @@ func TestADiscardWithdrawsARedispatchWaitingForItsTask(t *testing.T) {
 	var waiting bool
 	require.NoError(t, l.db.QueryRowContext(ctx, `SELECT redispatch_decision IS NOT NULL FROM events WHERE id = 1`).Scan(&waiting))
 	assert.False(t, waiting, "the authorization went with the record")
-}
-
-// A canceled guard is finished like every other intent the ledger closes.
-func TestAHeldRecordsCanceledGuardIsFinished(t *testing.T) {
-	l := newTestLedger(t)
-	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
-	ctx := context.Background()
-	opAdmit(t, l, 1, "recording:1")
-	guards, err := l.Intents(ctx, IntentFilter{Kinds: []IntentKind{IntentGuardAck}})
-	require.NoError(t, err)
-	require.Len(t, guards, 1)
-
-	_, err = l.SetHold(ctx, opBy, HoldByOperator)
-	require.NoError(t, err)
-	guard, err := l.Intent(ctx, guards[0].ID)
-	require.NoError(t, err)
-	assert.Equal(t, IntentCanceled, guard.State)
-	assert.NotNil(t, guard.FinishedAt, "a canceled intent says when it was finished")
 }
 
 // Invariant 2, for the worker a crashed connector left running: while the hold
@@ -1093,42 +879,6 @@ func TestAHoldRefusesAnExposureAsHeldNotAsAFailure(t *testing.T) {
 
 	_, err = l.ExposeEvent(ctx, launch.AttemptID, 2)
 	require.ErrorIs(t, err, ErrHeld)
-}
-
-// Through the dispatcher: a hold that lands while a task runs withholds the
-// next instruction and lets the task finish, rather than failing it.
-//
-//nolint:contextcheck // the harness builds its fixtures on background contexts
-func TestAHoldWithholdsTheNextInstructionWithoutFailingTheTask(t *testing.T) {
-	ctx := context.Background()
-	release := make(chan struct{})
-	fake := newFakeDriver()
-	var h *dispatchHarness
-	fake.turn = func(_ *fakeSession, n int, _ string) (driver.PromptResult, error) {
-		if n == 1 {
-			<-release
-		}
-		return driver.PromptResult{Stop: driver.TurnEndTurn}, nil
-	}
-	h = newDispatchHarness(t, fake, nil)
-	opAdmit(t, h.ledger, 1, "recording:1")
-	h.run(t)
-	s := <-fake.made
-	opAdmit(t, h.ledger, 2, "recording:1")
-	require.Eventually(t, func() bool {
-		var n int
-		_ = h.ledger.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_events WHERE event_id = 2`).Scan(&n)
-		return n == 1
-	}, 5*time.Second, 10*time.Millisecond, "the follow-up joined the task")
-
-	_, err := h.ledger.SetHold(ctx, opBy, HoldByOperator)
-	require.NoError(t, err)
-	close(release)
-
-	rows := h.attemptsEnded(t, 1)
-	assert.Equal(t, "finished", rows[0].StopReason, "a held connector is not a failed task")
-	assert.Len(t, s.promptList(), 1, "nothing more was handed over")
-	assert.Equal(t, StateHeld, stateOf(t, h.ledger, 2), "the follow-up waits for a person")
 }
 
 // Invariant 2: an event the launch exposed carries only a pointer until a

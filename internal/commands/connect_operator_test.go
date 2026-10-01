@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,7 +28,6 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
-	"github.com/basecamp/basecamp-cli/internal/connector/driver/acp"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
@@ -139,7 +137,7 @@ func TestConnectStatusReadsWithoutWritingAndShowsNoContent(t *testing.T) {
 	assert.NotContains(t, styled, operatorSecretContent)
 }
 
-func TestConnectRedispatchDiscardAndRelease(t *testing.T) {
+func TestConnectDiscardAndRelease(t *testing.T) {
 	f := newOperatorFixture(t)
 	l := f.ledger(t, false)
 	ctx := context.Background()
@@ -147,21 +145,10 @@ func TestConnectRedispatchDiscardAndRelease(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, l.Close())
 
-	out, err := f.run(t, output.FormatJSON, "redispatch", "1")
+	out, err := f.run(t, output.FormatJSON, "discard", "2")
 	require.NoError(t, err, out)
-	assert.Contains(t, out, "admitted")
-	assert.Contains(t, out, "nothing launches until release")
 
-	out, err = f.run(t, output.FormatJSON, "redispatch", "1")
-	require.Error(t, err, out)
-	assert.Equal(t, output.CodeUsage, usageError(t, err).Code, "an admitted record is live")
-
-	out, err = f.run(t, output.FormatJSON, "discard", "2")
-	require.NoError(t, err, out)
-	out, err = f.run(t, output.FormatJSON, "redispatch", "2")
-	require.Error(t, err, out)
-
-	_, err = f.run(t, output.FormatJSON, "redispatch", "nope")
+	_, err = f.run(t, output.FormatJSON, "discard", "nope")
 	require.Error(t, err)
 
 	out, err = f.run(t, output.FormatJSON, "release")
@@ -176,9 +163,6 @@ func TestConnectRedispatchDiscardAndRelease(t *testing.T) {
 	held, err := l.Held(ctx)
 	require.NoError(t, err)
 	assert.False(t, held)
-	one, _, err := l.Get(ctx, 1)
-	require.NoError(t, err)
-	assert.Equal(t, connector.StateAdmitted, one.State)
 	two, _, err := l.Get(ctx, 2)
 	require.NoError(t, err)
 	assert.Equal(t, connector.StateDiscarded, two.State)
@@ -237,26 +221,6 @@ func TestConnectHoldFlagIsOnTheRunCommand(t *testing.T) {
 	assert.True(t, v)
 }
 
-// doctor refuses what the run command refuses, and nothing the run command
-// runs. The acp driver is on the run command now, so it is not a failing
-// check any more.
-func TestConnectDoctorRefusesOnlyWhatTheRunCommandRefuses(t *testing.T) {
-	file := setup.New("agent")
-	assert.Empty(t, driverChecks(connectProfile{name: "agent", file: file}))
-
-	acpFile := setup.New("agent")
-	acpFile.Driver = setup.DriverACP
-	assert.Empty(t, driverChecks(connectProfile{name: "agent", file: acpFile}),
-		"the acp driver is a driver the connector starts on")
-
-	unknown := setup.New("agent")
-	unknown.Driver = "someday"
-	checks := driverChecks(connectProfile{name: "agent", file: unknown})
-	require.Len(t, checks, 1)
-	assert.Equal(t, "Driver", checks[0].Name)
-	assert.Equal(t, setup.StatusFail, checks[0].Status)
-}
-
 // Copilot, on #748: on macOS the Platform check said the connector cannot run
 // there and then named a capability macOS has, so the failure contradicted
 // itself and sent a Mac reader after the wrong thing. The constraint that
@@ -277,53 +241,6 @@ func TestConnectDoctorPlatformCheckNamesTheConstraintThatApplies(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), connectSupportedOSReason, "doctor and the run command give the one reason")
 	assert.Contains(t, err.Error(), "Linux and macOS only, not windows")
-}
-
-// The acp driver runs a pinned adapter out of the connector's own npm
-// prefix, never one on PATH: doctor resolves it the way the driver does, so
-// a documented install passes and an unpinned build on PATH does not.
-func TestConnectDoctorFindsTheACPAdapterWhereTheDriverDoes(t *testing.T) {
-	data := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", data)
-
-	// A decoy on PATH, which is not what the acp driver would run.
-	decoy := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(decoy, "claude-agent-acp"), []byte("#!/bin/sh\nexit 0\n"), 0o700))
-	t.Setenv("PATH", decoy)
-
-	file := setup.New("agent")
-	file.Driver = setup.DriverACP
-	checks := workerBinaryChecks(file)
-	require.Len(t, checks, 1)
-	assert.Equal(t, setup.StatusFail, checks[0].Status,
-		"an unpinned executable that happens to be on PATH is not the pinned adapter")
-	assert.Contains(t, checks[0].Hint, "make acp-adapters")
-
-	// The adapters directory make acp-adapters writes.
-	adapter, ok := acp.AdapterForWorker(setup.WorkerClaude)
-	require.True(t, ok)
-	prefix := filepath.Join(data, "basecamp", "acp-adapters")
-	pkgDir := filepath.Join(prefix, "node_modules", filepath.FromSlash(adapter.Package))
-	require.NoError(t, os.MkdirAll(pkgDir, 0o755))
-	manifest := fmt.Sprintf(`{"name":%q,"version":%q}`, adapter.Package, adapter.Version)
-	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "package.json"), []byte(manifest), 0o600))
-	binDir := filepath.Join(prefix, "node_modules", ".bin")
-	require.NoError(t, os.MkdirAll(binDir, 0o755))
-	bin := filepath.Join(binDir, adapter.Name)
-	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o700))
-
-	checks = workerBinaryChecks(file)
-	require.Len(t, checks, 1)
-	assert.Equal(t, setup.StatusPass, checks[0].Status, "the adapter make acp-adapters installed is the one doctor finds")
-	assert.Contains(t, checks[0].Message, bin)
-	assert.Contains(t, checks[0].Message, adapter.Version)
-
-	// A version other than the pin is not the adapter the driver would run.
-	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "package.json"),
-		[]byte(fmt.Sprintf(`{"name":%q,"version":"0.0.1-not-the-pin"}`, adapter.Package)), 0o600))
-	checks = workerBinaryChecks(file)
-	require.Len(t, checks, 1)
-	assert.Equal(t, setup.StatusFail, checks[0].Status, "an adapter off the pin is not ready")
 }
 
 func TestConnectDoctorReportsLedgerGapsAndTheHold(t *testing.T) {
@@ -379,19 +296,6 @@ func TestFakeMCPServer(t *testing.T) {
 	}
 	_ = server.Run(context.Background(), &mcp.StdioTransport{})
 	os.Exit(0)
-}
-
-func TestConnectDoctorMCPHandshakeRunsTheServerWithAnAllowlistedEnvironment(t *testing.T) {
-	t.Setenv("CONNECT_DOCTOR_LEAK_CHECK", "not-a-real-secret")
-	orig := mcpServerCommand
-	mcpServerCommand = func(string) (string, []string, error) {
-		return os.Args[0], []string{"-test.run=^TestFakeMCPServer$", "--", fakeMCPServerArg}, nil
-	}
-	t.Cleanup(func() { mcpServerCommand = orig })
-
-	c := mcpHandshakeCheck(context.Background(), "agent")
-	assert.Equal(t, setup.StatusPass, c.Status, c.Message)
-	assert.Contains(t, c.Message, "1 tools", "only the allowlisted environment reached the server")
 }
 
 func TestOperatorCommandsDoNotMigrateUnderARunningConnector(t *testing.T) {
@@ -479,16 +383,15 @@ func TestConnectStatusOnAMissingShadowLedgerPointsAtTheShadowRun(t *testing.T) {
 	assert.Contains(t, usageError(t, err).Hint, "--shadow")
 }
 
-// A token in the environment would decide a record's prerequisite as somebody
-// other than the agent, so redispatch and doctor refuse before the ledger is
-// touched.
-func TestRedispatchAndDoctorRefuseAShadowingToken(t *testing.T) {
+// A token in the environment would check somebody other than the agent, so
+// doctor refuses before the ledger is touched.
+func TestDoctorRefusesAShadowingToken(t *testing.T) {
 	f := newOperatorFixture(t)
 	l := f.ledger(t, false)
 	require.NoError(t, l.Close())
 	t.Setenv("BASECAMP_TOKEN", "not-a-real-token")
 
-	for _, args := range [][]string{{"redispatch", "2"}, {"doctor"}} {
+	for _, args := range [][]string{{"doctor"}} {
 		_, err := f.run(t, output.FormatJSON, args...)
 		require.Error(t, err, args[0])
 		assert.Contains(t, err.Error(), "BASECAMP_TOKEN", args[0])
@@ -511,12 +414,7 @@ func TestTheDecisionCommandsSpeakSnakeCase(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, l.Close())
 
-	out, err := f.run(t, output.FormatJSON, "redispatch", "1")
-	require.NoError(t, err, out)
-	assert.Contains(t, out, `"event_id"`)
-	assert.NotContains(t, out, `"EventID"`)
-
-	out, err = f.run(t, output.FormatJSON, "release")
+	out, err := f.run(t, output.FormatJSON, "release")
 	require.NoError(t, err, out)
 	assert.Contains(t, out, `"still_held"`)
 	assert.NotContains(t, out, `"StillHeld"`)
@@ -534,167 +432,10 @@ func preflightCheck(t *testing.T, checks []setup.Check) (setup.Check, bool) {
 	return setup.Check{}, false
 }
 
-// codexProfile is an acp/codex profile, with HOME (and so ~/.codex) pointed
-// at a home of its own and the process's working directory at a repository
-// of its own: the machine state the Codex preflight reads, and nothing of
-// the person running the test. Doctor checks the directory it runs in, so
-// the test runs in one it owns.
-func codexProfile(t *testing.T) (file setup.File, home, dir string) {
-	t.Helper()
-	home = t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("CODEX_HOME", "")
-	dir = filepath.Join(t.TempDir(), "repo")
-	require.NoError(t, os.MkdirAll(dir, 0o755))
-	t.Chdir(dir)
-	// Doctor names the directory as the kernel reports it, which on a Mac is
-	// the resolved path under /private.
-	resolved, err := os.Getwd()
-	require.NoError(t, err)
-	file = setup.New("agent")
-	file.Driver = setup.DriverACP
-	file.Worker = setup.WorkerCodex
-	file.Projects[1] = admission.Project{}
-	return file, home, resolved
-}
-
 func writeCodexConfig(t *testing.T, dir, body string) string {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".codex"), 0o755))
 	path := filepath.Join(dir, ".codex", "config.toml")
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
 	return path
-}
-
-// The acp driver refuses a session before it starts anything when a Codex
-// config layer declares MCP servers of its own, so every dispatch on such a
-// machine is blocked with a notice on the card. Doctor runs that same
-// refusal: a profile whose adapter is installed and on the pin is not ready
-// if no session it would start could run.
-//
-// It runs it in the directory doctor itself was started in. That is where a
-// dispatch would run a session only if the connector was started in the same
-// place — the connector runs where it is started and records nowhere — so
-// the check names the directory it checked.
-func TestConnectDoctorRunsTheAdaptersPreflightInItsOwnDirectory(t *testing.T) {
-	file, home, dir := codexProfile(t)
-
-	checks := workerBinaryChecks(file)
-	c, ok := preflightCheck(t, checks)
-	require.True(t, ok, "the codex adapter's preflight is a check of its own")
-	assert.Equal(t, setup.StatusPass, c.Status)
-	assert.Contains(t, c.Message, dir, "it says which directory it ran in")
-
-	// The user's own layer: the one anybody who uses Codex with MCP servers
-	// at all has.
-	userConfig := writeCodexConfig(t, home, "[mcp_servers.linear]\ncommand = \"linear-mcp\"\n")
-
-	c, ok = preflightCheck(t, workerBinaryChecks(file))
-	require.True(t, ok)
-	assert.Equal(t, setup.StatusFail, c.Status, "doctor never calls a profile ready that would not start")
-	assert.Contains(t, c.Message, userConfig, "the person reading this has to know which file")
-	assert.Contains(t, c.Message, dir, "and which directory it was checked in")
-	assert.Equal(t, 1, strings.Count(c.Message, userConfig), "and named once")
-	assert.Contains(t, c.Hint, "CODEX_HOME", "and what to do about it")
-
-	// And that is what the command exits with: the file is on the error a
-	// person sees, not only in the styled table.
-	err := doctorNotReady(append(append([]setup.Check{}, checks...), c))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), userConfig)
-}
-
-// claude-agent-acp has nothing on this machine to refuse a session over, so
-// it gets no row: a check that does not exist must not report that it
-// passed.
-func TestConnectDoctorHasNoPreflightRowForAnAdapterWithoutOne(t *testing.T) {
-	file := setup.New("agent")
-	file.Driver = setup.DriverACP
-	file.Worker = setup.WorkerClaude
-	file.Projects[1] = admission.Project{}
-	_, ok := preflightCheck(t, workerBinaryChecks(file))
-	assert.False(t, ok)
-}
-
-// The spawn driver runs the worker's own CLI with the host's configuration
-// switched off on the command line (codex --ignore-user-config, claude
-// --setting-sources ""), so there is no machine-configuration refusal for
-// doctor to run there.
-func TestConnectDoctorHasNoPreflightRowUnderTheSpawnDriver(t *testing.T) {
-	file := setup.New("agent")
-	file.Driver = setup.DriverSpawn
-	file.Worker = setup.WorkerCodex
-	file.Projects[1] = admission.Project{}
-	_, ok := preflightCheck(t, workerBinaryChecks(file))
-	assert.False(t, ok)
-}
-
-// A config layer that cannot be read refuses every session too — nothing
-// can say it declares no MCP server — but it is not a declaration, and
-// telling a person to take mcp_servers out of a file they cannot read is
-// not a remedy.
-func TestConnectDoctorPreflightSaysWhatToDoAboutAnUnreadableConfig(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root reads a file whatever its mode says")
-	}
-	file, home, _ := codexProfile(t)
-	config := writeCodexConfig(t, home, "model = \"gpt-5\"\n")
-	require.NoError(t, os.Chmod(config, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(config, 0o600) })
-
-	c, ok := preflightCheck(t, workerBinaryChecks(file))
-	require.True(t, ok)
-	assert.Equal(t, setup.StatusFail, c.Status, "what cannot be read cannot be vouched for")
-	assert.Contains(t, c.Message, config)
-	assert.Contains(t, c.Message, "cannot be read")
-	assert.NotContains(t, c.Message, "declares MCP servers of its own",
-		"a file nobody could read is not a file that declares them")
-	assert.Contains(t, c.Hint, "readable")
-	assert.NotContains(t, c.Hint, "Take the MCP servers out",
-		"there are no MCP servers to take out of a file nothing has read")
-}
-
-// And one run names every layer a person has to change, not the first: the
-// user's layer is read before the directory's own, so stopping at the first
-// would hide the directory's until the user's was fixed and doctor run
-// again.
-func TestConnectDoctorPreflightNamesEveryLayerInOneRun(t *testing.T) {
-	file, home, dir := codexProfile(t)
-	user := writeCodexConfig(t, home, "[mcp_servers.linear]\ncommand = \"linear-mcp\"\n")
-	project := writeCodexConfig(t, dir, "[mcp_servers.other]\ncommand = \"other-mcp\"\n")
-
-	c, ok := preflightCheck(t, workerBinaryChecks(file))
-	require.True(t, ok)
-	assert.Equal(t, setup.StatusFail, c.Status)
-	assert.Contains(t, c.Message, user)
-	assert.Contains(t, c.Message, project, "the directory's own layer is named in the same run as the user's")
-}
-
-// The hint carries what to do about every reason reported, most pressing
-// first. The layers are read in a fixed order, so a file that cannot be read
-// comes before a config that certainly declares MCP servers; the person has
-// to be told about the declaration, and about both.
-func TestConnectDoctorPreflightHintsAtWhatMostNeedsDoing(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root reads a file whatever its mode says")
-	}
-	file, home, _ := codexProfile(t)
-	// config.toml is read before managed_config.toml, so the layer that
-	// cannot be read is the one this would hint about by order alone.
-	unreadable := writeCodexConfig(t, home, "model = \"gpt-5\"\n")
-	declared := filepath.Join(home, ".codex", "managed_config.toml")
-	require.NoError(t, os.WriteFile(declared, []byte("[mcp_servers.linear]\ncommand = \"linear-mcp\"\n"), 0o600))
-	require.NoError(t, os.Chmod(unreadable, 0o000))
-	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o600) })
-
-	c, ok := preflightCheck(t, workerBinaryChecks(file))
-	require.True(t, ok)
-	assert.Equal(t, setup.StatusFail, c.Status)
-	assert.Contains(t, c.Message, declared, "both layers are reported")
-	assert.Contains(t, c.Message, unreadable)
-	assert.Contains(t, c.Hint, "Take the MCP servers out",
-		"the declaration is certainly there, and is what to do about it first")
-	assert.Contains(t, c.Hint, "readable by the user", "and the other layer still has its own remedy")
-	assert.Less(t, strings.Index(c.Hint, "Take the MCP servers out"), strings.Index(c.Hint, "readable by the user"),
-		"most pressing first, not first in the order the layers are read")
 }

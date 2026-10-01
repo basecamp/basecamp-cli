@@ -3,7 +3,6 @@
 package commands
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,7 +19,6 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
-	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
@@ -61,42 +59,15 @@ func (p *scriptedPrompter) Input(question string) (string, error) {
 // on Linux, with the browser kept shut and the state home a temp dir.
 func guided(t *testing.T, p *scriptedPrompter) {
 	t.Helper()
-	prevInteractive, prevAsk, prevConnection, prevGOOS := connectSetupInteractive, connectSetupAsk, connectSetupConnection, connectServiceGOOS
+	prevInteractive, prevAsk, prevConnection, prevGOOS := connectSetupInteractive, connectSetupAsk, connectSetupConnection, connectGOOS
 	connectSetupInteractive = func(*appctx.App) bool { return true }
 	connectSetupAsk = p
 	connectSetupConnection = agentConnectFlags{softwareName: "basecamp connect", noBrowser: true}
-	connectServiceGOOS = "linux"
+	connectGOOS = "linux"
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Cleanup(func() {
-		connectSetupInteractive, connectSetupAsk, connectSetupConnection, connectServiceGOOS = prevInteractive, prevAsk, prevConnection, prevGOOS
+		connectSetupInteractive, connectSetupAsk, connectSetupConnection, connectGOOS = prevInteractive, prevAsk, prevConnection, prevGOOS
 	})
-	workerAnswers(t, readyWorker)
-}
-
-// readyWorker is a worker whose preflight passes.
-var readyWorker = driver.Preflight{Product: "Claude Code", Version: "2.1.283", Checks: []driver.PreflightCheck{
-	{Name: driver.PreflightStarts, Status: driver.PreflightPass, Message: "Claude Code 2.1.283 starts (/usr/local/bin/claude)"},
-	{Name: driver.PreflightFlags, Status: driver.PreflightPass, Message: "knows all 13 options the connector passes"},
-	{Name: driver.PreflightLogin, Status: driver.PreflightPass, Message: "logged in"},
-}}
-
-// brokenLauncher is the worker a manual run met: a claude on PATH that hands
-// over to a Claude Code that is not there.
-var brokenLauncher = driver.Preflight{Product: "Claude Code", Checks: []driver.PreflightCheck{
-	{Name: driver.PreflightStarts, Status: driver.PreflightFail,
-		Message: "The claude on your PATH is a launcher that couldn't find Claude Code (claude: line 2: /home/me/.local/share/mise/installs/claude/latest/claude: No such file or directory)",
-		Hint:    "Reinstall Claude Code, or fix the launcher at /home/me/.local/bin/claude."},
-}}
-
-// workerAnswers answers the worker preflight with p, for the test.
-func workerAnswers(t *testing.T, p driver.Preflight) {
-	t.Helper()
-	prev := connectWorkerPreflight
-	// As the real one: the acp driver has no spawn preflight.
-	connectWorkerPreflight = func(_ context.Context, f setup.File) (driver.Preflight, bool) {
-		return p, f.Driver != setup.DriverACP
-	}
-	t.Cleanup(func() { connectWorkerPreflight = prev })
 }
 
 func ownedByTheOperator(s *connectSetupServer) {
@@ -159,12 +130,11 @@ func TestGuidedConnectSetupFromNothing(t *testing.T) {
 	assert.Equal(t, []string{
 		"Work in all 2 of Marie Chef's projects? Connector, Launch",
 	}, p.asked)
-	assert.Contains(t, out, "✓ Claude Code 2.1.283 is ready")
 	assert.Contains(t, out, "✓ Everything checks out")
 	assert.Contains(t, out, "Marie Chef is set up on this computer")
 	assert.Contains(t, out, "Works in:  Connector, Launch")
 	assert.Contains(t, out, "Running:   no")
-	assert.Contains(t, out, "To start it, run this in the folder it should work in, and leave it running.")
+	assert.Contains(t, out, "To start it, run /basecamp-connect in your Claude Code session.")
 	assert.Contains(t, out, "  basecamp connect -P agent\n")
 	assert.Contains(t, out, "Once it's running, mention Marie Chef in one of those projects to try it.")
 	for _, internal := range []string{"Connected profile", "Account: 999", "auth status", "connect.json", "Identity", "Person " + strconv.FormatInt(setupOperatorPerson, 10)} {
@@ -236,32 +206,6 @@ func TestGuidedConnectSetupResumedRefusesAReadOnlyCredential(t *testing.T) {
 	assert.NotContains(t, out, "is set up on this computer")
 }
 
-// A worker with no preflight of its own (the acp driver) is still checked,
-// as doctor checks it: its pinned adapter must be installed, or setup says so
-// instead of calling the agent set up (Codex on #794).
-func TestGuidedConnectSetupChecksAnACPWorker(t *testing.T) {
-	s := startConnectSetupServer(t)
-	firstSetup(t, s)
-	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
-	path := connectSetupPath(t, "agent")
-	raw, err := os.ReadFile(path)
-	require.NoError(t, err)
-	var doc map[string]any
-	require.NoError(t, json.Unmarshal(raw, &doc))
-	doc["driver"] = setup.DriverACP
-	raw, err = json.Marshal(doc)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(path, raw, 0o600))
-	t.Setenv("XDG_DATA_HOME", t.TempDir()) // no adapters installed
-	guided(t, &scriptedPrompter{})
-
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"))
-	require.Error(t, err, out)
-	assert.Contains(t, err.Error(), "adapter")
-	assert.NotContains(t, out, "is set up on this computer")
-}
-
 // On a platform the connector doesn't run on, guided setup stops before it
 // connects anything: connecting would replace the secret a Linux computer may
 // be running this agent on, for a connector that can't run here (Codex on
@@ -271,7 +215,7 @@ func TestGuidedConnectSetupRefusesAnUnsupportedPlatformBeforeConnecting(t *testi
 	ownedByTheOperator(s)
 	s.agentProjects = projectsNamed(setupProject)
 	guided(t, &scriptedPrompter{})
-	connectServiceGOOS = "windows"
+	connectGOOS = "windows"
 
 	out, err := runConnectSetupCmd(t, bareSetupApp(t, s, "agent"))
 	require.Error(t, err, out)
@@ -336,32 +280,6 @@ func TestGuidedConnectSetupRefusesAnInsecureAgentProfileURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "base_url")
 }
 
-// Setup never offers the background service, which would run the agent in
-// the home directory, and never touches systemd: it says how to start the
-// agent in the folder it should work in.
-func TestGuidedConnectSetupNeverOffersTheBackgroundService(t *testing.T) {
-	s := startConnectSetupServer(t)
-	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
-	p := &scriptedPrompter{confirms: []bool{true}}
-	guided(t, p)
-	prev := runSystemctl
-	runSystemctl = func(args ...string) ([]byte, error) {
-		t.Errorf("setup ran systemctl %v", args)
-		return nil, nil
-	}
-	t.Cleanup(func() { runSystemctl = prev })
-
-	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"))
-	require.NoError(t, err, out)
-
-	assert.Equal(t, []string{"Work in Marie Chef's project, Connector?"}, p.asked)
-	assert.Contains(t, out, "  basecamp connect -P agent\n")
-	for _, service := range []string{"whenever you log in", "in the background", "service install", "systemctl"} {
-		assert.NotContains(t, out, service)
-	}
-}
-
 // An agent in no projects yet is the next step of a first setup, in
 // Basecamp, and not a failure: setup says what to do there and ends cleanly.
 func TestGuidedConnectSetupStopsWhenTheAgentIsInNoProjects(t *testing.T) {
@@ -375,54 +293,6 @@ func TestGuidedConnectSetupStopsWhenTheAgentIsInNoProjects(t *testing.T) {
 	assert.Contains(t, out, "Next: add it to the projects it should work in (in Basecamp, Adminland → Manage agents → Marie Chef → Edit), then run `basecamp connect setup -P agent` again.")
 	assert.NotContains(t, out, "is set up on this computer")
 	assertNotWritten(t, "agent")
-}
-
-// An AI that cannot start is caught here, before connect.json is written and
-// before anyone mentions the agent: setup stops, says why in plain words, and
-// says how to fix it.
-func TestGuidedConnectSetupStopsWhenTheWorkerCannotStart(t *testing.T) {
-	s := startConnectSetupServer(t)
-	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
-	p := &scriptedPrompter{}
-	guided(t, p)
-	workerAnswers(t, brokenLauncher)
-
-	app := bareSetupApp(t, s, "work")
-	app.Flags.Profile = "work"
-	out, err := runConnectSetupCmd(t, app)
-	require.Error(t, err, out)
-	var apiErr *output.Error
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, brokenLauncher.Checks[0].Message, apiErr.Message)
-	// The profile it was working on, which a bare `connect setup` may not
-	// choose again (Codex on #794).
-	assert.Equal(t, "Reinstall Claude Code, or fix the launcher at /home/me/.local/bin/claude. Then run this again: basecamp connect setup -P work", apiErr.Hint)
-	assert.Empty(t, p.asked, "nothing is asked of a person whose AI cannot start")
-	assert.NotContains(t, out, "is set up on this computer")
-	assertNotWritten(t, "work")
-}
-
-// A finished setup whose AI has since stopped starting is not called set up.
-func TestGuidedConnectSetupOnAFinishedSetupChecksTheWorker(t *testing.T) {
-	s := startConnectSetupServer(t)
-	firstSetup(t, s)
-	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
-	guided(t, &scriptedPrompter{})
-	loggedOut := driver.Preflight{Product: "Claude Code", Version: "2.1.283", Checks: []driver.PreflightCheck{
-		readyWorker.Checks[0], readyWorker.Checks[1],
-		{Name: driver.PreflightLogin, Status: driver.PreflightFail, Message: "Claude Code is logged out on this computer — run `claude` and log in"},
-	}}
-	workerAnswers(t, loggedOut)
-
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"))
-	require.Error(t, err, out)
-	var apiErr *output.Error
-	require.ErrorAs(t, err, &apiErr)
-	assert.Equal(t, "Claude Code is logged out on this computer — run `claude` and log in", apiErr.Message)
-	assert.Equal(t, "Then run this again: basecamp connect setup -P agent", apiErr.Hint)
-	assert.NotContains(t, out, "is set up on this computer")
 }
 
 // A computer whose connection Basecamp no longer takes is offered a fresh

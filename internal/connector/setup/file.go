@@ -41,7 +41,6 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/auth"
@@ -53,34 +52,6 @@ const Version = 1
 
 // FileName is connect.json's name inside its profile directory.
 const FileName = "connect.json"
-
-// Drivers.
-const (
-	DriverSpawn = "spawn"
-	DriverACP   = "acp"
-)
-
-// Workers: the coding agent a driver runs.
-const (
-	WorkerClaude = "claude"
-	WorkerCodex  = "codex"
-)
-
-// Workers is every worker connect.json may name. A worker is a row here plus
-// its spawn constructor (internal/connector/driver/spawn).
-var Workers = []string{WorkerClaude, WorkerCodex}
-
-// Defaults, from the connector spec.
-const (
-	DefaultWorker      = WorkerClaude
-	DefaultDriver      = DriverSpawn
-	DefaultConcurrency = 2
-	DefaultDeadline    = 45 * time.Minute
-
-	MaxConcurrency = 32
-	MinDeadline    = time.Minute
-	MaxDeadline    = 24 * time.Hour
-)
 
 // Credential kinds recorded for the agent.
 const (
@@ -109,21 +80,19 @@ type File struct {
 	Trust    admission.Trust             `json:"trust"`
 	Projects map[int64]admission.Project `json:"projects"`
 
-	Driver string `json:"driver"`
-	// Worker is the coding agent the driver runs: claude, or another row of
-	// Workers. Empty reads as DefaultWorker, so a file written before the
-	// field existed means what it meant.
-	Worker      string   `json:"worker,omitempty"`
-	Concurrency int      `json:"concurrency"`
-	Deadline    Duration `json:"deadline"`
-
-	// Dangerous is dangerous mode: the worker may run any command on this
-	// computer, as the person running the connector, without asking. Only
-	// `connect setup --dangerous` turns it on, with a person at a terminal
-	// who typed yes. It is refused unless trust is operator, since everyone
-	// who can give the agent work could otherwise have commands run here,
-	// and needs the spawn driver.
-	Dangerous bool `json:"dangerous,omitempty"`
+	// The Legacy fields are the settings of a connector that ran its own
+	// workers: which driver and coding agent, how many at once, for how
+	// long, and dangerous mode. The connector no longer starts workers
+	// (the person's own session does the work), so nothing reads these.
+	// They are fields for the same reason LegacyWorktrees is: Parse refuses
+	// an unknown key, and a connect.json written before has them. Parse
+	// zeroes them, and omitempty keeps them out of anything written from
+	// here.
+	LegacyDriver      string `json:"driver,omitempty"`
+	LegacyWorker      string `json:"worker,omitempty"`
+	LegacyConcurrency int    `json:"concurrency,omitempty"`
+	LegacyDeadline    string `json:"deadline,omitempty"`
+	LegacyDangerous   bool   `json:"dangerous,omitempty"`
 
 	// LegacyWorktrees is the --worktrees setting of a connector that gave
 	// each task a git worktree of its own. Worktrees are gone: a task runs
@@ -175,14 +144,10 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 // New is an empty connect.json for a profile, with the spec's defaults.
 func New(profile string) File {
 	return File{
-		Version:     Version,
-		Profile:     profile,
-		Trust:       admission.Trust{Mode: admission.TrustOperator},
-		Projects:    map[int64]admission.Project{},
-		Driver:      DefaultDriver,
-		Worker:      DefaultWorker,
-		Concurrency: DefaultConcurrency,
-		Deadline:    Duration(DefaultDeadline),
+		Version:  Version,
+		Profile:  profile,
+		Trust:    admission.Trust{Mode: admission.TrustOperator},
+		Projects: map[int64]admission.Project{},
 	}
 }
 
@@ -255,40 +220,12 @@ func (f File) Validate() error {
 	if _, err := f.Policy(f.Agent.PersonID); err != nil {
 		return err
 	}
-	if f.Dangerous && f.Trust.Mode != admission.TrustOperator {
-		return ErrDangerousShared
-	}
-	if f.Dangerous && f.Driver != DriverSpawn {
-		return fmt.Errorf("dangerous mode needs the %q driver, not %q", DriverSpawn, f.Driver)
-	}
 	for bucket, project := range f.Projects {
 		if project.Class != "" && !ValidClass(project.Class) {
 			return fmt.Errorf("served project %d: class %q must be lowercase letters, digits, - or _, at most 40", bucket, project.Class)
 		}
 	}
-	switch f.Driver {
-	case DriverSpawn, DriverACP:
-	default:
-		return fmt.Errorf("connect.json driver %q is not %q or %q", f.Driver, DriverSpawn, DriverACP)
-	}
-	if f.Worker != "" && !slices.Contains(Workers, f.Worker) {
-		return fmt.Errorf("connect.json worker %q is not one of %s", f.Worker, strings.Join(Workers, ", "))
-	}
-	if f.Concurrency < 1 || f.Concurrency > MaxConcurrency {
-		return fmt.Errorf("connect.json concurrency %d is outside 1..%d", f.Concurrency, MaxConcurrency)
-	}
-	if d := time.Duration(f.Deadline); d < MinDeadline || d > MaxDeadline {
-		return fmt.Errorf("connect.json deadline %s is outside %s..%s", d, MinDeadline, MaxDeadline)
-	}
 	return nil
-}
-
-// WorkerName is the worker the file names, the default when it names none.
-func (f File) WorkerName() string {
-	if f.Worker == "" {
-		return DefaultWorker
-	}
-	return f.Worker
 }
 
 // Parse decodes connect.json strictly. It refuses what encoding/json would
@@ -323,6 +260,7 @@ func Parse(data []byte) (File, error) {
 	// directories went, and DisallowUnknownFields would refuse the file
 	// outright without a field to decode them into.
 	f.LegacyWorktrees = false
+	f.LegacyDriver, f.LegacyWorker, f.LegacyConcurrency, f.LegacyDeadline, f.LegacyDangerous = "", "", 0, "", false
 	if f.Projects == nil {
 		f.Projects = map[int64]admission.Project{}
 	}

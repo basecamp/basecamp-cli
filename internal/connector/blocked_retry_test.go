@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -514,7 +515,6 @@ func TestAStaleRetryHandoffIsNotDecidedInsideTheInterval(t *testing.T) {
 func TestARedispatchMakesABlockedRecordDueAtOnce(t *testing.T) {
 	ledger, clock := retryLedger(t)
 	ctx := context.Background()
-	ledger.SetHooks(LifecycleHooks(ledger, LifecycleOptions{}))
 	blockRecord(t, ledger, 1, adapterBucketID, admission.ReasonReadFailed)
 
 	_, ok, err := ledger.Admission().LoadUndecided(ctx, 1)
@@ -566,7 +566,6 @@ func TestASweepsLimitCountsWorkItCanActuallyDo(t *testing.T) {
 func TestABlockedRecordWithNoScheduledAttemptIsNotRunnable(t *testing.T) {
 	ledger, clock := retryLedger(t)
 	ctx := context.Background()
-	ledger.SetHooks(LifecycleHooks(ledger, LifecycleOptions{}))
 	// no_route waits for the operator to serve the project: untimed, so the
 	// verdict writes no next attempt at all.
 	blockRecord(t, ledger, 1, adapterBucketID, admission.ReasonNoRoute)
@@ -695,4 +694,22 @@ func TestPruningNeverDropsAClaimItDidNotAskAbout(t *testing.T) {
 
 	assert.NotContains(t, intake.retriedBlocked, int64(7), "asked about, and not named: dropped")
 	assert.Contains(t, intake.retriedBlocked, int64(9), "never asked about: kept")
+}
+
+// obClock is a settable clock for the ledger and intake under test.
+type obClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *obClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *obClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	c.now = c.now.Add(d)
+	c.mu.Unlock()
 }

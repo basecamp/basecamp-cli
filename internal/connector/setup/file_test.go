@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -84,10 +83,9 @@ func TestSaveWritesTheSpecDefaults(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(data, &raw))
-	assert.Equal(t, "spawn", raw["driver"])
-	assert.EqualValues(t, 2, raw["concurrency"])
-	assert.Equal(t, "45m0s", raw["deadline"])
-	assert.NotContains(t, raw, "worktrees", "a setting the connector no longer has is not written")
+	for _, gone := range []string{"worktrees", "driver", "worker", "concurrency", "deadline", "dangerous"} {
+		assert.NotContains(t, raw, gone, "a setting the connector no longer has is not written")
+	}
 }
 
 func TestLoadReportsAMissingFileAsNotExist(t *testing.T) {
@@ -192,12 +190,7 @@ func TestValidateFailsClosed(t *testing.T) {
 		"agent in the allowlist": func(f *File) {
 			f.Trust = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{agentID}}
 		},
-		"class with spaces":    func(f *File) { f.Projects[projectID] = admission.Project{Class: "a b"} },
-		"unknown driver":       func(f *File) { f.Driver = "fork" },
-		"no concurrency":       func(f *File) { f.Concurrency = 0 },
-		"too much concurrency": func(f *File) { f.Concurrency = MaxConcurrency + 1 },
-		"deadline too short":   func(f *File) { f.Deadline = Duration(time.Second) },
-		"deadline too long":    func(f *File) { f.Deadline = Duration(48 * time.Hour) },
+		"class with spaces": func(f *File) { f.Projects[projectID] = admission.Project{Class: "a b"} },
 		"served project that is not a project": func(f *File) {
 			f.Projects[-1] = admission.Project{}
 		},
@@ -237,11 +230,11 @@ func TestParseRefusesDuplicateKeysAndTrailingData(t *testing.T) {
 		"trailing ]":            string(data) + "]",
 		"trailing }":            string(data) + "}",
 		"trailing object":       string(data) + "{}",
-		"duplicate top-level":   `{"driver":"acp",` + string(data[1:]),
+		"duplicate top-level":   `{"profile":"other",` + string(data[1:]),
 		"duplicate operator_id": strings.Replace(string(data), `"operator_id":`, `"operator_id":1,"operator_id":`, 1),
 		"duplicate nested key":  strings.Replace(string(data), `"48699913":{`, `"48699913":{"class":"other",`, 1),
 		"case variant key":      strings.Replace(string(data), `"trust":`, `"Trust":`, 1),
-		"long s variant key":    strings.Replace(string(data), `"concurrency"`, `"concurrencſ"`, 1),
+		"long s variant key":    strings.Replace(string(data), `"projects"`, `"projectſ"`, 1),
 		"padded project id":     strings.Replace(string(data), `"48699913":{`, `"048699913":{`, 1),
 		"signed project id":     strings.Replace(string(data), `"48699913":{`, `"+48699913":{`, 1),
 	} {
@@ -318,22 +311,6 @@ func TestSaveRefusesAHoldOnAnotherProfile(t *testing.T) {
 	assert.Contains(t, err.Error(), "profile \"agent\"")
 	_, statErr := os.Stat(path)
 	assert.True(t, os.IsNotExist(statErr), "nothing is written")
-}
-
-func TestWorkerIsOneSetupKnowsAndDefaultsToClaude(t *testing.T) {
-	f := validFile(t)
-	assert.Equal(t, WorkerClaude, f.WorkerName())
-	f.Worker = ""
-	require.NoError(t, f.Validate(), "a file written before the field existed")
-	assert.Equal(t, WorkerClaude, f.WorkerName())
-	f.Worker = "gemini"
-	assert.Error(t, f.Validate())
-
-	_, err := Apply(validFile(t), Changes{Worker: "gemini"})
-	assert.Error(t, err)
-	next, err := Apply(validFile(t), Changes{Worker: WorkerClaude})
-	require.NoError(t, err)
-	assert.Equal(t, WorkerClaude, next.Worker)
 }
 
 // The same refusal at the other reader: setup writes and re-reads the trust
@@ -425,4 +402,31 @@ func TestTheWorktreesCompatibilityFieldKeepsItsOldShapeRules(t *testing.T) {
 		_, err = Parse(data)
 		assert.Error(t, err, "the one thing the type guaranteed, still guaranteed")
 	})
+}
+
+// A connect.json from when the connector ran its own workers still opens:
+// its worker settings are read, then forgotten, and the next write drops them.
+func TestParseAcceptsAndForgetsTheWorkerSettingsOfAnOlderFile(t *testing.T) {
+	data, err := json.Marshal(validFile(t))
+	require.NoError(t, err)
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(data, &raw))
+	raw["driver"] = "spawn"
+	raw["worker"] = "claude"
+	raw["concurrency"] = 2
+	raw["deadline"] = "45m0s"
+	raw["dangerous"] = true
+	data, err = json.Marshal(raw)
+	require.NoError(t, err)
+
+	f, err := Parse(data)
+	require.NoError(t, err, "a file written by a connector that ran workers still opens")
+
+	again, err := json.Marshal(f)
+	require.NoError(t, err)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(again, &out))
+	for _, gone := range []string{"driver", "worker", "concurrency", "deadline", "dangerous"} {
+		assert.NotContains(t, out, gone)
+	}
 }

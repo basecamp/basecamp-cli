@@ -4,7 +4,6 @@ package setup
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -117,12 +116,4 @@ func TestApplyServedProjects(t *testing.T) {
 		_, err = Apply(base, Changes{Remove: []int64{projectID}, Serve: []int64{projectID}})
 		assert.Error(t, err, "serving and removing one project in one run")
 	})
-}
-
-func TestApplyDispatchSettings(t *testing.T) {
-	out, err := Apply(validFile(t), Changes{Driver: DriverACP, Concurrency: 4, Deadline: 90 * time.Minute})
-	require.NoError(t, err)
-	assert.Equal(t, DriverACP, out.Driver)
-	assert.Equal(t, 4, out.Concurrency)
-	assert.Equal(t, Duration(90*time.Minute), out.Deadline)
 }

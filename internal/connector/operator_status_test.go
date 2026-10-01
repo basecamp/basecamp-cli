@@ -20,7 +20,6 @@ func TestInvariant8StatusReadsBesideAWriterAndShowsNoSecrets(t *testing.T) {
 	l, err := OpenLedger(path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = l.Close() })
-	l.SetHooks(LifecycleHooks(l, LifecycleOptions{}))
 
 	const position = "signed-position-not-real-7f3a"
 	require.NoError(t, l.Save(ctx, testKey(), position))
@@ -34,11 +33,6 @@ func TestInvariant8StatusReadsBesideAWriterAndShowsNoSecrets(t *testing.T) {
 	seenRecord(t, l, 5)
 	_, err = l.Admission().Commit(ctx, blockedVerdict(5, 0, "read_failed"))
 	require.NoError(t, err)
-	_, err = l.db.ExecContext(context.Background(), `UPDATE outbox SET state = 'sending', sending_at = ? WHERE event_id = 1`, stamp(time.Now()))
-	require.NoError(t, err)
-	_, err = l.db.ExecContext(context.Background(), `UPDATE outbox SET state = 'indeterminate', note = 'two candidates' WHERE event_id = 1`)
-	require.NoError(t, err)
-	l.SetHooks(Hooks{})
 	opAdmit(t, l, 3, "recording:3")
 	seenRecord(t, l, 4)
 	_, err = l.SetHold(ctx, opBy, HoldByOperator)
@@ -73,8 +67,6 @@ func TestInvariant8StatusReadsBesideAWriterAndShowsNoSecrets(t *testing.T) {
 	assert.Equal(t, 1, s.Queues["seen"])
 	assert.Equal(t, 3, s.Review, "the seen, the blocked and the dispatched record wait for review")
 	assert.Equal(t, map[string]int{"read_failed": 1}, s.Blocked)
-	require.Len(t, s.Indeterminate, 1)
-	assert.Equal(t, int64(1), s.Indeterminate[0].EventID)
 	require.Len(t, s.Dispatches, 2)
 
 	raw, err := json.Marshal(s)

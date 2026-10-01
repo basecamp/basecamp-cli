@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -46,8 +47,11 @@ const connectAgentProfileName = "agent"
 var connectSetupPolicyFlags = []string{
 	"expect-identity", "operator", "operator-profile", "trust", "allow",
 	"serve", "unserve", "class", "watch-completions", "no-watch-completions",
-	"driver", "worker", "concurrency", "deadline", "dangerous",
 }
+
+// connectGOOS is the platform guided setup checks before connecting. A
+// variable so tests can be on another.
+var connectGOOS = runtime.GOOS
 
 // connectSetupInteractive reports whether a person is at the terminal to
 // answer. A variable so tests can say yes.
@@ -102,8 +106,8 @@ func runGuidedConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupF
 	// Before anything is connected: connecting replaces the secret another
 	// computer may be running this agent on, for a connector this one
 	// can't run.
-	if !connectSupportedOS(connectServiceGOOS) {
-		return connectUnsupportedOSError(connectServiceGOOS)
+	if !connectSupportedOS(connectGOOS) {
+		return connectUnsupportedOSError(connectGOOS)
 	}
 	name, err := guidedSetupProfile(ctx, app)
 	if err != nil {
@@ -134,17 +138,12 @@ func runGuidedConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupF
 	if err != nil {
 		return err
 	}
-	worker := setup.New(name)
 	if file != nil {
 		// A setup being resumed isn't run through setup's checks again, but
 		// the credential it will run on may have been replaced since.
 		if err := checkGuidedScope(ctx, app, name); err != nil {
 			return err
 		}
-		worker = *file
-	}
-	if err := checkGuidedWorker(ctx, w, r, worker, name); err != nil {
-		return err
 	}
 	if file == nil {
 		err := setUpGuidedConnectFile(cmd, app, w, r, agent, f)
@@ -540,48 +539,6 @@ func chooseGuidedProjects(w io.Writer, agent guidedAgent) ([]guidedProject, erro
 	return chosen, nil
 }
 
-// checkGuidedWorker starts the worker as the connector would, before
-// anything is written or anyone is told the agent is set up: an agent whose
-// AI cannot start fails every request it is given, and the person who
-// mentioned it is the last to be able to fix that.
-func checkGuidedWorker(ctx context.Context, w io.Writer, r *output.Renderer, file setup.File, name string) error {
-	p, ok := connectWorkerPreflight(ctx, file)
-	if !ok {
-		return checkGuidedWorkerBinary(w, r, file, name)
-	}
-	for _, c := range p.Checks {
-		if c.Status == driver.PreflightWarn {
-			fmt.Fprintln(w, r.Warning.Render(richtext.SanitizeSingleLine(c.Message)))
-		}
-	}
-	failed, bad := p.Failed()
-	if !bad {
-		named := p.Product
-		if p.Version != "" {
-			named += " " + p.Version
-		}
-		fmt.Fprintln(w, r.Success.Render("✓ "+richtext.SanitizeSingleLine(named)+" is ready"))
-		return nil
-	}
-	hint := strings.TrimSpace(failed.Hint + " " + runGuidedSetupAgain(name))
-	return output.ErrUsageHint(richtext.SanitizeSingleLine(failed.Message), richtext.SanitizeSingleLine(hint))
-}
-
-// checkGuidedWorkerBinary checks a worker whose driver has no spawn preflight
-// (the acp driver) as doctor does: where the driver would find it.
-func checkGuidedWorkerBinary(w io.Writer, r *output.Renderer, file setup.File, name string) error {
-	for _, c := range workerBinaryChecks(file) {
-		switch c.Status {
-		case setup.StatusWarn:
-			fmt.Fprintln(w, r.Warning.Render(richtext.SanitizeSingleLine(c.Message)))
-		case setup.StatusFail:
-			hint := strings.TrimSpace(c.Hint + " " + runGuidedSetupAgain(name))
-			return output.ErrUsageHint(richtext.SanitizeSingleLine(c.Message), richtext.SanitizeSingleLine(hint))
-		}
-	}
-	return nil
-}
-
 // connectorRunning reports whether a connector for this setup is running:
 // the instance lock's holder, as `connect status` reads it, is alive.
 func connectorRunning(file setup.File) bool {
@@ -671,15 +628,12 @@ func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, fil
 	if agent.HasOwner {
 		fmt.Fprintf(w, "  Works for: %s\n", richtext.SanitizeSingleLine(agent.Owner.Name))
 	}
-	if file.Dangerous {
-		fmt.Fprintln(w, "  Dangerous: on — it can run any command on this computer, as you, without asking")
-	}
 	if len(served) == 0 {
-		// Every project was taken out of connect.json: a mention anywhere
-		// gets a holding reply, so there is nowhere to try it.
+		// Every project was taken out of connect.json: there is nowhere to
+		// try it.
 		fmt.Fprintln(w, "  Works in:  no projects")
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "It isn't working in any projects, so a mention gets \"I'm not set up to work in this project yet\". To add one: basecamp connect setup -P %s --serve <project-id>\n", richtext.ShellQuote(name))
+		fmt.Fprintf(w, "It isn't working in any projects, so it won't pick up any mentions. To add one: basecamp connect setup -P %s --serve <project-id>\n", richtext.ShellQuote(name))
 		return
 	}
 	fmt.Fprintf(w, "  Works in:  %s\n", strings.Join(served, ", "))
@@ -687,17 +641,12 @@ func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, fil
 		fmt.Fprintln(w, "  Running:   yes")
 		fmt.Fprintf(w, "\nMention %s in one of those projects to try it.\n", agentName)
 	} else {
-		// No background service yet: it would work in the home directory and
-		// is untested on real machines. The agent works, and may change files
-		// without asking, in the folder it is started in.
+		// The connector only listens: the person's own Claude Code session
+		// does the work, through the basecamp-connect skill.
 		fmt.Fprintln(w, "  Running:   no")
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "To start it, run this in the folder it should work in, and leave it running.")
-		if file.Dangerous {
-			fmt.Fprintln(w, "It can run any command on this computer without asking, starting in that folder.")
-		} else {
-			fmt.Fprintln(w, "It can change files in that folder without asking.")
-		}
+		fmt.Fprintln(w, "To start it, run /basecamp-connect in your Claude Code session. It starts the")
+		fmt.Fprintln(w, "connector and handles each request with your own setup. The connector on its own:")
 		fmt.Fprintln(w, "  basecamp connect -P "+richtext.ShellQuote(name))
 		fmt.Fprintf(w, "\nOnce it's running, mention %s in one of those projects to try it.\n", agentName)
 	}

@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,15 +19,13 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
-	"github.com/basecamp/basecamp-cli/internal/connector/admission"
-	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
-// The operator's commands on a connector's ledger: status, redispatch,
-// discard, release, shadow promote and import. doctor is in connect_doctor.go.
+// The operator's commands on a connector's ledger: status, discard, release,
+// shadow promote and import. doctor is in connect_doctor.go.
 // Each resolves the connector from the profile's connect.json, locally.
 
 // connectProfile is a set-up profile, read without the network.
@@ -37,90 +34,6 @@ type connectProfile struct {
 	name string
 	path string
 	file setup.File
-}
-
-// servedBucketsOf is the projects a connect.json serves, as the ledger's
-// decisions want them.
-func servedBucketsOf(file setup.File) []int64 {
-	served := make([]int64, 0, len(file.Projects))
-	for bucket := range file.Projects {
-		served = append(served, bucket)
-	}
-	slices.Sort(served)
-	return served
-}
-
-// authorizedProfile is p with connect.json as it is now — read under the
-// file's own lock — together with the projects it serves and the release to
-// hold until the decision that reading authorizes has been written. The file
-// the command loaded when it started is not that reading: a `connect setup
-// --unserve` can complete between start-up and the write, and the point here
-// is that it cannot complete between this read and the release.
-//
-// It returns the whole profile and not only the bucket ids because a
-// redispatch is not one decision. A blocked record's redispatch re-runs what
-// blocked it, and that rerun builds an admission policy from the file; a
-// rerun carrying the start-up file can re-admit a record whose project was
-// unserved in between and write a verdict that is not true of the policy as
-// it stands (Copilot on #771). The caller reassigns its own profile from
-// this, so the start-up reading is gone rather than merely unused.
-//
-// It waits for a holder rather than refusing on sight (setup.Lock, not
-// TryLock): this is an operator's command, a connector's own hold is
-// measured in milliseconds, and a person who typed a redispatch would rather
-// wait out a `connect setup` than be told to run it again. A holder that
-// outlasts the wait is reported as busy and retryable, and nothing is
-// written.
-//
-// The lock is taken before the ledger is written and released after, never
-// the other way about, so the two locks are always taken in one order.
-func authorizedProfile(ctx context.Context, p connectProfile) (connectProfile, []int64, func(), error) {
-	unlock, err := setup.Lock(ctx, p.path)
-	if err != nil {
-		return p, nil, nil, classifyDecisionLockError(p.name, err)
-	}
-	file, err := setup.Load(p.path)
-	if err != nil {
-		unlock()
-		return p, nil, nil, output.ErrUsage("connect.json cannot be used: " + setup.ErrorText(err))
-	}
-	// The same refusal the connector's own reader makes: a file that now
-	// names another agent or account is not this profile's policy, and a
-	// decision taken against it would be taken for somebody else.
-	if file.Agent != p.file.Agent || file.AccountID != p.file.AccountID {
-		unlock()
-		return p, nil, nil, output.ErrUsage("connect.json now names another agent or account, so nothing was decided")
-	}
-	p.file = file
-	return p, servedBucketsOf(file), unlock, nil
-}
-
-// classifyDecisionLockError is classifyLockError's wording for an operator's
-// decision rather than for setup. The two say the same things about the same
-// failures and name different commands to run again: telling somebody whose
-// redispatch was refused to "run setup again" sends them somewhere else at
-// the moment they are already puzzled, and saying only setup needs the lock
-// is no longer true (Copilot on #771).
-func classifyDecisionLockError(name string, err error) error {
-	profile := shellQuote(name)
-	switch {
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		// Stopped while waiting for the lock: nothing was locked, nothing
-		// was decided, and the interruption is what to report.
-		return err
-	case errors.Is(err, setup.ErrSetupRunning):
-		return &output.Error{Code: output.CodeBusy, Retryable: true,
-			Message: fmt.Sprintf("Another command is working on profile %q right now, so nothing was decided: %s", name, setup.ErrorText(err)),
-			Hint:    "Nothing is wrong with the profile. Run the command again when it has finished: basecamp connect redispatch -P " + profile + " <event_id>"}
-	case errors.Is(err, setup.ErrLockUnavailable):
-		return &output.Error{Code: output.CodeLockUnavailable,
-			Message: fmt.Sprintf("This host cannot lock profile %q's connector policy: %s", name, setup.ErrorText(err)),
-			Hint: "Nothing was decided. A decision reads which projects are served under that lock, as setup writes them under it, so this needs a filesystem for XDG_CONFIG_HOME that supports locking " +
-				"(some network and FUSE mounts do not). Moving it hides every profile and stored file credential."}
-	case errors.Is(err, setup.ErrNotPrivate):
-		return output.ErrUsageHint(err.Error(), "A decision reads connect.json only where nobody else can change it.")
-	}
-	return output.ErrUsage(err.Error())
 }
 
 func loadConnectProfile(cmd *cobra.Command) (connectProfile, error) {
@@ -225,10 +138,6 @@ func openConnectLedger(ctx context.Context, p connectProfile, requireStopped boo
 		done()
 		return nil, func() {}, err
 	}
-	// A verdict a redispatch writes calls for the lifecycle messages a running
-	// connector's verdict would: the same intents, which the connector's outbox
-	// sends.
-	ledger.SetHooks(connector.LifecycleHooks(ledger, connector.LifecycleOptions{}))
 	return ledger, func() {
 		_ = ledger.Close()
 		done()
@@ -274,7 +183,6 @@ record's recording URL is shown so a person can open what was asked.`,
 type connectStatusReport struct {
 	Profile    string             `json:"profile"`
 	Shadow     bool               `json:"shadow"`
-	Dangerous  bool               `json:"dangerous,omitempty"`
 	LockHolder *connectLockHolder `json:"lock_holder,omitempty"`
 	Status     connector.Status   `json:"status"`
 }
@@ -320,7 +228,7 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 		status.Tasks[i].Worker = recordedWorkerState(t)
 		status.Tasks[i].Taker = recordedTakerState(t)
 	}
-	report := connectStatusReport{Profile: p.name, Shadow: shadow, Dangerous: p.file.Dangerous && !shadow, Status: status}
+	report := connectStatusReport{Profile: p.name, Shadow: shadow, Status: status}
 	if holder, ok := connector.InstanceHolder(dir, p.file.AccountID, p.file.Agent.PersonID); ok {
 		report.LockHolder = &connectLockHolder{PID: holder.PID, StartedAt: holder.StartedAt, PIDStatus: processPresence(holder.PID)}
 	}
@@ -331,45 +239,8 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	return p.app.OK(report, output.WithSummary(connectStatusSummary(report)))
 }
 
-// notTakingWork is why the connector stopped taking work, when it did: its
-// worker could not start (connector.StartFailuresToHold).
-func notTakingWork(s connector.Status) (string, bool) {
-	if s.Connection == nil || s.Connection.State != connector.ConnectionNotTakingWork {
-		return "", false
-	}
-	return s.Connection.Detail, true
-}
-
-// dangerousUnused is why a running connector isn't using the dangerous mode
-// connect.json has on, or "" when it is (or none runs).
-func (r connectStatusReport) dangerousUnused() string {
-	c := r.Status.Connection
-	if !r.Dangerous || c == nil || c.State != connector.ConnectionRunning {
-		return ""
-	}
-	switch c.Detail {
-	case dangerousOnThisRun:
-		return ""
-	case dangerousOffThisRun:
-		return "requests from other people were still waiting when it started. Restart it once they're done"
-	default:
-		return "it was started before dangerous mode was turned on. Restart it for dangerous mode to take effect"
-	}
-}
-
 func connectStatusSummary(r connectStatusReport) string {
 	parts := []string{}
-	switch {
-	case r.Dangerous && r.Status.Connection != nil && r.Status.Connection.Detail == dangerousOffThisRun:
-		parts = append(parts, "dangerous mode on but not in use until a restart after other people's waiting requests finish")
-	case r.Dangerous && r.dangerousUnused() != "":
-		parts = append(parts, "dangerous mode on but not in use until a restart")
-	case r.Dangerous:
-		parts = append(parts, "dangerous mode on")
-	}
-	if _, ok := notTakingWork(r.Status); ok {
-		parts = append(parts, "not taking work")
-	}
 	if c := r.Status.Connection; c != nil && c.State == connector.ConnectionDisconnected {
 		parts = append(parts, "disconnected")
 	}
@@ -392,15 +263,6 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 		title += " (shadow)"
 	}
 	fmt.Fprintf(w, "%s\n\n", title)
-	if why, ok := notTakingWork(s); ok {
-		fmt.Fprintf(w, "  Not taking work: %s. %s\n\n", clean(why), connector.NotTakingWorkFix)
-	}
-	switch {
-	case r.dangerousUnused() != "":
-		fmt.Fprintf(w, "  Dangerous mode is on in connect.json, but the running connector isn't using it: %s.\n\n", r.dangerousUnused())
-	case r.Dangerous:
-		fmt.Fprintf(w, "  Dangerous mode is on: the agent can run any command on this computer, as you. Turn it off: basecamp connect setup -P %s --dangerous=false\n\n", richtext.ShellQuote(r.name()))
-	}
 	if s.Connection != nil && s.Connection.State == connector.ConnectionDisconnected {
 		fmt.Fprintf(w, "  Disconnected: %s. Reconnect it: basecamp connect setup -P %s\n\n", clean(s.Connection.Detail), richtext.ShellQuote(r.name()))
 	}
@@ -473,7 +335,7 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 	for _, in := range s.Indeterminate {
 		fmt.Fprintf(w, "    intent %d  %s  event %d  %s on %d\n", in.ID, clean(in.Kind), in.EventID, clean(in.MessageKind), in.RecordingID)
 	}
-	fmt.Fprintf(w, "  Held records   %d (redispatch or discard each)\n", len(s.Held))
+	fmt.Fprintf(w, "  Held records   %d (discard each)\n", len(s.Held))
 	for _, h := range s.Held {
 		fmt.Fprintf(w, "    event %d  %s  %s  %s\n", h.EventID, clean(h.EventType), clean(h.Trigger), clean(h.RecordingURL))
 	}
@@ -500,211 +362,6 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 }
 
 func (r connectStatusReport) name() string { return r.Profile }
-
-// --- redispatch -----------------------------------------------------------
-
-func newConnectRedispatchCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "redispatch <event_id>",
-		Short: "Authorize a record to run again, or for the first time",
-		Long: `Authorize a record the connector will not run on its own.
-
-Accepted for a completed record whose outcome is unknown or failed, every
-blocked record, and a held one. Refused for a success, a discarded record, and
-anything live. The replaced task's token is retired, its worker is stopped,
-and who authorized it is recorded.
-
-A completed or held record is admitted at once (a completed one whose task is
-still running, when that task ends). A blocked record keeps its state and
-runs what blocked it again — the read, the events lookup, the served check —
-and is admitted the moment that succeeds; if it blocks again, the record stays
-blocked with the authorization, and redispatch runs it again. That re-run
-reads Basecamp, so it cannot hold the policy lock, and it decides against the
-served projects as they were when the redispatch was authorized: an unserve
-landing while it runs is not seen by that verdict. Nothing starts on it — the
-connector reads connect.json under its lock at every launch and refuses a
-project no longer served, and basecamp connect status counts what is left
-waiting. While the hold stands the record is authorized and nothing launches
-until release.
-
-It works on the ledger's transactions, so it is safe while the connector runs;
-the running connector dispatches what it admits.`,
-		Example: `  basecamp connect redispatch -P agent 9876543210`,
-		Args:    cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runConnectRedispatch(cmd, args[0])
-		},
-	}
-}
-
-// connectRedispatchReport is redispatch's output.
-type connectRedispatchReport struct {
-	connector.RedispatchResult
-	// WorkerSignaled says a signal was sent to the replaced worker's recorded
-	// process group; WorkerState says whether it is gone.
-	WorkerSignaled bool `json:"worker_signaled,omitempty"`
-	// WorkerState is what became of it: stopped, gone, held (its group still
-	// runs and was not proven this task's to signal), unverified, or
-	// not_recorded (the attempt had no worker process recorded yet).
-	WorkerState string `json:"worker_state,omitempty"`
-	WorkerNote  string `json:"worker_note,omitempty"`
-	// Verdict is what running the prerequisite again decided.
-	Verdict      string `json:"verdict,omitempty"`
-	VerdictNote  string `json:"verdict_reason,omitempty"`
-	RerunSkipped string `json:"rerun_skipped,omitempty"`
-}
-
-func runConnectRedispatch(cmd *cobra.Command, raw string) error {
-	ctx := cmd.Context()
-	id, err := parseEventIDArg(raw)
-	if err != nil {
-		return err
-	}
-	// Before the ledger is opened, let alone written: a redispatch may run the
-	// record's prerequisite as the agent, and a token in the environment would
-	// decide that as somebody else.
-	if os.Getenv("BASECAMP_TOKEN") != "" {
-		return errEnvTokenShadows("a redispatch runs a record's prerequisite as the agent its profile holds, and BASECAMP_TOKEN would override it")
-	}
-	p, err := loadConnectProfile(cmd)
-	if err != nil {
-		return err
-	}
-	ledger, done, err := openConnectLedger(cmd.Context(), p, false)
-	if err != nil {
-		return err
-	}
-	defer done()
-
-	// p itself is reassigned, so the reading the command started with is
-	// gone rather than merely unused: everything below — the ledger's
-	// decision and the rerun's policy alike — is the file as it was when
-	// this was authorized.
-	p, res, err := authorizedRedispatch(ctx, p, ledger, id)
-	if err != nil {
-		return err
-	}
-	report := connectRedispatchReport{RedispatchResult: res}
-	if res.Worker != nil {
-		// The ledger's own identity, not one assembled here: without
-		// StartedExact the one-owner rule cannot tell the recorded worker
-		// from a later process that reused its pid, and a redispatch would
-		// leave the worker it replaces running.
-		stop := stopReplacedWorker(res.Worker.Identity(), driver.DefaultGrace)
-		report.WorkerSignaled, report.WorkerState, report.WorkerNote = stop.signaled, stop.state, stop.note
-	}
-	if res.Rerun {
-		verdict, reason, err := rerunPrerequisite(ctx, p, ledger, id)
-		if err != nil {
-			report.RerunSkipped = errorMessage(err)
-		} else {
-			report.Verdict, report.VerdictNote = verdict, reason
-		}
-	}
-	return p.app.OK(report, output.WithSummary(redispatchSummary(report)))
-}
-
-// authorizedRedispatch writes the decision under connect.json's own lock,
-// against the served set read under it, and returns the profile carrying
-// that reading.
-//
-// One function, and the release deferred inside it, because both halves of
-// the claim should be structural rather than a matter of reading the command
-// carefully: the lock is held across the ledger's write on every path, and
-// it is let go before the caller re-runs a prerequisite — which talks to
-// Basecamp, and must not happen under a lock `connect setup` waits on. A
-// later edit to the command cannot leave it held, or take it early, without
-// changing this (Codex on #771).
-func authorizedRedispatch(ctx context.Context, p connectProfile, ledger *connector.Ledger, id int64) (connectProfile, connector.RedispatchResult, error) {
-	p, served, release, err := authorizedProfile(ctx, p)
-	if err != nil {
-		return p, connector.RedispatchResult{}, err
-	}
-	defer release()
-	// The served projects as connect.json has them now, rather than the bit
-	// on the record: a record admitted while its project was served is not
-	// authorization to run it after the operator stopped serving it.
-	res, err := ledger.Redispatch(ctx, id, operatorName(), served)
-	if err != nil {
-		return p, connector.RedispatchResult{}, decisionError(err)
-	}
-	return p, res, nil
-}
-
-func redispatchSummary(r connectRedispatchReport) string {
-	var s string
-	switch {
-	case r.Pending && r.SupersededTaskID > 0:
-		s = fmt.Sprintf("Event %d authorized; admitted when its task %d ends", r.EventID, r.SupersededTaskID)
-	case r.Pending:
-		s = fmt.Sprintf("Event %d authorized; admitted when the task it is on ends", r.EventID)
-	case r.Admitted:
-		s = fmt.Sprintf("Event %d admitted", r.EventID)
-	case r.Verdict != "":
-		s = fmt.Sprintf("Event %d authorized; its prerequisite ran again: %s", r.EventID, r.Verdict)
-		if r.VerdictNote != "" {
-			s += " (" + r.VerdictNote + ")"
-		}
-	case r.RerunSkipped != "":
-		s = fmt.Sprintf("Event %d authorized; its prerequisite did not run here (%s). Read basecamp connect status before redispatching it again: something else may have decided it", r.EventID, r.RerunSkipped)
-	default:
-		s = fmt.Sprintf("Event %d authorized", r.EventID)
-	}
-	if r.Held {
-		s += "; the hold stands, so nothing launches until release"
-	}
-	return s
-}
-
-// rerunPrerequisite decides a blocked record again, as the agent, by the same
-// rules the connector's admission applies: the verdict is revision-guarded,
-// so a running connector deciding it at the same time is not a second
-// verdict.
-//
-// By the same rules, and not against the same reading. The connector's
-// admission asks a live reader for the served projects; this decides against
-// the file as it was when the redispatch was authorized, because deciding
-// reads Basecamp and nothing that waits on the network is done under a lock
-// `connect setup` waits on. So an unserve completing while this runs is not
-// seen here, and the verdict can admit a record whose project has just
-// stopped being served. That is the deliberate residue, and it starts
-// nothing: the launch reads connect.json under the lock and refuses it, and
-// the stranded report names what is left waiting.
-func rerunPrerequisite(ctx context.Context, p connectProfile, ledger *connector.Ledger, id int64) (string, string, error) {
-	agent, err := verifiedConnectAgent(ctx, p)
-	if err != nil {
-		return "", "", err
-	}
-	policy, err := p.file.Policy(agent.personID)
-	if err != nil {
-		return "", "", err
-	}
-	reads := admission.NewSDKReads(&basecamp.Config{BaseURL: p.app.Config.BaseURL}, agent.tokens, agent.account, connectSDKOptions()...)
-	admitter, err := admission.NewAdmitter(policy, reads)
-	if err != nil {
-		return "", "", err
-	}
-	records := ledger.Admission()
-	ev, ok, err := records.LoadUndecided(ctx, id)
-	if err != nil {
-		return "", "", err
-	}
-	if !ok {
-		return "", "", errors.New("the record is no longer blocked; something else decided it")
-	}
-	v, err := admitter.Decide(ctx, ev)
-	if err != nil {
-		return "", "", err
-	}
-	v, err = admission.NewCommitter(records).Commit(ctx, v)
-	if errors.Is(err, admission.ErrAlreadyDecided) {
-		return "", "", errors.New("the running connector decided it first")
-	}
-	if err != nil {
-		return "", "", err
-	}
-	return string(v.State), string(v.Reason), nil
-}
 
 // connectAgent is the agent a profile's credential proved to be, checked
 // against connect.json.
@@ -799,10 +456,10 @@ outcome is unknown. A lifecycle message still pending for it is not sent.`,
 func newConnectReleaseCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "release",
-		Short: "Clear the hold: dispatch and posting resume",
+		Short: "Clear the hold: requests are handed off again",
 		Long: `Clear the durable hold that basecamp connect --hold or shadow promote set.
-Records a person authorized, and records that arrived after the hold, dispatch;
-held records stay held until each is redispatched or discarded.`,
+Records that arrived after the hold are handed off; held records stay held
+until each is discarded.`,
 		Example: `  basecamp connect release -P agent`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -847,8 +504,8 @@ connector's state directory. A crash at any point leaves either the untouched
 shadow or a held ledger; run promote again to finish.
 
 Start the connector afterwards: intake continues from the promoted position,
-nothing dispatches until basecamp connect release, and held records wait for
-redispatch or discard.`,
+nothing is handed off until basecamp connect release, and held records wait
+to be discarded.`,
 		Example: `  basecamp connect shadow promote -P agent`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

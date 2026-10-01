@@ -26,9 +26,6 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
-	"github.com/basecamp/basecamp-cli/internal/connector/driver"
-	"github.com/basecamp/basecamp-cli/internal/connector/driver/acp"
-	"github.com/basecamp/basecamp-cli/internal/connector/driver/spawn"
 	"github.com/basecamp/basecamp-cli/internal/connector/ndjson"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -40,8 +37,6 @@ type connectRunFlags struct {
 	projects []string
 	shadow   bool
 	since    int64
-	driver   string
-	adapters string
 	hold     bool
 }
 
@@ -52,8 +47,6 @@ func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
 	fl.Var((*repeatedString)(&f.projects), "project", "Only hear events in this project id (repeatable; default every project the agent can see)")
 	fl.BoolVar(&f.shadow, "shadow", false, "Admit and log in an isolated state directory; dispatch and post nothing")
 	fl.Int64Var(&f.since, "since", 0, "Enter the feed just after this event id, whatever the ledger holds")
-	fl.StringVar(&f.driver, "driver", "", "Override connect.json's driver (spawn or acp)")
-	fl.StringVar(&f.adapters, "acp-adapters", "", "Where the pinned ACP adapters are installed, for --driver acp (default $XDG_DATA_HOME/basecamp/acp-adapters)")
 	fl.BoolVar(&f.hold, "hold", false, "Set the durable hold: intake and admission run, nothing is dispatched or posted until the hold is released, and earlier records wait for review")
 }
 
@@ -117,49 +110,6 @@ func connectStateParts(file setup.File, shadow bool) []string {
 		group = "connect-shadow"
 	}
 	return []string{"basecamp", group, connector.StateDirName(file.AccountID, file.Agent.PersonID)}
-}
-
-// connectSessionsDir is where a session's short-lived files go — the MCP
-// configuration, and the socket that hands over a task token. Never
-// under the state directory or a working directory, which outlive the session
-// and which other tools read: under $XDG_RUNTIME_DIR, the per-user,
-// memory-backed directory made for exactly this, or /tmp where there is none.
-// Not the platform's temporary directory: on macOS that path is too long for
-// a unix socket inside it. Owner-only, and swept when the connector starts.
-func connectSessionsDir(file setup.File) (string, error) {
-	dir := connectSessionsPath(file)
-	if err := setup.EnsurePrivateDir(dir); err != nil {
-		return "", fmt.Errorf("the connector's session directory cannot be used: %w", err)
-	}
-	return dir, nil
-}
-
-// connectSessionsPath is where a run's session directories go, without making
-// anything: the per-user runtime directory, which is short and cleared when
-// the user logs out, and /tmp where there is none.
-func connectSessionsPath(file setup.File) string {
-	base := os.Getenv("XDG_RUNTIME_DIR")
-	if info, err := os.Stat(base); base == "" || !filepath.IsAbs(base) || err != nil || !info.IsDir() {
-		base = "/tmp"
-	}
-	return filepath.Join(base, "bcc-"+connector.StateDirName(file.AccountID, file.Agent.PersonID))
-}
-
-// connectDriver is the driver connect.json (or --driver) names for its
-// worker. The acp driver runs the worker's pinned ACP adapter, found where it
-// was installed; nothing is downloaded here.
-func connectDriver(name, worker, adaptersDir string) (driver.Driver, error) {
-	if name != setup.DriverACP {
-		return spawn.New(worker, spawn.Options{})
-	}
-	if adaptersDir != "" && !filepath.IsAbs(adaptersDir) {
-		abs, err := filepath.Abs(adaptersDir)
-		if err != nil {
-			return nil, err
-		}
-		adaptersDir = abs
-	}
-	return acp.ForWorker(worker, adaptersDir, nil)
 }
 
 func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
@@ -306,32 +256,10 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return err
 	}
 
-	// connect.json's served projects as they are now, for admission and for
-	// dispatch alike. What one reader buys is that neither half reads the
-	// startup file any more: both reload from the same place, share one
-	// cache, and treat a failed read the same way. Admission deciding
-	// against the file as it was at startup while the dispatcher read the
-	// current one is what left an unserved project's events admitted and
-	// never started — no work and no holding reply — and a newly served
-	// project's blocked until a restart (Copilot on #765).
-	//
-	// It is not a shared snapshot, and the sentence above is not saying it
-	// is. Admission and dispatch call Current independently, and the cache
-	// can expire between the two calls, so a setup change landing in that
-	// gap is seen by one and not the other (Copilot on #765). The
-	// difference from the bug this replaced is that the disagreement is
-	// bounded: one decision against a served set at most connectServedTTL
-	// old, where the startup file never caught up at all. That bound is
-	// asserted, not merely described — see TestConnectServedTTLStaysSmall.
-	//
-	// One place does hold a snapshot across a whole decision, and it is the
-	// one where a stale reading would start work: served.Authorize reads
-	// connect.json under `connect setup`'s own lock and keeps the lock until
-	// the launch has committed. Admission keeps the cache: it decides once
-	// per event, a file lock per event is not a thing to put on that path,
-	// and the cost of it being a reading rather than a lock is a record
-	// admitted into a project that has just stopped being served — which
-	// dispatch then refuses and reportStranded names.
+	// connect.json's served projects as they are now, for admission and the
+	// handoff alike: both reload from the same place and share one cache, so
+	// a setup change reaches the next decision without a restart. A reading
+	// is at most connectServedTTL old — see TestConnectServedTTLStaysSmall.
 	served := newConnectServed(path, file, logger)
 
 	reads := admission.NewSDKReads(&basecamp.Config{BaseURL: app.Config.BaseURL}, tokens, account, connectSDKOptions()...)
@@ -532,18 +460,8 @@ func connectConsumerNamespace(agentID int64, shadow bool) string {
 	return name
 }
 
-// connectSupportedOS is where the connector runs: Linux and macOS.
-//
-// Two things have to hold. The driver must be able to read process start
-// times, so a recorded worker group is never signaled after its pid was
-// reused. And the task token has to reach the worker's MCP server, which it
-// does on an inherited descriptor: `connect worker-mcp` execs `basecamp mcp
-// --connect-token-fd`, and that hand-over is accepted only where the
-// descriptors this process inherited are sealed against everything it
-// starts (mcp_token_sealed.go, internal/cli's inherited_fds_seal.go). Linux
-// and macOS do both; anywhere else every non-shadow dispatch would start a
-// worker whose Basecamp tools fail at the handshake, so the connector says so
-// here rather than at the far end of each task.
+// connectSupportedOS is where the connector runs: Linux and macOS, the
+// platforms it has been tested on.
 func connectSupportedOS(goos string) bool {
 	return goos == "linux" || goos == "darwin"
 }
@@ -551,7 +469,7 @@ func connectSupportedOS(goos string) bool {
 // connectSupportedOSReason is why, in one place: the run command's refusal and
 // doctor's Platform check say the same thing, so a person who meets one and
 // then the other is not told two different stories about their machine.
-const connectSupportedOSReason = "the task token reaches a worker's MCP server over an inherited descriptor, and the CLI keeps inherited descriptors from the programs it starts only on Linux and macOS"
+const connectSupportedOSReason = "it has only been tested there"
 
 // connectUnsupportedOSError is the refusal on a platform the connector does
 // not run on, given by the run command and by `service install`, which would
@@ -566,7 +484,7 @@ func connectUnsupportedOSError(goos string) error {
 
 // connectServed is connect.json's served projects as they are now, not as
 // they were at start: a project removed by `connect setup --unserve` stops
-// authorizing dispatch without a restart. A file that no longer loads, or
+// being handed off without a restart. A file that no longer loads, or
 // that now names another agent or account, authorizes nothing.
 type connectServed struct {
 	path     string
@@ -577,20 +495,12 @@ type connectServed struct {
 	mu       sync.Mutex
 	loadedAt time.Time
 	projects map[int64]admission.Project
-	// dangerous is connect.json's dangerous mode as of the last read, and
-	// operator the operator it names; a file that could not be read has it
-	// off.
-	dangerous bool
-	operator  int64
 	// err is why the last reload could not answer. It is kept apart from an
 	// empty map on purpose: "the operator serves no projects" and "nothing
 	// could read the file" are different answers, and only the first is
 	// safe to tell a person on a card (Copilot on #765).
 	err     error
 	failing bool
-	// lockFailing is failing's counterpart for the lock: a host that cannot
-	// take it says so once rather than once per launch.
-	lockFailing bool
 }
 
 // connectServedTTL is how long a read of connect.json is reused.
@@ -607,70 +517,17 @@ func newConnectServed(path string, file setup.File, log *slog.Logger) *connectSe
 // whatever the caller goes on to do with it. Dispatch treats an error as authorizing
 // nothing; admission holds the record as a configuration error rather than
 // answering that the project is not served.
-//
-// A caller that must not have an unserve land between its reading and what
-// that reading authorizes wants Authorize, not this.
 func (r *connectServed) Current() (map[int64]admission.Project, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// A failure is cached for the TTL exactly as an answer is. Reloading on
 	// every call while the file is broken would read it once per event in
-	// admission and once per tick in dispatch (Copilot on #765); the answer
+	// admission and once per tick in the handoff (Copilot on #765); the answer
 	// would not change, and the log line is written once either way.
 	if (r.projects == nil && r.err == nil) || r.now().Sub(r.loadedAt) >= connectServedTTL {
 		r.reload()
 	}
 	return r.answer()
-}
-
-// Authorize reads connect.json under the per-profile setup lock — the lock
-// `connect setup` holds across its load, change and save — and hands back
-// the release for the caller to hold until the commit that reading
-// authorizes has landed. Between the two an unserve cannot complete, so the
-// launch is decided against the file as it will still be when the task
-// exists.
-//
-// The read is fresh: the TTL is a reuse policy for callers that are only
-// choosing, and reusing a reading here would reintroduce exactly the gap the
-// lock is taken to close. It refreshes the cache on its way through, so the
-// next Current cannot be older than this read.
-//
-// A lock another command holds is connector.ErrPolicyBusy: this authorizes
-// nothing, and the dispatcher gives up its pass rather than waiting out a
-// `connect setup`'s network checks. A host that cannot lock at all
-// authorizes nothing either — the guarantee here is the lock, as it is in
-// setup.
-func (r *connectServed) Authorize() (map[int64]admission.Project, func(), error) {
-	unlock, err := setup.TryLock(r.path)
-	if err != nil {
-		if errors.Is(err, setup.ErrSetupRunning) {
-			return nil, nil, fmt.Errorf("%w: %w", connector.ErrPolicyBusy, err)
-		}
-		r.logLockFailure(err)
-		return nil, nil, fmt.Errorf("%w: %w", connector.ErrPolicyUnreadable, err)
-	}
-	r.mu.Lock()
-	r.lockFailing = false
-	r.reload()
-	projects, err := r.answer()
-	r.mu.Unlock()
-	if err != nil {
-		unlock()
-		// reload has already said why, once. This only tells the dispatcher
-		// which kind of nothing it is being handed.
-		return nil, nil, fmt.Errorf("%w: %w", connector.ErrPolicyUnreadable, err)
-	}
-	return projects, unlock, nil
-}
-
-// logLockFailure says a lock could not be taken, once per spell of failing.
-func (r *connectServed) logLockFailure(err error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if !r.lockFailing {
-		r.log.Error("connector: dispatching nothing until connect.json can be locked", "error", err)
-	}
-	r.lockFailing = true
 }
 
 // answer is the reader's answer from whatever the last reload left: a copy of
@@ -697,11 +554,10 @@ func (r *connectServed) reload() {
 	}
 	if err != nil {
 		if !r.failing {
-			r.log.Error("connector: dispatching nothing until connect.json is usable again", "error", err)
+			r.log.Error("connector: handing off nothing until connect.json is usable again", "error", err)
 		}
 		r.failing = true
 		r.projects, r.err = nil, err
-		r.dangerous, r.operator = false, 0
 		return
 	}
 	if r.failing {
@@ -709,88 +565,9 @@ func (r *connectServed) reload() {
 	}
 	r.failing = false
 	r.err = nil
-	r.dangerous, r.operator = file.Dangerous, file.Trust.OperatorID
 	r.projects = make(map[int64]admission.Project, len(file.Projects))
 	for bucket, project := range file.Projects {
 		r.projects[bucket] = project
-	}
-}
-
-// DangerousFor reports whether connect.json has dangerous mode on now, for
-// operator: read fresh every time, not from the cache, so turning it off
-// reaches the very next launch or follow-up; and only while the file still
-// names the operator this connector started trusting, which is the one
-// admission lets in until a restart. A file that cannot be read has it off.
-func (r *connectServed) DangerousFor(operator int64) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.reload()
-	return r.err == nil && r.dangerous && operator > 0 && r.operator == operator
-}
-
-// connectDispatch is what the run knows when it builds the dispatcher.
-type connectDispatch struct {
-	File    setup.File
-	Buckets []int64
-	Ledger  *connector.Ledger
-	Driver  driver.Driver
-	Served  func() (map[int64]admission.Project, error)
-	// Authorize is Served read under connect.json's lock, with the release
-	// the dispatcher holds across a launch's commit.
-	Authorize func() (map[int64]admission.Project, func(), error)
-	// Dangerous is whether the next launch runs in dangerous mode.
-	Dangerous func() bool
-	// RunningNote is the run's note for status while it takes work.
-	RunningNote string
-
-	Profile     string
-	Executable  string
-	StateDir    string
-	SessionsDir string
-
-	Replies            connector.ReplyLister
-	IsLifecycleMessage func(id int64) bool
-	Lines              *ndjson.Writer
-	Logger             *slog.Logger
-}
-
-// connectDispatcherOptions is the dispatcher the run starts: connect.json's
-// concurrency and deadline, the projects this run hears, and the worker's own
-// MCP server. Built here so what the command wires is what a test can read.
-func connectDispatcherOptions(d connectDispatch) connector.DispatcherOptions {
-	return connector.DispatcherOptions{
-		Ledger:             d.Ledger,
-		Driver:             d.Driver,
-		Served:             d.Served,
-		Authorize:          d.Authorize,
-		Concurrency:        d.File.Concurrency,
-		Deadline:           time.Duration(d.File.Deadline),
-		Buckets:            d.Buckets,
-		MCP:                connector.WorkerMCP{Command: d.Executable, Profile: d.Profile, StateDir: d.StateDir},
-		PrivateDir:         d.SessionsDir,
-		Replies:            d.Replies,
-		IsLifecycleMessage: d.IsLifecycleMessage,
-		Lines:              d.Lines,
-		Logger:             d.Logger,
-		StillRunning:       connector.DefaultStillRunning,
-		RunningNote:        d.RunningNote,
-		Preflight:          workerPreflight(d.Driver),
-		Policy: func() driver.PermissionPolicy {
-			return connector.PolicyFor(d.Dangerous != nil && d.Dangerous())
-		},
-	}
-}
-
-// workerPreflight is the driver's preflight, for a dispatcher that stopped
-// taking work because its worker could not start; nil for a driver without
-// one.
-func workerPreflight(d driver.Driver) func(context.Context) driver.Preflight {
-	p, ok := d.(driver.Preflighter)
-	if !ok {
-		return nil
-	}
-	return func(ctx context.Context) driver.Preflight {
-		return p.Preflight(ctx, connector.DefaultPolicy())
 	}
 }
 

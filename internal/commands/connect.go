@@ -8,10 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/spf13/cobra"
@@ -37,8 +35,11 @@ func NewConnectCmd() *cobra.Command {
 		Hidden: true,
 		Short:  "Run a local agent connector for a Basecamp agent",
 		Long: `Run a local agent connector: it listens to the account event feed as a
-Basecamp agent, admits what a trusted person asks of that agent, and hands
-the work to a local coding agent that replies in Basecamp as the agent.
+Basecamp agent, admits what a trusted person asks of that agent, and prints
+each trusted request for the session that started it to handle. It starts no
+workers and posts nothing itself: the basecamp-connect skill, run in your own
+Claude Code session, acknowledges each request, picks the repo and hands it to
+a subagent that replies as the agent.
 
 Connect the agent to a profile first (basecamp auth agent connect -P <profile>),
 then run setup on that profile: it records who may drive the agent, maps
@@ -47,25 +48,21 @@ ready. Show prints what setup recorded. Then run the connector on it:
 
   basecamp connect -P <profile> [--project <id>]... [--shadow]
 
-It runs in the foreground until interrupted. Stdout is a wire of one JSON
-object per line (events seen, verdicts, dispatches, lifecycle messages;
-never content), and logs
-go to stderr. SIGINT and SIGTERM cancel live workers with stop reason
-shutdown, settle them, and exit 130 and 143. --shadow admits and logs in an
-isolated state directory and dispatches nothing. --hold sets a durable hold:
-intake and admission run, nothing dispatches or posts, and earlier records
-wait for review, until basecamp connect release. Linux and macOS only.
+It runs in the foreground until interrupted. Stdout is one JSON object per
+line: events seen, admission's verdicts, and a "type":"request" line for each
+trusted request, which is the one to act on. Logs go to stderr. SIGINT and
+SIGTERM exit 130 and 143. A request made before the connector started is not
+picked up. --shadow admits and logs in an isolated state directory and hands
+off nothing. --hold sets a durable hold: intake and admission run, nothing is
+handed off, and earlier records wait for review, until basecamp connect
+release. Linux and macOS only.
 
-  basecamp connect status             what it heard, holds and ran
+  basecamp connect status             what it heard and holds
   basecamp connect doctor             what it needs to run
-  basecamp connect redispatch <id>    authorize a record to run
   basecamp connect discard <id>       close a record without running it
   basecamp connect release            clear the hold
   basecamp connect shadow promote     make the shadow ledger the connector's, held
-  basecamp connect import <file>      apply a cutover reconciliation file
-
-Start it in the folder it should work in and leave it running: workers run
-there and may change files in it without asking.`,
+  basecamp connect import <file>      apply a cutover reconciliation file`,
 		Example: `  basecamp connect setup -P agent --operator-profile me --serve 12345
   basecamp connect -P agent
   basecamp connect -P agent --project 12345 --shadow`,
@@ -79,9 +76,8 @@ there and may change files in it without asking.`,
 		},
 	}
 	addConnectRunFlags(cmd, &run)
-	cmd.AddCommand(newConnectSetupCmd(), newConnectWorkerMCPCmd(), newConnectShowCmd(), newConnectStatusCmd(), newConnectDoctorCmd(),
-		newConnectRedispatchCmd(), newConnectDiscardCmd(), newConnectReleaseCmd(), newConnectShadowCmd(), newConnectImportCmd(),
-		newConnectServiceCmd())
+	cmd.AddCommand(newConnectSetupCmd(), newConnectShowCmd(), newConnectStatusCmd(), newConnectDoctorCmd(),
+		newConnectDiscardCmd(), newConnectReleaseCmd(), newConnectShadowCmd(), newConnectImportCmd())
 	return cmd
 }
 
@@ -94,7 +90,7 @@ func newConnectShowCmd() *cobra.Command {
 		Use:   "show",
 		Short: "Show a profile's connector setup without changing it",
 		Long: `Show the connect.json a profile's setup wrote: the agent, the operator and
-trust mode, each served project and the worker settings.
+trust mode, and each served project.
 
 The file is read through the same checks setup and the connector apply:
 it is refused, and nothing of it shown, when it is a symlink, is not a
@@ -192,11 +188,6 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		"agent":    agent,
 		"operator": fmt.Sprintf("person %d", f.Trust.OperatorID),
 		"trust":    trust,
-		// The worker as well as the driver: the file records which coding
-		// agent the driver runs, and a file written before that field
-		// existed still means the default, which is what a person reading
-		// show needs to see.
-		"workers":  fmt.Sprintf("%s running %s, concurrency %d, deadline %s", f.Driver, f.WorkerName(), f.Concurrency, time.Duration(f.Deadline)),
 		"projects": strconv.Itoa(len(f.Projects)) + " served",
 	}
 	for id, r := range f.Projects {
@@ -266,18 +257,11 @@ type connectSetupFlags struct {
 	trust string
 	allow []string
 
-	serve    []string
-	classes  []string
-	watch    []string
-	unwatch  []string
-	unserve  []string
-	driver   string
-	worker   string
-	parallel int
-	deadline time.Duration
-	// dangerous is --dangerous; only what the command line said counts, so
-	// it is read with Changed.
-	dangerous bool
+	serve   []string
+	classes []string
+	watch   []string
+	unwatch []string
+	unserve []string
 
 	// guided is the guided setup running this one: a setup that passes says
 	// so in a line, since the guided summary names the agent, its owner and
@@ -328,9 +312,8 @@ gets a holding reply and no work; anything else is discarded unanswered. --watch
 makes the agent hear every trusted completion in that project without being
 assigned.
 
-No directory is associated with a project. The connector runs where it is
-started, every worker runs there too, and a task that needs a clone or a
-directory of its own is the agent's own business to make.
+No directory is associated with a project here: the session handling the
+requests chooses the repo for each one.
 
 connect.json is written owner-only and refused when anyone else could have
 changed it or a directory above it. Where this CLI cannot verify that
@@ -353,8 +336,8 @@ you through instead: it connects this computer to your agent when it is not
 which of your agent's projects it works in (all of them by default), and
 writes connect.json, offering to set it up again when the one there can't
 be used or is for another agent. It ends by saying how to start the
-connector: in the folder it should work in, left running. Run it again any
-time: it takes the next step, or says everything is set.
+connector. Run it again any time: it takes the next step, or says
+everything is set.
 
 Examples:
   basecamp connect setup                                # guided, in a terminal
@@ -363,7 +346,7 @@ Examples:
   basecamp connect setup -P agent --operator-profile me --serve 12345
   basecamp connect setup -P agent --operator-profile me --trust allowlist --allow 111 --allow 222
   basecamp connect setup -P bot --operator-profile me --expect-identity 4242 --serve 12345
-  basecamp connect setup -P agent --class 12345=internal --deadline 90m`,
+  basecamp connect setup -P agent --class 12345=internal`,
 		Annotations: map[string]string{AnnotationProfileMayCreate: "true"},
 		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -389,11 +372,6 @@ Examples:
 	fl.StringArrayVar(&f.classes, "class", nil, "Classify a served project: <project-id>=<class>, or <project-id>= to clear it (repeatable)")
 	fl.StringArrayVar(&f.watch, "watch-completions", nil, "Admit every trusted completion in a served project (repeatable)")
 	fl.StringArrayVar(&f.unwatch, "no-watch-completions", nil, "Stop watching a project's completions (repeatable)")
-	fl.StringVar(&f.driver, "driver", "", "How workers are run: spawn or acp (default spawn)")
-	fl.BoolVar(&f.dangerous, "dangerous", false, "Let the agent run any command on this computer, as you (asks you to type yes; only while you alone can give it work). --dangerous=false turns it off")
-	fl.StringVar(&f.worker, "worker", "", fmt.Sprintf("The coding agent workers run: %s (default %s)", strings.Join(setup.Workers, ", "), setup.DefaultWorker))
-	fl.IntVar(&f.parallel, "concurrency", 0, fmt.Sprintf("Workers at once (default %d)", setup.DefaultConcurrency))
-	fl.DurationVar(&f.deadline, "deadline", 0, fmt.Sprintf("Deadline per task (default %s)", setup.DefaultDeadline))
 	cmd.MarkFlagsMutuallyExclusive("operator", "operator-profile")
 
 	return cmd
@@ -450,12 +428,6 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if existing.Profile != name {
 		return output.ErrUsage(fmt.Sprintf("%s names profile %q, not %q", path, existing.Profile, name))
 	}
-	// Turning dangerous mode off on its own is the off switch: saved here,
-	// with nothing asked of Basecamp, so it works offline or with a
-	// credential Basecamp no longer takes.
-	if exists && dangerousOffOnly(cmd) {
-		return turnDangerousModeOff(cmd, app, name, path, existing)
-	}
 	if os.Getenv("BASECAMP_TOKEN") != "" {
 		return errEnvTokenShadows("connect setup cannot check the agent while BASECAMP_TOKEN is set")
 	}
@@ -470,12 +442,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	// Everything refusable without the network is refused first.
 	next, err := setup.Apply(existing, changes)
 	if err != nil {
-		return refusedChange(cmd.ErrOrStderr(), name, err)
-	}
-	if next.Dangerous && !existing.Dangerous {
-		if err := confirmDangerous(cmd.OutOrStdout(), app, name); err != nil {
-			return err
-		}
+		return output.ErrUsage(err.Error())
 	}
 	// With no operator named or recorded, a personal agent's operator is the
 	// person it works for, which Basecamp says in the agent's own profile.
@@ -617,9 +584,6 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		next.Agent.IdentityID = expect
 	}
 	next.Trust.OperatorID = trust.Operator.ID
-	if err := setup.CheckDangerousOperator(existing, next); err != nil {
-		return refusedChange(cmd.ErrOrStderr(), name, err)
-	}
 	if err := next.Validate(); err != nil {
 		return output.ErrUsage("connect.json was not written: " + err.Error())
 	}
@@ -639,10 +603,6 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	report.Add(checks...)
 	report.Add(setup.TicketCheck(ctx, reader, kind))
 	report.Add(setup.ProjectChecks(ctx, reader, next, !exists)...)
-	report.Add(workFolderCheck())
-	if next.Dangerous {
-		report.Add(dangerousModeCheck(name))
-	}
 	// A command the person stopped did not find the connector unready: it
 	// found nothing, and says so as an interruption.
 	if err := ctx.Err(); err != nil {
@@ -680,7 +640,6 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		return classifyWriteError(name, saveErr)
 	}
 	report.Written = true
-	noteDangerousChange(cmd.ErrOrStderr(), existing, next, name)
 
 	summary := summarizeChecks(asDoctorChecks(report.Checks()))
 	if !report.Ready() {
@@ -877,34 +836,6 @@ func (f *connectSetupFlags) changes(cmd *cobra.Command) (setup.Changes, error) {
 		ch.Remove = append(ch.Remove, id)
 	}
 
-	switch f.driver {
-	case "", setup.DriverSpawn, setup.DriverACP:
-		ch.Driver = f.driver
-	default:
-		return ch, output.ErrUsage(fmt.Sprintf("Invalid --driver %q: use spawn or acp", f.driver))
-	}
-	if f.worker != "" && !slices.Contains(setup.Workers, f.worker) {
-		return ch, output.ErrUsage(fmt.Sprintf("Invalid --worker %q: use %s", f.worker, strings.Join(setup.Workers, ", ")))
-	}
-	ch.Worker = f.worker
-	if cmd.Flags().Changed("dangerous") {
-		on := f.dangerous
-		ch.Dangerous = &on
-	}
-	// A typed zero is out of range, not a request for the default: the flags
-	// are read as typed, not as their zero values.
-	if cmd.Flags().Changed("concurrency") {
-		if f.parallel < 1 || f.parallel > setup.MaxConcurrency {
-			return ch, output.ErrUsage(fmt.Sprintf("Invalid --concurrency %d: use 1 to %d", f.parallel, setup.MaxConcurrency))
-		}
-		ch.Concurrency = f.parallel
-	}
-	if cmd.Flags().Changed("deadline") {
-		if f.deadline < setup.MinDeadline || f.deadline > setup.MaxDeadline {
-			return ch, output.ErrUsage(fmt.Sprintf("Invalid --deadline %s: use %s to %s", f.deadline, setup.MinDeadline, setup.MaxDeadline))
-		}
-		ch.Deadline = f.deadline
-	}
 	return ch, nil
 }
 
