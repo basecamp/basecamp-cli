@@ -1282,7 +1282,7 @@ basecamp api post "/buckets/<circle_id>/chats/<chat_id>/lines.json" \
   --data '{"content":"<div>Hey, quick question.</div>","content_type":"text/html"}' --json
 ```
 
-Always send `"content_type": "text/html"` with formatted content. Without it the line is stored as plain text: HTML tags are shown escaped, Markdown is shown literally, multiline text renders with the quote border, and a later edit does not convert it. Lines accept `div`, `h1`, `br`, `strong`, `em`, `strike`, `a href`, `pre`, `ol`, `ul`, `li`, `blockquote` and `<bc-attachment sgid>`; use `<br>` for line breaks.
+Always send `"content_type": "text/html"` with formatted content. Without it the line is stored as plain text: HTML tags are shown escaped, Markdown is shown literally, and multiline text renders with the quote border. (Editing it with `basecamp chat update` stores the edit as rich text.) Lines accept `div`, `h1`, `br`, `strong`, `em`, `strike`, `a href`, `pre`, `ol`, `ul`, `li`, `blockquote` and `<bc-attachment sgid>`; use `<br>` for line breaks.
 
 Ping line records include `creator.name`, `created_at`, `content` HTML, `type`, `bucket.type: "Circle"`, and attachment fields when files or voice notes are present.
 
