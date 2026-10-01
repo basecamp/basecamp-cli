@@ -90,9 +90,23 @@ the work will take more than **about 10 minutes**, post 1 short interim reply at
 `reply_to`: what you are doing and where to follow it (the pull request once it
 exists, otherwise the branch). One, not a running commentary.
 
+**Your turn is your session.** When you stop calling tools, the turn ends, and
+once no other event is waiting the connector closes the session: anything still
+running in the background is killed, and an event you have not completed is
+recorded as unfinished. So never end a turn with work running in the background
+or an event not yet completed. Wait for it.
+
 **Validate with `bin/ci`.** When a coherent body of work is finished, run the
-repo's `bin/ci`, if it has one, in the background, once at the end rather than
-after every edit, and fix what it flags before you reply.
+repo's `bin/ci`, if it has one, once at the end rather than after every edit,
+and fix what it flags before you reply. Run it in the foreground. If it can run
+longer than one command's time limit, start it with its output going to a log
+that ends in its exit status, then wait for it in foreground calls until that
+status appears:
+
+```bash
+bin/ci > /tmp/ci-<branch>.log 2>&1; echo "EXIT=$?" >> /tmp/ci-<branch>.log   # started in the background
+timeout 540 sh -c 'until grep -q "^EXIT=" /tmp/ci-<branch>.log; do sleep 15; done'   # repeat until it returns 0
+```
 
 ### When the work is a pull request
 
@@ -102,8 +116,9 @@ task, not a follow-up.
 1. Work in a fresh worktree off the default branch.
 2. Get `bin/ci` green locally. Never push red.
 3. Push and open the pull request.
-4. Watch the remote checks (`gh pr checks <n> --watch --fail-fast`). If one fails,
-   fix it, push and watch again, until every check is green.
+4. Watch the remote checks (`gh pr checks <n> --watch --fail-fast`) in the
+   foreground, again until they finish, not past the end of your turn. If one
+   fails, fix it, push and watch again, until every check is green.
 5. Only then reply "done", with the pull request linked by its title. If you
    can't get it green after a reasonable effort, reply with what is failing and
    mention the requester, never a false "done".
