@@ -89,7 +89,7 @@ func awaitToken(ctx context.Context, tokens basecamp.TokenProvider, w connectSta
 		if wait <= 0 {
 			wait = connectStartBackoff(attempt)
 		}
-		w.Log(fmt.Sprintf("connector: could not get the agent's token yet (%s); trying again in %s", output.AsError(err).Message, wait.Round(time.Second)))
+		w.Log(fmt.Sprintf("connector: could not get the agent's token yet (%s); trying again in %s", output.AsError(err).Message, max(wait.Round(time.Second), time.Second)))
 		if err := sleep(ctx, wait); err != nil {
 			return err
 		}

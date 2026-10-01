@@ -116,6 +116,9 @@ func TestAStartRidesOutServerFaults(t *testing.T) {
 		assert.True(t, d > 0 && d <= time.Minute, "%s is within the feed's backoff", d)
 	}
 	assert.Len(t, w.lines, 3)
+	for _, line := range w.lines {
+		assert.NotContains(t, line, "in 0s", "a wait is never logged as none")
+	}
 	assert.Equal(t, 4, mints())
 }
 
