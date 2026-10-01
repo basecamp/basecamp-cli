@@ -182,22 +182,14 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return connectStoppedBySignal(sig)
 	default:
 	}
-	if agentDisconnectedAtStart(kind, err) {
-		return errAgentDisconnected("", name)
-	}
 	if err != nil {
-		return err
+		return connectStartFailure(kind, name, err)
 	}
 	client := connectSDKClient(app, tokens)
 	accountClient := client.ForAccount(account)
 	me, err := (setup.SDKReader{Client: accountClient}).Me(ctx)
-	if agentDisconnectedAtStart(kind, err) {
-		// Disconnected while the connector wasn't running: said the way a
-		// running connector says it, with no name, since reading it failed.
-		return errAgentDisconnected("", name)
-	}
 	if err != nil {
-		return output.ErrAuth(fmt.Sprintf("Could not read who profile %q is: %s", name, setup.ErrorText(err)))
+		return connectStartFailure(kind, name, err)
 	}
 	if _, err := checkConnectIdentity(ctx, app, client, kind, creds.OAuthType, me, file.Agent.IdentityID); err != nil {
 		return err
@@ -398,6 +390,23 @@ func connectorStoppedBy(err error, agent, profile string, refused func() bool) (
 	}
 	e := errAgentDisconnected(agent, profile)
 	return connector.ConnectionDisconnected, e.Message, e
+}
+
+// connectStartFailure is what a start that could not learn who it is exits
+// with. Stopped by a signal or a canceled context, it says so as it is.
+// Disconnected while the connector wasn't running, it is said the way a
+// running connector says it, with no name, since reading it failed.
+// Anything else is a failure to read who the profile is.
+func connectStartFailure(kind, profile string, err error) error {
+	var e *output.Error
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded),
+		errors.As(err, &e) && (e.Code == output.CodeTerminated || e.Code == output.CodeInterrupted):
+		return err
+	case agentDisconnectedAtStart(kind, err):
+		return errAgentDisconnected("", profile)
+	}
+	return output.ErrAuth(fmt.Sprintf("Could not read who profile %q is: %s", profile, setup.ErrorText(err)))
 }
 
 // agentDisconnectedAtStart reports whether the connector's first read of who

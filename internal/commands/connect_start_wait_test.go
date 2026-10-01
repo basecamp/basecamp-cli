@@ -3,14 +3,20 @@ package commands
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+	surfguard "github.com/basecamp/surfguard/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -228,4 +234,55 @@ func TestTheStartBacksOffAsTheFeedDoes(t *testing.T) {
 			assert.True(t, d > 0 && d <= envelope, "attempt %d drew %s", attempt, d)
 		}
 	}
+}
+
+// What no wait can change is not retried: a URL the egress policy refused,
+// or one the client could not send at all. A request that got no answer is.
+func TestOnlyATransportFailureWithoutAnAnswerIsRetried(t *testing.T) {
+	wrap := func(err error) error {
+		return fmt.Errorf("minting an agent token: %w", &url.Error{Op: "Post", URL: "https://example.test/oauth/tokens", Err: err})
+	}
+	for name, err := range map[string]error{
+		"blocked by policy":  wrap(&net.OpError{Op: "dial", Net: "tcp", Err: surfguard.ErrBlocked}),
+		"unsupported scheme": wrap(errors.New("unsupported protocol scheme \"ftp\"")),
+	} {
+		_, ok := tokenRetry(err)
+		assert.False(t, ok, name)
+	}
+	for name, err := range map[string]error{
+		"refused": wrap(&net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}),
+		"dropped": wrap(io.EOF),
+		"no name": wrap(&net.DNSError{Err: "no such host", Name: "example.test", IsNotFound: true}),
+		"cut off": wrap(io.ErrUnexpectedEOF),
+	} {
+		_, ok := tokenRetry(err)
+		assert.True(t, ok, name)
+	}
+}
+
+// An OAuth refresh carries its rate limit as the SDK's error, under the
+// CLI's: the wait it names is the one taken.
+func TestARefreshRateLimitKeepsItsWait(t *testing.T) {
+	refused := &output.Error{Code: output.CodeRateLimit, Message: "token refresh failed: rate limited", HTTPStatus: 429, Retryable: true,
+		Cause: basecamp.ErrRateLimit(30)}
+	wait, ok := tokenRetry(refused)
+	assert.True(t, ok)
+	assert.Equal(t, 30*time.Second, wait)
+}
+
+// A start that cannot learn who it is says so in the profile's terms,
+// unless it was stopped or the agent was disconnected.
+func TestAStartFailureKeepsItsFraming(t *testing.T) {
+	refused := output.ErrAuth("Minting an agent token was refused (invalid_client)")
+	refused.Cause = auth.ErrAgentCredentialRefused
+	terminated := output.ErrTerminated("connector terminated")
+
+	assert.Same(t, terminated, connectStartFailure(setup.KindAgent, "agent", terminated))
+	assert.ErrorIs(t, connectStartFailure(setup.KindAgent, "agent", context.Canceled), context.Canceled)
+	assert.Equal(t, errAgentDisconnected("", "agent"), connectStartFailure(setup.KindAgent, "agent", refused))
+
+	var e *output.Error
+	require.ErrorAs(t, connectStartFailure(setup.KindAgent, "agent", output.ErrAPI(404, "minting an agent token: the server answered HTTP 404")), &e)
+	assert.Equal(t, output.CodeAuth, e.Code)
+	assert.Equal(t, `Could not read who profile "agent" is: minting an agent token: the server answered HTTP 404`, e.Message)
 }

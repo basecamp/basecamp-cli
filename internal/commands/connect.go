@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,6 +16,7 @@ import (
 	"time"
 	"unicode"
 
+	surfguard "github.com/basecamp/surfguard/go"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
@@ -1135,21 +1137,44 @@ func retryableInSDKTerms(err error) error {
 // tokenRetry is the one rule for a failed token renewal, which the running
 // feed (through retryableInSDKTerms) and a starting connector both go by:
 // whether it can be retried, and the wait the endpoint named, zero when it
-// named none. Retryable is the CLI's own verdict — a rate limit, a 5xx — or a
-// request that got no answer at all, which the feed's SDK already rides out
-// as a transport failure. The wait is passed through the SDK's constructor
-// for its bound.
+// named none.
+//
+// Retryable is the CLI's own verdict — a rate limit, a 5xx — or a request
+// that got no answer: a connection refused, reset or dropped, a name that
+// did not resolve, a timeout. A URL the egress policy refused, or one the
+// client could not even send, is a verdict on the configuration that no
+// wait changes. The wait is the agent mint's own, or that of the SDK error
+// an OAuth refresh carries, through the SDK's constructor for its bound.
 func tokenRetry(err error) (time.Duration, bool) {
+	if errors.Is(err, surfguard.ErrBlocked) {
+		return 0, false
+	}
+	seconds := auth.RetryAfter(err)
+	var sdkErr *basecamp.Error
+	if errors.As(err, &sdkErr) {
+		seconds = max(seconds, sdkErr.RetryAfter)
+	}
 	var cliErr *output.Error
-	var urlErr *url.Error
-	var netErr net.Error
 	switch {
 	case errors.As(err, &cliErr) && cliErr.Retryable:
-		return time.Duration(basecamp.ErrRateLimit(auth.RetryAfter(err)).RetryAfter) * time.Second, true
-	case errors.As(err, &urlErr), errors.As(err, &netErr):
+		return time.Duration(basecamp.ErrRateLimit(seconds).RetryAfter) * time.Second, true
+	case gotNoAnswer(err):
 		return 0, true
 	}
 	return 0, false
+}
+
+// gotNoAnswer reports a request that was sent, or tried to be, and got no
+// response: the transport failed on the way, not the URL or the client.
+func gotNoAnswer(err error) bool {
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) {
+		return false
+	}
+	var opErr *net.OpError
+	var dnsErr *net.DNSError
+	return urlErr.Timeout() || errors.Is(urlErr.Err, io.EOF) || errors.Is(urlErr.Err, io.ErrUnexpectedEOF) ||
+		errors.As(urlErr.Err, &opErr) || errors.As(urlErr.Err, &dnsErr)
 }
 
 // connectSDKClient is the client setup reads through: no request hooks, no
