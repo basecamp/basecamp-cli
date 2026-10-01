@@ -147,10 +147,12 @@ func (m *Manager) resolveAgentMint(creds *Credentials) (*agentMint, error) {
 //
 // Nothing is ever deleted: a mint that fails leaves the client credentials
 // where they are, rather than an empty store and an instruction to log in.
-// There is no invalid_grant equivalent to forget here — a refused
-// client_credentials request says the CLIENT is wrong, and the operator's
-// remedy is to re-run the login with a good secret, which overwrites the
-// credential anyway.
+// There is no refresh-token invalid_grant equivalent to forget here. A
+// refused client_credentials request is a verdict on the client: either
+// permanent for this secret (invalid_client), where the remedy is a login
+// with a good secret, which overwrites the credential anyway; or one that
+// can reverse (invalid_grant, an inactive agent, or a 401/403 naming no
+// reason), which the same secret may get past later.
 //
 // But a refusal is not forgotten either. The token endpoint's verdict is
 // remembered on the stored credential (MintHold, agent_hold.go), and the
@@ -347,6 +349,12 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxAgentTokenBytes+1))
+	if resp.StatusCode == http.StatusTooManyRequests && (err != nil || int64(len(body)) > maxAgentTokenBytes) {
+		// A 429's status and Retry-After are all its hold needs, and a
+		// body that could not be read must not cost the hold.
+		hold, err := m.agentMintRefusal(resp, nil, mint)
+		return nil, hold, err
+	}
 	if err != nil {
 		return nil, nil, wrapOAuthError("minting an agent token", err)
 	}

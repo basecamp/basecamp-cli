@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -496,3 +497,47 @@ type unreadableStore struct{ credStore }
 func (unreadableStore) Load(string) ([]byte, error) { return nil, errors.New("the keychain is locked") }
 func (unreadableStore) FallbackWarning() string     { return "" }
 func (unreadableStore) UsingKeyring() bool          { return true }
+
+// TestARateLimitWithAnUnreadableBodyIsStillHeld: a 429's status and
+// Retry-After decide its hold. A body cut short, or too large to read,
+// does not send the secret again on the next poll.
+func TestARateLimitWithAnUnreadableBodyIsStillHeld(t *testing.T) {
+	for name, write := range map[string]func(w http.ResponseWriter){
+		"cut short": func(w http.ResponseWriter) {
+			w.Header().Set("Content-Length", "100")
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"err`)
+		},
+		"too large": func(w http.ResponseWriter) {
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, strings.Repeat(" ", int(maxAgentTokenBytes)+1))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Retry-After", "300")
+				write(w)
+			}))
+			t.Cleanup(srv.Close)
+			m := newDeviceTestManager(t, srv.URL)
+			now := time.Now().Truncate(time.Second)
+			m.clock = func() time.Time { return now }
+			key := storeAgent(t, m, agentCredential(srv.URL+"/oauth/tokens", time.Now().Add(-time.Minute)))
+
+			_, err := m.AccessToken(context.Background())
+			require.Error(t, err)
+			assert.Equal(t, output.CodeRateLimit, output.AsError(err).Code)
+
+			stored, err := m.store.Load(key)
+			require.NoError(t, err)
+			require.NotNil(t, stored.MintHold)
+			assert.Equal(t, now.Add(300*time.Second).Unix(), stored.MintHold.Until)
+
+			_, err = m.AccessToken(context.Background())
+			require.Error(t, err)
+			assert.EqualValues(t, 1, calls.Load(), "the 429 was not held")
+		})
+	}
+}
