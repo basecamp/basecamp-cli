@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/spf13/cobra"
@@ -1117,16 +1120,36 @@ func (t *managerTokens) AccessToken(ctx context.Context) (string, error) {
 func retryableInSDKTerms(err error) error {
 	var cliErr *output.Error
 	var sdkErr *basecamp.Error
-	if !errors.As(err, &cliErr) || !cliErr.Retryable || cliErr.HTTPStatus == 0 || errors.As(err, &sdkErr) {
+	asked, retryable := tokenRetry(err)
+	if !retryable || !errors.As(err, &cliErr) || cliErr.HTTPStatus == 0 || errors.As(err, &sdkErr) {
 		return err
 	}
 	e := &basecamp.Error{Code: basecamp.CodeAPI, Message: err.Error(), HTTPStatus: cliErr.HTTPStatus, Retryable: true, Cause: err}
 	if cliErr.HTTPStatus == http.StatusTooManyRequests {
 		e.Code = basecamp.CodeRateLimit
-		// Through the SDK's constructor for its bound on the wait.
-		e.RetryAfter = basecamp.ErrRateLimit(auth.RetryAfter(err)).RetryAfter
+		e.RetryAfter = int(asked / time.Second)
 	}
 	return e
+}
+
+// tokenRetry is the one rule for a failed token renewal, which the running
+// feed (through retryableInSDKTerms) and a starting connector both go by:
+// whether it can be retried, and the wait the endpoint named, zero when it
+// named none. Retryable is the CLI's own verdict — a rate limit, a 5xx — or a
+// request that got no answer at all, which the feed's SDK already rides out
+// as a transport failure. The wait is passed through the SDK's constructor
+// for its bound.
+func tokenRetry(err error) (time.Duration, bool) {
+	var cliErr *output.Error
+	var urlErr *url.Error
+	var netErr net.Error
+	switch {
+	case errors.As(err, &cliErr) && cliErr.Retryable:
+		return time.Duration(basecamp.ErrRateLimit(auth.RetryAfter(err)).RetryAfter) * time.Second, true
+	case errors.As(err, &urlErr), errors.As(err, &netErr):
+		return 0, true
+	}
+	return 0, false
 }
 
 // connectSDKClient is the client setup reads through: no request hooks, no

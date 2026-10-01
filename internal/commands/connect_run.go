@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -170,7 +169,19 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if err != nil {
 		return output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
 	}
+	logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
 	tokens := &managerTokens{mgr: app.Auth}
+	// Every read below needs a token first. One the running feed would
+	// wait for is waited for here too, rather than ending the start.
+	startSignals, stopStartSignals := connector.NotifyShutdown()
+	err = awaitConnectToken(ctx, tokens, connectStartWait{Log: func(line string) { logger.Warn(line) }, Signals: startSignals})
+	stopStartSignals()
+	if agentDisconnectedAtStart(kind, err) {
+		return errAgentDisconnected("", name)
+	}
+	if err != nil {
+		return err
+	}
 	client := connectSDKClient(app, tokens)
 	accountClient := client.ForAccount(account)
 	me, err := (setup.SDKReader{Client: accountClient}).Me(ctx)
@@ -215,7 +226,6 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	}
 	defer func() { _ = ledger.Close() }()
 
-	logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
 	if f.hold {
 		// Before intake starts: nothing this run admits may dispatch ahead of
 		// the marker.
@@ -352,10 +362,8 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	sig := received
 	mu.Unlock()
 	switch {
-	case sig == os.Interrupt || sig == syscall.SIGINT:
-		return output.ErrInterrupted("connector interrupted")
-	case sig == syscall.SIGTERM:
-		return output.ErrTerminated("connector terminated")
+	case sig != nil:
+		return connectStoppedBySignal(sig)
 	case firstErr != nil:
 		var err error
 		refused := func() bool { return confirmAgentRefused(context.WithoutCancel(ctx), app, kind, name) }
