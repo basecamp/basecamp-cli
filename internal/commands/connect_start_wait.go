@@ -10,6 +10,7 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
+	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -27,6 +28,17 @@ type connectStartWait struct {
 	Log     func(string)
 	Signals <-chan os.Signal
 	Sleep   func(ctx context.Context, d time.Duration) error
+	// Exit ends the process on a second signal; os.Exit when nil.
+	Exit func(code int)
+}
+
+func (w connectStartWait) forceStop(sig os.Signal) {
+	exit := w.Exit
+	if exit == nil {
+		exit = os.Exit
+	}
+	w.Log("connector: stopping now, before it has started; signal " + sig.String())
+	exit(connector.ExitCodeForSignal(sig))
 }
 
 // awaitConnectToken holds a starting connector until the agent's token can
@@ -44,7 +56,7 @@ type connectStartWait struct {
 func awaitConnectToken(parent context.Context, tokens basecamp.TokenProvider, w connectStartWait) error {
 	ctx, cancel := context.WithCancel(parent)
 	var stopped error
-	watched := make(chan struct{})
+	watched, done := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(watched)
 		select {
@@ -52,10 +64,20 @@ func awaitConnectToken(parent context.Context, tokens basecamp.TokenProvider, w 
 			stopped = connectStoppedBySignal(sig)
 			cancel()
 		case <-ctx.Done():
+			return
+		}
+		// Saving a renewed credential does not stop for a canceled
+		// context. A second signal is someone who has waited long enough,
+		// and ends the process as it does for a running connector.
+		select {
+		case sig := <-w.Signals:
+			w.forceStop(sig)
+		case <-done:
 		}
 	}()
 	err := awaitToken(ctx, tokens, w)
 	cancel()
+	close(done)
 	<-watched
 	if stopped != nil {
 		return stopped
@@ -96,8 +118,8 @@ func awaitToken(ctx context.Context, tokens basecamp.TokenProvider, w connectSta
 	}
 }
 
-// connectStartBackoff is the feed's full-jitter draw for the attempt'th
-// consecutive failure: uniform in (0, min(base × 2^(attempt−1), cap)].
+// connectStartBackoff is the feed's full-jitter draw for the nth
+// consecutive failure, n being attempt: uniform in (0, min(base × 2^(attempt−1), cap)].
 func connectStartBackoff(attempt int) time.Duration {
 	envelope := connectStartBackoffCap
 	if attempt <= 6 {

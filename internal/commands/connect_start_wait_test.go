@@ -22,6 +22,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
@@ -288,4 +289,38 @@ func TestAStartFailureKeepsItsFraming(t *testing.T) {
 	require.ErrorAs(t, connectStartFailure(setup.KindAgent, "agent", output.ErrAPI(404, "minting an agent token: the server answered HTTP 404")), &e)
 	assert.Equal(t, output.CodeAuth, e.Code)
 	assert.Equal(t, `Could not read who profile "agent" is: minting an agent token: the server answered HTTP 404`, e.Message)
+}
+
+// stuckTokens is a renewal that does not stop for its context, as saving a
+// renewed credential does not.
+type stuckTokens struct{ release chan struct{} }
+
+func (s stuckTokens) AccessToken(context.Context) (string, error) {
+	<-s.release
+	return "bc_at_minted", nil
+}
+
+// A second signal ends a start whose renewal will not stop, as it ends a
+// running connector.
+func TestASecondSignalForcesAStuckStartToEnd(t *testing.T) {
+	tokens := stuckTokens{release: make(chan struct{})}
+	signals := make(chan os.Signal, 2)
+	exited := make(chan int, 1)
+	signals <- syscall.SIGTERM
+	signals <- syscall.SIGTERM
+
+	result := make(chan error, 1)
+	go func() {
+		result <- awaitConnectToken(t.Context(), tokens, connectStartWait{Log: func(string) {}, Signals: signals, Exit: func(code int) { exited <- code }})
+	}()
+	select {
+	case code := <-exited:
+		assert.Equal(t, connector.ExitCodeForSignal(syscall.SIGTERM), code)
+	case <-time.After(5 * time.Second):
+		t.Fatal("a second signal did not end the stuck start")
+	}
+	close(tokens.release)
+	var e *output.Error
+	require.ErrorAs(t, <-result, &e)
+	assert.Equal(t, output.CodeTerminated, e.Code)
 }
