@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -23,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
@@ -478,4 +480,50 @@ func TestAnOversizedServerFaultIsWaitedOut(t *testing.T) {
 	require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options(tokens)))
 	assert.Len(t, w.waits, 1)
 	assert.Equal(t, 2, mints())
+}
+
+// A second connector for an agent that is already running says so at once,
+// even while the token endpoint is rate-limiting it: the lock is checked
+// before the start waits for a token, not after.
+func TestASecondConnectorIsRefusedBeforeItWaitsForAToken(t *testing.T) {
+	f := newOperatorFixture(t)
+	dir, err := connectStateDir(f.file, false)
+	require.NoError(t, err)
+	lock, err := connector.AcquireInstanceLock(dir, f.file.AccountID, f.file.Agent.PersonID, time.Now())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lock.Release() })
+
+	app := newConnectSetupApp(t, f.s, "agent")
+	creds, err := app.Auth.GetStore().Load(app.Auth.CredentialKey())
+	require.NoError(t, err)
+	creds.ExpiresAt = time.Now().Add(-time.Minute).Unix()
+	require.NoError(t, app.Auth.GetStore().Save(app.Auth.CredentialKey(), creds))
+	f.s.mu.Lock()
+	f.s.rateLimitMints, f.s.mints = true, 0
+	f.s.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var buf bytes.Buffer
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: &buf})
+	cmd := NewConnectCmd()
+	cmd.SetArgs(nil)
+	cmd.SetContext(appctx.WithApp(ctx, app))
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SilenceErrors, cmd.SilenceUsage = true, true
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	select {
+	case err := <-done:
+		assert.Equal(t, output.CodeLockUnavailable, usageError(t, err).Code, buf.String())
+	case <-time.After(10 * time.Second):
+		cancel()
+		<-done
+		t.Fatalf("a second connector waited for a token instead of refusing: %s", buf.String())
+	}
+	f.s.mu.Lock()
+	defer f.s.mu.Unlock()
+	assert.Zero(t, f.s.mints, "nothing was minted for a connector that cannot run")
 }

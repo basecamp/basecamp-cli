@@ -169,6 +169,23 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if err != nil {
 		return output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
 	}
+	// The lock first, under the agent connect.json names: a second
+	// connector for an agent already running says so now, not after
+	// waiting out a rate limit for a token it would never use. VerifyAgent
+	// below holds the credential to that same person.
+	stateDir, err := connectStateDir(file, f.shadow)
+	if err != nil {
+		return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
+	}
+	lock, err := connector.AcquireInstanceLock(stateDir, account, file.Agent.PersonID, time.Now())
+	if err != nil {
+		if errors.Is(err, connector.ErrAlreadyRunning) {
+			return &output.Error{Code: output.CodeLockUnavailable, Message: err.Error()}
+		}
+		return err
+	}
+	defer func() { _ = lock.Release() }()
+
 	logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
 	tokens := &managerTokens{mgr: app.Auth}
 	// Every read below needs a token first. One the running feed would
@@ -204,19 +221,6 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return output.ErrUsage(err.Error())
 	}
 	policy.Buckets = buckets
-
-	stateDir, err := connectStateDir(file, f.shadow)
-	if err != nil {
-		return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
-	}
-	lock, err := connector.AcquireInstanceLock(stateDir, account, agentID, time.Now())
-	if err != nil {
-		if errors.Is(err, connector.ErrAlreadyRunning) {
-			return &output.Error{Code: output.CodeLockUnavailable, Message: err.Error()}
-		}
-		return err
-	}
-	defer func() { _ = lock.Release() }()
 
 	ledger, err := connector.OpenLedger(filepath.Join(stateDir, connector.LedgerFile))
 	if err != nil {

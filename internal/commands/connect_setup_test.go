@@ -77,6 +77,10 @@ type connectSetupServer struct {
 	// refuseSecret answers every mint with invalid_client, as Basecamp does
 	// for an agent disconnected, or connected on another computer.
 	refuseSecret bool
+	// rateLimitMints answers every mint with a 429 asking for an hour.
+	rateLimitMints bool
+	// mints counts the agent token mints.
+	mints int
 }
 
 func startConnectSetupServer(t *testing.T) *connectSetupServer {
@@ -108,6 +112,15 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 		writeJSON(w, map[string]any{"client_id": "agent-client", "client_secret": fakeConnectSecret, "account_id": "999", "scope": scope})
 	})
 	mux.HandleFunc("/oauth/tokens", func(w http.ResponseWriter, _ *http.Request) {
+		s.mu.Lock()
+		s.mints++
+		rateLimited := s.rateLimitMints
+		s.mu.Unlock()
+		if rateLimited {
+			w.Header().Set("Retry-After", "3600")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
 		if s.refuseSecret {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
