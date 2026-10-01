@@ -526,3 +526,28 @@ func TestAHandoffStillInFlightAtTheReleasePointHoldsTheAttempt(t *testing.T) {
 	holder := settledTaker(s, slog.New(slog.DiscardHandler), "att", 50*time.Millisecond)
 	assert.True(t, holder.Held(), "an attempt is not released around a handoff that is still deciding")
 }
+
+// macOS names a peer's process only while it is connected: a peer of this
+// user's that closed first is not a refusal (nothing untrusted asked) and is
+// handed nothing; the socket waits for the next start. Another user's is
+// still refused.
+func TestAPeerGoneBeforeItIsNamedIsUndeliveredNotRefused(t *testing.T) {
+	for uid, want := range map[int]Handoff{os.Getuid(): HandoffUndelivered, os.Getuid() + 1: HandoffRefused} {
+		gone := func(*net.UnixConn) (PeerCredentials, error) { return PeerCredentials{UID: uid}, errPeerGone }
+		s, err := serveTaskTokenWith(tokenDir(t), socketTestToken, 5*time.Second, gone,
+			processGroupOf, parentProcessOf, driver.LookupProcess)
+		require.NoError(t, err)
+		handoffs := make(chan Handoff, 4)
+		s.OnHandoff(func(h Handoff, _ driver.Process, _ bool) { handoffs <- h })
+		s.AllowGroup(syscall.Getpgrp())
+
+		dialer := net.Dialer{Timeout: 2 * time.Second}
+		conn, err := dialer.DialContext(context.Background(), "unix", s.Path())
+		require.NoError(t, err)
+		got, _ := io.ReadAll(conn)
+		_ = conn.Close()
+		assert.Empty(t, got, "no token for a peer that could not be named")
+		assert.Equal(t, want, <-handoffs, "uid %d", uid)
+		s.Close()
+	}
+}

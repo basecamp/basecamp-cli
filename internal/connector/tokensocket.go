@@ -645,7 +645,12 @@ func (s *TokenSocket) handOne(window time.Duration) (Handoff, driver.Process) {
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(deadline)
-	if !s.trusted(conn, deadline) {
+	if ok, gone := s.trusted(conn, deadline); !ok {
+		if gone {
+			// This user's process, closed before it could be named: nothing
+			// untrusted asked, and nothing was handed over.
+			return HandoffUndelivered, driver.Process{}
+		}
 		return HandoffRefused, driver.Process{}
 	}
 	if _, err := conn.Write([]byte(s.token + "\n")); err != nil {
@@ -667,12 +672,21 @@ func (s *TokenSocket) allowedGroup() int {
 	}
 }
 
+// errPeerGone is a peer that closed before the kernel would name its
+// process. macOS answers LOCAL_PEERPID only while the peer is connected, and
+// still names its user.
+var errPeerGone = errors.New("connector: the peer closed before it could be identified")
+
 // trusted reports whether the peer is this user's process in the worker's
-// own process group.
-func (s *TokenSocket) trusted(conn *net.UnixConn, deadline time.Time) bool {
+// own process group. gone is a peer of this user's that closed before its
+// process could be named: not trusted, and not a refusal either.
+func (s *TokenSocket) trusted(conn *net.UnixConn, deadline time.Time) (ok, gone bool) {
 	cred, err := s.peer(conn)
+	if errors.Is(err, errPeerGone) {
+		return false, cred.UID == os.Getuid()
+	}
 	if err != nil || cred.UID != os.Getuid() || cred.PID <= 0 {
-		return false
+		return false, false
 	}
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
@@ -681,15 +695,15 @@ func (s *TokenSocket) trusted(conn *net.UnixConn, deadline time.Time) bool {
 	case want = <-s.group:
 		s.group <- want
 	case <-ctx.Done():
-		return false
+		return false, false
 	}
 	if want <= 1 {
-		return false
+		return false, false
 	}
 	if got, err := s.groupOf(cred.PID); err == nil && got == want {
-		return true
+		return true, false
 	}
-	return s.descendsFrom(cred.PID, want)
+	return s.descendsFrom(cred.PID, want), false
 }
 
 // maxAncestry bounds the walk up a peer's parents.

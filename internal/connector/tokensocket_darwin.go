@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"errors"
 	"net"
 
 	"golang.org/x/sys/unix"
@@ -32,6 +33,11 @@ func peerCredentials(conn *net.UnixConn) (PeerCredentials, error) {
 	}
 	if credOK != nil {
 		return PeerCredentials{}, credOK
+	}
+	if errors.Is(pidOK, unix.ENOTCONN) {
+		// The user is still answered; the process is not, once the peer has
+		// closed.
+		return PeerCredentials{UID: int(cred.Uid)}, errPeerGone
 	}
 	if pidOK != nil {
 		return PeerCredentials{}, pidOK
