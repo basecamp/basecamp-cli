@@ -436,15 +436,17 @@ Use the card's own card table. If either column is missing, skip this. Never
 create columns. Skip it for `subscribed` and `completed`.
 
 **4. Do the work** in the repo, the way its own AGENTS.md and CLAUDE.md say.
-Start by changing into the repo path you were given: you don't start there.
-Work that changes code goes in a fresh git worktree off the default branch,
-never in the main checkout.
+If you were given a repo path, start by changing into it: you don't start
+there. "no repo" means the request needs none (a summary, a question about the
+project): do it from Basecamp alone. Work that changes code goes in a fresh git
+worktree off the default branch, never in the main checkout.
 
 **Read the code before you answer anything about it.** Open the files the
 request is about, and answer from what's there, not from what the request or
-the names suggest. If what it asks about isn't in the code, say so. If you
-can't reach the repo, or it was "no repo", say that rather than guess. A
-confident wrong answer is worse than "I couldn't find that".
+the names suggest. If what it asks about isn't in the code, say so. If a
+request about code came with "no repo", or you can't reach the repo, say that
+rather than guess. A confident wrong answer is worse than "I couldn't find
+that".
 
 **Commit with the repo's own git identity, or not at all.** Never set a name
 or email, and never borrow the person's. If git has no author configured,
