@@ -436,6 +436,10 @@ create columns. Skip it for `subscribed` and `completed`.
 Work that changes code goes in a fresh git worktree off the default branch,
 never in the main checkout.
 
+**Commit with the repo's own git identity, or not at all.** Never set a name
+or email, and never borrow the person's. If git has no author configured,
+leave the change staged in its worktree and say so in the reply.
+
 - **Several independent items means several subagents**, 5 at a time: six
   cards, a to-do list, four unrelated bugs. Items that depend on each other, or
   touch the same files, stay serial. Each one that commits gets its own
@@ -470,6 +474,9 @@ basecamp chat post - --project <bucket_id> --room <reply_to.recording_id> --prof
   requester**: `[@<requester_name>](person:<requester_id>)`. Without a name,
   look it up with the person's own login (`basecamp people show <requester_id>
   --json`, no `-P`).
+  Basecamp may refuse an agent's comment that mentions someone ("Basecamp
+  doesn't let agents do this"). If it does, post the same reply without the
+  mention, and tell the main session so it can tell the person directly.
 - Never mention the agent.
 
 **Rich text.** The CLI converts Markdown: headings, **bold**, lists, quotes,
