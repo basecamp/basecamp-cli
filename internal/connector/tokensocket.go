@@ -645,7 +645,8 @@ func (s *TokenSocket) handOne(window time.Duration) (Handoff, driver.Process) {
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(deadline)
-	if ok, gone := s.trusted(conn, deadline); !ok {
+	peer, ok, gone := s.trusted(conn, deadline)
+	if !ok {
 		if gone {
 			// This user's process, closed before it could be named: nothing
 			// untrusted asked, and nothing was handed over.
@@ -658,7 +659,10 @@ func (s *TokenSocket) handOne(window time.Duration) (Handoff, driver.Process) {
 		// socket a peer that has gone makes this EPIPE at once.
 		return HandoffUndelivered, driver.Process{}
 	}
-	return HandoffDelivered, s.takerOfConn(conn)
+	// The peer named before the write, not asked again: a server that reads
+	// its token and closes at once is the ordinary case, and macOS no longer
+	// names a peer that has closed.
+	return HandoffDelivered, s.takerOf(peer.PID)
 }
 
 // allowedGroup is the worker's process group, or 0 before it is named.
@@ -680,13 +684,13 @@ var errPeerGone = errors.New("connector: the peer closed before it could be iden
 // trusted reports whether the peer is this user's process in the worker's
 // own process group. gone is a peer of this user's that closed before its
 // process could be named: not trusted, and not a refusal either.
-func (s *TokenSocket) trusted(conn *net.UnixConn, deadline time.Time) (ok, gone bool) {
+func (s *TokenSocket) trusted(conn *net.UnixConn, deadline time.Time) (peer PeerCredentials, ok, gone bool) {
 	cred, err := s.peer(conn)
 	if errors.Is(err, errPeerGone) {
-		return false, cred.UID == os.Getuid()
+		return cred, false, cred.UID == os.Getuid()
 	}
 	if err != nil || cred.UID != os.Getuid() || cred.PID <= 0 {
-		return false, false
+		return cred, false, false
 	}
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
@@ -695,15 +699,15 @@ func (s *TokenSocket) trusted(conn *net.UnixConn, deadline time.Time) (ok, gone 
 	case want = <-s.group:
 		s.group <- want
 	case <-ctx.Done():
-		return false, false
+		return cred, false, false
 	}
 	if want <= 1 {
-		return false, false
+		return cred, false, false
 	}
 	if got, err := s.groupOf(cred.PID); err == nil && got == want {
-		return true, false
+		return cred, true, false
 	}
-	return s.descendsFrom(cred.PID, want), false
+	return cred, s.descendsFrom(cred.PID, want), false
 }
 
 // maxAncestry bounds the walk up a peer's parents.
@@ -724,16 +728,15 @@ func (s *TokenSocket) descendsFrom(pid, ancestor int) bool {
 	return false
 }
 
-// takerOfConn is the identity of the process the token just went to, so the
+// takerOf is the identity of the process the token just went to, so the
 // release point can end it: it is outside the worker's process group whenever
 // the agent started it in one of its own. A restarted MCP server is a new
 // process, and the newest is the one holding the token.
-func (s *TokenSocket) takerOfConn(conn *net.UnixConn) driver.Process {
-	cred, err := s.peer(conn)
-	if err != nil || cred.PID <= 0 {
+func (s *TokenSocket) takerOf(pid int) driver.Process {
+	if pid <= 0 {
 		return driver.Process{}
 	}
-	taker, err := s.lookup(cred.PID)
+	taker, err := s.lookup(pid)
 	if err != nil {
 		return driver.Process{}
 	}

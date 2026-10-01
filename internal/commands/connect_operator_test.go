@@ -271,11 +271,11 @@ func TestConnectDoctorPlatformCheckNamesTheConstraintThatApplies(t *testing.T) {
 	assert.Equal(t, "Platform", c.Name)
 	assert.Equal(t, setup.StatusFail, c.Status)
 	assert.Contains(t, c.Message, "windows", "it names the platform it refuses")
-	assert.Contains(t, c.Message, connectLinuxOnlyReason, "it gives the reason the run command gives")
+	assert.Contains(t, c.Message, connectSupportedOSReason, "it gives the reason the run command gives")
 
 	err := connectUnsupportedOSError("windows")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), connectLinuxOnlyReason, "doctor and the run command give the one reason")
+	assert.Contains(t, err.Error(), connectSupportedOSReason, "doctor and the run command give the one reason")
 	assert.Contains(t, err.Error(), "Linux and macOS only, not windows")
 }
 

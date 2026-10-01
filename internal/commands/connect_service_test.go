@@ -337,9 +337,9 @@ func TestConnectServiceInstallRefusesWhenSystemdReadsAnotherFile(t *testing.T) {
 // The platform gate is the run command's, so a platform the connector does
 // not run on is refused before a unit is written for it; and the unit is
 // systemd's, so a Mac, where the connector runs, is refused for that.
-func TestConnectServiceRefusesAPlatformTheConnectorDoesNotRunOn(t *testing.T) {
+func TestConnectServiceRefusesAnInstallOffLinux(t *testing.T) {
 	for goos, want := range map[string]string{
-		"windows": connectLinuxOnlyReason,
+		"windows": connectSupportedOSReason,
 		"darwin":  "background service is a systemd unit, so it runs on Linux only, not darwin",
 	} {
 		t.Run(goos, func(t *testing.T) {

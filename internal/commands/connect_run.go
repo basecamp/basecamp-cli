@@ -614,28 +614,26 @@ func connectConsumerNamespace(agentID int64, shadow bool) string {
 	return name
 }
 
-// connectSupportedOS is where the connector runs: Linux, and for now only
-// Linux.
+// connectSupportedOS is where the connector runs: Linux and macOS.
 //
-// Two things have to hold, and macOS has only one of them. The driver must
-// be able to read process start times, so a recorded worker group is never
-// signaled after its pid was reused — macOS can. And the task token has to
-// reach the worker's MCP server, which it does on an inherited descriptor:
-// `connect worker-mcp` execs `basecamp mcp --connect-token-fd`, and that
-// hand-over is accepted only where the descriptors this process inherited
-// are sealed against everything it starts, which is Linux alone
-// (mcp_token_linux.go, and #736, which gated it deliberately). On macOS
-// every non-shadow dispatch would start a worker whose Basecamp tools fail
-// at the handshake, so the connector says so here rather than at the far
-// end of each task.
+// Two things have to hold. The driver must be able to read process start
+// times, so a recorded worker group is never signaled after its pid was
+// reused. And the task token has to reach the worker's MCP server, which it
+// does on an inherited descriptor: `connect worker-mcp` execs `basecamp mcp
+// --connect-token-fd`, and that hand-over is accepted only where the
+// descriptors this process inherited are sealed against everything it
+// starts (mcp_token_sealed.go, internal/cli's inherited_fds_seal.go). Linux
+// and macOS do both; anywhere else every non-shadow dispatch would start a
+// worker whose Basecamp tools fail at the handshake, so the connector says so
+// here rather than at the far end of each task.
 func connectSupportedOS(goos string) bool {
 	return goos == "linux" || goos == "darwin"
 }
 
-// connectLinuxOnlyReason is why, in one place: the run command's refusal and
+// connectSupportedOSReason is why, in one place: the run command's refusal and
 // doctor's Platform check say the same thing, so a person who meets one and
 // then the other is not told two different stories about their machine.
-const connectLinuxOnlyReason = "the task token reaches a worker's MCP server over an inherited descriptor, and the CLI keeps inherited descriptors from the programs it starts only on Linux and macOS"
+const connectSupportedOSReason = "the task token reaches a worker's MCP server over an inherited descriptor, and the CLI keeps inherited descriptors from the programs it starts only on Linux and macOS"
 
 // connectUnsupportedOSError is the refusal on a platform the connector does
 // not run on, given by the run command and by `service install`, which would
@@ -645,7 +643,7 @@ const connectLinuxOnlyReason = "the task token reaches a worker's MCP server ove
 // refusal is prose, not a command to run, and a hint that begins like a
 // command is read as one — by a person, and by TestHintCommandsResolve.
 func connectUnsupportedOSError(goos string) error {
-	return output.ErrUsage(fmt.Sprintf("The connector runs on Linux and macOS only, not %s: %s", goos, connectLinuxOnlyReason))
+	return output.ErrUsage(fmt.Sprintf("The connector runs on Linux and macOS only, not %s: %s", goos, connectSupportedOSReason))
 }
 
 // connectServed is connect.json's served projects as they are now, not as

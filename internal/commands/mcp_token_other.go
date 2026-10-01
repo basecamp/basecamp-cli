@@ -17,5 +17,5 @@ import (
 //
 // The connector runs on Linux and macOS, so this refuses nothing that works today.
 func readTaskToken(sysfd.Descriptor) (string, error) {
-	return "", output.ErrUsage("--connect-state is only available on Linux and macOS, where an inherited descriptor can be kept from the processes this one starts")
+	return "", output.ErrUsage("--connect-token-fd is only available on Linux and macOS, where an inherited descriptor can be kept from the processes this one starts")
 }

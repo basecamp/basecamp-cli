@@ -544,10 +544,45 @@ func TestAPeerGoneBeforeItIsNamedIsUndeliveredNotRefused(t *testing.T) {
 		dialer := net.Dialer{Timeout: 2 * time.Second}
 		conn, err := dialer.DialContext(context.Background(), "unix", s.Path())
 		require.NoError(t, err)
-		got, _ := io.ReadAll(conn)
+		got, err := io.ReadAll(conn)
+		require.NoError(t, err)
 		_ = conn.Close()
 		assert.Empty(t, got, "no token for a peer that could not be named")
 		assert.Equal(t, want, <-handoffs, "uid %d", uid)
 		s.Close()
 	}
+}
+
+// The process that took the token is the one the trust check named before
+// the write. A server that reads its token and closes at once is the
+// ordinary case, and macOS will not name a peer that has closed: asking a
+// second time would lose the taker, and hold the attempt over a delivery that
+// worked.
+func TestTheTakerIsThePeerNamedBeforeTheWrite(t *testing.T) {
+	var calls atomic.Int32
+	namedOnce := func(*net.UnixConn) (PeerCredentials, error) {
+		if calls.Add(1) > 1 {
+			return PeerCredentials{UID: os.Getuid()}, errPeerGone
+		}
+		return PeerCredentials{PID: os.Getpid(), UID: os.Getuid()}, nil
+	}
+	s, err := serveTaskTokenWith(tokenDir(t), socketTestToken, 5*time.Second, namedOnce,
+		processGroupOf, parentProcessOf, driver.LookupProcess)
+	require.NoError(t, err)
+	defer s.Close()
+	type handed struct {
+		h     Handoff
+		taker driver.Process
+	}
+	handoffs := make(chan handed, 2)
+	s.OnHandoff(func(h Handoff, taker driver.Process, _ bool) { handoffs <- handed{h, taker} })
+	s.AllowGroup(syscall.Getpgrp())
+
+	got, err := fetch(t, s.Path())
+	require.NoError(t, err)
+	assert.Equal(t, socketTestToken, strings.TrimSpace(got))
+	first := <-handoffs
+	assert.Equal(t, HandoffDelivered, first.h)
+	assert.Equal(t, os.Getpid(), first.taker.PID, "the taker is the peer the trust check named")
+	assert.Equal(t, int32(1), calls.Load(), "the peer is asked once")
 }

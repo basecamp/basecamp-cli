@@ -502,8 +502,9 @@ Pass the run's shape to the connector itself: `--project <id>` (repeatable) to
 hear only some projects, `--shadow` to admit and log without dispatching or
 posting anything, `--hold` to run with the durable hold set.
 
-Linux only for now: on any other system the connector refuses to start, and
-says so. If a person on a Mac asks, say that.
+Linux and macOS only: on any other system the connector refuses to start,
+and says so. The background service (`connect service`) is Linux only, since
+it writes a systemd unit; on a Mac, start the connector yourself.
 
 Quote the profile, as everywhere else in this skill.
 

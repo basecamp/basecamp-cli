@@ -1477,9 +1477,9 @@ basecamp connect setup -P agent --worker codex     # Run workers with Codex inst
 answer. Stdout is a wire of one JSON object per line (events seen, verdicts,
 dispatches — ids and states, never content) and the logs are on stderr, so read
 the lines rather than the log. SIGINT and SIGTERM cancel whatever workers are
-running, settle them, and exit 130 and 143. It runs on Linux only: the task
-token's hand-over onto a descriptor the next program inherits is sealed only
-there. It refuses a second connector for the same agent, and takes `--project`
+running, settle them, and exit 130 and 143. It runs on Linux and macOS: the
+task token's hand-over onto a descriptor the next program inherits is sealed
+only there. It refuses a second connector for the same agent, and takes `--project`
 (repeatable) to hear and dispatch only those projects. Run it under a
 supervisor rather than from a session you will close.
 

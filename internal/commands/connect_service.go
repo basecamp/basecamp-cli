@@ -32,9 +32,9 @@ import (
 // OS. These commands write the unit that does the restarting, and take it
 // away again.
 //
-// systemd only. The connector runs on Linux alone, for the reason the run
-// command gives, so there is no second supervisor to write for: a launchd
-// agent would supervise a process that refuses to start.
+// systemd only, so Linux only. The connector also runs on macOS, where a
+// launchd agent would be the supervisor; none is written yet, and the service
+// stays hidden until one is.
 
 // connectServiceUnitPrefix begins every unit this writes. The profile name
 // completes it, so one machine can supervise several agents.

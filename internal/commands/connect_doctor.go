@@ -371,7 +371,7 @@ func preflightReason(err error) string {
 // then refused it anyway.
 func connectUnsupportedOSCheck(goos string) setup.Check {
 	return setup.Check{Name: "Platform", Status: setup.StatusFail,
-		Message: fmt.Sprintf("The connector does not run on %s: %s", goos, connectLinuxOnlyReason),
+		Message: fmt.Sprintf("The connector does not run on %s: %s", goos, connectSupportedOSReason),
 		Hint:    "Run the connector on Linux; the rest of the CLI runs here."}
 }
 

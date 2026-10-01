@@ -22,21 +22,33 @@ func sealInheritedDescriptors() error {
 	}
 	// /dev/fd is a filesystem macOS mounts by default, and one that is not
 	// there must not leave a descriptor unsealed: try every number the
-	// process may hold instead.
-	return sealEveryDescriptorUpTo(descriptorLimit())
+	// process may hold instead, or fail closed when that number is not known.
+	limit, err := descriptorLimit()
+	if err != nil {
+		return err
+	}
+	return sealEveryDescriptorUpTo(limit)
 }
 
 // devFD is where macOS lists the descriptors a process holds.
 const devFD = "/dev/fd"
 
+// maxDescriptorScan is the most descriptor numbers the fallback will try one
+// by one. A limit above it is not scanned partly: that would report every
+// descriptor sealed while one above the scan could still be inherited.
+const maxDescriptorScan = 1 << 20
+
 // descriptorLimit is the highest number a descriptor of this process can have,
-// plus one.
-func descriptorLimit() uint64 {
+// plus one, or an error when it cannot be known or is too large to scan.
+func descriptorLimit() (uint64, error) {
 	var lim unix.Rlimit
-	if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &lim); err != nil || lim.Cur == 0 || lim.Cur > 1<<20 {
-		return 1 << 16
+	if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &lim); err != nil {
+		return 0, fmt.Errorf("could not seal the descriptors this process inherited: /dev/fd could not be read, and neither could the descriptor limit: %w", err)
 	}
-	return lim.Cur
+	if lim.Cur == 0 || lim.Cur > maxDescriptorScan {
+		return 0, fmt.Errorf("could not seal the descriptors this process inherited: /dev/fd could not be read, and the descriptor limit (%d) is too large to check one by one", lim.Cur)
+	}
+	return lim.Cur, nil
 }
 
 // sealEveryDescriptorUpTo marks close-on-exec every open descriptor above

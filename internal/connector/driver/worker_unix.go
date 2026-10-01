@@ -5,6 +5,7 @@ package driver
 import (
 	"errors"
 	"os/exec"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -30,7 +31,10 @@ func signalGroup(pgid int, sig syscall.Signal) error {
 		return syscall.EINVAL
 	}
 	err := syscall.Kill(-pgid, sig)
-	if errors.Is(err, syscall.EPERM) {
+	// macOS only: Linux delivers a signal to a zombie-only group, so EPERM
+	// there is a group this process may not signal — and with /proc mounted
+	// hidepid, its listing cannot see that group's members to say otherwise.
+	if runtime.GOOS == "darwin" && errors.Is(err, syscall.EPERM) {
 		// macOS refuses any signal to a group whose only members are
 		// zombies, where Linux delivers it; nothing in such a group runs.
 		// When the kernel's own listing says so, it is the absent group it
