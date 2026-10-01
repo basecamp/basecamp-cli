@@ -1102,7 +1102,31 @@ func asDoctorChecks(in []setup.Check) []Check {
 type managerTokens struct{ mgr *auth.Manager }
 
 func (t *managerTokens) AccessToken(ctx context.Context) (string, error) {
-	return t.mgr.AccessToken(ctx)
+	token, err := t.mgr.AccessToken(ctx)
+	return token, retryableInSDKTerms(err)
+}
+
+// retryableInSDKTerms hands the SDK a token renewal that can be retried — a
+// rate limit, the token endpoint's own 5xx — in the SDK's error type. The
+// event feed classifies a failure by that type alone and takes anything else
+// as unrecoverable, so without it a brief rate limit on the agent's token
+// would end the run. The CLI's error stays the cause, so its words are still
+// the ones rendered. A failure that got no answer at all already reaches the
+// feed as the transport failure it is, and one that cannot be retried — a
+// refused credential first among them — is returned as it is.
+func retryableInSDKTerms(err error) error {
+	var cliErr *output.Error
+	var sdkErr *basecamp.Error
+	if !errors.As(err, &cliErr) || !cliErr.Retryable || cliErr.HTTPStatus == 0 || errors.As(err, &sdkErr) {
+		return err
+	}
+	e := &basecamp.Error{Code: basecamp.CodeAPI, Message: err.Error(), HTTPStatus: cliErr.HTTPStatus, Retryable: true, Cause: err}
+	if cliErr.HTTPStatus == http.StatusTooManyRequests {
+		e.Code = basecamp.CodeRateLimit
+		// Through the SDK's constructor for its bound on the wait.
+		e.RetryAfter = basecamp.ErrRateLimit(auth.RetryAfter(err)).RetryAfter
+	}
+	return e
 }
 
 // connectSDKClient is the client setup reads through: no request hooks, no

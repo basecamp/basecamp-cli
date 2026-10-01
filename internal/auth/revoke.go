@@ -232,6 +232,9 @@ func statusFailure(msg string, resp *http.Response) error {
 		e := output.ErrRateLimit(retryAfter)
 		e.Message = msg
 		e.HTTPStatus = resp.StatusCode
+		if retryAfter > 0 {
+			e.Cause = retryAfterError(retryAfter)
+		}
 		return e
 	case http.StatusInsufficientStorage:
 		e := output.ErrAPI(resp.StatusCode, msg)
@@ -242,6 +245,23 @@ func statusFailure(msg string, resp *http.Response) error {
 		e.Retryable = resp.StatusCode >= 500 && resp.StatusCode < 600
 		return e
 	}
+}
+
+// retryAfterError is a 429's Retry-After, in seconds, carried as the cause of
+// the rate limit statusFailure builds: output.Error has no field for it, and
+// a caller that reschedules the work itself needs the number, not the hint.
+type retryAfterError int
+
+func (s retryAfterError) Error() string { return fmt.Sprintf("retry after %d seconds", int(s)) }
+
+// RetryAfter is the wait, in seconds, a rate-limited answer named, or zero
+// when it named none.
+func RetryAfter(err error) int {
+	var s retryAfterError
+	if errors.As(err, &s) {
+		return int(s)
+	}
+	return 0
 }
 
 // discardGrant revokes a freshly minted credential the login refused to
