@@ -136,10 +136,15 @@ func TestAServerFaultAtTheTokenEndpointIsTransient(t *testing.T) {
 // feed already rides out.
 func TestAnUnreachableTokenEndpointIsTransient(t *testing.T) {
 	live, _ := tokenEndpointFeed(t, func(w http.ResponseWriter) {
+		// The handler runs off the test goroutine, where only assert is safe.
 		hj, ok := w.(http.Hijacker)
-		require.True(t, ok)
+		if !assert.True(t, ok) {
+			return
+		}
 		conn, _, err := hj.Hijack()
-		require.NoError(t, err)
+		if !assert.NoError(t, err) {
+			return
+		}
 		_ = conn.Close()
 	})
 
