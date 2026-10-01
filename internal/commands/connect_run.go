@@ -169,22 +169,19 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if err != nil {
 		return output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
 	}
-	// The lock first, under the agent connect.json names: a second
-	// connector for an agent already running says so now, not after
-	// waiting out a rate limit for a token it would never use. VerifyAgent
-	// below holds the credential to that same person.
+	// A look at the lock first, under the agent connect.json names: a
+	// second connector for an agent already running says so now, not after
+	// waiting out a rate limit for a token it would never use. Only a look:
+	// until the credential is proven to be that agent, holding its lock
+	// through the wait could keep the agent's real connector from starting.
+	// The lock is taken for the run once the identity is verified.
 	stateDir, err := connectStateDir(file, f.shadow)
 	if err != nil {
 		return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
 	}
-	lock, err := connector.AcquireInstanceLock(stateDir, account, file.Agent.PersonID, time.Now())
-	if err != nil {
-		if errors.Is(err, connector.ErrAlreadyRunning) {
-			return &output.Error{Code: output.CodeLockUnavailable, Message: err.Error()}
-		}
+	if err := connectLockFree(stateDir, account, file.Agent.PersonID); err != nil {
 		return err
 	}
-	defer func() { _ = lock.Release() }()
 
 	logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
 	tokens := &managerTokens{mgr: app.Auth}
@@ -194,9 +191,11 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	err = awaitConnectToken(ctx, tokens, connectStartWait{Log: func(line string) { logger.Warn(line) }, Signals: startSignals})
 	stopStartSignals()
 	select {
-	case sig := <-startSignals:
+	case sig, ok := <-startSignals:
 		// Delivered after the wait had finished, before the stop took.
-		return connectStoppedBySignal(sig)
+		if ok {
+			return connectStoppedBySignal(sig)
+		}
 	default:
 	}
 	if err != nil {
@@ -215,6 +214,11 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return output.ErrAuth(err.Error())
 	}
 	agentID := me.ID
+	lock, err := acquireConnectLock(stateDir, account, agentID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Release() }()
 
 	policy, err := file.Policy(agentID)
 	if err != nil {
@@ -394,6 +398,26 @@ func connectorStoppedBy(err error, agent, profile string, refused func() bool) (
 	}
 	e := errAgentDisconnected(agent, profile)
 	return connector.ConnectionDisconnected, e.Message, e
+}
+
+// acquireConnectLock takes the connector's instance lock for the run, or
+// says another connector for this agent already holds it.
+func acquireConnectLock(stateDir, account string, agentID int64) (*connector.InstanceLock, error) {
+	lock, err := connector.AcquireInstanceLock(stateDir, account, agentID, time.Now())
+	if errors.Is(err, connector.ErrAlreadyRunning) {
+		return nil, &output.Error{Code: output.CodeLockUnavailable, Message: err.Error()}
+	}
+	return lock, err
+}
+
+// connectLockFree reports, by taking and at once releasing it, whether the
+// instance lock is free: the start's look before it waits for a token.
+func connectLockFree(stateDir, account string, agentID int64) error {
+	lock, err := acquireConnectLock(stateDir, account, agentID)
+	if err != nil {
+		return err
+	}
+	return lock.Release()
 }
 
 // connectStartFailure is what a start that could not learn who it is exits

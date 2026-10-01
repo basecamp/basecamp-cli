@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
 	surfguard "github.com/basecamp/surfguard/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -526,4 +527,141 @@ func TestASecondConnectorIsRefusedBeforeItWaitsForAToken(t *testing.T) {
 	f.s.mu.Lock()
 	defer f.s.mu.Unlock()
 	assert.Zero(t, f.s.mints, "nothing was minted for a connector that cannot run")
+}
+
+// A 503 that names its Retry-After is waited out for that long, by the
+// start and the feed alike, not on backoff.
+func TestAServerFaultsRetryAfterIsHonored(t *testing.T) {
+	unavailable := answerStatus(http.StatusServiceUnavailable, map[string]string{"Retry-After": "30"}, "")
+	tokens, _ := startingAgent(t, unavailable, answerStatus(http.StatusOK, nil, mintedToken))
+	var w startWaits
+	require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options(tokens)))
+	assert.Equal(t, []time.Duration{30 * time.Second}, w.waits)
+
+	live, _ := tokenEndpointFeed(t, unavailable)
+	_, err := live.Minter().MintStreamTicket(t.Context())
+	var mintErr *eventfeed.MintError
+	require.ErrorAs(t, err, &mintErr)
+	assert.Equal(t, eventfeed.MintThrottled, mintErr.Kind, "%v", err)
+	assert.Equal(t, 30*time.Second, mintErr.RetryAfter)
+}
+
+// lockedBuffer is a buffer a running command writes while the test reads.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// A start waiting for its token does not hold the agent's lock: until the
+// credential is proven to be that agent, the lock is only looked at, so a
+// profile whose credential is some other agent's cannot keep the real
+// connector out while it waits.
+func TestAStartWaitingForItsTokenHoldsNoLock(t *testing.T) {
+	f := newOperatorFixture(t)
+	app := newConnectSetupApp(t, f.s, "agent")
+	creds, err := app.Auth.GetStore().Load(app.Auth.CredentialKey())
+	require.NoError(t, err)
+	creds.ExpiresAt = time.Now().Add(-time.Minute).Unix()
+	require.NoError(t, app.Auth.GetStore().Save(app.Auth.CredentialKey(), creds))
+	f.s.mu.Lock()
+	f.s.rateLimitMints = true
+	f.s.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var out lockedBuffer
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: &out})
+	cmd := NewConnectCmd()
+	cmd.SetArgs(nil)
+	cmd.SetContext(appctx.WithApp(ctx, app))
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SilenceErrors, cmd.SilenceUsage = true, true
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	require.Eventually(t, func() bool { return strings.Contains(out.String(), "could not get the agent's token yet") },
+		10*time.Second, 20*time.Millisecond, "the start never waited: %s", out.String())
+	dir, err := connectStateDir(f.file, false)
+	require.NoError(t, err)
+	lock, err := connector.AcquireInstanceLock(dir, f.file.AccountID, f.file.Agent.PersonID, time.Now())
+	require.NoError(t, err, "a waiting start held the agent's lock")
+	require.NoError(t, lock.Release())
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the waiting start did not stop when canceled")
+	}
+}
+
+// okTokens is a renewal that succeeds at once.
+type okTokens struct{}
+
+func (okTokens) AccessToken(context.Context) (string, error) { return "bc_at_minted", nil }
+
+// A closed signal channel delivers nothing: it is not a stop.
+func TestAClosedSignalChannelIsNotAStop(t *testing.T) {
+	signals := make(chan os.Signal)
+	close(signals)
+	assert.NoError(t, awaitConnectToken(t.Context(), okTokens{}, connectStartWait{Signals: signals}))
+}
+
+// A wait with nowhere to say so still waits, and a forced stop still stops.
+func TestAStartWithoutALogStillWaits(t *testing.T) {
+	unavailable := answerStatus(http.StatusServiceUnavailable, nil, "")
+	tokens, _ := startingAgent(t, unavailable, answerStatus(http.StatusOK, nil, mintedToken))
+	w := startWaits{}
+	opts := w.options(tokens)
+	opts.Log = nil
+	require.NoError(t, awaitConnectToken(t.Context(), tokens, opts))
+	assert.Len(t, w.waits, 1)
+
+	exited := -1
+	connectStartWait{Exit: func(code int) { exited = code }}.forceStop(syscall.SIGTERM)
+	assert.Equal(t, connector.ExitCodeForSignal(syscall.SIGTERM), exited)
+}
+
+// The wait comes from the server or from the backoff, never from anywhere
+// else: a 5xx that names none waits on the backoff, one that names one
+// waits exactly that, and so does a 429.
+func TestTheWaitIsWhatTheServerNamedOrNothing(t *testing.T) {
+	failure := func(status int) error {
+		if status == http.StatusTooManyRequests {
+			return output.ErrRateLimit(0)
+		}
+		e := output.ErrAPI(status, "minting an agent token")
+		e.Retryable = true
+		return e
+	}
+	wait, ok := tokenRetry(failure(http.StatusServiceUnavailable))
+	assert.True(t, ok)
+	assert.Zero(t, wait, "a 5xx naming no wait leaves it to the backoff")
+	wait, ok = tokenRetry(failure(http.StatusTooManyRequests))
+	assert.True(t, ok)
+	assert.Zero(t, wait, "a 429 naming no wait leaves it to the backoff")
+
+	start := startWaitsFor(t, answerStatus(http.StatusBadGateway, map[string]string{"Retry-After": "17"}, ""))
+	assert.Equal(t, []time.Duration{17 * time.Second}, start)
+}
+
+func startWaitsFor(t *testing.T, first func(http.ResponseWriter)) []time.Duration {
+	t.Helper()
+	tokens, _ := startingAgent(t, first, answerStatus(http.StatusOK, nil, mintedToken))
+	var w startWaits
+	require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options(tokens)))
+	return w.waits
 }

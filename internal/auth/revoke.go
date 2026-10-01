@@ -225,7 +225,8 @@ func transportFailure(msg string, cause error) error {
 // statusFailure is a revocation request the server answered with something
 // other than 200, classified the way the SDK classifies any other response:
 // 429 is a rate limit (retryable, with its Retry-After), 507 an account
-// limit (a verdict, not retryable), any other 5xx retryable, the rest final.
+// limit (a verdict, not retryable), any other 5xx retryable (with its
+// Retry-After, when it names one), the rest final.
 func statusFailure(msg string, resp *http.Response) error {
 	switch resp.StatusCode {
 	case http.StatusTooManyRequests:
@@ -244,6 +245,11 @@ func statusFailure(msg string, resp *http.Response) error {
 	default:
 		e := output.ErrAPI(resp.StatusCode, msg)
 		e.Retryable = resp.StatusCode >= 500 && resp.StatusCode < 600
+		// A 503 may name its wait as surely as a 429; a retryable answer
+		// carries it the same way.
+		if retryAfter := retryAfterSeconds(resp.Header.Get("Retry-After"), time.Now()); e.Retryable && retryAfter > 0 {
+			e.Cause = retryAfterError(retryAfter)
+		}
 		return e
 	}
 }

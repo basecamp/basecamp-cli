@@ -25,6 +25,7 @@ const (
 // it says so, which signals stop it, and how it sleeps — by default a timer
 // that ctx cuts short.
 type connectStartWait struct {
+	// Log says each wait, once; nothing is said when nil.
 	Log     func(string)
 	Signals <-chan os.Signal
 	Sleep   func(ctx context.Context, d time.Duration) error
@@ -37,8 +38,14 @@ func (w connectStartWait) forceStop(sig os.Signal) {
 	if exit == nil {
 		exit = os.Exit
 	}
-	w.Log("connector: stopping now, before it has started; signal " + sig.String())
+	w.log("connector: stopping now, before it has started; signal " + sig.String())
 	exit(connector.ExitCodeForSignal(sig))
+}
+
+func (w connectStartWait) log(line string) {
+	if w.Log != nil {
+		w.Log(line)
+	}
 }
 
 // awaitConnectToken holds a starting connector until the agent's token can
@@ -59,8 +66,12 @@ func awaitConnectToken(parent context.Context, tokens basecamp.TokenProvider, w 
 	watched, done := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(watched)
+		// A closed channel delivers no stop, only the end of the watch.
 		select {
-		case sig := <-w.Signals:
+		case sig, ok := <-w.Signals:
+			if !ok {
+				return
+			}
 			stopped = connectStoppedBySignal(sig)
 			cancel()
 		case <-ctx.Done():
@@ -70,8 +81,10 @@ func awaitConnectToken(parent context.Context, tokens basecamp.TokenProvider, w 
 		// context. A second signal is someone who has waited long enough,
 		// and ends the process as it does for a running connector.
 		select {
-		case sig := <-w.Signals:
-			w.forceStop(sig)
+		case sig, ok := <-w.Signals:
+			if ok {
+				w.forceStop(sig)
+			}
 		case <-done:
 		}
 	}()
@@ -83,11 +96,13 @@ func awaitConnectToken(parent context.Context, tokens basecamp.TokenProvider, w 
 		return stopped
 	}
 	select {
-	case sig := <-w.Signals:
-		return connectStoppedBySignal(sig)
+	case sig, ok := <-w.Signals:
+		if ok {
+			return connectStoppedBySignal(sig)
+		}
 	default:
-		return err
 	}
+	return err
 }
 
 func awaitToken(ctx context.Context, tokens basecamp.TokenProvider, w connectStartWait) error {
@@ -111,7 +126,7 @@ func awaitToken(ctx context.Context, tokens basecamp.TokenProvider, w connectSta
 		if wait <= 0 {
 			wait = connectStartBackoff(attempt)
 		}
-		w.Log(fmt.Sprintf("connector: could not get the agent's token yet (%s); trying again in %s", output.AsError(err).Message, max(wait.Round(time.Second), time.Second)))
+		w.log(fmt.Sprintf("connector: could not get the agent's token yet (%s); trying again in %s", output.AsError(err).Message, max(wait.Round(time.Second), time.Second)))
 		if err := sleep(ctx, wait); err != nil {
 			return err
 		}

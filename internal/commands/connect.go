@@ -1133,7 +1133,7 @@ func (t *feedTokens) AccessToken(ctx context.Context) (string, error) {
 
 // tokenFailureInSDKTerms is a failed renewal as the SDK's error, classified
 // by tokenRetry, or nil when there was no failure. A retryable one keeps
-// its status — a 429 with the wait it named, a 5xx — or, with no status, is
+// its status and any wait it named — a 429, a 5xx — or, with no status, is
 // a network failure; the feed backs off and carries on either way. One that
 // cannot be retried carries no status at all, so the feed ends on it rather
 // than counting it toward its own authorization threshold; a refused
@@ -1152,10 +1152,10 @@ func tokenFailureInSDKTerms(err error) *basecamp.Error {
 	if errors.As(err, &cliErr) {
 		e.HTTPStatus = cliErr.HTTPStatus
 	}
+	e.RetryAfter = int(asked / time.Second)
 	switch e.HTTPStatus {
 	case http.StatusTooManyRequests:
 		e.Code = basecamp.CodeRateLimit
-		e.RetryAfter = int(asked / time.Second)
 	case 0:
 		e.Code = basecamp.CodeNetwork
 	}
@@ -1176,7 +1176,7 @@ func tokenFailureInSDKTerms(err error) *basecamp.Error {
 // Two things are never retried, because no wait changes them: a URL the
 // egress policy refused, and one the client could not send at all. The
 // wait is the agent mint's own, or that of the SDK error an OAuth refresh
-// carries, through the SDK's constructor for its bound.
+// carries; both are bounded where they are parsed.
 func tokenRetry(err error) (time.Duration, bool) {
 	if errors.Is(err, surfguard.ErrBlocked) || cannotBeSent(err) {
 		return 0, false
@@ -1189,7 +1189,9 @@ func tokenRetry(err error) (time.Duration, bool) {
 	var cliErr *output.Error
 	switch {
 	case errors.As(err, &cliErr) && cliErr.Retryable:
-		return time.Duration(basecamp.ErrRateLimit(seconds).RetryAfter) * time.Second, true
+		// Exactly what the server named, or nothing, which leaves it to
+		// the backoff: never a default wait from anywhere else.
+		return time.Duration(max(seconds, 0)) * time.Second, true
 	case gotNoResponse(err):
 		return 0, true
 	}
