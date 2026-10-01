@@ -135,9 +135,9 @@ func agentClientFingerprint(clientID, clientSecret string) string {
 
 // mintHoldFor is the hold a refused mint leaves, or nil for a failure the
 // next command should simply retry — a 5xx, a redirect, a response that
-// does not name the client. rateLimited is a 429; refused is a verdict on
-// the client credentials, and code the RFC 6749 §5.2 code the server named
-// with it, if any.
+// does not name the client. A 429 is told by resp's status; refused is a
+// verdict on the client credentials, and code the RFC 6749 §5.2 code the
+// server named with it, if any.
 func mintHoldFor(mint *agentMint, resp *http.Response, detail, code string, refused bool, now time.Time) *MintHold {
 	hold := &MintHold{
 		Detail: detail,

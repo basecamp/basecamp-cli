@@ -167,8 +167,10 @@ func (m *Manager) resolveAgentMint(creds *Credentials) (*agentMint, error) {
 //     the meantime as a rate limit. bc3's abuse blocks run longer (up to a
 //     day), and it answers a request inside one with another 429 without
 //     charging it, so the cap costs one request per cap, not an escalation.
-//   - Anything else — a 5xx, the network, a response this cannot read —
-//     holds nothing, and the next command tries again as it always has.
+//   - Anything else — a 5xx, the network, a response other than a 429
+//     whose body this cannot read — holds nothing, and the next command
+//     tries again as it always has. A 429 is held from its status and
+//     Retry-After alone, so its body does not matter.
 //
 // It is remembered because nothing else would stop the asking. Every
 // process mints for itself, so an automated caller — a connector polling
