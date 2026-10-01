@@ -378,7 +378,8 @@ Use the Agent tool with `run_in_background: true`. Give it everything it needs
 to finish without this session:
 
 - the whole request line;
-- the agent's profile name, and the repo path (or "no repo");
+- the agent's profile name, and the repo path (or "no repo"). A subagent
+  doesn't start in that repo by itself: say plainly that it must work there;
 - whether an acknowledgement is still owed (the boost failed), or not owed
   (it landed, or the reply is the acknowledgement);
 - the subagent instructions below, in full.
@@ -435,8 +436,15 @@ Use the card's own card table. If either column is missing, skip this. Never
 create columns. Skip it for `subscribed` and `completed`.
 
 **4. Do the work** in the repo, the way its own AGENTS.md and CLAUDE.md say.
+Start by changing into the repo path you were given: you don't start there.
 Work that changes code goes in a fresh git worktree off the default branch,
 never in the main checkout.
+
+**Read the code before you answer anything about it.** Open the files the
+request is about, and answer from what's there, not from what the request or
+the names suggest. If what it asks about isn't in the code, say so. If you
+can't reach the repo, or it was "no repo", say that rather than guess. A
+confident wrong answer is worse than "I couldn't find that".
 
 **Commit with the repo's own git identity, or not at all.** Never set a name
 or email, and never borrow the person's. If git has no author configured,
