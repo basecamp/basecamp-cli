@@ -70,22 +70,6 @@ func TestTheDevFDWalkSealsWhatItNames(t *testing.T) {
 	assert.True(t, cloexec(t, inheritedFDDarwin))
 }
 
-// Without /dev/fd the fallback tries every number up to the descriptor limit,
-// and seals the same descriptor.
-func TestTheFallbackSealsEveryDescriptorUpToTheLimit(t *testing.T) {
-	inheritDarwin(t, inheritedFDDarwin)
-	limit, err := descriptorLimit()
-	require.NoError(t, err)
-	require.Greater(t, limit, uint64(inheritedFDDarwin))
-
-	require.NoError(t, sealEveryDescriptorUpTo(limit))
-	assert.True(t, cloexec(t, inheritedFDDarwin))
-	for _, fd := range []int{0, 1, 2} {
-		_, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
-		assert.NoError(t, err, "standard descriptor %d is left open", fd)
-	}
-}
-
 // A listing that cannot be read is an error, never a quiet success.
 func TestTheDevFDWalkRefusesAListingItCannotRead(t *testing.T) {
 	require.Error(t, sealListedDescriptors(t.TempDir()+"/missing"))

@@ -4,6 +4,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -38,7 +39,7 @@ func TestMacOSNamesAClosedPeerAsGoneWithItsUser(t *testing.T) {
 	require.NoError(t, client.Close())
 	require.Eventually(t, func() bool {
 		_, err := peerCredentials(conn)
-		return err != nil
+		return errors.Is(err, errPeerGone)
 	}, 5*time.Second, 10*time.Millisecond)
 	gone, err := peerCredentials(conn)
 	require.ErrorIs(t, err, errPeerGone)
