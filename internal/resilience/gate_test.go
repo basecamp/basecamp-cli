@@ -156,6 +156,8 @@ func helperCommand(t *testing.T, env helperEnv) *exec.Cmd {
 type invocationTally struct {
 	ok, rejected, peak, queued, slotWaits int
 	rejections                            []string
+	// elapsed runs from the children's release to the last one finishing.
+	elapsed time.Duration
 }
 
 func tally(lines []string) invocationTally {
@@ -237,6 +239,7 @@ func runBarrieredInvocations(t *testing.T, n int, env helperEnv) invocationTally
 		require.NoError(t, <-ready)
 	}
 
+	released := time.Now()
 	for _, k := range kids {
 		_, err := io.WriteString(k.stdin, "go\n")
 		require.NoError(t, err)
@@ -265,7 +268,9 @@ func runBarrieredInvocations(t *testing.T, n int, env helperEnv) invocationTally
 	for _, k := range kids {
 		require.NoError(t, k.cmd.Wait(), k.stderr.String())
 	}
-	return tally(all)
+	tl := tally(all)
+	tl.elapsed = time.Since(released)
+	return tl
 }
 
 // runSlotOversubscription starts n children against a bulkhead of `slots`
@@ -427,14 +432,23 @@ func TestGateQueuesTenParallelWorkersThroughTheDefaults(t *testing.T) {
 
 	assert.Equal(t, workers*callsEach, tl.ok, "every call succeeds: %v", tl.rejections)
 	assert.Zero(t, tl.rejected)
-	// Thirty calls are not covered by the starting bucket. Nearly all of
-	// them sleep; the odd one arrives in the instant after a refill lands
-	// and is served without waiting, so the count comes in a little under —
-	// 29 idle here, 28 on a saturated core. One free pickup per worker is
-	// the allowance. A zero is a run that never entered the wait path.
+	// Thirty calls are not covered by the starting bucket, so the run cannot
+	// finish before the bucket has refilled thirty tokens: three seconds at
+	// ten a second, however fast the machine. That is the limiter doing its
+	// job, and it holds on any machine; a slow one only takes longer.
+	//
+	// How many of those thirty slept is not: on a loaded runner the calls
+	// themselves are slow, refills land between them, and a call that finds
+	// a token waiting is served without sleeping. Counting sleepers measured
+	// the runner, and failed three times in a day on unrelated pull requests
+	// (7, 17 and 19 of an expected 20). So the count only has to prove the
+	// wait path runs at all; the elapsed time proves the throttling.
 	uncovered := workers*callsEach - int(cfg.RateLimiter.MaxTokens)
-	assert.GreaterOrEqual(t, tl.queued, uncovered-workers,
-		"the calls the starting bucket could not cover slept for a refill; %d of %d did", tl.queued, uncovered)
+	refillTime := time.Duration(float64(uncovered) / cfg.RateLimiter.RefillRate * float64(time.Second))
+	assert.GreaterOrEqual(t, tl.elapsed, refillTime*9/10,
+		"%d calls past the starting bucket cannot finish before %d tokens refill (%s); it took %s",
+		uncovered, uncovered, refillTime, tl.elapsed)
+	assert.Positive(t, tl.queued, "some call slept for a refill; zero means the wait path never ran")
 	assert.LessOrEqual(t, tl.peak, cfg.Bulkhead.MaxConcurrent, "never more than MaxConcurrent live holders")
 }
 
