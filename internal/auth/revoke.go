@@ -291,6 +291,24 @@ func retryAfterSeconds(value string, now time.Time) int {
 	return int(seconds)
 }
 
+// namedWaitError is the wait a server asked for, in seconds, when what is
+// waited is less: a 429 held for the cap rather than for all it named.
+type namedWaitError int
+
+func (s namedWaitError) Error() string {
+	return fmt.Sprintf("the server asked to wait %d seconds", int(s))
+}
+
+// NamedWait is the wait, in seconds, the server itself named for err: more
+// than RetryAfter when the wait was capped, the same otherwise.
+func NamedWait(err error) int {
+	var s namedWaitError
+	if errors.As(err, &s) {
+		return int(s)
+	}
+	return RetryAfter(err)
+}
+
 // RetryAfter is the wait, in seconds, a rate-limited answer named, or zero
 // when it named none.
 func RetryAfter(err error) int {

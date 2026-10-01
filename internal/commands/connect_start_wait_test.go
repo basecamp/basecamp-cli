@@ -711,3 +711,18 @@ func TestTheFeedSaysWhenItCapsAWait(t *testing.T) {
 	assert.Contains(t, lines[0], "asked to wait 27777h46m39s")
 	assert.Contains(t, lines[0], "waiting "+auth.MaxServerWait.String())
 }
+
+// An agent mint's 429 goes through the same cap as every other named wait,
+// and the log says what the server asked for beyond it.
+func TestAnAgentRateLimitBeyondTheCapIsCappedAndSaid(t *testing.T) {
+	tokens, mints := startingAgent(t,
+		answerStatus(http.StatusTooManyRequests, map[string]string{"Retry-After": "86400"}, ""),
+		answerStatus(http.StatusOK, nil, mintedToken))
+	var w startWaits
+	require.NoError(t, awaitConnectToken(t.Context(), tokens, w.options(tokens)))
+	assert.Equal(t, []time.Duration{auth.MaxServerWait}, w.waits, "the hold and the start wait the one cap")
+	require.Len(t, w.lines, 1)
+	assert.Contains(t, w.lines[0], "asked to wait 24h0m0s")
+	assert.Contains(t, w.lines[0], "waiting "+auth.MaxServerWait.String())
+	assert.Equal(t, 2, mints(), "the hold had ended when the start tried again")
+}

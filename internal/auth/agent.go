@@ -486,7 +486,13 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 		now := m.now()
 		hold := mintHoldFor(mint, resp, detail, code, false, now)
 		if hold != nil && hold.Kind == mintHoldRateLimited {
-			return hold, holdRateLimitError(hold, now, "minting an agent token: "+detail)
+			e := holdRateLimitError(hold, now, "minting an agent token: "+detail)
+			if named := retryAfterSeconds(resp.Header.Get("Retry-After"), now); named > holdWait(hold, now) {
+				// Held for the cap; what the server asked for is kept too,
+				// so a caller can say both.
+				e.Cause = errors.Join(e.Cause, namedWaitError(named))
+			}
+			return hold, e
 		}
 		return hold, statusFailure("minting an agent token: "+detail, resp)
 	}

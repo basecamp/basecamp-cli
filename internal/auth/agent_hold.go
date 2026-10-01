@@ -101,10 +101,10 @@ const defaultAgentRateLimitHold = 60 * time.Second
 const maxAgentMintHold = time.Hour
 
 // MaxServerWait is the longest any wait a server names is waited, whatever
-// the status or the token path: the same bound as a mint hold, so a held
-// rate limit and every other named wait agree. A connector that waited a
-// server's word for years would be a hang, not a wait.
-const MaxServerWait = maxAgentMintHold
+// the status or the token path: the bound a rate-limit hold is written
+// under, so a held rate limit and every other named wait agree. A connector
+// that waited a server's word for years would be a hang, not a wait.
+const MaxServerWait = maxAgentConnectLifetime
 
 // MintHold is the token endpoint's last refusal of an agent credential's
 // client, remembered so the next mint can answer it without asking again.
@@ -166,13 +166,13 @@ func mintHoldFor(mint *agentMint, resp *http.Response, detail, code string, refu
 }
 
 // rateLimitHold is how long a 429 holds the mint: its Retry-After, or
-// defaultAgentRateLimitHold when it has none, never past maxAgentMintHold.
+// defaultAgentRateLimitHold when it has none, never past MaxServerWait.
 func rateLimitHold(header http.Header, now time.Time) time.Duration {
 	wait := retryAfter(header, now)
 	if wait <= 0 {
 		wait = defaultAgentRateLimitHold
 	}
-	return min(wait, maxAgentMintHold)
+	return min(wait, MaxServerWait)
 }
 
 // ceilUnix is t in Unix seconds, rounded up: a deadline stored in whole

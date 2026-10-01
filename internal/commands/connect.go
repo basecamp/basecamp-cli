@@ -1206,7 +1206,7 @@ func tokenRetry(err error) (time.Duration, bool) {
 // the agent mint's own, or that of the SDK error an OAuth refresh carries.
 // Zero when it named none.
 func serverNamedWait(err error) time.Duration {
-	seconds := auth.RetryAfter(err)
+	seconds := auth.NamedWait(err)
 	var sdkErr *basecamp.Error
 	if errors.As(err, &sdkErr) {
 		seconds = max(seconds, sdkErr.RetryAfter)
