@@ -226,6 +226,9 @@ func TestARateLimitHoldIsBounded(t *testing.T) {
 	}{
 		"no Retry-After": {func(time.Time) http.Header { return nil }, defaultAgentRateLimitHold},
 		"an absurd one":  {retryAfter("86400"), maxAgentConnectLifetime},
+		// Too large for an int: still the cap, never the one-minute default
+		// a header nothing could read gets.
+		"an overflowing one": {retryAfter("99999999999999999999999"), MaxServerWait},
 		"an HTTP-date": {func(now time.Time) http.Header {
 			return http.Header{"Retry-After": {now.Add(10 * time.Minute).UTC().Format(http.TimeFormat)}}
 		}, 10 * time.Minute},

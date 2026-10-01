@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -766,23 +765,11 @@ func agentConnectBackoff(answer *agentConnectAnswer, interval time.Duration) tim
 // for nothing this can read. The date form is what a proxy in front of the
 // server is as likely to send as the server itself, and reading only the
 // seconds form would answer a mandated wait with the five-second step and
-// earn the next refusal.
+// earn the next refusal. It is read by retryAfterSeconds, the one parser
+// every Retry-After goes through, so a count too large to hold is the cap
+// here too, not a header nothing could read.
 func retryAfter(header http.Header, now time.Time) time.Duration {
-	value := strings.TrimSpace(header.Get("Retry-After"))
-	if value == "" {
-		return 0
-	}
-	if seconds, err := strconv.Atoi(value); err == nil {
-		if seconds <= 0 {
-			return 0
-		}
-		return reportedSeconds(seconds, maxAgentConnectLifetime)
-	}
-	when, err := http.ParseTime(value)
-	if err != nil {
-		return 0
-	}
-	return min(max(when.Sub(now), 0), maxAgentConnectLifetime)
+	return min(time.Duration(retryAfterSeconds(header.Get("Retry-After"), now))*time.Second, maxAgentConnectLifetime)
 }
 
 // agentConnectExpired is the one ending that is nobody's fault: the code
