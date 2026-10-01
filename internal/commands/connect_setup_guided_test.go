@@ -271,11 +271,11 @@ func TestGuidedConnectSetupRefusesAnUnsupportedPlatformBeforeConnecting(t *testi
 	ownedByTheOperator(s)
 	s.agentProjects = projectsNamed(setupProject)
 	guided(t, &scriptedPrompter{})
-	connectServiceGOOS = "darwin"
+	connectServiceGOOS = "windows"
 
 	out, err := runConnectSetupCmd(t, bareSetupApp(t, s, "agent"))
 	require.Error(t, err, out)
-	assert.Contains(t, err.Error(), "Linux only, not darwin")
+	assert.Contains(t, err.Error(), "Linux and macOS only, not windows")
 	assert.NotContains(t, out, "connect this computer")
 	assertNotWritten(t, "agent")
 }

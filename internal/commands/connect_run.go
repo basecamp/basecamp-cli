@@ -629,13 +629,13 @@ func connectConsumerNamespace(agentID int64, shadow bool) string {
 // at the handshake, so the connector says so here rather than at the far
 // end of each task.
 func connectSupportedOS(goos string) bool {
-	return goos == "linux"
+	return goos == "linux" || goos == "darwin"
 }
 
 // connectLinuxOnlyReason is why, in one place: the run command's refusal and
 // doctor's Platform check say the same thing, so a person who meets one and
 // then the other is not told two different stories about their machine.
-const connectLinuxOnlyReason = "the task token reaches a worker's MCP server over an inherited descriptor, and Linux is the only platform that seals the descriptors a process inherits"
+const connectLinuxOnlyReason = "the task token reaches a worker's MCP server over an inherited descriptor, and the CLI keeps inherited descriptors from the programs it starts only on Linux and macOS"
 
 // connectUnsupportedOSError is the refusal on a platform the connector does
 // not run on, given by the run command and by `service install`, which would
@@ -645,7 +645,7 @@ const connectLinuxOnlyReason = "the task token reaches a worker's MCP server ove
 // refusal is prose, not a command to run, and a hint that begins like a
 // command is read as one — by a person, and by TestHintCommandsResolve.
 func connectUnsupportedOSError(goos string) error {
-	return output.ErrUsage(fmt.Sprintf("The connector runs on Linux only, not %s: %s", goos, connectLinuxOnlyReason))
+	return output.ErrUsage(fmt.Sprintf("The connector runs on Linux and macOS only, not %s: %s", goos, connectLinuxOnlyReason))
 }
 
 // connectServed is connect.json's served projects as they are now, not as

@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux || darwin
 
 package commands
 
@@ -22,10 +22,10 @@ import (
 // exists at a path, in argv or in the environment; once read, the descriptor
 // is gone too, and nothing this process starts can inherit it.
 //
-// This file is built for Linux alone, and shares that constraint with
-// internal/cli's inherited_fds_linux.go on purpose: a credential may arrive
-// on an inherited descriptor only where startup has already sealed every
-// inherited descriptor against the children the pre-command hooks start.
+// This file is built for Linux and macOS alone, and shares that constraint
+// with internal/cli's inherited_fds_seal.go on purpose: a credential may
+// arrive on an inherited descriptor only where startup has already sealed
+// every inherited descriptor against the children the pre-command hooks start.
 // Everywhere else mcp_token_other.go refuses the handover, and
 // TestTheTokenIsOnlyReadWhereItIsSealed holds the two constraints together.
 //

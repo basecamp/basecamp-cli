@@ -15,7 +15,7 @@ import (
 // asks about the code rather than about a build tag it repeats.
 const (
 	sealingDir  = "."
-	sealingFile = "inherited_fds_linux.go"
+	sealingFile = "inherited_fds_seal.go"
 	handoverDir = "../commands"
 	refusalFile = "mcp_token_other.go"
 )

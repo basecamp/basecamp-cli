@@ -334,23 +334,31 @@ func TestConnectServiceInstallRefusesWhenSystemdReadsAnotherFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "/etc/systemd/user/basecamp-connect-agent.service")
 }
 
-// The platform gate is the run command's, so a Mac is refused before a unit
-// is written for a connector that would not start on it.
+// The platform gate is the run command's, so a platform the connector does
+// not run on is refused before a unit is written for it; and the unit is
+// systemd's, so a Mac, where the connector runs, is refused for that.
 func TestConnectServiceRefusesAPlatformTheConnectorDoesNotRunOn(t *testing.T) {
-	connectServiceHome(t)
-	writeConnectSetup(t, "agent")
-	prev := connectServiceGOOS
-	connectServiceGOOS = "darwin"
-	t.Cleanup(func() { connectServiceGOOS = prev })
-	app, _ := connectServiceApp(t, "agent")
+	for goos, want := range map[string]string{
+		"windows": connectLinuxOnlyReason,
+		"darwin":  "background service is a systemd unit, so it runs on Linux only, not darwin",
+	} {
+		t.Run(goos, func(t *testing.T) {
+			connectServiceHome(t)
+			writeConnectSetup(t, "agent")
+			prev := connectServiceGOOS
+			connectServiceGOOS = goos
+			t.Cleanup(func() { connectServiceGOOS = prev })
+			app, _ := connectServiceApp(t, "agent")
 
-	_, err := runConnectServiceCmd(t, app, "install")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), connectLinuxOnlyReason)
+			_, err := runConnectServiceCmd(t, app, "install")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), want)
 
-	path, err := connectServiceUnitPath("agent")
-	require.NoError(t, err)
-	assert.NoFileExists(t, path)
+			path, err := connectServiceUnitPath("agent")
+			require.NoError(t, err)
+			assert.NoFileExists(t, path)
+		})
+	}
 }
 
 // When systemctl is missing, or fails in the running rather than in what it

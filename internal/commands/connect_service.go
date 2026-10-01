@@ -189,6 +189,10 @@ func connectServiceProfile(app *appctx.App) (string, error) {
 	if !connectSupportedOS(connectServiceGOOS) {
 		return "", connectUnsupportedOSError(connectServiceGOOS)
 	}
+	// The connector runs on macOS too; the unit this writes is systemd's.
+	if connectServiceGOOS != "linux" {
+		return "", output.ErrUsage(fmt.Sprintf("The connector's background service is a systemd unit, so it runs on Linux only, not %s. Start the connector yourself in the folder it should work in.", connectServiceGOOS))
+	}
 	name := app.Config.ActiveProfile
 	if name == "" {
 		return "", output.ErrUsageHint("The connector's service needs the agent's profile", "Pass -P/--profile <name>, a profile set up with `basecamp connect setup`.")

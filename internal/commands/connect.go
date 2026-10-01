@@ -54,7 +54,7 @@ go to stderr. SIGINT and SIGTERM cancel live workers with stop reason
 shutdown, settle them, and exit 130 and 143. --shadow admits and logs in an
 isolated state directory and dispatches nothing. --hold sets a durable hold:
 intake and admission run, nothing dispatches or posts, and earlier records
-wait for review, until basecamp connect release. Linux only.
+wait for review, until basecamp connect release. Linux and macOS only.
 
   basecamp connect status             what it heard, holds and ran
   basecamp connect doctor             what it needs to run

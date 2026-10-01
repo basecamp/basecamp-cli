@@ -112,13 +112,16 @@ func fakeClaude(scenario string) {
 	}
 
 	if scenario == "deaf" || scenario == "deaf-secret" {
-		// Reads nothing, ever: the pipe fills and a write blocks.
-		select {}
+		// Reads nothing, ever: the pipe fills and a write blocks. A sleep,
+		// not an empty select: with nothing else running, the runtime calls
+		// an empty select a deadlock and ends the process, which on macOS
+		// it does before the pipe fills.
+		time.Sleep(time.Hour)
 	}
 	if scenario == "badmode-eager" {
 		// An init before any prompt, in a mode the policy did not ask for.
 		emit(map[string]any{"type": "system", "subtype": "init", "session_id": sessionID, "permissionMode": "bypassPermissions", "mcp_servers": []any{}})
-		select {}
+		time.Sleep(time.Hour)
 	}
 
 	in := bufio.NewScanner(os.Stdin)

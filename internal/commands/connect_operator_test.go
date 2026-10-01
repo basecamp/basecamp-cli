@@ -267,18 +267,16 @@ func TestConnectDoctorRefusesOnlyWhatTheRunCommandRefuses(t *testing.T) {
 // The check and the run command's refusal say the one reason, so a person
 // cannot be told two different things about the same platform.
 func TestConnectDoctorPlatformCheckNamesTheConstraintThatApplies(t *testing.T) {
-	c := connectUnsupportedOSCheck("darwin")
+	c := connectUnsupportedOSCheck("windows")
 	assert.Equal(t, "Platform", c.Name)
 	assert.Equal(t, setup.StatusFail, c.Status)
-	assert.Contains(t, c.Message, "darwin", "it names the platform it refuses")
+	assert.Contains(t, c.Message, "windows", "it names the platform it refuses")
 	assert.Contains(t, c.Message, connectLinuxOnlyReason, "it gives the reason the run command gives")
-	assert.NotContains(t, c.Message, "macOS",
-		"a refusal must not name a capability the platform it refuses actually has")
 
-	err := connectUnsupportedOSError("darwin")
+	err := connectUnsupportedOSError("windows")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), connectLinuxOnlyReason, "doctor and the run command give the one reason")
-	assert.NotContains(t, err.Error(), "macOS")
+	assert.Contains(t, err.Error(), "Linux and macOS only, not windows")
 }
 
 // The acp driver runs a pinned adapter out of the connector's own npm

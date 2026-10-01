@@ -176,7 +176,7 @@ func checkLegacyPathValue(raw json.RawMessage) error {
 	if lossyJSONString(bytes.TrimSpace(raw)) {
 		return errors.New(`the "path" of a connector that routed projects is not encoded the way it was written: it holds malformed UTF-8 or an unpaired surrogate escape, which encoding/json silently replaces with U+FFFD, so the value read back is not the value in the file`)
 	}
-	// POSIX, not this host's rules. The connector runs on Linux only, so the
+	// POSIX, not this host's rules. The connector runs on Linux and macOS, so the
 	// writer of this key wrote a POSIX path — and path.IsAbs answers for
 	// that format on every platform, where filepath.IsAbs answers for
 	// whatever the reader happens to be compiled for. This package builds
