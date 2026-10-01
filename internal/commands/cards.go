@@ -3146,8 +3146,11 @@ You can pass either a step ID or a Basecamp URL:
 			}
 			// bc3 has always counted step positions from 1; its docs once
 			// said "zero indexed", and the SDK now refuses 0.
-			if position < 1 {
+			if !cmd.Flags().Changed("position") && !cmd.Flags().Changed("pos") {
 				return output.ErrUsage("--position is required (1-based)")
+			}
+			if position < 1 {
+				return output.ErrUsage("--position must be 1 or more (1 = top)")
 			}
 
 			cardIDInt, err := strconv.ParseInt(cardID, 10, 64)

@@ -325,6 +325,20 @@ func TestCardsStepMoveRequiresPosition(t *testing.T) {
 	}
 }
 
+// A --position that was given but is below 1 says so, rather than calling it missing.
+func TestCardsStepMoveRejectsPositionZero(t *testing.T) {
+	app, _ := setupTestApp(t)
+	app.Config.ProjectID = "123"
+
+	err := executeCommand(newCardsStepMoveCmd(), app, "456", "--card", "789", "--position", "0")
+	require.NotNil(t, err, "expected error, got nil")
+
+	var e *output.Error
+	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
+		assert.Equal(t, "--position must be 1 or more (1 = top)", e.Message)
+	}
+}
+
 // TestCardsCmdRequiresProject tests that Project ID required when not in config.
 // TestCardsCmdWithoutProjectListsAccountWide tests that a bare `cards list`
 // with no project anywhere lists account-wide rather than prompting.
