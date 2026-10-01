@@ -105,6 +105,15 @@ func TestOnlyServedProjectsAreHandedOff(t *testing.T) {
 
 	assert.Empty(t, out.String())
 	assert.Equal(t, StateAdmitted, getRecord(t, ledger, 1).State, "left for a run that serves it")
+
+	// And a project connect.json no longer serves, with no --project.
+	opts = handoffOptions(ledger, &out)
+	opts.Served = func() (map[int64]admission.Project, error) {
+		return map[int64]admission.Project{adapterBucketID + 1: {}}, nil
+	}
+	require.NoError(t, handOffReady(context.Background(), opts))
+	assert.Empty(t, out.String())
+	assert.Equal(t, StateAdmitted, getRecord(t, ledger, 1).State)
 }
 
 // The line names the project and, when they wrote the recording, the person
@@ -125,4 +134,43 @@ func TestTheLineNamesTheProjectAndTheRequester(t *testing.T) {
 	require.Len(t, lines, 1)
 	assert.Equal(t, "Bring your agents to Basecamp", lines[0].Recording.ProjectName)
 	assert.Equal(t, "Rob Zolkos", lines[0].RequesterName)
+}
+
+// A record with nothing to hand off is closed under its own reason: status
+// never claims a delivery that didn't happen.
+func TestARecordWithNothingToHandOffIsNotCalledHandedOff(t *testing.T) {
+	ledger := newTestLedger(t)
+	admitOn(t, ledger, 1, "recording:1")
+	_, err := ledger.db.ExecContext(context.Background(), `UPDATE events SET snapshot = '{not json' WHERE id = 1`)
+	require.NoError(t, err)
+	var out bytes.Buffer
+
+	require.NoError(t, handOffReady(context.Background(), handoffOptions(ledger, &out)))
+
+	assert.Empty(t, out.String())
+	r := getRecord(t, ledger, 1)
+	assert.Equal(t, StateDiscarded, r.State)
+	assert.Equal(t, ReasonUnreadable, r.Reason)
+}
+
+// Control sequences in Basecamp's text never reach the line.
+func TestTheLineCarriesNoTerminalControlSequences(t *testing.T) {
+	ledger := newTestLedger(t)
+	seenRecord(t, ledger, 1)
+	v := admittedVerdict(1, 0, "recording:1")
+	v.Snapshot.Content = "<p>fix it\u009b2J\x1b[31m now</p>"
+	v.Snapshot.Title = "A \x1b]0;title\x07card"
+	_, err := ledger.Admission().Commit(context.Background(), v)
+	require.NoError(t, err)
+	var out bytes.Buffer
+
+	require.NoError(t, handOffReady(context.Background(), handoffOptions(ledger, &out)))
+
+	lines := handedOffLines(t, &out)
+	require.Len(t, lines, 1)
+	for _, s := range []string{lines[0].Content, lines[0].Recording.Title} {
+		assert.NotContains(t, s, "\x1b")
+		assert.NotContains(t, s, "\u009b")
+	}
+	assert.Contains(t, lines[0].Content, "fix it")
 }

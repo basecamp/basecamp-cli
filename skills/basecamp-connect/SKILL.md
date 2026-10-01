@@ -268,14 +268,16 @@ Then arm a persistent monitor on that file with the Monitor tool
 the start and the monitor is missed:
 
 ```bash
-tail -f -n +1 <connector-output-file> | grep --line-buffered -F '"type":"request"'
+tail -f -n +1 '<connector-output-file>' | grep --line-buffered -F '"type":"request"'
 ```
+
+Single-quote the path, as with every other value.
 
 Each notification is one request: handle it with *For each request*. A request
 that arrives while you're waiting on the person is not their reply.
 
-The connector starts from the present. Anything asked while it wasn't running
-is not picked up. If someone says the agent ignored them, that's the first
+The connector starts from the present. Anything asked more than a minute
+before it started is not picked up. If someone says the agent ignored them, that's the first
 thing to check.
 
 ### 2. The request line

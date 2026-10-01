@@ -1258,3 +1258,42 @@ func TestAnUnreadableConfigDoesNotDiscardASubscribedComment(t *testing.T) {
 	assert.Equal(t, ReasonConfigUnreadable, v.Reason)
 	assert.NotEqual(t, ReasonNotAddressed, v.Reason, "a discard here is unrecoverable")
 }
+
+// An admitted snapshot names the project and, when they wrote the recording,
+// the requester: what the handoff gives the session instead of a lookup.
+func TestTheSnapshotNamesTheProjectAndARequesterWhoWroteIt(t *testing.T) {
+	admit := func(t *testing.T, writer int64) *Snapshot {
+		t.Helper()
+		f := newFakeReads()
+		s := summaryWith(recordingID, servedProj, "Message", writer, "<div>please look "+mentionOf(t, agentID)+"</div>")
+		s.Bucket.Name = "BC5 Calendar"
+		s.Creator.Name = "The writer"
+		f.summaries[recordingID] = s
+		v := decide(t, newAdmitter(t, basePolicy(), f), Event{
+			ID: eventID, EventType: "message.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID,
+		})
+		require.Equal(t, StateAdmitted, v.State, "reason %q", v.Reason)
+		require.NotNil(t, v.Snapshot)
+		return v.Snapshot
+	}
+
+	snap := admit(t, operatorID)
+	assert.Equal(t, "BC5 Calendar", snap.ProjectName)
+	assert.Equal(t, "The writer", snap.RequesterName)
+
+	// The operator assigning a card someone else wrote: the requester is the
+	// operator, and the name on the card is the writer's, so none is given.
+	f := newFakeReads()
+	card := summaryWith(recordingID, servedProj, "Kanban::Card", strangerID, "<div>a card</div>")
+	card.Bucket.Name = "BC5 Calendar"
+	card.Creator.Name = "Someone else"
+	card.Assignees = []basecamp.Person{{ID: agentID}}
+	f.summaries[recordingID] = card
+	f.assignments[eventID] = []int64{agentID}
+	v := decide(t, newAdmitter(t, basePolicy(), f), Event{
+		ID: eventID, EventType: "card.assignment_changed", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID,
+	})
+	require.Equal(t, StateAdmitted, v.State, "reason %q", v.Reason)
+	assert.Equal(t, "BC5 Calendar", v.Snapshot.ProjectName)
+	assert.Empty(t, v.Snapshot.RequesterName, "the card's writer isn't the requester")
+}

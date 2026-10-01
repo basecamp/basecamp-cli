@@ -12,6 +12,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/ndjson"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // The handoff is what the connector does with a request it trusts: it writes
@@ -55,6 +56,9 @@ type HandoffRecording struct {
 const (
 	// ReasonHandedOff: the request was written to stdout for the session.
 	ReasonHandedOff = "handed_off"
+	// ReasonUnreadable: the request's record had no content to hand off, so
+	// nothing was written.
+	ReasonUnreadable = "unreadable"
 	// ReasonBeforeThisRun: the request was made before this run started.
 	// Nobody was there to take it, and it is not run late.
 	ReasonBeforeThisRun = "before_this_run"
@@ -166,8 +170,11 @@ func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 	}
 	line, err := handoffLine(record, opts.AgentID)
 	if err != nil {
+		// Closed under its own reason, not handed_off: nothing was written.
+		// Returning the error instead would stop the connector on every
+		// start, for one record.
 		opts.log().Warn("connector: a request could not be handed off", "event_id", record.ID, "error", err)
-		return opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonHandedOff)
+		return opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonUnreadable)
 	}
 	if err := opts.Lines.WriteLine(line); err != nil {
 		return fmt.Errorf("connector: hand off event %d: %w", record.ID, err)
@@ -199,17 +206,19 @@ func handoffLine(record Record, agentID int64) (HandoffLine, error) {
 		Trigger:   record.Decision.Trigger,
 		Recording: HandoffRecording{
 			BucketID:    record.BucketID,
-			ProjectName: snapshot.ProjectName,
+			ProjectName: richtext.SanitizeTerminal(snapshot.ProjectName),
 			RecordingID: record.RecordingID,
-			Type:        snapshot.Type,
-			Title:       snapshot.Title,
+			Type:        richtext.SanitizeTerminal(snapshot.Type),
+			Title:       richtext.SanitizeTerminal(snapshot.Title),
 			URL:         record.Decision.RecordingURL,
 		},
-		ReplyTo:          InstructionReply{Kind: record.Decision.ReplyKind, RecordingID: record.Decision.ReplyRecordingID},
-		RequesterID:      record.Decision.RequesterID,
-		RequesterName:    snapshot.RequesterName,
-		Acknowledge:      record.Decision.Acknowledge,
-		Content:          StripMentionsOf(snapshot.Content, agentID),
+		ReplyTo:       InstructionReply{Kind: record.Decision.ReplyKind, RecordingID: record.Decision.ReplyRecordingID},
+		RequesterID:   record.Decision.RequesterID,
+		RequesterName: richtext.SanitizeTerminal(snapshot.RequesterName),
+		Acknowledge:   record.Decision.Acknowledge,
+		// The line is read in a terminal as often as by a program: no
+		// control sequences from Basecamp's text reach it.
+		Content:          richtext.SanitizeTerminal(StripMentionsOf(snapshot.Content, agentID)),
 		ContentUpdatedAt: snapshot.UpdatedAt,
 	}, nil
 }
