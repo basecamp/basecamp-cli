@@ -502,8 +502,14 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 	if clientRefusalCodes[code] || bareUnauthorized {
 		refused := output.ErrAuth("Minting an agent token was refused (" + detail + ")")
 		refused.Cause = ErrAgentCredentialRefused
-		return mintHoldFor(mint, resp, detail, code, true, m.now()),
-			m.agentRemedy(refused, mint.clientID, mint.scope)
+		var hold *MintHold
+		// Held only when the refusal named a known code or named nothing
+		// at all: a code this version does not know may mean something a
+		// held hour would get wrong, so it is asked again.
+		if code != "" || errResp.Error == "" {
+			hold = mintHoldFor(mint, resp, detail, code, true, m.now())
+		}
+		return hold, m.agentRemedy(refused, mint.clientID, mint.scope)
 	}
 	return nil, statusFailure("minting an agent token: "+detail, resp)
 }

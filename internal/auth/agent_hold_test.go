@@ -544,3 +544,22 @@ func TestARateLimitWithAnUnreadableBodyIsStillHeld(t *testing.T) {
 		})
 	}
 }
+
+// TestARefusalNamingAnUnknownCodeIsNotHeld: a 401 or 403 is held as an
+// unnamed refusal only when it names nothing. One naming a code this
+// version does not know is answered as before and asked again.
+func TestARefusalNamingAnUnknownCodeIsNotHeld(t *testing.T) {
+	e := startMintEndpoint(t)
+	e.respond(http.StatusUnauthorized, `{"error":"something_newer"}`)
+	m, key, _ := heldManager(t, e)
+
+	for range 2 {
+		_, err := m.AccessToken(context.Background())
+		require.Error(t, err)
+	}
+	assert.EqualValues(t, 2, e.calls.Load(), "a refusal naming an unknown code was held")
+
+	stored, err := m.store.Load(key)
+	require.NoError(t, err)
+	assert.Nil(t, stored.MintHold)
+}
