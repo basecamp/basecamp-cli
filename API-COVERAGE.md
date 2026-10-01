@@ -240,7 +240,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | **Webhooks** |
 | webhooks | 7 | `webhooks` | ✅ | BC4 | - | list, show, create, update, delete |
 | **Templates** |
-| templates | 10 | `templates` | ✅ | BC4 | - | list, show, create, update, delete, construct, construction, library, copy, copy-status |
+| templates | 15 | `templates projects`, `templates todolists`, `templates card-tables`, `todolists templatify`, `card-tables templatify` | ✅ | BC4 | - | projects: list, show, create, update, delete, construct, construction; todolists and card-tables: list, create, duplicate, duplication, archive, trash, restore; templatify, templatification. The flat `templates list/library/copy/…` spellings remain as hidden, deprecated aliases |
 | **Time Tracking** |
 | timesheets | 6 | `timesheet` | ✅ | BC4 | - | list, show, create, update, delete |
 | **Subscriptions** |
