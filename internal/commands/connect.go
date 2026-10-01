@@ -1204,12 +1204,18 @@ func tokenRetry(err error) (time.Duration, bool) {
 
 // serverNamedWait is the wait the server named for err, as it named it:
 // the agent mint's own, or that of the SDK error an OAuth refresh carries.
-// Zero when it named none.
+// Every SDK error down the chain is read, not only the first, since the
+// first may be this package's own capped wrapping of the one the server
+// gave. Zero when it named none.
 func serverNamedWait(err error) time.Duration {
 	seconds := auth.NamedWait(err)
-	var sdkErr *basecamp.Error
-	if errors.As(err, &sdkErr) {
+	for next := err; next != nil; {
+		var sdkErr *basecamp.Error
+		if !errors.As(next, &sdkErr) {
+			break
+		}
 		seconds = max(seconds, sdkErr.RetryAfter)
+		next = sdkErr.Cause
 	}
 	return time.Duration(max(seconds, 0)) * time.Second
 }

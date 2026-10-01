@@ -726,3 +726,13 @@ func TestAnAgentRateLimitBeyondTheCapIsCappedAndSaid(t *testing.T) {
 	assert.Contains(t, w.lines[0], "waiting "+auth.MaxServerWait.String())
 	assert.Equal(t, 2, mints(), "the hold had ended when the start tried again")
 }
+
+// A refresh's wait, once wrapped for the SDK with the cap, still reads
+// back as what the server named, so the start's log says both.
+func TestACappedRefreshWaitStillSaysWhatWasNamed(t *testing.T) {
+	refresh := &output.Error{Code: output.CodeRateLimit, Message: "token refresh failed", HTTPStatus: 429, Retryable: true,
+		Cause: basecamp.ErrRateLimit(99999999)}
+	wrapped := tokenFailureInSDKTerms(refresh)
+	assert.Equal(t, auth.MaxServerWait, time.Duration(wrapped.RetryAfter)*time.Second)
+	assert.Equal(t, 99999999*time.Second, serverNamedWait(wrapped))
+}
