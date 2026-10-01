@@ -654,15 +654,17 @@ func (s *TokenSocket) handOne(window time.Duration) (Handoff, driver.Process) {
 		}
 		return HandoffRefused, driver.Process{}
 	}
+	// The peer named before the write, not asked again, and looked up before
+	// the write too: a server that reads its token and closes at once is the
+	// ordinary case, macOS no longer names a peer that has closed, and once
+	// it has gone its pid could belong to another process (Copilot on #812).
+	taker := s.takerOf(peer.PID)
 	if _, err := conn.Write([]byte(s.token + "\n")); err != nil {
 		// The peer was the worker's; the write is what failed. On a unix
 		// socket a peer that has gone makes this EPIPE at once.
 		return HandoffUndelivered, driver.Process{}
 	}
-	// The peer named before the write, not asked again: a server that reads
-	// its token and closes at once is the ordinary case, and macOS no longer
-	// names a peer that has closed.
-	return HandoffDelivered, s.takerOf(peer.PID)
+	return HandoffDelivered, taker
 }
 
 // allowedGroup is the worker's process group, or 0 before it is named.

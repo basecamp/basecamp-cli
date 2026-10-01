@@ -302,10 +302,13 @@ func TestTheShortSocketBaseIsChosenSoTheSocketFits(t *testing.T) {
 // an empty taker for a token that was in fact handed over.
 func TestAHandoffInFlightIsFinishedBeforeTheTakerIsRead(t *testing.T) {
 	// The identity lookup is where the handoff is slowest; hold it there.
-	slow := make(chan struct{})
+	// It runs before the write (Copilot on #812), so the peer is connected
+	// and waiting for its token.
+	reached, slow := make(chan struct{}), make(chan struct{})
 	s, err := serveTaskTokenWith(tokenDir(t), socketTestToken, 2*time.Second,
 		peerCredentials, processGroupOf, parentProcessOf,
 		func(pid int) (driver.Process, error) {
+			close(reached)
 			<-slow
 			return driver.LookupProcess(pid)
 		})
@@ -318,7 +321,7 @@ func TestAHandoffInFlightIsFinishedBeforeTheTakerIsRead(t *testing.T) {
 		token, _ := fetch(t, s.Path())
 		got <- token
 	}()
-	require.Equal(t, socketTestToken, strings.TrimSpace(<-got), "the token is out before the taker is known")
+	<-reached
 	_, ok := s.Taker()
 	require.False(t, ok, "the fixture must have the handoff still deciding")
 
@@ -330,6 +333,7 @@ func TestAHandoffInFlightIsFinishedBeforeTheTakerIsRead(t *testing.T) {
 	require.True(t, ok, "and the process that took the token is known by then")
 	assert.Equal(t, os.Getpid(), taker.PID)
 	assert.Equal(t, HandoffDelivered, s.Result())
+	assert.Equal(t, socketTestToken, strings.TrimSpace(<-got), "the handoff in flight still delivered")
 }
 
 // Opus r8: after a delivery the socket does not arm again while the process
