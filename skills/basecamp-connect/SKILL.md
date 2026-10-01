@@ -261,7 +261,11 @@ basecamp connect -P '<profile>'
 It runs until stopped. Its folder doesn't matter: every subagent works in the
 repo you choose for it. Read the output once after a few seconds. You should
 see `connector: running` in its log. If it exited instead, explain the error
-(see *When the connector stops*), and stop.
+(see *When the connector stops*), and stop. If it says `could not get the
+agent's token yet`, Basecamp's token endpoint is rate-limiting it or having
+trouble: it waits as long as it says and tries again on its own. Tell the
+person, leave it running, and arm the monitor as usual. Restarting it doesn't
+help.
 
 Then arm a persistent monitor on that file with the Monitor tool
 (`persistent: true`), replaying from the start so nothing that arrived between
