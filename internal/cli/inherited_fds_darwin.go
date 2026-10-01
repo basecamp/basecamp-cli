@@ -3,7 +3,9 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"os"
 
 	"golang.org/x/sys/unix"
 
@@ -17,12 +19,16 @@ import (
 // marked as the Linux fallback marks /proc/self/fd's. It fails closed in the
 // same way, for the same reason.
 func sealInheritedDescriptors() error {
-	if err := sealListedDescriptors(devFD); err == nil {
-		return nil
+	// /dev/fd is a filesystem macOS mounts by default. Where it lists, its
+	// walk decides, and a descriptor it fails to seal is that error, not a
+	// reason to try another way.
+	if dir, err := os.Open(devFD); err == nil {
+		_ = dir.Close()
+		return sealListedDescriptors(devFD)
 	}
-	// /dev/fd is a filesystem macOS mounts by default, and one that is not
-	// there must not leave a descriptor unsealed: try every number the
-	// process may hold instead, or fail closed when that number is not known.
+	// Where it is not there, it must not leave a descriptor unsealed: try
+	// every number the process may hold instead, or fail closed when that
+	// number is not known.
 	limit, err := descriptorLimit()
 	if err != nil {
 		return err
@@ -43,10 +49,13 @@ const maxDescriptorScan = 1 << 20
 func descriptorLimit() (uint64, error) {
 	var lim unix.Rlimit
 	if err := unix.Getrlimit(unix.RLIMIT_NOFILE, &lim); err != nil {
-		return 0, fmt.Errorf("could not seal the descriptors this process inherited: /dev/fd could not be read, and neither could the descriptor limit: %w", err)
+		return 0, fmt.Errorf("could not seal the descriptors this process inherited: /dev/fd could not be opened, and the descriptor limit could not be read: %w", err)
 	}
-	if lim.Cur == 0 || lim.Cur > maxDescriptorScan {
-		return 0, fmt.Errorf("could not seal the descriptors this process inherited: /dev/fd could not be read, and the descriptor limit (%d) is too large to check one by one", lim.Cur)
+	switch {
+	case lim.Cur == 0:
+		return 0, errors.New("could not seal the descriptors this process inherited: /dev/fd could not be opened, and the descriptor limit reads as zero")
+	case lim.Cur > maxDescriptorScan:
+		return 0, fmt.Errorf("could not seal the descriptors this process inherited: /dev/fd could not be opened, and the descriptor limit (%d) is too large to check one by one", lim.Cur)
 	}
 	return lim.Cur, nil
 }

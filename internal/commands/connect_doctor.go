@@ -365,14 +365,12 @@ func preflightReason(err error) string {
 // connectUnsupportedOSCheck is the Platform check on a GOOS the connector
 // does not run on. It gives the constraint that actually applies
 // (connectSupportedOS, and #736): the task token reaches a worker's MCP
-// server over an inherited descriptor, and Linux alone seals the descriptors
-// a process passes on. Reading a process's start time is the half macOS has,
-// so naming that here told a Mac reader the connector could run there and
-// then refused it anyway.
+// server over an inherited descriptor, and only Linux and macOS seal the
+// descriptors a process passes on.
 func connectUnsupportedOSCheck(goos string) setup.Check {
 	return setup.Check{Name: "Platform", Status: setup.StatusFail,
 		Message: fmt.Sprintf("The connector does not run on %s: %s", goos, connectSupportedOSReason),
-		Hint:    "Run the connector on Linux; the rest of the CLI runs here."}
+		Hint:    "Run the connector on Linux or macOS; the rest of the CLI runs here."}
 }
 
 // driverChecks refuses what the run command refuses: doctor never calls a

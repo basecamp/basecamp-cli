@@ -503,8 +503,7 @@ hear only some projects, `--shadow` to admit and log without dispatching or
 posting anything, `--hold` to run with the durable hold set.
 
 Linux and macOS only: on any other system the connector refuses to start,
-and says so. The background service (`connect service`) is Linux only, since
-it writes a systemd unit; on a Mac, start the connector yourself.
+and says so.
 
 Quote the profile, as everywhere else in this skill.
 

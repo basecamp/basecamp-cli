@@ -5,6 +5,7 @@ package cli
 import (
 	"os"
 	"os/exec"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,8 +50,9 @@ func TestSealedDescriptorsDoNotReachChildrenOnMacOS(t *testing.T) {
 	require.NoError(t, sealInheritedDescriptors())
 
 	assert.True(t, cloexec(t, inheritedFDDarwin))
+	fd := strconv.Itoa(inheritedFDDarwin)
 	out, err := exec.CommandContext(t.Context(), "/bin/sh", "-c",
-		"if (: <&200) 2>/dev/null; then echo inherited; else echo sealed; fi").Output()
+		"if (: <&"+fd+") 2>/dev/null; then echo inherited; else echo sealed; fi").Output() //nolint:gosec // G204: the descriptor number is the test's own constant
 	require.NoError(t, err)
 	assert.Equal(t, "sealed\n", string(out), "the child inherited the descriptor")
 
