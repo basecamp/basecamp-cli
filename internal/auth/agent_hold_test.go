@@ -155,6 +155,7 @@ func TestARateLimitIsHeldUntilItsRetryAfter(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, output.CodeRateLimit, output.AsError(err).Code)
 	assert.NotContains(t, output.AsError(err).Message, "invalid_client", "a 429 is not a verdict on the client")
+	assert.Equal(t, 300, RetryAfter(err), "the wait is read from the hold's deadline")
 
 	*now = now.Add(299 * time.Second)
 	_, err = m.AccessToken(context.Background())
@@ -167,6 +168,8 @@ func TestARateLimitIsHeldUntilItsRetryAfter(t *testing.T) {
 	assert.Contains(t, held.Message, "the server answered HTTP 429")
 	assert.NotContains(t, held.Message, "invalid_client")
 	assert.Contains(t, held.Hint, "1 seconds")
+	assert.Equal(t, 1, RetryAfter(err), "a held mint carries what is left of the hold")
+	assert.ErrorIs(t, err, errMintHeld)
 	assert.NotContains(t, held.Hint, "--with-client-credentials", "a rate limit is not a refused secret")
 	assert.False(t, errors.Is(err, ErrAgentCredentialRefused), "a rate limit is not a disconnect")
 
