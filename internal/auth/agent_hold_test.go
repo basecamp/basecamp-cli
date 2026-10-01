@@ -208,19 +208,26 @@ func TestARateLimitHoldRoundsItsDeadlineUp(t *testing.T) {
 // TestARateLimitHoldIsBounded: a 429 with no Retry-After is held for the
 // default minute, and one asking for a day is not believed past the cap.
 func TestARateLimitHoldIsBounded(t *testing.T) {
+	retryAfter := func(v string) func(time.Time) http.Header {
+		return func(time.Time) http.Header { return http.Header{"Retry-After": {v}} }
+	}
 	for name, c := range map[string]struct {
-		header http.Header
+		// header is built from the test's own clock, so an HTTP-date
+		// names the same instant the hold is computed against.
+		header func(now time.Time) http.Header
 		want   time.Duration
 	}{
-		"no Retry-After":     {nil, defaultAgentRateLimitHold},
-		"an absurd one":      {http.Header{"Retry-After": {"86400"}}, maxAgentConnectLifetime},
-		"an HTTP-date":       {http.Header{"Retry-After": {time.Now().Add(10 * time.Minute).UTC().Format(http.TimeFormat)}}, 10 * time.Minute},
-		"one that means now": {http.Header{"Retry-After": {"0"}}, defaultAgentRateLimitHold},
+		"no Retry-After": {func(time.Time) http.Header { return nil }, defaultAgentRateLimitHold},
+		"an absurd one":  {retryAfter("86400"), maxAgentConnectLifetime},
+		"an HTTP-date": {func(now time.Time) http.Header {
+			return http.Header{"Retry-After": {now.Add(10 * time.Minute).UTC().Format(http.TimeFormat)}}
+		}, 10 * time.Minute},
+		"one that means now": {retryAfter("0"), defaultAgentRateLimitHold},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := startMintEndpoint(t)
-			e.answer = func(int) (int, http.Header, string) { return http.StatusTooManyRequests, c.header, `{}` }
 			m, key, now := heldManager(t, e)
+			e.answer = func(int) (int, http.Header, string) { return http.StatusTooManyRequests, c.header(*now), `{}` }
 
 			_, err := m.AccessToken(context.Background())
 			require.Error(t, err)
