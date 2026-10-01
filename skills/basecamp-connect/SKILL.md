@@ -535,9 +535,13 @@ Requests that arrive while it's stopped are not picked up later.
 - `basecamp connect doctor -P '<profile>'`: the credential, the identity, the
   event feed and the ledger. Start here when something seems wrong. It posts
   nothing.
-- `basecamp connect status -P '<profile>'`: what the connector has seen and
-  admitted. It answers "did that mention reach it?" and "why didn't it?".
-  Read-only, and safe while the connector runs.
+- **"Did that mention reach it?"**: search the connector's output file for the
+  recording id. A `"type":"request"` line means it was handed to you. A
+  `"type":"event"` line with a `reason` says why it was turned away (for
+  example `untrusted_performer`). No line means the feed never delivered it.
+- `basecamp connect status -P '<profile>'`: the feed's position, holds and
+  losses. Read-only, and safe while the connector runs. Handed-off requests
+  don't appear here; the output file is the record of those.
 
 ## Stopping
 

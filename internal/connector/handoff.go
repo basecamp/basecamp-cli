@@ -202,7 +202,7 @@ func handoffLine(record Record, agentID int64) (HandoffLine, error) {
 	return HandoffLine{
 		Type:      "request",
 		EventID:   record.ID,
-		EventType: record.EventType,
+		EventType: richtext.SanitizeTerminal(record.EventType),
 		Trigger:   record.Decision.Trigger,
 		Recording: HandoffRecording{
 			BucketID:    record.BucketID,
@@ -210,7 +210,7 @@ func handoffLine(record Record, agentID int64) (HandoffLine, error) {
 			RecordingID: record.RecordingID,
 			Type:        richtext.SanitizeTerminal(snapshot.Type),
 			Title:       richtext.SanitizeTerminal(snapshot.Title),
-			URL:         record.Decision.RecordingURL,
+			URL:         richtext.SanitizeTerminal(record.Decision.RecordingURL),
 		},
 		ReplyTo:       InstructionReply{Kind: record.Decision.ReplyKind, RecordingID: record.Decision.ReplyRecordingID},
 		RequesterID:   record.Decision.RequesterID,
@@ -259,6 +259,10 @@ ORDER BY e.id LIMIT ?`
 			return nil, err
 		}
 		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("connector: records to hand off: %w", err)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
