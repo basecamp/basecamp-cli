@@ -301,8 +301,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		// Whatever ended the run, status says it is not running any more.
 		_ = ledger.NoteConnection(context.WithoutCancel(ctx), stopState, stopDetail)
 	}()
-	logger.Info("connector: running", "profile", richtext.SanitizeSingleLine(name), "account", account,
-		"agent_person_id", agentID, "shadow", f.shadow, "projects", len(buckets), "state", richtext.SanitizeSingleLine(stateDir))
+	logger.Info("connector: running", connectRunningAttrs(name, account, agentID, f.shadow, len(file.Projects), buckets, stateDir)...)
 
 	var (
 		wg       sync.WaitGroup
@@ -603,3 +602,16 @@ func (r *repeatedString) Set(v string) error {
 }
 
 func (r *repeatedString) Type() string { return "string" }
+
+// connectRunningAttrs is what the connector logs as it starts. It says how
+// many projects the agent serves, and, only when --project narrowed the run,
+// which ones this run is limited to: a bare count of the narrowing read as
+// "serving nothing" when there was none.
+func connectRunningAttrs(profile, account string, agentID int64, shadow bool, served int, only []int64, stateDir string) []any {
+	attrs := []any{"profile", richtext.SanitizeSingleLine(profile), "account", account,
+		"agent_person_id", agentID, "shadow", shadow, "served_projects", served}
+	if len(only) > 0 {
+		attrs = append(attrs, "only_projects", only)
+	}
+	return append(attrs, "state", richtext.SanitizeSingleLine(stateDir))
+}
