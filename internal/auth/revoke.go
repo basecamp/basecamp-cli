@@ -266,13 +266,23 @@ const maxRetryAfterSeconds = math.MaxInt32
 func retryAfterSeconds(value string, now time.Time) int {
 	value = strings.TrimSpace(value)
 	if seconds, err := strconv.ParseUint(value, 10, 64); err == nil || errors.Is(err, strconv.ErrRange) {
-		return int(min(seconds, maxRetryAfterSeconds))
+		if seconds > maxRetryAfterSeconds {
+			return maxRetryAfterSeconds
+		}
+		return int(seconds)
 	}
 	when, err := http.ParseTime(value)
 	if err != nil {
 		return 0
 	}
-	return int(min(math.Ceil(max(when.Sub(now), 0).Seconds()), maxRetryAfterSeconds))
+	seconds := math.Ceil(when.Sub(now).Seconds())
+	switch {
+	case seconds <= 0:
+		return 0
+	case seconds > maxRetryAfterSeconds:
+		return maxRetryAfterSeconds
+	}
+	return int(seconds)
 }
 
 // RetryAfter is the wait, in seconds, a rate-limited answer named, or zero
