@@ -1468,25 +1468,19 @@ basecamp auth login --with-token -P bot --account <id>  # Import a personal acce
 basecamp auth login --with-client-credentials --client-id <id> -P agent --account <id>  # Authenticate as a Basecamp agent: client secret on stdin, self-token minted on demand (no refresh token)
 basecamp auth agent connect -P agent               # Connect this computer to a Basecamp agent: approve it in a browser and its OAuth client is stored — nothing to paste
 basecamp connect setup -P agent --operator-profile <me> --serve <project-id>  # Set up a local agent connector on a connected profile (run `auth agent connect` first): verifies trust, checks token, identity, scope, ticket mint and project reads, then writes connect.json
-basecamp connect -P agent                          # Run the connector in the foreground: hear the agent's events, admit what a trusted person asks, and hand the work to a local coding agent that replies as the agent
-basecamp connect -P agent --project <id> --shadow  # Narrow it to one project, and watch without acting: an isolated state directory, nothing dispatched and nothing posted
-basecamp connect setup -P agent --worker codex     # Run workers with Codex instead of Claude Code
+basecamp connect -P agent                          # Run the connector in the foreground: hear the agent's events, admit what a trusted person asks, and print each trusted request for your session to handle
+basecamp connect -P agent --project <id> --shadow  # Narrow it to one project, and watch without acting: an isolated state directory, nothing handed off
 ```
 
 `basecamp connect` runs until it is stopped: it is not a command to call for an
-answer. Stdout is a wire of one JSON object per line (events seen, verdicts,
-dispatches — ids and states, never content) and the logs are on stderr, so read
-the lines rather than the log. SIGINT and SIGTERM cancel whatever workers are
-running, settle them, and exit 130 and 143. It runs on Linux and macOS: the
-task token's hand-over onto a descriptor the next program inherits is sealed
-only there. It refuses a second connector for the same agent, and takes `--project`
-(repeatable) to hear and dispatch only those projects. Run it under a
-supervisor rather than from a session you will close.
-
-A task runs in the directory the connector itself was started in, and the
-connector prepares nothing: no directory is associated with a project, and it
-makes no directory, no clone and no branch. Work that needs one of its own is
-the agent's to make, from its own skills and instructions.
+answer. Stdout is one JSON object per line (events seen, verdicts, and a
+`"type":"request"` line for each trusted request) and the logs are on stderr.
+It starts no workers and posts nothing: the `basecamp-connect` skill runs it from
+your own Claude Code session, which acknowledges each request, picks the repo and
+hands it to a subagent that replies as the agent. Use that skill to drive an
+agent from Basecamp. SIGINT and SIGTERM exit 130 and 143. It runs on Linux and
+macOS, refuses a second connector for the same agent, and takes `--project`
+(repeatable) to hear only those projects.
 
 **Before running ANY of the logins above, check `oauth_type`.** `basecamp auth
 status --json` reports it, and `agent` means the profile is a Basecamp agent: a

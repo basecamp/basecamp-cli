@@ -29,11 +29,7 @@ load smoke_helper
 }
 
 @test "connect doctor is out of scope" {
-  mark_out_of_scope "Needs a set-up connector profile and starts its MCP server — covered by Go tests in internal/commands"
-}
-
-@test "connect redispatch is out of scope" {
-  mark_out_of_scope "Decides a record in a local connector ledger — covered by Go tests in internal/commands and internal/connector"
+  mark_out_of_scope "Needs a set-up connector profile — covered by Go tests in internal/commands"
 }
 
 @test "connect discard is out of scope" {
@@ -50,14 +46,6 @@ load smoke_helper
 
 @test "connect import is out of scope" {
   mark_out_of_scope "Applies a reconciliation file to a local connector ledger — covered by Go tests in internal/commands and internal/connector"
-}
-
-@test "connect service install is out of scope" {
-  mark_out_of_scope "Writes a systemd user unit and asks systemctl to start it, which the smoke runner has no session for — covered by Go tests in internal/commands"
-}
-
-@test "connect service uninstall is out of scope" {
-  mark_out_of_scope "Stops a systemd user unit and removes it, which the smoke runner has no session for — covered by Go tests in internal/commands"
 }
 
 @test "auth refresh is out of scope" {
