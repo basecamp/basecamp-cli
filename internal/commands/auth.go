@@ -358,7 +358,7 @@ func authStatusReport(ctx context.Context, app *appctx.App) (*authStatus, error)
 	// leaves the credential refreshable once it ends; only a permanent
 	// one does not. renewal_refused is the stored hold and nothing else:
 	// a credential that cannot mint for a local reason has no hold.
-	hold := app.Auth.MintHoldStatus(creds)
+	hold := app.Auth.MintHoldStatus(creds, refusal)
 	timeLimited := hold != nil && !hold.Permanent()
 	refreshable := refusal == nil || timeLimited
 

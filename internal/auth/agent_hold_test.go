@@ -338,13 +338,12 @@ func TestARefusalThatCanReverseIsRecheckedHourly(t *testing.T) {
 // refusal and the write keeps its credential clean.
 func TestAStaleRefusalNeverLandsOnANewSecret(t *testing.T) {
 	e := startMintEndpoint(t)
-	m, key, now := heldManager(t, e)
+	m, key, _ := heldManager(t, e)
 
 	stale := &MintHold{
 		Kind:   mintHoldRefused,
 		Detail: "token error: invalid_client",
 		Client: agentClientFingerprint("agent-client", "agent-secret"),
-		At:     now.Unix(),
 	}
 
 	relogged := agentCredential(e.url(), time.Now().Add(time.Hour))
@@ -437,3 +436,63 @@ func TestEveryHoldDeadlineIsRoundedUpAndEveryWaitReadFromIt(t *testing.T) {
 		})
 	}
 }
+
+// TestAHoldIsReportedOnlyAsTheAnswerARenewalWouldMeet: the report's hold is
+// the one RefreshRefusal answered with, decided at one instant. A local
+// failure checked ahead of the hold is reported as itself, and a hold that
+// ends after that answer was given is still reported with it rather than
+// leaving the two disagreeing.
+func TestAHoldIsReportedOnlyAsTheAnswerARenewalWouldMeet(t *testing.T) {
+	e := startMintEndpoint(t)
+	e.answer = func(int) (int, http.Header, string) {
+		return http.StatusTooManyRequests, http.Header{"Retry-After": {"300"}}, `{}`
+	}
+	m, key, now := heldManager(t, e)
+	_, err := m.AccessToken(context.Background())
+	require.Error(t, err)
+
+	stored, err := m.store.Load(key)
+	require.NoError(t, err)
+	require.NotNil(t, stored.MintHold)
+
+	refusal := m.RefreshRefusal(stored)
+	require.Error(t, refusal)
+	*now = now.Add(time.Hour)
+	status := m.MintHoldStatus(stored, refusal)
+	require.NotNil(t, status, "the hold expired between the answer and the report, and the two disagree")
+	assert.Equal(t, mintHoldRateLimited, status.Kind)
+	assert.False(t, status.Permanent())
+
+	broken := *stored
+	broken.TokenEndpoint = ""
+	refusal = m.RefreshRefusal(&broken)
+	require.Error(t, refusal)
+	assert.Nil(t, m.MintHoldStatus(&broken, refusal), "a hold masked a credential that cannot mint at all")
+}
+
+// TestAFailedReadIsReportedWhenARefusalCannotBeRemembered: the refusal is
+// what the caller sees either way, but a store that cannot be read means
+// the next command will ask again, and that is said.
+func TestAFailedReadIsReportedWhenARefusalCannotBeRemembered(t *testing.T) {
+	e := startMintEndpoint(t)
+	m, key, _ := heldManager(t, e)
+	var warned []string
+	m.Warnf = func(format string, args ...any) { warned = append(warned, fmt.Sprintf(format, args...)) }
+
+	m.rememberMintHold("nowhere", &MintHold{Kind: mintHoldRefused})
+	assert.Empty(t, warned, "a credential that is gone has nothing to remember a refusal on")
+
+	m.store = &Store{inner: unreadableStore{}}
+	m.store.initOnce.Do(func() {})
+	m.rememberMintHold(key, &MintHold{Kind: mintHoldRefused})
+	require.Len(t, warned, 1)
+	assert.Contains(t, warned[0], "could not read the credential")
+}
+
+// unreadableStore is a credential store whose every read fails, as a
+// locked keychain's does.
+type unreadableStore struct{ credStore }
+
+func (unreadableStore) Load(string) ([]byte, error) { return nil, errors.New("the keychain is locked") }
+func (unreadableStore) FallbackWarning() string     { return "" }
+func (unreadableStore) UsingKeyring() bool          { return true }

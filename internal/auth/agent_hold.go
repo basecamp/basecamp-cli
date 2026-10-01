@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -116,9 +117,6 @@ type MintHold struct {
 	// verdict was about. A hold for any others holds nothing.
 	Client string `json:"client"`
 
-	// At is when the verdict was given, in Unix seconds.
-	At int64 `json:"at"`
-
 	// Until is when the next mint may be sent, in Unix seconds, rounded
 	// up. Zero on an invalid_client refusal means never with these client
 	// credentials; any other hold without one is damaged, and holds nothing.
@@ -144,7 +142,6 @@ func mintHoldFor(mint *agentMint, resp *http.Response, detail, code string, refu
 	hold := &MintHold{
 		Detail: detail,
 		Client: agentClientFingerprint(mint.clientID, mint.clientSecret),
-		At:     now.Unix(),
 	}
 	switch {
 	case resp.StatusCode == http.StatusTooManyRequests:
@@ -194,6 +191,10 @@ func holdRateLimitError(hold *MintHold, now time.Time, message string) *output.E
 	return e
 }
 
+// errMintHeld is in the cause of every error a stored hold answers a mint
+// with, so a report can tell the hold's answer from any other.
+var errMintHeld = errors.New("a stored hold answered the mint")
+
 // heldMint is the error a remembered verdict answers a mint with, or nil
 // when the mint may be sent. It reads nothing but creds, so a report can
 // ask it too.
@@ -207,7 +208,9 @@ func (m *Manager) heldMint(creds *Credentials) error {
 
 	switch hold.Kind {
 	case mintHoldRateLimited:
-		return holdRateLimitError(hold, now, fmt.Sprintf("Minting an agent token is held until %s: the token endpoint rate-limited the last attempt (%s)", when, hold.Detail))
+		e := holdRateLimitError(hold, now, fmt.Sprintf("Minting an agent token is held until %s: the token endpoint rate-limited the last attempt (%s)", when, hold.Detail))
+		e.Cause = errMintHeld
+		return e
 	case mintHoldRefused:
 		msg := "Minting an agent token was refused (" + hold.Detail + ")"
 		if hold.Until == 0 {
@@ -216,7 +219,7 @@ func (m *Manager) heldMint(creds *Credentials) error {
 			msg += "; the refusal is remembered until " + when + ", when this client secret will be tried once more — a login with a new secret replaces it sooner"
 		}
 		e := output.ErrAuth(msg)
-		e.Cause = ErrAgentCredentialRefused
+		e.Cause = errors.Join(ErrAgentCredentialRefused, errMintHeld)
 		if hold.Until != 0 {
 			// The hold ends on its own, so the remedy is to wait for it.
 			e.Hint = fmt.Sprintf("Wait until %s (%d seconds); the next mint after that sends this client secret once more", when, holdWait(hold, now))
@@ -249,20 +252,21 @@ type MintHoldStatus struct {
 // credentials — only a login with a new secret replaces it.
 func (s *MintHoldStatus) Permanent() bool { return s.Until == "" }
 
-// MintHoldStatus is the stored hold a renewal sent now would be answered
-// with, or nil when there is none: not an agent credential, no hold, or a
-// hold this version does not believe (see holds).
-func (m *Manager) MintHoldStatus(creds *Credentials) *MintHoldStatus {
-	if creds == nil || creds.OAuthType != oauthTypeAgent || !creds.MintHold.holds(creds, m.now()) {
+// MintHoldStatus is the stored hold of creds as a report shows it, when
+// refusal — RefreshRefusal's answer for the same creds — is that hold's
+// answer; nil otherwise. It reads no clock: whether the hold is what a
+// renewal sent now would meet was decided once, by RefreshRefusal, and a
+// local failure checked ahead of the hold (a missing token endpoint) is
+// not masked by it.
+func (m *Manager) MintHoldStatus(creds *Credentials, refusal error) *MintHoldStatus {
+	if creds == nil || creds.MintHold == nil || !errors.Is(refusal, errMintHeld) {
 		return nil
 	}
 	hold := creds.MintHold
-	status := &MintHoldStatus{Kind: hold.Kind, Detail: hold.Detail}
+	e := output.AsError(refusal)
+	status := &MintHoldStatus{Kind: hold.Kind, Detail: hold.Detail, Message: e.Message, Hint: e.Hint}
 	if hold.Until != 0 {
 		status.Until = time.Unix(hold.Until, 0).UTC().Format(time.RFC3339)
-	}
-	if e := output.AsError(m.agentRemedy(m.heldMint(creds), creds.ClientID, creds.Scope)); e != nil {
-		status.Message, status.Hint = e.Message, e.Hint
 	}
 	return status
 }
@@ -309,6 +313,11 @@ func (hold *MintHold) holds(creds *Credentials, now time.Time) bool {
 func (m *Manager) rememberMintHold(origin string, hold *MintHold) {
 	current, err := m.store.Load(origin)
 	if err != nil {
+		// A credential removed since the mint (a logout) has nothing to
+		// remember a refusal on; any other failure is worth saying.
+		if !errors.Is(err, ErrNoCredential) {
+			m.warnf("warning: could not read the credential for %s to remember the token endpoint's refusal, so the next command will ask again: %v", origin, err)
+		}
 		return
 	}
 	if current.OAuthType != oauthTypeAgent || agentClientFingerprint(current.ClientID, current.ClientSecret) != hold.Client {
