@@ -149,7 +149,7 @@ load test_helper
 
   run basecamp subtasks move 456 --position 0
   assert_failure
-  assert_output_contains "--position is required (1-based)"
+  assert_output_contains "--position must be 1 or more"
 }
 
 

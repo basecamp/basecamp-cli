@@ -443,8 +443,11 @@ func newSubtasksMoveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if position < 1 {
+			if !cmd.Flags().Changed("position") && !cmd.Flags().Changed("pos") {
 				return output.ErrUsage("--position is required (1-based)")
+			}
+			if position < 1 {
+				return output.ErrUsage("--position must be 1 or more (1 = top)")
 			}
 
 			app := appctx.FromContext(cmd.Context())
