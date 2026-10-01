@@ -399,7 +399,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			// trusting its operator alone: trust is read once, at start, and
 			// a connector admitting other people must never run their work
 			// with a shell, whatever connect.json says now.
-			Dangerous: dangerousLaunches(dangerousAllowed, served.Dangerous),
+			Dangerous: dangerousLaunches(dangerousAllowed, func() bool { return served.DangerousFor(file.Trust.OperatorID) }),
 			Profile:   name, Executable: exe, StateDir: stateDir, SessionsDir: sessions,
 			// Replies are listed with their words, so the connector's own
 			// notices are left out even before their receipts are known, and
@@ -496,7 +496,11 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			return err
 		}
 	}
-	if err := ledger.NoteConnection(ctx, connector.ConnectionRunning, ""); err != nil {
+	runningDetail := ""
+	if file.Dangerous && !dangerousAllowed {
+		runningDetail = dangerousOffThisRun
+	}
+	if err := ledger.NoteConnection(ctx, connector.ConnectionRunning, runningDetail); err != nil {
 		logger.Warn("connector: could not record that it runs, for status", "error", err)
 	}
 	runPart("intake", intake.Run)
@@ -678,9 +682,11 @@ type connectServed struct {
 	mu       sync.Mutex
 	loadedAt time.Time
 	projects map[int64]admission.Project
-	// dangerous is connect.json's dangerous mode as of the last read; a file
-	// that could not be read has it off.
+	// dangerous is connect.json's dangerous mode as of the last read, and
+	// operator the operator it names; a file that could not be read has it
+	// off.
 	dangerous bool
+	operator  int64
 	// err is why the last reload could not answer. It is kept apart from an
 	// empty map on purpose: "the operator serves no projects" and "nothing
 	// could read the file" are different answers, and only the first is
@@ -800,7 +806,7 @@ func (r *connectServed) reload() {
 		}
 		r.failing = true
 		r.projects, r.err = nil, err
-		r.dangerous = false
+		r.dangerous, r.operator = false, 0
 		return
 	}
 	if r.failing {
@@ -808,24 +814,23 @@ func (r *connectServed) reload() {
 	}
 	r.failing = false
 	r.err = nil
-	r.dangerous = file.Dangerous
+	r.dangerous, r.operator = file.Dangerous, file.Trust.OperatorID
 	r.projects = make(map[int64]admission.Project, len(file.Projects))
 	for bucket, project := range file.Projects {
 		r.projects[bucket] = project
 	}
 }
 
-// Dangerous reports whether connect.json has dangerous mode on as of the last
-// read, reading it again when that read is older than connectServedTTL. A
-// file that cannot be read has it off, so turning it off takes effect at the
-// next launch.
-func (r *connectServed) Dangerous() bool {
+// DangerousFor reports whether connect.json has dangerous mode on now, for
+// operator: read fresh every time, not from the cache, so turning it off
+// reaches the very next launch or follow-up; and only while the file still
+// names the operator this connector started trusting, which is the one
+// admission lets in until a restart. A file that cannot be read has it off.
+func (r *connectServed) DangerousFor(operator int64) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if (r.projects == nil && r.err == nil) || r.now().Sub(r.loadedAt) >= connectServedTTL {
-		r.reload()
-	}
-	return r.err == nil && r.dangerous
+	r.reload()
+	return r.err == nil && r.dangerous && operator > 0 && r.operator == operator
 }
 
 // connectDispatch is what the run knows when it builds the dispatcher.

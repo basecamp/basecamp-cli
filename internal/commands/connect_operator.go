@@ -373,7 +373,10 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 	if why, ok := notTakingWork(s); ok {
 		fmt.Fprintf(w, "  Not taking work: %s. %s\n\n", clean(why), connector.NotTakingWorkFix)
 	}
-	if r.Dangerous {
+	switch {
+	case r.Dangerous && s.Connection != nil && s.Connection.State == connector.ConnectionRunning && s.Connection.Detail == dangerousOffThisRun:
+		fmt.Fprintf(w, "  Dangerous mode is on in connect.json, but the running connector isn't using it: requests from other people were still waiting when it started. Restart it once they're done.\n\n")
+	case r.Dangerous:
 		fmt.Fprintf(w, "  Dangerous mode is on: the agent can run any command on this computer, as you. Turn it off: basecamp connect setup -P %s --dangerous=false\n\n", richtext.ShellQuote(r.name()))
 	}
 	if s.Connection != nil && s.Connection.State == connector.ConnectionDisconnected {

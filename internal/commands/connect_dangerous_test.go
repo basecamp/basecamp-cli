@@ -4,6 +4,11 @@ package commands
 
 import (
 	"bytes"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -201,4 +206,85 @@ func TestTheOperatorCantChangeWhileDangerousModeIsOn(t *testing.T) {
 	require.NoError(t, setup.CheckDangerousOperator(before, after), "turned off in the same run")
 	first := setup.File{}
 	require.NoError(t, setup.CheckDangerousOperator(first, before), "a first setup has no operator to change")
+}
+
+// The off switch works with Basecamp out of reach: turning dangerous mode off
+// on its own is saved with nothing asked of the server (Codex on #810).
+func TestTurningDangerousModeOffNeedsNoBasecamp(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	guided(t, &scriptedPrompter{inputs: []string{"yes"}})
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--dangerous")
+	require.NoError(t, err, out)
+	require.True(t, loadAgentFile(t).Dangerous)
+
+	app := newConnectSetupApp(t, s, "agent")
+	s.srv.Close() // Basecamp is down, or the credential refused
+	out, err = runConnectSetupCmd(t, app, "--dangerous=false")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, "Dangerous mode is off")
+	assert.False(t, loadAgentFile(t).Dangerous)
+
+	out, err = runConnectSetupCmd(t, app, "--dangerous=false")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, "already off")
+}
+
+// Dangerous mode is read fresh for every decision, and only for the operator
+// the connector started trusting (Codex on #810): turning it off reaches the
+// next decision at once, and a file that now names someone else is off.
+func TestDangerousModeIsReadFreshForTheStartingOperator(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "connect")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	path := filepath.Join(dir, "connect.json")
+	file := setup.New("agent")
+	file.AccountID = "2914079"
+	file.Agent = setup.Agent{PersonID: 52007412, Kind: setup.KindAgent}
+	file.Trust.OperatorID = 111
+	file.Projects = map[int64]admission.Project{48929974: {}}
+	file.Dangerous = true
+	write := func(f setup.File) {
+		data, err := json.Marshal(f)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(path, data, 0o600))
+	}
+	write(file)
+	clock := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	served := newConnectServed(path, file, slog.New(slog.DiscardHandler))
+	served.now = func() time.Time { return clock } // the cache never expires: a fresh read must not need it to
+
+	assert.True(t, served.DangerousFor(111))
+	assert.False(t, served.DangerousFor(222), "not for an operator the connector did not start with")
+
+	off := file
+	off.Dangerous = false
+	write(off)
+	assert.False(t, served.DangerousFor(111), "turned off, at the very next decision")
+
+	other := file
+	other.Trust.OperatorID = 222
+	write(other)
+	assert.False(t, served.DangerousFor(111), "the file names another operator now")
+}
+
+// Status says when the running connector isn't using dangerous mode, rather
+// than claiming it is.
+func TestConnectStatusSaysWhenThisRunIsNotUsingDangerousMode(t *testing.T) {
+	report := connectStatusReport{Profile: "agent", Dangerous: true, Status: connector.Status{Connection: &connector.ConnectionStatus{
+		State: connector.ConnectionRunning, PID: 42, ChangedAt: time.Now(), Detail: dangerousOffThisRun,
+	}}}
+	var out bytes.Buffer
+	renderConnectStatus(&out, report)
+	assert.Contains(t, out.String(), "the running connector isn't using it")
+	assert.NotContains(t, out.String(), "Dangerous mode is on: the agent can run any command")
+}
+
+// The fixes refusals print are commands that run as printed.
+func TestDangerousRefusalsPrintRunnableCommands(t *testing.T) {
+	for _, refused := range []error{setup.ErrDangerousWhileShared, setup.ErrDangerousOperatorChange} {
+		var e *output.Error
+		require.ErrorAs(t, refusedChange(io.Discard, "agent", refused), &e)
+		assert.Contains(t, e.Hint, "basecamp connect setup -P agent --dangerous=false.")
+		assert.NotContains(t, e.Hint, "you want")
+	}
 }

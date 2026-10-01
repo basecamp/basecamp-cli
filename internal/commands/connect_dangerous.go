@@ -7,7 +7,10 @@ import (
 	"io"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
@@ -55,12 +58,12 @@ func refusedChange(w io.Writer, name string, err error) error {
 			"To use it, make the agent yours alone in the same run: basecamp connect setup -P "+profile+" --trust operator --dangerous")
 	case errors.Is(err, setup.ErrDangerousOperatorChange):
 		return output.ErrUsageHint("Dangerous mode is on, so the person who can give your agent work can't change, and nothing was changed",
-			"To change the operator, turn dangerous mode off in the same run: basecamp connect setup -P "+profile+" --dangerous=false and the operator you want")
+			"Turn dangerous mode off first: basecamp connect setup -P "+profile+" --dangerous=false. Then run your change again.")
 	case errors.Is(err, setup.ErrDangerousWhileShared):
 		fmt.Fprintln(w, setup.DangerousSharedExplainer)
 		fmt.Fprintln(w)
 		return output.ErrUsageHint("Dangerous mode is on, so other people can't be allowed to give your agent work yet, and nothing was changed",
-			"To share it, turn dangerous mode off in the same run: basecamp connect setup -P "+profile+" --dangerous=false and the trust you want")
+			"Turn dangerous mode off first: basecamp connect setup -P "+profile+" --dangerous=false. Then run your change again.")
 	}
 	return output.ErrUsage(err.Error())
 }
@@ -117,4 +120,48 @@ func noteDangerousChange(w io.Writer, before, after setup.File, name string) {
 		return
 	}
 	fmt.Fprintln(w, "Your connector is running. A task it already started keeps running as it started, with dangerous mode, until it finishes, and gets nothing more. To stop it now, "+restart)
+}
+
+// dangerousOffThisRun is the running connector's note that connect.json has
+// dangerous mode on but this run is not using it, for status.
+const dangerousOffThisRun = "dangerous mode is off for this run: requests from other people were still waiting when it started"
+
+// dangerousOffOnly reports whether the run asks for nothing but turning
+// dangerous mode off.
+func dangerousOffOnly(cmd *cobra.Command) bool {
+	flags := cmd.Flags()
+	if !flags.Changed("dangerous") {
+		return false
+	}
+	if on, err := flags.GetBool("dangerous"); err != nil || on {
+		return false
+	}
+	for _, name := range connectSetupPolicyFlags {
+		if name != "dangerous" && flags.Changed(name) {
+			return false
+		}
+	}
+	return true
+}
+
+// turnDangerousModeOff is the off switch: it saves connect.json with
+// dangerous mode off under the setup lock already held, checks nothing with
+// Basecamp, and says what it means for a connector running now.
+func turnDangerousModeOff(cmd *cobra.Command, app *appctx.App, name, path string, existing setup.File) error {
+	w := cmd.OutOrStdout()
+	if !existing.Dangerous {
+		fmt.Fprintln(w, "Dangerous mode is already off.")
+		return nil
+	}
+	next := existing
+	next.Dangerous = false
+	err := app.Auth.GetStore().WithCredential(cmd.Context(), app.Auth.CredentialKey(), func(held auth.HeldCredential) error {
+		return setup.Save(held, path, next)
+	})
+	if err != nil {
+		return classifyWriteError(name, err)
+	}
+	fmt.Fprintln(w, "Dangerous mode is off: from its next task the agent can only read and change files in its folder again.")
+	noteDangerousChange(cmd.ErrOrStderr(), existing, next, name)
+	return nil
 }

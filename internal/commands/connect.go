@@ -454,6 +454,12 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if existing.Profile != name {
 		return output.ErrUsage(fmt.Sprintf("%s names profile %q, not %q", path, existing.Profile, name))
 	}
+	// Turning dangerous mode off on its own is the off switch: saved here,
+	// with nothing asked of Basecamp, so it works offline or with a
+	// credential Basecamp no longer takes.
+	if exists && dangerousOffOnly(cmd) {
+		return turnDangerousModeOff(cmd, app, name, path, existing)
+	}
 	// Guided setup makes connect.json only where there was none. One written
 	// while it was asking is another setup's, and its trust may not be what
 	// guided setup told the person: it is left as it is.
