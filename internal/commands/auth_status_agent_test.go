@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -173,6 +174,54 @@ func TestAuthStatusSaysARefusalIsRemembered(t *testing.T) {
 	assert.Contains(t, hold.Message, "the refusal is remembered")
 	assert.False(t, report.Data.Refreshable)
 	assert.Contains(t, report.Notice, "--with-client-credentials")
+}
+
+// TestAuthStatusNamesAPermanentHoldWhileTheTokenIsLive: the report says
+// what a renewal sent now would meet. A stored invalid_client hold means
+// the next renewal is refused, so the token line says so while the token
+// still has well over the refresh window left, not only once it expires.
+func TestAuthStatusNamesAPermanentHoldWhileTheTokenIsLive(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_TOKEN", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &config.Config{BaseURL: srv.URL, ActiveProfile: "clawdito", Sources: map[string]string{}}
+	authMgr := auth.NewManager(cfg, srv.Client())
+	store := auth.NewStore(config.GlobalConfigDir())
+	authMgr.SetStore(store)
+	require.NoError(t, store.Save("profile:clawdito", &auth.Credentials{
+		AccessToken:   "spent",
+		OAuthType:     "agent",
+		ClientID:      "agent-client",
+		ClientSecret:  "rotated-away",
+		TokenEndpoint: srv.URL + "/oauth/tokens",
+		ExpiresAt:     time.Now().Add(-time.Minute).Unix(),
+	}))
+	_, err := authMgr.AccessToken(context.Background())
+	require.Error(t, err)
+
+	// A token that is good for another hour, beside the stored refusal.
+	creds, err := store.Load("profile:clawdito")
+	require.NoError(t, err)
+	require.NotNil(t, creds.MintHold)
+	creds.AccessToken = "still-good"
+	creds.ExpiresAt = time.Now().Add(time.Hour).Unix()
+	require.NoError(t, store.Save("profile:clawdito", creds))
+
+	app := &appctx.App{Config: cfg, Auth: authMgr}
+	report, err := authStatusReport(context.Background(), app)
+	require.NoError(t, err)
+	joined := strings.Join(report.details, "\n")
+	assert.Contains(t, joined, "renewal would be refused: token error: invalid_client; log in with a new secret")
+	assert.NotContains(t, joined, "refreshes automatically")
+	assert.Contains(t, report.hint, "--with-client-credentials")
 }
 
 // TestAuthStatusReportsATimeLimitedHoldAsRefreshable: a hold that ends on

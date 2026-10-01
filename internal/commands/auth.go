@@ -447,6 +447,11 @@ func authStatusReport(ctx context.Context, app *appctx.App) (*authStatus, error)
 		case !expired && refreshable:
 			expiry = "expires in " + coarseDuration(expiresIn) + ", refreshes automatically" + held
 			report.refreshPromise, report.refreshFailed = expiry, "expires in "+coarseDuration(expiresIn)+", and the refresh failed"
+		case !expired && hold != nil:
+			// A stored hold that never ends: the next renewal will be
+			// refused, and the line says so before the token runs out.
+			expiry = "expires in " + coarseDuration(expiresIn) + "; renewal would be refused: " + hold.Detail + "; log in with a new secret"
+			report.hint = remedyFor(app, refusal)
 		case !expired:
 			expiry = "expires in " + coarseDuration(expiresIn)
 		case refreshable:
