@@ -26,7 +26,8 @@ func newConnectDoctorCmd() *cobra.Command {
 		Short: "Check what the connector needs to run",
 		Long: `Check the connector for a set-up profile: connect.json, the token, the agent's
 identity, the stream ticket mint, the account feed, and the ledger (its gaps,
-open losses and hold).
+open losses, hold, and lifecycle messages an older connector left waiting for
+a person).
 
 It writes nothing to the connector's ledger and posts nothing to Basecamp.
 Renewing the profile's own credential, which every command does when its token
