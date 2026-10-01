@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -228,7 +229,7 @@ func transportFailure(msg string, cause error) error {
 func statusFailure(msg string, resp *http.Response) error {
 	switch resp.StatusCode {
 	case http.StatusTooManyRequests:
-		retryAfter, _ := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After")))
+		retryAfter := retryAfterSeconds(resp.Header.Get("Retry-After"), time.Now())
 		e := output.ErrRateLimit(retryAfter)
 		e.Message = msg
 		e.HTTPStatus = resp.StatusCode
@@ -253,6 +254,26 @@ func statusFailure(msg string, resp *http.Response) error {
 type retryAfterError int
 
 func (s retryAfterError) Error() string { return fmt.Sprintf("retry after %d seconds", int(s)) }
+
+// maxRetryAfterSeconds bounds a Retry-After to what an int holds on every
+// platform; the SDK applies its own, tighter bound to whatever it is handed.
+const maxRetryAfterSeconds = math.MaxInt32
+
+// retryAfterSeconds is the wait a Retry-After header asks for, in either
+// RFC 9110 form — a count of seconds or an HTTP date, rounded up — and zero
+// when it asks for nothing this can read. A count too large to hold is held
+// at the bound rather than read as no wait at all.
+func retryAfterSeconds(value string, now time.Time) int {
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.ParseUint(value, 10, 64); err == nil || errors.Is(err, strconv.ErrRange) {
+		return int(min(seconds, maxRetryAfterSeconds))
+	}
+	when, err := http.ParseTime(value)
+	if err != nil {
+		return 0
+	}
+	return int(min(math.Ceil(max(when.Sub(now), 0).Seconds()), maxRetryAfterSeconds))
+}
 
 // RetryAfter is the wait, in seconds, a rate-limited answer named, or zero
 // when it named none.

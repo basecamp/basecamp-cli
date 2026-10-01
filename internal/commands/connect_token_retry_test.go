@@ -19,7 +19,8 @@ import (
 )
 
 // tokenEndpointFeed is the connector's live feed over an Agent whose token
-// has expired, against a server whose token endpoint answers with answer.
+// has expired, against a server whose token endpoint responds through the
+// answer callback.
 // Nothing but the token endpoint is ever reached: every feed request needs
 // a token first. It reports how many mints the endpoint saw.
 func tokenEndpointFeed(t *testing.T, answer func(http.ResponseWriter)) (*eventfeed.Live, func() int32) {
@@ -90,6 +91,18 @@ func TestARateLimitedTokenRenewalThrottlesTheFeed(t *testing.T) {
 	assert.Equal(t, int32(2), mints())
 }
 
+// A wait named as an HTTP date is honored as surely as one named in seconds.
+func TestARateLimitUntilADateThrottlesTheFeed(t *testing.T) {
+	until := time.Now().Add(2 * time.Minute).UTC().Format(http.TimeFormat)
+	live, _ := tokenEndpointFeed(t, answerStatus(http.StatusTooManyRequests, map[string]string{"Retry-After": until}, ""))
+
+	_, err := live.Minter().MintStreamTicket(t.Context())
+	var mintErr *eventfeed.MintError
+	require.ErrorAs(t, err, &mintErr)
+	assert.Equal(t, eventfeed.MintThrottled, mintErr.Kind, "%v", err)
+	assert.InDelta(t, 2*time.Minute, mintErr.RetryAfter, float64(2*time.Second))
+}
+
 // A rate limit that names no wait is still a wait: the feed's own backoff
 // governs.
 func TestARateLimitWithoutRetryAfterIsTransient(t *testing.T) {
@@ -138,7 +151,7 @@ func TestAnUnreachableTokenEndpointIsTransient(t *testing.T) {
 
 // The CLI's own words still reach whoever renders the failure: the SDK
 // error the feed classifies wraps them, it does not replace them.
-func TestAThrottledRenewalKeepsTheCLIsMessage(t *testing.T) {
+func TestAFailedRenewalKeepsTheCLIsMessage(t *testing.T) {
 	live, _ := tokenEndpointFeed(t, answerStatus(http.StatusServiceUnavailable, nil, ""))
 
 	_, err := live.Minter().MintStreamTicket(t.Context())
