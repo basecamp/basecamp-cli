@@ -9,11 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
+	"slices"
 	"testing"
 	"time"
 
@@ -24,236 +22,143 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
+	"github.com/basecamp/basecamp-cli/internal/connector/fakebasecamp"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
+// The people, projects and tokens of the world connect setup is tested in:
+// the fake's default account, and the people setup's checks meet in it.
 const (
-	setupAgentPerson    int64 = 52007412
-	setupOperatorPerson int64 = 26909558
-	setupBotPerson      int64 = 51177542
-	setupBotIdentity    int64 = 4242
-	setupProject        int64 = 48699913
-	setupProject2       int64 = 48699914
-	setupClientPerson   int64 = 1003
+	setupAgentPerson    = fakebasecamp.AgentID
+	setupOperatorPerson = fakebasecamp.OperatorID
+	setupProject        = fakebasecamp.ProjectID
+	setupOperatorToken  = fakebasecamp.OperatorToken
 
-	// Tokens the mock server tells apart. None is shaped like a real one.
-	setupAgentToken    = "minted"
-	setupOperatorToken = "operator-token"
-	setupBotToken      = "bot-token"
-	setupTicket        = "not-a-real-ticket"
+	// setupColleague is someone in the account only the operator can read,
+	// as Basecamp refuses an Agent people reads today.
+	setupColleague    int64 = setupOperatorPerson + 1
+	setupBotPerson    int64 = 51177542
+	setupBotIdentity  int64 = 4242
+	setupProject2     int64 = 48699914
+	setupClientPerson int64 = 1003
+	setupOtherAgent   int64 = 777
+	setupBotToken           = "bot-token"
 )
 
-// connectSetupServer is Basecamp for connect setup: the connection ceremony, and
-// the account reads setup makes, answered per bearer.
-type connectSetupServer struct {
-	srv *httptest.Server
-
-	mu      sync.Mutex
-	intakes int
-	paths   []string
-
-	// agentID is who the agent's token reads back as.
-	agentID int64
-	// refuseAgentReads answers the project reads with 403 for an Agent token,
-	// as bc3 does today.
-	refuseAgentReads bool
-	// refusePeople answers the people read with 403.
-	refusePeople bool
-	// agentAsUser answers the agent's identity read as a person, not an Agent.
-	agentAsUser bool
-	// grantScope is the scope the connection hands over; "" means full.
-	grantScope string
-	// duringMint runs when the stream ticket is minted, between setup's
-	// identity read and its write, as another process's change would land.
-	duringMint func()
-	// mintFailure, when set, answers the stream ticket mint.
-	mintFailure func(w http.ResponseWriter)
-	// boss is who the agent works for, in its own profile; nil for a plain
-	// agent, or a Basecamp that does not say.
-	boss map[string]any
-	// agentProjects is what the agent's project list answers.
-	agentProjects []map[string]any
-	// refuseSecret answers every mint with invalid_client, as Basecamp does
-	// for an agent disconnected, or connected on another computer.
-	refuseSecret bool
-	// rateLimitMints answers every mint with a 429 asking for an hour.
-	rateLimitMints bool
-	// mints counts the agent token mints.
-	mints int
-}
-
-func startConnectSetupServer(t *testing.T) *connectSetupServer {
+// startConnectSetupServer is Basecamp for connect setup: the fake's default
+// account, with a second project, a client, a colleague the agent cannot
+// read, and a bot user whose person login is the bot token. The agent is on
+// the first project only.
+func startConnectSetupServer(t *testing.T) *fakebasecamp.Server {
 	t.Helper()
-	s := &connectSetupServer{agentID: setupAgentPerson}
-	mux := http.NewServeMux()
-	bearer := func(r *http.Request) string { return strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ") }
-	writeJSON := func(w http.ResponseWriter, v any) {
-		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(v))
-	}
-
-	mux.HandleFunc("/oauth/agent_connections", func(w http.ResponseWriter, _ *http.Request) {
-		s.mu.Lock()
-		s.intakes++
-		s.mu.Unlock()
-		writeJSON(w, map[string]any{
-			"device_code": "dev-code-1", "user_code": "WDJB-MJHT",
-			"verification_uri_complete": s.srv.URL + "/connect?user_code=WDJB-MJHT",
-			"token_uri":                 s.srv.URL + "/oauth/agent_connection_tokens",
-			"expires_in":                600, "interval": 1,
-		})
+	s := fakebasecamp.Start(t, fakebasecamp.DefaultWorld())
+	s.Update(func(w *fakebasecamp.World) {
+		w.People[setupColleague] = &fakebasecamp.Person{ID: setupColleague, Name: "Colleague", ReadableBy: []int64{setupOperatorPerson}}
+		w.People[setupClientPerson] = &fakebasecamp.Person{ID: setupClientPerson, Name: "Client", Client: true}
+		w.People[setupBotPerson] = &fakebasecamp.Person{ID: setupBotPerson, Name: "Bot User", IdentityID: setupBotIdentity}
+		w.Tokens[setupBotToken] = &fakebasecamp.Token{PersonID: setupBotPerson, Scope: fakebasecamp.ScopeFull}
+		w.Projects[setupProject].Members = append(w.Projects[setupProject].Members, setupBotPerson)
+		w.Projects[setupProject2] = &fakebasecamp.Project{ID: setupProject2, Name: "Launch", Members: []int64{setupOperatorPerson}}
 	})
-	mux.HandleFunc("/oauth/agent_connection_tokens", func(w http.ResponseWriter, _ *http.Request) {
-		scope := s.grantScope
-		if scope == "" {
-			scope = "full"
-		}
-		writeJSON(w, map[string]any{"client_id": "agent-client", "client_secret": fakeConnectSecret, "account_id": "999", "scope": scope})
-	})
-	mux.HandleFunc("/oauth/tokens", func(w http.ResponseWriter, _ *http.Request) {
-		s.mu.Lock()
-		s.mints++
-		rateLimited := s.rateLimitMints
-		s.mu.Unlock()
-		if rateLimited {
-			w.Header().Set("Retry-After", "3600")
-			w.WriteHeader(http.StatusTooManyRequests)
-			return
-		}
-		if s.refuseSecret {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
-			return
-		}
-		scope := s.grantScope
-		if scope == "" {
-			scope = "full"
-		}
-		writeJSON(w, map[string]any{"access_token": setupAgentToken, "token_type": "bearer", "expires_in": 3600, "resource": "urn:bc:agent:42", "scope": scope})
-	})
-	mux.HandleFunc("/authorization.json", func(w http.ResponseWriter, r *http.Request) {
-		if bearer(r) != setupBotToken {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		writeJSON(w, map[string]any{
-			"identity": map[string]any{"id": setupBotIdentity, "first_name": "Bot", "last_name": "User"},
-			"accounts": []map[string]any{{"id": 999, "name": "Acme", "href": s.srv.URL + "/999", "product": "bc3"}},
-		})
-	})
-	mux.HandleFunc("/999/my/profile.json", func(w http.ResponseWriter, r *http.Request) {
-		switch bearer(r) {
-		case setupAgentToken:
-			personable := "Agent"
-			if s.agentAsUser {
-				personable = "User"
-			}
-			profile := map[string]any{"id": s.agentID, "name": "Marie Chef", "personable_type": personable}
-			if s.boss != nil {
-				profile["boss"] = s.boss
-			}
-			writeJSON(w, profile)
-		case setupOperatorToken:
-			writeJSON(w, map[string]any{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User"})
-		case setupBotToken:
-			writeJSON(w, map[string]any{"id": setupBotPerson, "name": "Bot", "personable_type": "User"})
-		default:
-			w.WriteHeader(http.StatusUnauthorized)
-		}
-	})
-	mux.HandleFunc(fmt.Sprintf("/999/people/%d", setupOperatorPerson), func(w http.ResponseWriter, _ *http.Request) {
-		if s.refusePeople {
-			w.WriteHeader(http.StatusForbidden)
-			return
-		}
-		writeJSON(w, map[string]any{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User"})
-	})
-	mux.HandleFunc(fmt.Sprintf("/999/people/%d", setupOperatorPerson+1), func(w http.ResponseWriter, r *http.Request) {
-		if bearer(r) != setupOperatorToken {
-			w.WriteHeader(http.StatusForbidden) // as bc3 refuses an Agent today
-			return
-		}
-		writeJSON(w, map[string]any{"id": setupOperatorPerson + 1, "name": "Colleague", "personable_type": "User"})
-	})
-	mux.HandleFunc(fmt.Sprintf("/999/people/%d", setupAgentPerson), func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, map[string]any{"id": setupAgentPerson, "name": "Marie Chef", "personable_type": "Agent"})
-	})
-	mux.HandleFunc(fmt.Sprintf("/999/people/%d", setupClientPerson), func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, map[string]any{"id": setupClientPerson, "name": "Client", "personable_type": "User", "client": true})
-	})
-	mux.HandleFunc("/999/events/stream_ticket.json", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-		if s.duringMint != nil {
-			s.duringMint()
-		}
-		if s.mintFailure != nil {
-			s.mintFailure(w)
-			return
-		}
-		writeJSON(w, map[string]any{"ticket": setupTicket, "expires_in": 120, "url": "wss://example.test/cable?ticket=" + setupTicket})
-	})
-	projectRead := func(w http.ResponseWriter, r *http.Request, body any) {
-		if s.refuseAgentReads && bearer(r) == setupAgentToken {
-			w.WriteHeader(http.StatusForbidden)
-			return
-		}
-		writeJSON(w, body)
-	}
-	mux.HandleFunc("/999/projects.json", func(w http.ResponseWriter, r *http.Request) {
-		if bearer(r) != setupAgentToken {
-			w.WriteHeader(http.StatusForbidden)
-			return
-		}
-		projects := s.agentProjects
-		if projects == nil {
-			projects = []map[string]any{}
-		}
-		writeJSON(w, projects)
-	})
-	mux.HandleFunc(fmt.Sprintf("/999/projects/%d", setupProject), func(w http.ResponseWriter, r *http.Request) {
-		projectRead(w, r, map[string]any{"id": setupProject, "name": "Connector"})
-	})
-	mux.HandleFunc(fmt.Sprintf("/999/projects/%d/people.json", setupProject), func(w http.ResponseWriter, r *http.Request) {
-		projectRead(w, r, []any{})
-	})
-	mux.HandleFunc(fmt.Sprintf("/999/projects/%d", setupProject2), func(w http.ResponseWriter, r *http.Request) {
-		projectRead(w, r, map[string]any{"id": setupProject2, "name": "Launch"})
-	})
-	mux.HandleFunc(fmt.Sprintf("/999/projects/%d/people.json", setupProject2), func(w http.ResponseWriter, r *http.Request) {
-		projectRead(w, r, []any{})
-	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		s.mu.Lock()
-		s.paths = append(s.paths, r.Method+" "+r.URL.Path)
-		s.mu.Unlock()
-		http.NotFound(w, r)
-	})
-
-	s.srv = httptest.NewServer(mux)
-	t.Cleanup(s.srv.Close)
 	return s
 }
 
-func (s *connectSetupServer) intakeCount() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.intakes
+// agentOnProjects puts the agent on exactly the projects named, and on no
+// other: its project list, and the projects it can read, are those.
+func agentOnProjects(s *fakebasecamp.Server, ids ...int64) {
+	s.Update(func(w *fakebasecamp.World) {
+		for id, p := range w.Projects {
+			p.Members = slices.DeleteFunc(p.Members, func(m int64) bool { return m == setupAgentPerson })
+			if slices.Contains(ids, id) {
+				p.Members = append(p.Members, setupAgentPerson)
+			}
+		}
+	})
+}
+
+// ownedByTheOperator makes the agent the operator's personal agent, as its
+// own profile names its owner.
+func ownedByTheOperator(s *fakebasecamp.Server) {
+	s.Update(func(w *fakebasecamp.World) { w.People[setupAgentPerson].BossID = setupOperatorPerson })
+}
+
+// refuseAgentProjectReads answers the project reads admission makes with
+// 403 for an Agent, as bc3 does today.
+func refuseAgentProjectReads(s *fakebasecamp.Server) {
+	f := fakebasecamp.Refused(http.StatusForbidden, fakebasecamp.RouteProject, fakebasecamp.RouteProjectPeople)
+	f.When = fakebasecamp.ByAgents
+	s.Inject(f)
+}
+
+// readableOnlyBy lets only readers read a person; anyone else's read of
+// them is refused. No readers lifts the restriction.
+func readableOnlyBy(s *fakebasecamp.Server, person int64, readers ...int64) {
+	s.Update(func(w *fakebasecamp.World) { w.People[person].ReadableBy = readers })
+}
+
+// repointAgent connects the agent's client to another Agent: every token
+// minted for the agent, and every one minted from now on, is that agent's.
+// The other agent is on the projects the first one is on.
+func repointAgent(s *fakebasecamp.Server, to int64) {
+	s.Update(func(w *fakebasecamp.World) {
+		client := w.Agents[fakebasecamp.AgentClientID]
+		from := client.PersonID
+		if _, ok := w.People[to]; !ok {
+			w.People[to] = &fakebasecamp.Person{ID: to, Name: "Other Agent", Agent: true}
+		}
+		for _, p := range w.Projects {
+			if slices.Contains(p.Members, from) && !slices.Contains(p.Members, to) {
+				p.Members = append(p.Members, to)
+			}
+		}
+		for _, token := range w.Tokens {
+			if token.PersonID == from {
+				token.PersonID = to
+			}
+		}
+		client.PersonID = to
+	})
+}
+
+// connectedElsewhere connects the agent on another computer: the secret
+// this one holds is rotated away, and Basecamp refuses it from then on.
+func connectedElsewhere(s *fakebasecamp.Server) {
+	s.Update(func(w *fakebasecamp.World) {
+		w.Agents[fakebasecamp.AgentClientID].Secret = "rotated-on-another-computer" //nolint:gosec // G101: the fake's placeholder, not a credential
+	})
+}
+
+// agentSecret is the client secret the agent holds now: the connection
+// ceremony rotates it, so it is read from the world after one.
+func agentSecret(t *testing.T, s *fakebasecamp.Server) string {
+	t.Helper()
+	var secret string
+	s.View(func(w *fakebasecamp.World) { secret = w.Agents[fakebasecamp.AgentClientID].Secret })
+	require.NotEmpty(t, secret)
+	return secret
+}
+
+// assertNoSecretIn checks that out carries neither the agent's client
+// secret nor any stream ticket the fake issued.
+func assertNoSecretIn(t *testing.T, s *fakebasecamp.Server, out string) {
+	t.Helper()
+	assert.NotContains(t, out, agentSecret(t, s), "the client secret is never echoed")
+	tickets := s.Tickets()
+	for _, ticket := range tickets {
+		assert.NotContains(t, out, ticket, "a stream ticket is never echoed")
+	}
 }
 
 // bareSetupApp is an App for connect setup with nothing connected yet: a
 // file credential store and the global config under a temp XDG_CONFIG_HOME,
-// and the issuer pinned to the mock server.
-func bareSetupApp(t *testing.T, s *connectSetupServer, profile string) *appctx.App {
+// and the issuer pinned to the fake.
+func bareSetupApp(t *testing.T, s *fakebasecamp.Server, profile string) *appctx.App {
 	t.Helper()
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 	t.Setenv("BASECAMP_TOKEN", "")
 	t.Setenv("BASECAMP_NONINTERACTIVE", "")
-	t.Setenv("BASECAMP_OAUTH_ISSUER", s.srv.URL)
+	t.Setenv("BASECAMP_OAUTH_ISSUER", s.URL())
 	home := t.TempDir()
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", home)
@@ -263,7 +168,7 @@ func bareSetupApp(t *testing.T, s *connectSetupServer, profile string) *appctx.A
 // connectSetupApp is bareSetupApp with the profile already holding the
 // agent's credential when it is "agent": connected the way an operator
 // connects it, with `basecamp auth agent connect`.
-func connectSetupApp(t *testing.T, s *connectSetupServer, profile string) *appctx.App {
+func connectSetupApp(t *testing.T, s *fakebasecamp.Server, profile string) *appctx.App {
 	t.Helper()
 	app := bareSetupApp(t, s, profile)
 	if profile != "agent" {
@@ -276,17 +181,17 @@ func connectSetupApp(t *testing.T, s *connectSetupServer, profile string) *appct
 
 // newConnectSetupApp builds an App over the environment already set, as a second
 // invocation of the CLI would: from the global config file on disk.
-func newConnectSetupApp(t *testing.T, s *connectSetupServer, profile string) *appctx.App {
+func newConnectSetupApp(t *testing.T, s *fakebasecamp.Server, profile string) *appctx.App {
 	t.Helper()
 	cfg, err := config.Load(config.FlagOverrides{})
 	require.NoError(t, err)
-	cfg.BaseURL = s.srv.URL
+	cfg.BaseURL = s.URL()
 	if _, ok := cfg.Profiles[profile]; ok {
 		require.NoError(t, cfg.ApplyProfile(profile))
 	} else {
 		cfg.ActiveProfile = profile
 	}
-	authMgr := auth.NewManager(cfg, s.srv.Client())
+	authMgr := auth.NewManager(cfg, http.DefaultClient)
 	authMgr.SetStore(auth.NewStore(config.GlobalConfigDir()))
 	return &appctx.App{
 		Config: cfg,
@@ -320,19 +225,19 @@ func runConnectSetupCmdIn(ctx context.Context, t *testing.T, app *appctx.App, ar
 
 // storeConnectProfile registers a profile in the global config and stores a
 // person's token under it, as a completed login would have.
-func storeConnectProfile(t *testing.T, s *connectSetupServer, name, token string) {
+func storeConnectProfile(t *testing.T, s *fakebasecamp.Server, name, token string) {
 	t.Helper()
 	storeConnectProfileScoped(t, s, name, token, "full")
 }
 
-func storeConnectProfileScoped(t *testing.T, s *connectSetupServer, name, token, scope string) {
+func storeConnectProfileScoped(t *testing.T, s *fakebasecamp.Server, name, token, scope string) {
 	t.Helper()
-	_, err := registerProfile(name, &config.ProfileConfig{BaseURL: s.srv.URL, AccountID: "999", Scope: scope})
+	_, err := registerProfile(name, &config.ProfileConfig{BaseURL: s.URL(), AccountID: "999", Scope: scope})
 	require.NoError(t, err)
 	cfg := config.Default()
-	cfg.BaseURL = s.srv.URL
+	cfg.BaseURL = s.URL()
 	cfg.ActiveProfile = name
-	mgr := auth.NewManager(cfg, s.srv.Client())
+	mgr := auth.NewManager(cfg, http.DefaultClient)
 	mgr.SetStore(auth.NewStore(config.GlobalConfigDir()))
 	require.NoError(t, mgr.ImportToken(context.Background(), token, scope, "", "", time.Now().Add(24*time.Hour)))
 }
@@ -343,7 +248,7 @@ func serveArg() string {
 }
 
 // firstSetup runs a successful first setup of the agent profile.
-func firstSetup(t *testing.T, s *connectSetupServer) {
+func firstSetup(t *testing.T, s *fakebasecamp.Server) {
 	t.Helper()
 	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.NoError(t, err, out)
@@ -376,8 +281,8 @@ func TestConnectSetupOnAConnectedProfile(t *testing.T) {
 		"--class", fmt.Sprintf("%d=internal", setupProject))
 	require.NoError(t, err, out)
 
-	assert.NotContains(t, out, fakeConnectSecret, "the client secret is never echoed")
-	assert.NotContains(t, out, setupTicket, "the stream ticket is never echoed")
+	require.Positive(t, s.Count(fakebasecamp.RouteStreamTicket), "a stream ticket was minted")
+	assertNoSecretIn(t, s, out)
 	assert.NotContains(t, out, "not ready")
 	for _, check := range []string{"Token", "Identity", "Operator", "Stream ticket", fmt.Sprintf("Project %d", setupProject)} {
 		assert.Contains(t, out, check)
@@ -396,7 +301,7 @@ func TestConnectSetupOnAConnectedProfile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, setup.Agent{PersonID: setupAgentPerson, Kind: setup.KindAgent}, f.Agent)
 	assert.Equal(t, "999", f.AccountID)
-	assert.NotContains(t, string(data), fakeConnectSecret, "connect.json holds no credential")
+	assertNoSecretIn(t, s, string(data))
 
 	// A second run uses the connected profile as it is, and keeps what it
 	// is not told to change.
@@ -415,7 +320,7 @@ func TestConnectSetupOnAConnectedProfile(t *testing.T) {
 // person.
 func TestConnectSetupNamesTheAgentReadRefusal(t *testing.T) {
 	s := startConnectSetupServer(t)
-	s.refuseAgentReads = true
+	refuseAgentProjectReads(s)
 	app := connectSetupApp(t, s, "agent")
 
 	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
@@ -492,7 +397,7 @@ func TestConnectSetupRefusesBadInput(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s := startConnectSetupServer(t)
 			connectSetupApp(t, s, "agent")
-			_, err := registerProfile("unlogged", &config.ProfileConfig{BaseURL: s.srv.URL, AccountID: "999"})
+			_, err := registerProfile("unlogged", &config.ProfileConfig{BaseURL: s.URL(), AccountID: "999"})
 			require.NoError(t, err)
 			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), args...)
 			require.Error(t, err, out)
@@ -509,7 +414,7 @@ func TestConnectSetupRefusesBadInput(t *testing.T) {
 func TestConnectSetupRefusesAProfileWithNoCredential(t *testing.T) {
 	s := startConnectSetupServer(t)
 	bareSetupApp(t, s, "agent")
-	_, err := registerProfile("agent", &config.ProfileConfig{BaseURL: s.srv.URL, AccountID: "999"})
+	_, err := registerProfile("agent", &config.ProfileConfig{BaseURL: s.URL(), AccountID: "999"})
 	require.NoError(t, err)
 
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
@@ -518,7 +423,7 @@ func TestConnectSetupRefusesAProfileWithNoCredential(t *testing.T) {
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, output.CodeAuth, apiErr.Code)
 	assert.Contains(t, apiErr.Hint, "basecamp auth agent connect -P agent")
-	assert.Zero(t, s.intakeCount(), "setup never starts a connection")
+	assert.Zero(t, s.Count(fakebasecamp.RouteAgentConnections), "setup never starts a connection")
 	assertNotWritten(t, "agent")
 
 	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", "4242", serveArg())
@@ -555,7 +460,13 @@ func TestConnectSetupWorksInTheProfilesOwnAccount(t *testing.T) {
 func TestConnectSetupRefusesAZeroPersonID(t *testing.T) {
 	s := startConnectSetupServer(t)
 	connectSetupApp(t, s, "agent")
-	s.agentID = 0
+	// The agent's profile reads back with no id.
+	s.Inject(fakebasecamp.Fault{
+		Routes: []fakebasecamp.Route{fakebasecamp.RouteProfile},
+		When:   fakebasecamp.ByAgents,
+		Status: http.StatusOK,
+		Body:   `{"id":0,"name":"Marie Chef","personable_type":"Agent"}`,
+	})
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
 	var apiErr *output.Error
@@ -591,12 +502,16 @@ func TestConnectSetupNeverChangesTheCredential(t *testing.T) {
 		return string(data)
 	}
 	for name, tc := range map[string]struct {
-		prepare func(s *connectSetupServer)
+		prepare func(s *fakebasecamp.Server)
 		code    string
 	}{
-		"a readiness check fails": {prepare: func(s *connectSetupServer) { s.refuseAgentReads = true }, code: codeNotReady},
-		"not an Agent":            {prepare: func(s *connectSetupServer) { s.agentAsUser = true }, code: output.CodeAuth},
-		"granted read only":       {prepare: func(s *connectSetupServer) { s.grantScope = "read" }, code: codeNotReady},
+		"a readiness check fails": {prepare: func(s *fakebasecamp.Server) { refuseAgentProjectReads(s) }, code: codeNotReady},
+		"not an Agent": {prepare: func(s *fakebasecamp.Server) {
+			s.Update(func(w *fakebasecamp.World) { w.People[setupAgentPerson].Agent = false })
+		}, code: output.CodeAuth},
+		"granted read only": {prepare: func(s *fakebasecamp.Server) {
+			s.Update(func(w *fakebasecamp.World) { w.Connection.Scope = fakebasecamp.ScopeRead })
+		}, code: codeNotReady},
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := startConnectSetupServer(t)
@@ -640,10 +555,10 @@ func TestConnectSetupRefusesADifferentAgentUnderTheSameProfile(t *testing.T) {
 	before, err := os.ReadFile(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
 
-	s.agentID = 777
+	repointAgent(s, setupOtherAgent)
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"))
 	require.Error(t, err, out)
-	assert.Contains(t, err.Error(), "person 777")
+	assert.Contains(t, err.Error(), fmt.Sprintf("person %d", setupOtherAgent))
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, output.CodeAuth, apiErr.Code, "a different agent is a wrong credential")
@@ -689,7 +604,7 @@ func TestConnectSetupVerifiesTheOperatorBeforeWriting(t *testing.T) {
 	assert.Contains(t, err.Error(), "client")
 	assertNotWritten(t, "agent")
 
-	s.refusePeople = true
+	readableOnlyBy(s, setupOperatorPerson, setupOperatorPerson)
 	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
 	assert.Contains(t, err.Error(), "cannot be verified")
@@ -700,7 +615,7 @@ func TestConnectSetupVerifiesTheOperatorBeforeWriting(t *testing.T) {
 // they are, read in the agent's account.
 func TestConnectSetupResolvesTheOperatorFromTheirProfile(t *testing.T) {
 	s := startConnectSetupServer(t)
-	s.refusePeople = true // the agent need not read the operator: their own credential did
+	readableOnlyBy(s, setupOperatorPerson, setupOperatorPerson) // the agent need not read the operator: their own credential did
 	connectSetupApp(t, s, "agent")
 	storeConnectProfile(t, s, "me", setupOperatorToken)
 	app := newConnectSetupApp(t, s, "agent")
@@ -735,7 +650,7 @@ func TestConnectSetupOnTheBotUserPath(t *testing.T) {
 		"--expect-identity", fmt.Sprint(setupBotIdentity),
 		serveArg())
 	require.NoError(t, err, out)
-	assert.NotContains(t, out, setupTicket)
+	assertNoSecretIn(t, s, out)
 	f, err := setup.Load(connectSetupPath(t, "bot"))
 	require.NoError(t, err)
 	assert.Equal(t, setup.Agent{PersonID: setupBotPerson, Kind: setup.KindBotUser, IdentityID: setupBotIdentity}, f.Agent)
@@ -790,27 +705,27 @@ func TestConnectSetupRefusesExpectIdentityForAnAgent(t *testing.T) {
 // Every credential conflict names a command that fixes it.
 func TestConnectSetupConflictsNameACommandToRun(t *testing.T) {
 	for name, tc := range map[string]struct {
-		prepare func(t *testing.T, s *connectSetupServer)
+		prepare func(t *testing.T, s *fakebasecamp.Server)
 		args    []string
 		want    string
 	}{
 		"no credential": {
-			prepare: func(t *testing.T, s *connectSetupServer) {
-				_, err := registerProfile("agent", &config.ProfileConfig{BaseURL: s.srv.URL, AccountID: "999"})
+			prepare: func(t *testing.T, s *fakebasecamp.Server) {
+				_, err := registerProfile("agent", &config.ProfileConfig{BaseURL: s.URL(), AccountID: "999"})
 				require.NoError(t, err)
 			},
 			want: "basecamp auth agent connect -P agent",
 		},
 		"no credential, bot path": {
-			prepare: func(t *testing.T, s *connectSetupServer) {
-				_, err := registerProfile("agent", &config.ProfileConfig{BaseURL: s.srv.URL, AccountID: "999"})
+			prepare: func(t *testing.T, s *fakebasecamp.Server) {
+				_, err := registerProfile("agent", &config.ProfileConfig{BaseURL: s.URL(), AccountID: "999"})
 				require.NoError(t, err)
 			},
 			args: []string{"--expect-identity", "4242"},
 			want: "basecamp auth login -P agent --expect-identity 4242",
 		},
 		"a person's login with nothing pinning it": {
-			prepare: func(t *testing.T, s *connectSetupServer) { storeConnectProfile(t, s, "agent", setupBotToken) },
+			prepare: func(t *testing.T, s *fakebasecamp.Server) { storeConnectProfile(t, s, "agent", setupBotToken) },
 			want:    "--expect-identity",
 		},
 	} {
@@ -845,18 +760,18 @@ func TestConnectSetupOperatorProfileFollowsEnvironmentPrecedence(t *testing.T) {
 			connectSetupApp(t, s, "agent")
 			stored := tc.stored
 			if stored == "server" {
-				stored = s.srv.URL
+				stored = s.URL()
 			}
 			_, err := registerProfile("me", &config.ProfileConfig{BaseURL: stored, AccountID: "999", Scope: "full"})
 			require.NoError(t, err)
 			cfg := config.Default()
-			cfg.BaseURL = s.srv.URL
+			cfg.BaseURL = s.URL()
 			cfg.ActiveProfile = "me"
-			mgr := auth.NewManager(cfg, s.srv.Client())
+			mgr := auth.NewManager(cfg, http.DefaultClient)
 			mgr.SetStore(auth.NewStore(config.GlobalConfigDir()))
 			require.NoError(t, mgr.ImportToken(context.Background(), setupOperatorToken, "full", "", "", time.Now().Add(24*time.Hour)))
 			if tc.env != "" {
-				t.Setenv("BASECAMP_BASE_URL", s.srv.URL)
+				t.Setenv("BASECAMP_BASE_URL", s.URL())
 			}
 
 			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", serveArg())
@@ -906,11 +821,11 @@ func TestConnectSetupReportsAnotherSetupAsBusy(t *testing.T) {
 func TestConnectSetupReportsACredentialRemovedMidRunAsAuth(t *testing.T) {
 	s := startConnectSetupServer(t)
 	connectSetupApp(t, s, "agent")
-	s.duringMint = func() {
+	s.Before(fakebasecamp.RouteStreamTicket, func(fakebasecamp.Request) {
 		cfg := config.Default()
 		cfg.ActiveProfile = "agent"
-		require.NoError(t, auth.NewStore(config.GlobalConfigDir()).Delete(auth.NewManager(cfg, nil).CredentialKey()))
-	}
+		assert.NoError(t, auth.NewStore(config.GlobalConfigDir()).Delete(auth.NewManager(cfg, nil).CredentialKey()))
+	})
 
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
@@ -948,8 +863,7 @@ func TestConnectSetupJSONOutput(t *testing.T) {
 	assert.True(t, envelope.Data.Written)
 	assert.Equal(t, setupAgentPerson, envelope.Data.AgentPersonID)
 	assert.Equal(t, setupOperatorPerson, envelope.Data.OperatorID)
-	assert.NotContains(t, buf.String(), setupTicket)
-	assert.NotContains(t, buf.String(), fakeConnectSecret)
+	assertNoSecretIn(t, s, buf.String())
 }
 
 // A credential store that cannot be read is not "no credential": setup must
@@ -969,7 +883,7 @@ func TestConnectSetupRefusesAnUnreadableCredentialStore(t *testing.T) {
 // changes only a route keeps it, even though the agent cannot read people.
 func TestConnectSetupKeepsARecordedOperatorTheAgentCannotRead(t *testing.T) {
 	s := startConnectSetupServer(t)
-	s.refusePeople = true
+	readableOnlyBy(s, setupOperatorPerson, setupOperatorPerson)
 	connectSetupApp(t, s, "agent")
 	storeConnectProfile(t, s, "me", setupOperatorToken)
 
@@ -985,7 +899,7 @@ func TestConnectSetupKeepsARecordedOperatorTheAgentCannotRead(t *testing.T) {
 
 	// A different id is a new trust anchor, verified as one: here it reads
 	// back as a client and is refused.
-	s.refusePeople = false
+	readableOnlyBy(s, setupOperatorPerson)
 	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupClientPerson))
 	require.Error(t, err, out)
 	assert.Contains(t, err.Error(), "client")
@@ -1011,11 +925,11 @@ func TestConnectSetupVerifiesTheAllowlistBeforeWriting(t *testing.T) {
 	s := startConnectSetupServer(t)
 	connectSetupApp(t, s, "agent")
 	storeConnectProfile(t, s, "me", setupOperatorToken)
-	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", "--allow", fmt.Sprint(setupOperatorPerson+1), serveArg())
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", "--allow", fmt.Sprint(setupColleague), serveArg())
 	require.NoError(t, err, out)
 	f, err := setup.Load(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
-	assert.Equal(t, []int64{setupOperatorPerson + 1}, f.Trust.AllowlistIDs)
+	assert.Equal(t, []int64{setupColleague}, f.Trust.AllowlistIDs)
 }
 
 // The scope that decides readiness is the one the credential was granted,
@@ -1025,9 +939,9 @@ func TestConnectSetupReadsTheGrantedScopeNotTheProfiles(t *testing.T) {
 	connectSetupApp(t, s, "bot")
 	storeConnectProfile(t, s, "bot", setupBotToken) // configured full
 	cfg := config.Default()
-	cfg.BaseURL = s.srv.URL
+	cfg.BaseURL = s.URL()
 	cfg.ActiveProfile = "bot"
-	mgr := auth.NewManager(cfg, s.srv.Client())
+	mgr := auth.NewManager(cfg, http.DefaultClient)
 	mgr.SetStore(auth.NewStore(config.GlobalConfigDir()))
 	require.NoError(t, mgr.ImportToken(context.Background(), setupBotToken, "read", "", "", time.Now().Add(24*time.Hour))) // granted read
 
@@ -1046,11 +960,11 @@ func TestConnectSetupReadsTheGrantedScopeNotTheProfiles(t *testing.T) {
 func TestConnectSetupNeverPrintsATicketFromAFailedMint(t *testing.T) {
 	const canary = "CANARY-bearer-ticket-7f3a"
 	s := startConnectSetupServer(t)
-	s.mintFailure = func(w http.ResponseWriter) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		fmt.Fprintf(w, `{"error":%q,"message":%q,"ticket":%q,"url":"wss://example.test/cable?ticket=%s"}`, canary, "ticket "+canary, canary, canary)
-	}
+	s.Inject(fakebasecamp.Fault{
+		Routes: []fakebasecamp.Route{fakebasecamp.RouteStreamTicket},
+		Status: http.StatusUnprocessableEntity,
+		Body:   fmt.Sprintf(`{"error":%q,"message":%q,"ticket":%q,"url":"wss://example.test/cable?ticket=%s"}`, canary, "ticket "+canary, canary, canary),
+	})
 	connectSetupApp(t, s, "agent")
 	storeConnectProfile(t, s, "me", setupOperatorToken)
 
@@ -1072,7 +986,7 @@ func TestConnectSetupNeverPrintsATicketFromAFailedMint(t *testing.T) {
 func TestConnectSetupQuotesProfileNamesInSuggestedCommands(t *testing.T) {
 	s := startConnectSetupServer(t)
 	connectSetupApp(t, s, "agent")
-	_, err := registerProfile("my profile;rm", &config.ProfileConfig{BaseURL: s.srv.URL, AccountID: "999"})
+	_, err := registerProfile("my profile;rm", &config.ProfileConfig{BaseURL: s.URL(), AccountID: "999"})
 	require.NoError(t, err)
 
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "my profile;rm")
@@ -1135,14 +1049,14 @@ func TestConnectSetupRefusesACredentialReplacedDuringTheChecks(t *testing.T) {
 	s := startConnectSetupServer(t)
 	bareSetupApp(t, s, "bot")
 	storeConnectProfile(t, s, "bot", setupBotToken)
-	s.duringMint = func() {
+	s.Before(fakebasecamp.RouteStreamTicket, func(fakebasecamp.Request) {
 		cfg := config.Default()
-		cfg.BaseURL = s.srv.URL
+		cfg.BaseURL = s.URL()
 		cfg.ActiveProfile = "bot"
-		mgr := auth.NewManager(cfg, s.srv.Client())
+		mgr := auth.NewManager(cfg, http.DefaultClient)
 		mgr.SetStore(auth.NewStore(config.GlobalConfigDir()))
-		require.NoError(t, mgr.ImportToken(context.Background(), setupOperatorToken, "full", "", "", time.Now().Add(24*time.Hour)))
-	}
+		assert.NoError(t, mgr.ImportToken(context.Background(), setupOperatorToken, "full", "", "", time.Now().Add(24*time.Hour)))
+	})
 
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "bot"),
 		"--operator", fmt.Sprint(setupOperatorPerson), "--expect-identity", fmt.Sprint(setupBotIdentity), serveArg())
@@ -1169,7 +1083,7 @@ func TestConnectSetupWritesAPolicyBoundToTheCredential(t *testing.T) {
 
 	// The profile is pointed at someone else afterwards.
 	assert.Error(t, f.VerifyAgent(setup.KindBotUser, setupBotPerson, setupBotIdentity))
-	assert.Error(t, f.VerifyAgent(setup.KindAgent, 777, 0))
+	assert.Error(t, f.VerifyAgent(setup.KindAgent, setupOtherAgent, 0))
 
 	// And setup itself refuses the next run for the same reason.
 	storeConnectProfile(t, s, "agent", setupBotToken)
@@ -1269,7 +1183,7 @@ func TestConnectSetupPropagatesCancellation(t *testing.T) {
 	s := startConnectSetupServer(t)
 	connectSetupApp(t, s, "agent")
 	ctx, cancel := context.WithCancel(context.Background())
-	s.duringMint = cancel
+	s.Before(fakebasecamp.RouteStreamTicket, func(fakebasecamp.Request) { cancel() })
 
 	out, err := runConnectSetupCmdIn(ctx, t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)
@@ -1340,7 +1254,7 @@ func TestConnectShowPrintsWhatSetupRecorded(t *testing.T) {
 	assert.Equal(t, setup.Agent{PersonID: setupAgentPerson, Kind: setup.KindAgent}, envelope.Data.Agent)
 	assert.Equal(t, setupOperatorPerson, envelope.Data.Trust.OperatorID)
 	assert.Contains(t, envelope.Data.Projects, setupProject)
-	assert.NotContains(t, buf.String(), fakeConnectSecret)
+	assertNoSecretIn(t, s, buf.String())
 
 	after, err := os.ReadFile(path)
 	require.NoError(t, err)

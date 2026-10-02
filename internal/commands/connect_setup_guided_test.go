@@ -19,6 +19,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
+	"github.com/basecamp/basecamp-cli/internal/connector/fakebasecamp"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
@@ -70,19 +71,6 @@ func guided(t *testing.T, p *scriptedPrompter) {
 	})
 }
 
-func ownedByTheOperator(s *connectSetupServer) {
-	s.boss = map[string]any{"id": setupOperatorPerson, "name": "Operator"}
-}
-
-func projectsNamed(ids ...int64) []map[string]any {
-	names := map[int64]string{setupProject: "Connector", setupProject2: "Launch"}
-	projects := make([]map[string]any, 0, len(ids))
-	for _, id := range ids {
-		projects = append(projects, map[string]any{"id": id, "name": names[id]})
-	}
-	return projects
-}
-
 // A personal agent's operator is its owner, as Basecamp names them in the
 // agent's own profile: no flag, and no second login.
 func TestConnectSetupTakesAPersonalAgentsOwnerAsTheOperator(t *testing.T) {
@@ -117,7 +105,7 @@ func TestConnectSetupWithoutAnOwnerStillNeedsAnOperator(t *testing.T) {
 func TestGuidedConnectSetupFromNothing(t *testing.T) {
 	s := startConnectSetupServer(t)
 	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject, setupProject2)
+	agentOnProjects(s, setupProject, setupProject2)
 	p := &scriptedPrompter{confirms: []bool{true}}
 	guided(t, p)
 
@@ -150,7 +138,7 @@ func TestGuidedConnectSetupFromNothing(t *testing.T) {
 func TestGuidedConnectSetupPicksProjectsByNumber(t *testing.T) {
 	s := startConnectSetupServer(t)
 	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject, setupProject2)
+	agentOnProjects(s, setupProject, setupProject2)
 	guided(t, &scriptedPrompter{confirms: []bool{false}, inputs: []string{"2"}})
 
 	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"))
@@ -170,7 +158,7 @@ func TestGuidedConnectSetupPicksProjectsByNumber(t *testing.T) {
 func TestGuidedConnectSetupKeepsAnExplicitAccount(t *testing.T) {
 	s := startConnectSetupServer(t)
 	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
+	agentOnProjects(s, setupProject)
 	connectSetupApp(t, s, "agent")
 	guided(t, &scriptedPrompter{confirms: []bool{true}})
 
@@ -192,7 +180,7 @@ func TestGuidedConnectSetupResumedRefusesAReadOnlyCredential(t *testing.T) {
 	s := startConnectSetupServer(t)
 	firstSetup(t, s)
 	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
+	agentOnProjects(s, setupProject)
 	app := newConnectSetupApp(t, s, "agent")
 	creds, err := app.Auth.GetStore().Load(app.Auth.CredentialKey())
 	require.NoError(t, err)
@@ -213,7 +201,7 @@ func TestGuidedConnectSetupResumedRefusesAReadOnlyCredential(t *testing.T) {
 func TestGuidedConnectSetupRefusesAnUnsupportedPlatformBeforeConnecting(t *testing.T) {
 	s := startConnectSetupServer(t)
 	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
+	agentOnProjects(s, setupProject)
 	guided(t, &scriptedPrompter{})
 	connectGOOS = "windows"
 
@@ -230,7 +218,7 @@ func TestGuidedConnectSetupResumesAFileRepairedWhileItAsked(t *testing.T) {
 	s := startConnectSetupServer(t)
 	firstSetup(t, s)
 	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
+	agentOnProjects(s, setupProject)
 	path := connectSetupPath(t, "agent")
 	good, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -255,7 +243,7 @@ func TestGuidedConnectSetupWithNoProjectsServedSaysHowToAddOne(t *testing.T) {
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--unserve", strconv.FormatInt(setupProject, 10))
 	require.NoError(t, err, out)
 	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
+	agentOnProjects(s, setupProject)
 	guided(t, &scriptedPrompter{})
 
 	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"))
@@ -285,6 +273,7 @@ func TestGuidedConnectSetupRefusesAnInsecureAgentProfileURL(t *testing.T) {
 func TestGuidedConnectSetupStopsWhenTheAgentIsInNoProjects(t *testing.T) {
 	s := startConnectSetupServer(t)
 	ownedByTheOperator(s)
+	agentOnProjects(s) // none
 	guided(t, &scriptedPrompter{})
 
 	out, err := runConnectSetupCmd(t, connectSetupApp(t, s, "agent"))
@@ -300,15 +289,11 @@ func TestGuidedConnectSetupStopsWhenTheAgentIsInNoProjects(t *testing.T) {
 func TestGuidedConnectSetupOffersToReconnectARefusedCredential(t *testing.T) {
 	s := startConnectSetupServer(t)
 	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
+	agentOnProjects(s, setupProject)
 	app := connectSetupApp(t, s, "agent")
 	expireAgentToken(t, app)
-	s.refuseSecret = true
-	p := &scriptedPrompter{confirms: []bool{true, true, false}, onConfirm: func(q string) {
-		if q == "Connect this computer to it again?" {
-			s.refuseSecret = false // the person approves a new connection
-		}
-	}}
+	connectedElsewhere(s)
+	p := &scriptedPrompter{confirms: []bool{true, true, false}}
 	guided(t, p)
 
 	out, err := runConnectSetupCmd(t, app)
@@ -316,7 +301,7 @@ func TestGuidedConnectSetupOffersToReconnectARefusedCredential(t *testing.T) {
 
 	assert.Contains(t, out, "was disconnected in Basecamp, or it was connected on another computer")
 	assert.Equal(t, "Connect this computer to it again?", p.asked[0])
-	assert.Equal(t, 2, s.intakeCount(), "a second connection ran")
+	assert.Equal(t, 2, s.Count(fakebasecamp.RouteAgentConnections), "a second connection ran")
 	_, err = setup.Load(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
 }
@@ -325,12 +310,15 @@ func TestGuidedConnectSetupLeavesARefusedCredentialThePersonKeeps(t *testing.T) 
 	s := startConnectSetupServer(t)
 	app := connectSetupApp(t, s, "agent")
 	expireAgentToken(t, app)
-	s.refuseSecret = true
-	guided(t, &scriptedPrompter{confirms: []bool{false}})
+	connectedElsewhere(s)
+	p := &scriptedPrompter{confirms: []bool{false}}
+	guided(t, p)
 
 	out, err := runConnectSetupCmd(t, app)
 	require.Error(t, err, out)
-	assert.Equal(t, 1, s.intakeCount())
+	assert.Contains(t, out, "was disconnected in Basecamp, or it was connected on another computer")
+	assert.Equal(t, []string{"Connect this computer to it again?"}, p.asked)
+	assert.Equal(t, 1, s.Count(fakebasecamp.RouteAgentConnections))
 }
 
 // A file another command replaced while this one was asking is someone
@@ -340,7 +328,7 @@ func TestGuidedConnectSetupLeavesAFileReplacedWhileItAsked(t *testing.T) {
 	s := startConnectSetupServer(t)
 	firstSetup(t, s)
 	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
+	agentOnProjects(s, setupProject)
 	path := connectSetupPath(t, "agent")
 	good, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -374,7 +362,7 @@ func TestGuidedConnectSetupRebuildsABrokenConnectJSON(t *testing.T) {
 	s := startConnectSetupServer(t)
 	firstSetup(t, s)
 	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
+	agentOnProjects(s, setupProject)
 	path := connectSetupPath(t, "agent")
 	require.NoError(t, os.WriteFile(path, []byte(`{"version": 1, "watch_completion": true`), 0o600))
 	p := &scriptedPrompter{confirms: []bool{true, true, false}}
@@ -399,7 +387,7 @@ func TestGuidedConnectSetupOnAFinishedSetupSaysSo(t *testing.T) {
 	s := startConnectSetupServer(t)
 	firstSetup(t, s)
 	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
+	agentOnProjects(s, setupProject)
 	path := connectSetupPath(t, "agent")
 	before, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -446,11 +434,9 @@ func expireAgentToken(t *testing.T, app *appctx.App) {
 func TestGuidedConnectSetupRefusesAnAgentSwappedMidQuestion(t *testing.T) {
 	s := startConnectSetupServer(t)
 	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
+	agentOnProjects(s, setupProject)
 	p := &scriptedPrompter{confirms: []bool{true}, onConfirm: func(string) {
-		s.mu.Lock()
-		s.agentID++ // another agent's credential now answers for the profile
-		s.mu.Unlock()
+		repointAgent(s, setupOtherAgent) // another agent's credential now answers for the profile
 	}}
 	guided(t, p)
 
@@ -468,7 +454,7 @@ func TestGuidedConnectSetupRefusesAnAgentSwappedMidQuestion(t *testing.T) {
 func TestGuidedConnectSetupRefusesASetupWrittenMidQuestion(t *testing.T) {
 	s := startConnectSetupServer(t)
 	ownedByTheOperator(s)
-	s.agentProjects = projectsNamed(setupProject)
+	agentOnProjects(s, setupProject)
 	app := connectSetupApp(t, s, "agent")
 	p := &scriptedPrompter{confirms: []bool{true}, onConfirm: func(string) {
 		out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--trust", "project", serveArg())

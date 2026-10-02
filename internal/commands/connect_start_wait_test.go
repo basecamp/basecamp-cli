@@ -29,6 +29,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
+	"github.com/basecamp/basecamp-cli/internal/connector/fakebasecamp"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
@@ -499,9 +500,8 @@ func TestASecondConnectorIsRefusedBeforeItWaitsForAToken(t *testing.T) {
 	require.NoError(t, err)
 	creds.ExpiresAt = time.Now().Add(-time.Minute).Unix()
 	require.NoError(t, app.Auth.GetStore().Save(app.Auth.CredentialKey(), creds))
-	f.s.mu.Lock()
-	f.s.rateLimitMints, f.s.mints = true, 0
-	f.s.mu.Unlock()
+	f.s.Inject(fakebasecamp.TokenRateLimited(3600))
+	mintsBefore := f.s.Count(fakebasecamp.RouteToken)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -524,9 +524,7 @@ func TestASecondConnectorIsRefusedBeforeItWaitsForAToken(t *testing.T) {
 		<-done
 		t.Fatalf("a second connector waited for a token instead of refusing: %s", buf.String())
 	}
-	f.s.mu.Lock()
-	defer f.s.mu.Unlock()
-	assert.Zero(t, f.s.mints, "nothing was minted for a connector that cannot run")
+	assert.Equal(t, mintsBefore, f.s.Count(fakebasecamp.RouteToken), "nothing was minted for a connector that cannot run")
 }
 
 // A 503 that names its Retry-After is waited out for that long, by the
@@ -575,9 +573,7 @@ func TestAStartWaitingForItsTokenHoldsNoLock(t *testing.T) {
 	require.NoError(t, err)
 	creds.ExpiresAt = time.Now().Add(-time.Minute).Unix()
 	require.NoError(t, app.Auth.GetStore().Save(app.Auth.CredentialKey(), creds))
-	f.s.mu.Lock()
-	f.s.rateLimitMints = true
-	f.s.mu.Unlock()
+	f.s.Inject(fakebasecamp.TokenRateLimited(3600))
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

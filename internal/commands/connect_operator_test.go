@@ -28,6 +28,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
+	"github.com/basecamp/basecamp-cli/internal/connector/fakebasecamp"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
@@ -37,7 +38,7 @@ const operatorSecretContent = "please-look-secret-instruction"
 // operatorFixture is a set-up "agent" profile with its state under a temp
 // XDG_STATE_HOME.
 type operatorFixture struct {
-	s    *connectSetupServer
+	s    *fakebasecamp.Server
 	file setup.File
 }
 
