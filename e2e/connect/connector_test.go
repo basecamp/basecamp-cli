@@ -72,7 +72,7 @@ func (h *Harness) Connect(t *testing.T, extra ...string) *Connector {
 // flags, in the harness's home.
 func (h *Harness) ConnectProfile(t *testing.T, p Profile, extra ...string) *Connector {
 	t.Helper()
-	return h.Start(t, h.Home, append([]string{"connect", "-P", p.Name}, extra...)...)
+	return h.Start(t, h.Dir, append([]string{"connect", "-P", p.Name}, extra...)...)
 }
 
 // Start starts a CLI command in the background, in dir, with the harness's
