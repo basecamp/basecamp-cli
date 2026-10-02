@@ -34,6 +34,17 @@ const (
 type Queue struct {
 	ids    chan int64
 	warnAt int
+	// recoverAt and resumeAt are the depths at or below which a warning and a
+	// pause are reported as over: half of the depth that raised each. An edge
+	// that cleared one item below where it was raised would be reported twice
+	// for every event of a backlog that hovers at its threshold, and a pause
+	// at capacity would be reported twice for every event the feed delivers,
+	// since each take lets one waiting offer in and the next offer waits
+	// again. Half is a band that a hovering backlog cannot cross by itself,
+	// it needs no clock, and both bands are zero or more, so a drained queue
+	// always ends recovered and resumed.
+	recoverAt int
+	resumeAt  int
 
 	// edges serializes the depth sample with the warning transition and its
 	// callback. Unserialized, an offer can sample a warning depth, a take can
@@ -58,16 +69,21 @@ type Queue struct {
 	// finished last leaves the operator reading "resumed" while the feed is
 	// paused.
 	waiting int
-	paused  bool
+	// paused is the reported pause, not the live one. It is raised when an
+	// offer first waits for room and lowered only once no offer waits and the
+	// depth has drained to resumeAt. Paused reports the live state.
+	paused bool
 
-	// OnWarn fires when the depth first crosses the warning threshold, and
-	// OnRecover when it falls back below. Both are optional, and neither is
-	// needed for the operator to hear of it: every edge is reported on the
-	// logger first.
+	// OnWarn fires when the depth reaches the warning threshold, and
+	// OnRecover when it has drained to half of it. Both are optional, and
+	// neither is needed for the operator to hear of it: every edge is
+	// reported on the logger first.
 	OnWarn    func(depth int)
 	OnRecover func(depth int)
-	// OnPause fires when an offer begins waiting for room, and OnResume when
-	// it stops. The feed is not being consumed in between.
+	// OnPause fires when an offer first waits for room, with the depth the
+	// queue holds, not counting the waiting offer. OnResume fires once no
+	// offer waits and the depth has drained to half the pause threshold. In
+	// between, the feed is read only as fast as admission makes room.
 	OnPause  func(depth int)
 	OnResume func(depth int)
 	// log reports every edge and any callback that panicked. Held under
@@ -106,7 +122,12 @@ func NewQueue(warnAt, pauseAt int) (*Queue, error) {
 	// Capacity IS the pause threshold: a full channel is a blocked offer is a
 	// feed that has stopped being read. There is no second mechanism to keep
 	// in agreement with this one.
-	return &Queue{ids: make(chan int64, pauseAt), warnAt: warnAt}, nil
+	return &Queue{
+		ids:       make(chan int64, pauseAt),
+		warnAt:    warnAt,
+		recoverAt: warnAt / 2,
+		resumeAt:  pauseAt / 2,
+	}, nil
 }
 
 // Offer hands an event id to admission, waiting for room when the backlog is
@@ -226,15 +247,7 @@ func (q *Queue) stage(delta int) {
 	q.edges.Lock()
 	defer q.edges.Unlock()
 	q.depth += delta
-	depth := q.depth
-	switch {
-	case depth >= q.warnAt && !q.warned:
-		q.warned = true
-		q.pending = append(q.pending, queueEdge{kind: edgeWarn, fire: q.OnWarn, depth: depth})
-	case depth < q.warnAt && q.warned:
-		q.warned = false
-		q.pending = append(q.pending, queueEdge{kind: edgeRecover, fire: q.OnRecover, depth: depth})
-	}
+	q.decide()
 }
 
 // stageWait records an offer starting or finishing its wait for room and the
@@ -250,13 +263,35 @@ func (q *Queue) stageWait(delta int) {
 	q.edges.Lock()
 	defer q.edges.Unlock()
 	q.waiting += delta
-	switch {
-	case q.waiting > 0 && !q.paused:
+	q.decide()
+}
+
+// decide stages every edge the current depth and waiters cross. It is called
+// holding edges, after any change to either.
+//
+// A raised edge clears only at its band, not one item below where it was
+// raised, so a backlog that hovers at a threshold is one report each way.
+// The edges up are decided before the edges down. One change can clear both
+// the pause and the warning where their bands meet, and then the resume is
+// told before the recovery, the reverse of the order they were raised in.
+func (q *Queue) decide() {
+	if !q.warned && q.depth >= q.warnAt {
+		q.warned = true
+		q.pending = append(q.pending, queueEdge{kind: edgeWarn, fire: q.OnWarn, depth: q.depth})
+	}
+	if !q.paused && q.waiting > 0 {
 		q.paused = true
-		q.pending = append(q.pending, queueEdge{kind: edgePause, fire: q.OnPause, depth: q.depth})
-	case q.waiting == 0 && q.paused:
+		// The held depth: a waiting offer has counted its id but cannot put
+		// it in, so it is not part of what the queue holds.
+		q.pending = append(q.pending, queueEdge{kind: edgePause, fire: q.OnPause, depth: q.depth - q.waiting})
+	}
+	if q.paused && q.waiting == 0 && q.depth <= q.resumeAt {
 		q.paused = false
 		q.pending = append(q.pending, queueEdge{kind: edgeResume, fire: q.OnResume, depth: q.depth})
+	}
+	if q.warned && q.depth <= q.recoverAt {
+		q.warned = false
+		q.pending = append(q.pending, queueEdge{kind: edgeRecover, fire: q.OnRecover, depth: q.depth})
 	}
 }
 
@@ -320,24 +355,27 @@ func (q *Queue) fire(edge queueEdge) {
 	}
 }
 
-// report tells the operator about one edge, with the depth it was decided at
-// and the threshold it crossed. The depth of a pause or a resume counts the id
-// the waiting offer is holding: it is backlog either way.
+// backlogNextStep is what a warning tells the operator to look at.
+const backlogNextStep = "The usual cause is slow or failing Basecamp reads during admission; basecamp connect status shows the backlog of records by state."
+
+// report tells the operator about one edge, with the depth it was decided at,
+// the threshold it crossed and the depth at which it clears. The depth of a
+// pause is what the queue holds; the offer waiting for room is not counted.
 func (q *Queue) report(log *slog.Logger, edge queueEdge) {
 	pauseAt := cap(q.ids)
 	switch edge.kind {
 	case edgeWarn:
-		log.Warn("the backlog reached its warning depth; admission is falling behind the feed",
-			"depth", edge.depth, "warn_at", q.warnAt, "pause_at", pauseAt)
+		log.Warn("the backlog reached its warning depth; admission is falling behind the feed. "+backlogNextStep,
+			"depth", edge.depth, "warn_at", q.warnAt, "recover_at", q.recoverAt, "pause_at", pauseAt)
 	case edgeRecover:
 		log.Info("the backlog fell back below its warning depth",
-			"depth", edge.depth, "warn_at", q.warnAt)
+			"depth", edge.depth, "warn_at", q.warnAt, "recover_at", q.recoverAt)
 	case edgePause:
-		log.Warn("the backlog reached its pause depth; reading the feed is paused until admission makes room, so the backlog cannot outgrow memory",
-			"depth", edge.depth, "pause_at", pauseAt)
+		log.Warn("the backlog reached its pause depth; the next event waits for room, and the feed is read only as fast as admission makes room, so the backlog cannot outgrow memory. "+backlogNextStep,
+			"depth", edge.depth, "pause_at", pauseAt, "resume_at", q.resumeAt)
 	case edgeResume:
-		log.Info("the backlog has room again; reading the feed resumed",
-			"depth", edge.depth, "pause_at", pauseAt)
+		log.Info("the backlog drained to half its pause depth; the feed is read at full speed again",
+			"depth", edge.depth, "pause_at", pauseAt, "resume_at", q.resumeAt)
 	}
 }
 
