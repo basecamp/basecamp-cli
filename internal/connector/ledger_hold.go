@@ -509,9 +509,13 @@ const (
 	// reads this beside the instance lock's holder rather than instead of it.
 	ConnectionStopped = "stopped"
 	// ConnectionDisconnected is a connector that stopped because Basecamp
-	// refused the agent's credential: the agent was disconnected in Basecamp,
+	// refused its Agent's credential: the agent was disconnected in Basecamp,
 	// or connected on another computer. Its detail says so, for the person.
 	ConnectionDisconnected = "disconnected"
+	// ConnectionSignedOut is a connector that stopped because Basecamp
+	// refused its bot user's login: the session expired or was revoked. Its
+	// detail says so, for the person.
+	ConnectionSignedOut = "signed_out"
 )
 
 // NoteConnection records the running connector's connection state, for

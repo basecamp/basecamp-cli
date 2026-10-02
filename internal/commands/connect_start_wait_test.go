@@ -356,7 +356,7 @@ func TestATruncatedRefusalStillEndsTheStart(t *testing.T) {
 	err := awaitConnectToken(t.Context(), tokens, w.options(tokens))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, auth.ErrAgentCredentialRefused)
-	assert.Equal(t, errAgentDisconnected("", "agent"), connectStartFailure(t.Context(), setup.KindAgent, "agent", err))
+	assert.Equal(t, errAgentDisconnected("", "agent"), connectStartFailure(t.Context(), anAgent("", "agent"), err))
 	assert.Empty(t, w.waits)
 	assert.Equal(t, 1, mints())
 }
@@ -393,20 +393,20 @@ func TestAStartFailureKeepsItsFraming(t *testing.T) {
 
 	canceled, cancel := context.WithCancel(t.Context())
 	cancel()
-	assert.Same(t, terminated, connectStartFailure(t.Context(), setup.KindAgent, "agent", terminated))
-	assert.ErrorIs(t, connectStartFailure(canceled, setup.KindAgent, "agent", context.Canceled), context.Canceled)
-	assert.Equal(t, errAgentDisconnected("", "agent"), connectStartFailure(t.Context(), setup.KindAgent, "agent", refused))
+	assert.Same(t, terminated, connectStartFailure(t.Context(), anAgent("", "agent"), terminated))
+	assert.ErrorIs(t, connectStartFailure(canceled, anAgent("", "agent"), context.Canceled), context.Canceled)
+	assert.Equal(t, errAgentDisconnected("", "agent"), connectStartFailure(t.Context(), anAgent("", "agent"), refused))
 
 	// A request's own timeout, while the connector is not stopping, is a
 	// failure to read who the profile is like any other.
 	timedOut := &basecamp.Error{Code: basecamp.CodeNetwork, Message: "request timed out", Retryable: true, Cause: context.DeadlineExceeded}
 	var framed *output.Error
-	require.ErrorAs(t, connectStartFailure(t.Context(), setup.KindAgent, "agent", timedOut), &framed)
+	require.ErrorAs(t, connectStartFailure(t.Context(), anAgent("", "agent"), timedOut), &framed)
 	assert.Equal(t, output.CodeAuth, framed.Code)
 	assert.Contains(t, framed.Message, `Could not read who profile "agent" is`)
 
 	var e *output.Error
-	require.ErrorAs(t, connectStartFailure(t.Context(), setup.KindAgent, "agent", output.ErrAPI(404, "minting an agent token: the server answered HTTP 404")), &e)
+	require.ErrorAs(t, connectStartFailure(t.Context(), anAgent("", "agent"), output.ErrAPI(404, "minting an agent token: the server answered HTTP 404")), &e)
 	assert.Equal(t, output.CodeAuth, e.Code)
 	assert.Equal(t, `Could not read who profile "agent" is: minting an agent token: the server answered HTTP 404`, e.Message)
 }
