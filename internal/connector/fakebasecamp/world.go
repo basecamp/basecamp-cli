@@ -141,12 +141,20 @@ type AgentClient struct {
 	PersonID int64
 	// Scope is what the client was approved for.
 	Scope string
+	// TokenLifetime is how long the tokens it mints say they last, in
+	// whole seconds of at least one; zero is Basecamp's hour. The fake
+	// does not retire a token when it runs out: the client renews by what
+	// it was told, and a test can wait for that to come due.
+	TokenLifetime time.Duration
 }
 
 // Token is what a bearer token authenticates as.
 type Token struct {
 	PersonID int64
 	Scope    string
+	// ClientID is the agent client that minted it; empty for a person's
+	// own login.
+	ClientID string
 }
 
 // Connection is the operator's approval on the agent connection page.

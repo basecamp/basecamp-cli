@@ -1,10 +1,13 @@
 package fakebasecamp_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -97,4 +100,55 @@ func TestAgentConnectionHandsOverTheApprovedScope(t *testing.T) {
 	s.View(func(w *fakebasecamp.World) {
 		assert.Equal(t, fakebasecamp.ScopeRead, w.Agents[fakebasecamp.AgentClientID].Scope)
 	})
+}
+
+// mint asks the fake for a client_credentials token for the default agent's
+// client with secret, and returns the status and the decoded body.
+func mint(t *testing.T, s *fakebasecamp.Server, secret string) (int, map[string]any) {
+	t.Helper()
+	form := url.Values{"grant_type": {"client_credentials"}, "client_id": {fakebasecamp.AgentClientID}, "client_secret": {secret}}
+	status, _, body := do(t, s, http.MethodPost, "/oauth/tokens", "", form.Encode())
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal([]byte(body), &decoded), body)
+	return status, decoded
+}
+
+// A token says it lasts an hour, as Basecamp's do, unless the client is
+// set to mint shorter ones.
+func TestTokensSayHowLongTheyLast(t *testing.T) {
+	s := fakebasecamp.Start(t, fakebasecamp.DefaultWorld())
+	status, body := mint(t, s, fakebasecamp.AgentSecret)
+	require.Equal(t, http.StatusOK, status)
+	assert.InDelta(t, 3600, body["expires_in"], 0)
+
+	s.Update(func(w *fakebasecamp.World) { w.Agents[fakebasecamp.AgentClientID].TokenLifetime = 2 * time.Second })
+	_, body = mint(t, s, fakebasecamp.AgentSecret)
+	assert.InDelta(t, 2, body["expires_in"], 0)
+
+	s.Update(func(w *fakebasecamp.World) { w.Agents[fakebasecamp.AgentClientID].TokenLifetime = time.Millisecond })
+	_, body = mint(t, s, fakebasecamp.AgentSecret)
+	assert.InDelta(t, 1, body["expires_in"], 0, "never less than a second")
+}
+
+// Disconnecting an agent revokes every token its client minted and clears
+// its secret, and leaves everyone else's tokens alone.
+func TestDisconnectRevokesTheAgentsTokensAndSecret(t *testing.T) {
+	s := fakebasecamp.Start(t, fakebasecamp.DefaultWorld())
+	status, body := mint(t, s, fakebasecamp.AgentSecret)
+	require.Equal(t, http.StatusOK, status)
+	token, _ := body["access_token"].(string)
+	_, err := accountClient(s, token).People().Me(bounded(t))
+	require.NoError(t, err)
+
+	s.Disconnect(fakebasecamp.AgentClientID)
+
+	_, err = accountClient(s, token).People().Me(bounded(t))
+	var apiErr *basecamp.Error
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, http.StatusUnauthorized, apiErr.HTTPStatus)
+	status, body = mint(t, s, fakebasecamp.AgentSecret)
+	assert.Equal(t, http.StatusUnauthorized, status)
+	assert.Equal(t, "invalid_client", body["error"])
+	_, err = accountClient(s, fakebasecamp.OperatorToken).People().Me(bounded(t))
+	assert.NoError(t, err, "the operator's own login stands")
 }

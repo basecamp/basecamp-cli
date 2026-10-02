@@ -249,6 +249,14 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	}
 	lines := ndjson.NewWriter(cmd.OutOrStdout())
 
+	// The reads admission and intake make are watched for Basecamp refusing
+	// the agent's credential, which the feed alone would not see while its
+	// live connection stays up. The start's own reads are not: a refusal
+	// there ends the start as it is.
+	watch := newCredentialWatch()
+	watchedOpts := append(connectSDKOptions(), basecamp.WithTransportWrapper(watch))
+	watchedTokens := watch.Tokens(tokens)
+
 	queue, err := connector.NewQueue(connector.DefaultBacklogWarn, connector.DefaultBacklogPause)
 	if err != nil {
 		return err
@@ -266,7 +274,9 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	intakeOpts.Queue = queue
 	intakeOpts.Lines = lines
 	intakeOpts.Logger = logger
-	intakeOpts.Membership = connector.SDKMembership{Client: accountClient}
+	intakeOpts.Membership = connector.SDKMembership{
+		Client: basecamp.NewClient(&basecamp.Config{BaseURL: app.Config.BaseURL}, watchedTokens, watchedOpts...).ForAccount(account),
+	}
 	intake, err := connector.New(intakeOpts)
 	if err != nil {
 		return err
@@ -278,7 +288,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	// is at most connectServedTTL old — see TestConnectServedTTLStaysSmall.
 	served := newConnectServed(path, file, logger)
 
-	reads := admission.NewSDKReads(&basecamp.Config{BaseURL: app.Config.BaseURL}, tokens, account, connectSDKOptions()...)
+	reads := admission.NewSDKReads(&basecamp.Config{BaseURL: app.Config.BaseURL}, watchedTokens, account, watchedOpts...)
 	admitter, err := admission.NewAdmitter(policy, reads, admission.WithServed(served.Current))
 	if err != nil {
 		return output.ErrUsage(err.Error())
@@ -347,6 +357,9 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if err := ledger.NoteConnection(ctx, connector.ConnectionRunning, ""); err != nil {
 		logger.Warn("connector: could not record that it runs, for status", "error", err)
 	}
+	runPart("credential", func(ctx context.Context) error {
+		return watch.Run(ctx, func(ctx context.Context) bool { return confirmAgentRefused(ctx, app, kind, name) })
+	})
 	runPart("intake", intake.Run)
 	runPart("admission", func(ctx context.Context) error {
 		return connector.RunAdmission(ctx, connector.AdmissionOptions{Ledger: ledger, Queue: queue, Admitter: admitter, Lines: lines, Logger: logger})
@@ -390,9 +403,12 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 // another computer — is said in their words; anything else is returned as it
 // is. The feed's authorization_failed counts forbidden answers too, so it is
 // called a disconnect only when refused, asking Basecamp, confirms it; a
-// refused token renewal is already Basecamp's answer.
+// refused token renewal is already Basecamp's answer, and so is a refusal
+// the credential watch has confirmed.
 func connectorStoppedBy(err error, agent, profile string, refused func() bool) (state, detail string, exit error) {
-	disconnected := errors.Is(err, auth.ErrAgentCredentialRefused) || (feedAuthorizationFailed(err) && refused())
+	disconnected := errors.Is(err, auth.ErrAgentCredentialRefused) ||
+		errors.Is(err, errAgentCredentialNotTaken) ||
+		(feedAuthorizationFailed(err) && refused())
 	if !disconnected {
 		return connector.ConnectionStopped, "", err
 	}
