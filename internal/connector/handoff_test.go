@@ -15,6 +15,14 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector/ndjson"
 )
 
+// admitOn writes an admitted record on a conversation key.
+func admitOn(t *testing.T, ledger *Ledger, id int64, key string) {
+	t.Helper()
+	seenRecord(t, ledger, id)
+	_, err := ledger.Admission().Commit(context.Background(), admittedVerdict(id, 0, key))
+	require.NoError(t, err)
+}
+
 func handoffOptions(ledger *Ledger, out *bytes.Buffer) HandoffOptions {
 	return HandoffOptions{
 		Ledger: ledger,
@@ -181,7 +189,7 @@ func TestTheLineCarriesNoTerminalControlSequences(t *testing.T) {
 func TestATaskLeftOpenByTheWorkerConnectorBlocksNothing(t *testing.T) {
 	ledger := newTestLedger(t)
 	admitOn(t, ledger, 1, "recording:1")
-	launch(t, ledger, 1) // the old dispatcher started a task, then crashed
+	olderLaunch(t, ledger, 1) // the old dispatcher started a task, then crashed
 	admitOn(t, ledger, 2, "recording:1")
 	var out bytes.Buffer
 

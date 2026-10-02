@@ -1,87 +1,40 @@
 package connector
 
 import (
-	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
 
-// The outbox: every message the connector itself posts to Basecamp — the
-// guard acknowledgement, the holding reply, still-running, the completion
-// notice and the retraction that answers an ask in one of them — goes through
-// one table with one rule.
+// The outbox: every message an older build's connector posted to Basecamp
+// itself (the guard acknowledgement, the holding reply, still-running, the
+// completion notice, and the retraction that answered an ask in one of them)
+// went through this one table.
 //
-// # Invariants
+// Since #815 removed the worker side, this build writes no intent and sends
+// none: the table is written only by its migrations and by the triggers below.
+// What an older build left in it is still read and still decided about.
+// Status lists the intents waiting for a person (statusIntents), and a
+// discard or an import's done decision cancels the guard acknowledgement and
+// holding reply still pending for the record it closes.
 //
-// Each is held by the database where SQL can say it, and by a test that fails
-// without it (outbox_invariants_test.go).
+// What the schema held those writes to, and still holds any write to:
 //
-//  1. An intent is written in the transaction of the transition that calls
-//     for it, through the ledger's hooks, so the two commit or roll back
-//     together.
-//  2. One intent per thing answered for: the key is the guard or holding
-//     reply per event, the completion per attempt, still-running per attempt
-//     and occurrence, the retraction per posted message and the event whose
-//     ask it answers. A second write for a key writes nothing.
-//  3. Nothing is sent without a durable sending row. The only path to a
-//     request claims the intent — pending to sending, committed — first.
-//  4. Nothing sending is sent again automatically. A request is made only for
-//     an intent this process just claimed from pending. A sending intent is
-//     reconciled by listing the destination, never by posting.
-//  5. Reconciliation adopts only an unambiguous candidate: exactly one of the
-//     agent's messages at the destination since the intent went sending
-//     matches its body, the message is not a worker's own acknowledgement or
-//     reply, no other intent owns it, and no other intent at the destination
-//     whose own message may exist unreceipted — pending, sending,
-//     indeterminate, or abandoned by a person who could not prove it absent —
-//     has the same body. Anything else is indeterminate, for a person.
-//  6. A receipt belongs to exactly one intent, and once written it never
-//     changes. A unique index and a trigger.
-//  7. States move along the lifecycle's edges only: pending → sending |
-//     canceled; sending → sent | indeterminate, or canceled when Basecamp
-//     answered the request by refusing it, which creates nothing; and
-//     indeterminate → sent | abandoned | pending, those three only by a
-//     person, as is refused → pending once a person has fixed the cause.
-//  8. get_dispatch cancels the guard: a trigger moves the guard intent from
+//  1. One intent per thing answered for: intent_key is unique.
+//  2. A receipt belongs to exactly one intent, and once written it never
+//     changes (outbox_receipt, outbox_receipt_is_final).
+//  3. States move along the lifecycle's edges only (outbox_state_edges):
+//     pending to sending or canceled; sending to sent, indeterminate, or
+//     canceled when Basecamp refused the request; indeterminate to sent,
+//     abandoned or pending, those three only by a person.
+//  4. get_dispatch canceled the guard: a trigger moved the guard intent from
 //     pending to canceled in get_dispatch's own transaction, and a guard that
-//     already went out marks every task event it answers for as fired, so a
-//     worker is told the connector acknowledged.
-//  9. A guard is reported fired from the moment it is claimed, and that is
-//     final: #736's task_events_guard_settles_once lets a guard move only
-//     from armed. The claim marks its task events fired in the claim's own
-//     transaction, so no worker asking while the request is in flight
-//     acknowledges a second time. If Basecamp then refuses the request, the
-//     intent is canceled — nothing was created — but its task events stay
-//     fired, so that task's workers do not acknowledge either: the
-//     acknowledgement is missing, never doubled, the spec's own preference.
-//     A later task for the event (a person's redispatch) has its guard armed,
-//     and the worker acknowledges itself: the intent is canceled, so nothing
-//     remains to fire that guard, and get_dispatch cancels it. This is the spec's rule: a
-//     missing acknowledgement costs less than a double one. A refusal here is
-//     Basecamp refusing the connector's own lifecycle request, recorded on
-//     the outbox row; a worker's permission refusals are another matter.
-//  10. Reconciliation never holds up sending for long. A running connector
-//     sends a batch, then lists at most one due destination; each listing is
-//     bounded in time; each failure backs its intent off, doubling, and the
-//     intent is indeterminate after MaxReconcileFailures, with that count
-//     recorded. Start is the exception by design: it reconciles everything
-//     due before it sends, within the bound its caller sets, and stops
-//     sending at the first send that may not have landed.
-//  11. A notice is retracted by another message, never by editing or deleting
-//     the one that went out. Only an ask is retracted — a line telling a
-//     person to run something — and both halves of what the retraction claims
-//     are asked again at its claim, because a retraction that is wrong is
-//     worse than none: a reader trusts the later message, so a line saying an
-//     ask is answered under an ask that is still live means nobody acts on
-//     it. The message it answers must be known to exist — one whose notice
-//     was refused, or left indeterminate for a person, waits for that person
-//     rather than being posted where there may be nothing to answer, and is
-//     canceled once they say there is nothing (abandoned) — and the record
-//     must not be waiting for that ask any more, which is a person's decision
-//     having actually settled it and not merely having been made.
+//     had already gone out marked every task event it answered for as fired
+//     (outbox_guard_canceled_by_get_dispatch, outbox_guard_fired_before_task).
+//  5. A held record's pending guard is canceled, and nothing moves to sending
+//     while the hold marker stands (events_held_cancels_guard,
+//     outbox_refused_under_hold).
 const migrationOutbox = `
 CREATE TABLE outbox (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -380,17 +333,6 @@ type Intent struct {
 	ReconcileAt       *time.Time
 }
 
-// Errors from the outbox.
-var (
-	// ErrNoSuchIntent is an intent id the ledger does not hold.
-	ErrNoSuchIntent = errors.New("no such outbox intent")
-	// ErrNotIndeterminate is a person's resolution for an intent that is not
-	// indeterminate.
-	ErrNotIndeterminate = errors.New("the intent is not indeterminate")
-	// ErrReceiptOwned is a receipt another intent already owns.
-	ErrReceiptOwned = errors.New("the receipt belongs to another intent")
-)
-
 func nullableID64(id int64) any {
 	if id == 0 {
 		return nil
@@ -458,176 +400,6 @@ func parseNullStamp(s sql.NullString) (*time.Time, error) {
 	return &t, nil
 }
 
-// IntentFilter selects intents. Zero values select everything.
-type IntentFilter struct {
-	States  []IntentState
-	Kinds   []IntentKind
-	EventID int64
-	// Limit is the most returned, newest first; zero for all.
-	Limit int
-}
-
-// Intents lists outbox intents, newest first. It only reads.
-func (l *Ledger) Intents(ctx context.Context, f IntentFilter) ([]Intent, error) {
-	var out []Intent
-	err := retryBusy(func() error {
-		var err error
-		out, err = l.intents(ctx, f)
-		return err
-	})
-	return out, err
-}
-
-func (l *Ledger) intents(ctx context.Context, f IntentFilter) ([]Intent, error) {
-	var (
-		where []string
-		args  []any
-	)
-	if len(f.States) > 0 {
-		where = append(where, "state IN ("+placeholders(len(f.States))+")")
-		for _, s := range f.States {
-			args = append(args, string(s))
-		}
-	}
-	if len(f.Kinds) > 0 {
-		where = append(where, "kind IN ("+placeholders(len(f.Kinds))+")")
-		for _, k := range f.Kinds {
-			args = append(args, string(k))
-		}
-	}
-	if f.EventID != 0 {
-		where = append(where, "event_id = ?")
-		args = append(args, f.EventID)
-	}
-	query := selectIntents
-	if len(where) > 0 {
-		query += " WHERE " + strings.Join(where, " AND ")
-	}
-	query += " ORDER BY id DESC"
-	if f.Limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, f.Limit)
-	}
-	rows, err := l.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("connector: list outbox: %w", err)
-	}
-	return scanIntents(rows)
-}
-
-// Intent reads one intent by id.
-func (l *Ledger) Intent(ctx context.Context, id int64) (Intent, error) {
-	var intents []Intent
-	err := retryBusy(func() error {
-		rows, err := l.db.QueryContext(ctx, selectIntents+` WHERE id = ?`, id)
-		if err != nil {
-			return fmt.Errorf("connector: read outbox intent %d: %w", id, err)
-		}
-		intents, err = scanIntents(rows)
-		return err
-	})
-	if err != nil {
-		return Intent{}, err
-	}
-	if len(intents) == 0 {
-		return Intent{}, fmt.Errorf("connector: outbox intent %d: %w", id, ErrNoSuchIntent)
-	}
-	return intents[0], nil
-}
-
 func placeholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?, ", n), ", ")
-}
-
-// IsLifecycleReceipt reports whether a message id is the receipt of one of the
-// connector's own lifecycle messages of that kind.
-func (l *Ledger) IsLifecycleReceipt(ctx context.Context, kind MessageKind, id int64) (bool, error) {
-	var found bool
-	err := retryBusy(func() error {
-		return l.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM outbox WHERE message_kind = ? AND receipt_id = ?)`, string(kind), id).Scan(&found)
-	})
-	if err != nil {
-		return false, fmt.Errorf("connector: lifecycle receipt %d: %w", id, err)
-	}
-	return found, nil
-}
-
-// Resolution is a person's decision on an indeterminate intent.
-type Resolution string
-
-const (
-	// ResolveSent says the message is in Basecamp: ReceiptID names it.
-	ResolveSent Resolution = "sent"
-	// ResolveAbandon says it is not to be sent.
-	ResolveAbandon Resolution = "abandon"
-	// ResolveResend authorizes sending it again: the intent returns to
-	// pending. Only a person may choose this; nothing automatic does.
-	ResolveResend Resolution = "resend"
-)
-
-// IntentResolution is a person's decision and who made it.
-type IntentResolution struct {
-	Resolution Resolution
-	// ReceiptID is the message a ResolveSent names.
-	ReceiptID int64
-	// By names who decided, for the record. Required.
-	By string
-}
-
-// ResolveIntent applies a person's decision to an indeterminate intent.
-func (l *Ledger) ResolveIntent(ctx context.Context, id int64, r IntentResolution) error {
-	if strings.TrimSpace(r.By) == "" {
-		return errors.New("connector: a resolution records who decided")
-	}
-	now := l.timestamp()
-	var (
-		query string
-		args  []any
-	)
-	switch r.Resolution {
-	case ResolveSent:
-		if r.ReceiptID <= 0 {
-			return errors.New("connector: a sent resolution names the message")
-		}
-		query = `UPDATE outbox SET state = 'sent', receipt_id = ?, finished_at = ?, resolved_by = ?, note = ? WHERE id = ? AND state = 'indeterminate'`
-		args = []any{r.ReceiptID, now}
-	case ResolveAbandon:
-		query = `UPDATE outbox SET state = 'abandoned', finished_at = ?, resolved_by = ?, note = ? WHERE id = ? AND state = 'indeterminate'`
-		args = []any{now}
-	case ResolveResend:
-		// A refused request created nothing, so a person may send it again
-		// once the cause is fixed, as they may an indeterminate one.
-		query = `UPDATE outbox SET state = 'pending', sending_at = NULL, finished_at = NULL, reconcile_failures = 0, reconcile_at = NULL, not_before = ?, resolved_by = ?, note = ?
-WHERE id = ? AND (state = 'indeterminate' OR (state = 'canceled' AND note = '` + RefusedNote + `'))`
-		args = []any{now}
-	default:
-		return fmt.Errorf("connector: %q is not a resolution", r.Resolution)
-	}
-	return retryBusy(func() error {
-		res, err := l.db.ExecContext(ctx, query, append(args, r.By, "resolved: "+string(r.Resolution), id)...)
-		if err != nil {
-			if isUniqueViolation(err) {
-				return fmt.Errorf("connector: resolve intent %d: %w", id, ErrReceiptOwned)
-			}
-			return fmt.Errorf("connector: resolve intent %d: %w", id, err)
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			if _, err := l.Intent(ctx, id); err != nil {
-				return err
-			}
-			return fmt.Errorf("connector: resolve intent %d: %w", id, ErrNotIndeterminate)
-		}
-		return nil
-	})
-}
-
-// RefusedNote is the note on an intent Basecamp refused.
-const RefusedNote = "the request was refused; no message was created"
-
-func isUniqueViolation(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

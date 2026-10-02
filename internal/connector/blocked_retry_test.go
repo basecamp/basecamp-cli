@@ -507,30 +507,6 @@ func TestAStaleRetryHandoffIsNotDecidedInsideTheInterval(t *testing.T) {
 	assert.True(t, ok, "and at the moment the schedule names, it loads")
 }
 
-// A person's redispatch is not a timer, and does not wait for one. It marks
-// the record due, so the rerun it asks for runs at once — and so a rerun that
-// never happened (the command died between the authorization and the
-// admission run) is picked up by the next sweep rather than stranded.
-func TestARedispatchMakesABlockedRecordDueAtOnce(t *testing.T) {
-	ledger, clock := retryLedger(t)
-	ctx := context.Background()
-	blockRecord(t, ledger, 1, adapterBucketID, admission.ReasonReadFailed)
-
-	_, ok, err := ledger.Admission().LoadUndecided(ctx, 1)
-	require.NoError(t, err)
-	require.False(t, ok, "nine minutes early, on the timer's account")
-
-	out, err := ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
-	require.NoError(t, err)
-	require.True(t, out.Rerun)
-
-	_, ok, err = ledger.Admission().LoadUndecided(ctx, 1)
-	require.NoError(t, err)
-	assert.True(t, ok, "a person asked for it now")
-	assert.Equal(t, []int64{1}, dueIDs(t, ledger, BlockedRetryScope{Now: clock.Now(), Limit: 10}),
-		"and if the rerun never happens, the sweep picks it up")
-}
-
 // Copilot on #770, and it is the starvation the card named, reintroduced
 // through the back door. The claim stops a row being offered twice; it does
 // nothing if the claimed rows still spend the sweep's budget. A limit filled
@@ -573,15 +549,8 @@ func TestABlockedRecordWithNoScheduledAttemptIsNotRunnable(t *testing.T) {
 	_, ok, err := ledger.Admission().LoadUndecided(ctx, 1)
 	require.NoError(t, err)
 	assert.False(t, ok, "nothing has given this record an attempt to make")
-
-	// A person is what gives an untimed record one.
-	_, err = ledger.Redispatch(ctx, 1, "jorge", []int64{adapterBucketID})
-	require.NoError(t, err)
-	_, ok, err = ledger.Admission().LoadUndecided(ctx, 1)
-	require.NoError(t, err)
-	assert.True(t, ok, "the redispatch is the attempt")
-	assert.Equal(t, []int64{1}, dueIDs(t, ledger, BlockedRetryScope{Now: clock.Now(), Limit: 10}),
-		"and if the rerun never happens, the sweep picks it up rather than stranding it")
+	assert.Empty(t, dueIDs(t, ledger, BlockedRetryScope{Now: clock.Now(), Limit: 10}),
+		"and the sweep does not offer it either")
 }
 
 // queryPlan is what SQLite says it will actually do, which is the only

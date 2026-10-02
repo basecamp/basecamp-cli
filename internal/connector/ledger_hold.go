@@ -12,7 +12,9 @@ import (
 
 // The hold marker, intake generations, the review tag, and people's decisions
 // on records: the ledger half of `basecamp connect --hold`, `release`,
-// `redispatch`, `discard`, `shadow promote` and `import`.
+// `discard`, `shadow promote` and `import`. `connect redispatch` went with
+// the worker side in #815; what it wrote into a ledger is still read, and
+// withdrawn by a hold, a discard or an import.
 //
 // # Invariants
 //
@@ -24,15 +26,11 @@ import (
 //     by a task's end returning it, by anything — is written held instead, by
 //     a trigger, in the same statement. A held record is not startable.
 //  2. The hold marker stops dispatch and posting at the database. While it
-//     stands no attempt row can be written, no task takes a follow-up, no
-//     event is handed to a worker for the first time — neither a first
-//     exposure nor a first pull of an event the launch exposed, so a worker a
-//     crashed connector left running is told nothing new — and no outbox
-//     intent can move to sending. It lives in the ledger, so every
-//     start respects it, and only Release clears it. What it does not stop is
-//     what such a worker already holds: an instruction it was handed before
-//     the hold, and its own Basecamp credential. Ending it is the one-owner
-//     rule's (driver/worker.go), and a person can hurry it with redispatch.
+//     stands its triggers refuse an attempt row, a task's follow-up, an
+//     event's first exposure or first pull, and an outbox intent moving to
+//     sending. This build writes none of those; the triggers stay as an
+//     older build's ledger has them. The marker lives in the ledger, so every
+//     start respects it, and only Release clears it.
 //  3. A hold is one transaction: the marker, a new intake generation, the
 //     review tag on every non-terminal record of the generations before it
 //     (clearing any earlier authorization, a redispatch still waiting for its
@@ -40,20 +38,20 @@ import (
 //  4. A person's decision is one transaction with the state change it makes,
 //     and it records who decided. A terminal record leaves its state only
 //     against a decision row made after its outcome settled: completed to
-//     admitted by the redispatch the record names, which the move consumes;
+//     admitted by a redispatch an older build recorded, which the end of the
+//     record's task consumes (tasks_end_applies_redispatch);
 //     completed(unknown) to discarded(by_operator) by a discard, and
 //     completed(unknown or failed) to discarded(imported_done) by an import's
 //     done decision. Discarded never leaves. A trigger refuses every other
 //     edge.
-//  5. A redispatch never runs two workers for one event. The replaced task's
-//     token is superseded in the authorization's transaction, and an event
-//     whose task is still live is not admitted until that task ends: the
-//     authorization waits on the record and a trigger applies it in the
-//     transaction that ends the task. One live task per conversation keeps
-//     the new task from starting before then.
-//  6. Admitted means dispatchable. A redispatch admits only a record that
-//     still has its snapshot and a served project; anything else is decided
-//     again by admission, whose verdict stands.
+//  5. A redispatch an older build recorded for an event whose task was still
+//     live waits on the record (redispatch_decision) for that task to end,
+//     and a trigger applies it then. Status counts what waits
+//     (redispatch_pending); nothing in this build ends a task, so it waits
+//     until a hold, a discard or an import withdraws it.
+//  6. Admitted means dispatchable: that trigger admits only a record that
+//     still has its snapshot, and retention keeps the snapshot of a record a
+//     redispatch waits on.
 //  7. Shadow promote and import are atomic under a crash: each is one ledger
 //     transaction, and promote exposes the shadow ledger at the normal path
 //     only after its hold committed, by one rename (promote.go).
@@ -216,10 +214,6 @@ BEGIN
 END;
 `
 
-// ErrHeld is the hold marker refusing to hand a worker something new. It is
-// not a failure of the task: nothing more is handed over until release.
-var ErrHeld = errors.New("the connector is held")
-
 // Reasons a person's decision writes.
 const (
 	// ReasonByOperator is a record a person closed without running it.
@@ -232,17 +226,12 @@ const (
 // operatorEdges are the moves only a person's decision makes, by target: the
 // states a record may leave for it. The lifecycle's own edges (ledger_events.go)
 // are what the connector does by itself; these are never taken automatically.
+//
+// A discard or an import's done decision closes a held record or a worker's
+// outcome an older build left. The redispatch edges out of completed and held
+// went with `connect redispatch`; a hold writes held through the review tag's
+// trigger, not through a move.
 var operatorEdges = map[RecordState][]RecordState{
-	// A redispatch admits a completed record, or a held one with its snapshot
-	// (queued when its conversation is live).
-	StateAdmitted: {StateCompleted, StateHeld},
-	StateQueued:   {StateHeld},
-	// A hold holds what was waiting for a worker.
-	StateHeld: {StateAdmitted, StateQueued},
-	// A redispatch of a record held over a blocking reason runs it again as
-	// blocked.
-	StateBlocked: {StateHeld},
-	// A discard closes a held record or an unknown outcome.
 	StateDiscarded: {StateHeld, StateCompleted},
 }
 
@@ -426,20 +415,6 @@ func (l *Ledger) Release(ctx context.Context, by string) (ReleaseResult, error) 
 	return out, err
 }
 
-// isHeld reports whether the hold marker stands, inside a caller's
-// transaction: what a refused write asks before it calls itself a failure.
-func isHeld(ctx context.Context, q rowQuerier) (bool, error) {
-	_, ok, err := readHold(ctx, q)
-	return ok, err
-}
-
-// Held reports whether the hold marker stands. Its signature is
-// OutboxOptions.Paused's.
-func (l *Ledger) Held(ctx context.Context) (bool, error) {
-	_, ok, err := l.HoldMarker(ctx)
-	return ok, err
-}
-
 // HoldMarker reads the standing hold, if any.
 func (l *Ledger) HoldMarker(ctx context.Context) (Hold, bool, error) {
 	return readHold(ctx, l.db)
@@ -481,21 +456,16 @@ type decision struct {
 	note           string
 }
 
-func recordDecision(ctx context.Context, tx Tx, d decision) error {
-	_, err := insertDecision(ctx, tx, d)
-	return err
-}
-
-func insertDecision(ctx context.Context, tx Tx, d decision) (int64, error) {
-	res, err := tx.ExecContext(ctx, `
+func recordDecision(ctx context.Context, tx *sql.Tx, d decision) error {
+	_, err := tx.ExecContext(ctx, `
 INSERT INTO decisions (action, event_id, decided_by, decided_at, from_state, from_reason, from_outcome, to_state, superseded_task_id, note)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		d.action, nullableID64(d.eventID), d.by, d.at, string(d.fromState), d.fromReason, string(d.fromOutcome),
 		string(d.toState), nullableID64(d.supersededTask), d.note)
 	if err != nil {
-		return 0, fmt.Errorf("connector: record the decision: %w", err)
+		return fmt.Errorf("connector: record the decision: %w", err)
 	}
-	return res.LastInsertId()
+	return nil
 }
 
 // Connection states the run command reports for status.

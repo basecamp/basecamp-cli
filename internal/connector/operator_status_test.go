@@ -26,10 +26,10 @@ func TestInvariant8StatusReadsBesideAWriterAndShowsNoSecrets(t *testing.T) {
 	require.NoError(t, l.NotePollServed(ctx, testKey(), 41))
 	require.NoError(t, l.NoteConnection(ctx, ConnectionRunning, ""))
 
-	unknownOutcome(t, l, 2)
+	olderUnknownOutcome(t, l, 2)
 	opAdmit(t, l, 1, "recording:1")
-	launch := launchOf(t, l, 1)
-	require.NoError(t, l.MarkRunning(ctx, launch.AttemptID, AttemptProcess{PID: 4242, PGID: 4242, StartedAt: time.Now()}))
+	launch := olderLaunch(t, l, 1)
+	olderRunning(t, l, launch.AttemptID, 4242, time.Time{})
 	seenRecord(t, l, 5)
 	_, err = l.Admission().Commit(ctx, blockedVerdict(5, 0, "read_failed"))
 	require.NoError(t, err)
@@ -37,6 +37,9 @@ func TestInvariant8StatusReadsBesideAWriterAndShowsNoSecrets(t *testing.T) {
 	seenRecord(t, l, 4)
 	_, err = l.SetHold(ctx, opBy, HoldByOperator)
 	require.NoError(t, err)
+
+	var hash string
+	require.NoError(t, l.db.QueryRowContext(ctx, `SELECT token_sha256 FROM tasks WHERE id = ?`, launch.TaskID).Scan(&hash))
 
 	// A writer holds the write lock while status reads.
 	writer, err := l.db.BeginTx(ctx, nil)
@@ -74,8 +77,7 @@ func TestInvariant8StatusReadsBesideAWriterAndShowsNoSecrets(t *testing.T) {
 	out := string(raw)
 	assert.NotContains(t, out, position)
 	assert.NotContains(t, out, "please look", "no snapshot content")
-	assert.NotContains(t, out, tokenHash(launch.Token))
-	assert.NotContains(t, out, launch.Token)
+	assert.NotContains(t, out, hash, "no token hash")
 }
 
 func TestOpenLedgerReadOnlyCreatesNothing(t *testing.T) {
@@ -132,22 +134,18 @@ func TestOpenLedgerRefusesANewerSchema(t *testing.T) {
 }
 
 // Every process read back out of the ledger is an identity the one-owner
-// rule will answer about. The stamp stored is the kernel's — startedStamp
-// writes no other — so each read-back path marks it exact. A path that
-// rebuilds driver.Process by hand loses that bit, and the rule then calls a
-// live worker neither gone nor running (driver.ErrIdentityUnknown): status
-// reported every worker "unverified" and a redispatch refused to stop the
-// worker it replaced.
+// rule will answer about. The stamp stored is the kernel's, since an older
+// build wrote no other, so each read-back path marks it exact. A path that
+// rebuilds procid.Process by hand loses that bit, and the rule then calls a
+// live worker neither gone nor running (procid.ErrIdentityUnknown): status
+// reported every worker "unverified".
 func TestEveryProcessReadBackOutOfTheLedgerIsAnIdentity(t *testing.T) {
 	at := time.Now().UTC()
-	assert.True(t, AttemptProcess{PID: 7, PGID: 7, StartedAt: at, StartedExact: true}.Identity().StartedExact)
-	assert.True(t, LiveWorker{PID: 7, PGID: 7, StartedAt: at}.Identity().StartedExact)
 	assert.True(t, TaskStatus{PID: 7, PGID: 7, ProcessStartedAt: &at}.WorkerIdentity().StartedExact)
 	assert.True(t, TaskStatus{TakerPID: 7, TakerPGID: 7, TakerStartedAt: &at}.TakerIdentity().StartedExact)
 
 	// And a record with no stamp is no identity at all, rather than one the
 	// rule would answer about.
-	assert.False(t, AttemptProcess{PID: 7, PGID: 7}.Identity().StartedExact)
 	assert.False(t, TaskStatus{PID: 7, PGID: 7}.WorkerIdentity().StartedExact)
 	assert.False(t, TaskStatus{TakerPID: 7, TakerPGID: 7}.TakerIdentity().StartedExact)
 }
@@ -155,21 +153,21 @@ func TestEveryProcessReadBackOutOfTheLedgerIsAnIdentity(t *testing.T) {
 // A token whose holder could not be accounted for is held, and status is
 // where the person who must settle it reads that. The zero taker cannot say
 // it: "nothing took the token" and "the token is out and nobody can name who
-// has it" are opposite facts, and the ledger carries the difference the
-// release point acts on (TokenHolder.Unaccounted) all the way out.
+// has it" are opposite facts, and status carries the difference an older
+// build recorded all the way out.
 func TestStatusCarriesATokenHolderThatCannotBeAccountedFor(t *testing.T) {
 	ctx := context.Background()
 	l := newTestLedger(t)
 	opAdmit(t, l, 1, "recording:1")
-	launch := launchOf(t, l, 1)
-	require.NoError(t, l.MarkRunning(ctx, launch.AttemptID, AttemptProcess{PID: 4242, PGID: 4242, StartedAt: time.Now(), StartedExact: true}))
+	launch := olderLaunch(t, l, 1)
+	olderRunning(t, l, launch.AttemptID, 4242, time.Now())
 
 	before, err := l.Status(ctx)
 	require.NoError(t, err)
 	require.Len(t, before.Tasks, 1)
 	assert.False(t, before.Tasks[0].TakerUnaccounted, "nothing has taken the token yet")
 
-	require.NoError(t, l.MarkTakerUnaccounted(ctx, launch.AttemptID))
+	olderTakerUnaccounted(t, l, launch.AttemptID)
 	after, err := l.Status(ctx)
 	require.NoError(t, err)
 	require.Len(t, after.Tasks, 1)

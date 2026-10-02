@@ -70,8 +70,7 @@ var ErrLockUnavailable = errors.New("this host cannot lock the connector's polic
 //
 // Until #815 removed them, `connect redispatch` and the running connector's
 // dispatcher took it too, each across one file read and one ledger
-// transaction; TryLock was the dispatcher's form. The connector reads
-// connect.json without it now.
+// transaction. The connector reads connect.json without it now.
 //
 // Other locks are taken UNDER this one and never the other way about: the
 // credential key's lock on setup's final write. That one order is what keeps
@@ -111,19 +110,6 @@ const lockPoll = 20 * time.Millisecond
 // turn, which is what the lock is for. A second setup whose predecessor is
 // still going after LockWait is refused.
 func Lock(ctx context.Context, path string) (unlock func(), err error) {
-	return lock(ctx, path, LockWait)
-}
-
-// TryLock takes the lock if it is free and reports ErrSetupRunning if it is
-// not, without waiting. It was the dispatcher's form, so a pass never parked
-// behind a `connect setup`'s network checks; since #815 removed the
-// dispatcher only this package's tests call it, to probe the lock.
-// It takes no context because it does not wait: there is nothing to cancel.
-func TryLock(path string) (unlock func(), err error) {
-	return lock(context.Background(), path, 0)
-}
-
-func lock(ctx context.Context, path string, wait time.Duration) (unlock func(), err error) {
 	if err := ensurePrivateDirs(path); err != nil {
 		return nil, err
 	}
@@ -140,7 +126,7 @@ func lock(ctx context.Context, path string, wait time.Duration) (unlock func(), 
 		return nil, fmt.Errorf("%w: %s: %w", ErrLockUnavailable, lockPath, err)
 	}
 	lock := flock.New(lockPath, flock.SetPermissions(0o600))
-	deadline := time.Now().Add(wait)
+	deadline := time.Now().Add(LockWait)
 	for {
 		// Before the attempt, not only after it: a context that has already
 		// ended must not come away holding the lock and go on to act under

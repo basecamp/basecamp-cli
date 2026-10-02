@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/procid"
 )
 
 // OpenLedgerReadOnly opens an existing ledger for reading only: no migration,
@@ -170,7 +170,7 @@ type TaskStatus struct {
 	PID       int    `json:"pid,omitempty"`
 	PGID      int    `json:"pgid,omitempty"`
 	// ProcessStartedAt is the start time recorded with the pid: with it, the
-	// pid is an identity (driver.OwnsWorker).
+	// pid is an identity (procid.OwnsWorker).
 	ProcessStartedAt *time.Time `json:"process_started_at,omitempty"`
 	// TakerPID, TakerPGID and TakerStartedAt are the process the task token
 	// went to, where one took it: a worker's MCP server, which lives in a
@@ -194,22 +194,33 @@ type TaskStatus struct {
 }
 
 // WorkerIdentity is the attempt's recorded worker, for the one-owner rule.
-func (t TaskStatus) WorkerIdentity() driver.Process {
+func (t TaskStatus) WorkerIdentity() procid.Process {
 	return statusIdentity(t.PID, t.PGID, t.ProcessStartedAt)
 }
 
 // TakerIdentity is the process the task token went to, for the same rule.
 // It says nothing about TakerUnaccounted, which is a fact of the ledger and
 // not a question for the kernel: a caller asks that first.
-func (t TaskStatus) TakerIdentity() driver.Process {
+func (t TaskStatus) TakerIdentity() procid.Process {
 	return statusIdentity(t.TakerPID, t.TakerPGID, t.TakerStartedAt)
 }
 
-func statusIdentity(pid, pgid int, started *time.Time) driver.Process {
+// statusIdentity is the one way a process read back out of the ledger becomes
+// an identity the one-owner rule can answer about (procid.OwnsWorker).
+//
+// The exactness bit is not stored beside the stamp and does not need to be:
+// an older build wrote a start time only when the kernel gave it, so a stamp
+// that comes back out of the ledger is the kernel's by construction and a
+// record with no stamp has no identity at all. Both read-back paths, the
+// worker and the taker, go through here, because a path that rebuilds
+// procid.Process by hand drops StartedExact, and a record without it is
+// neither gone nor running (procid.ErrIdentityUnknown): status would call
+// every live worker "unverified".
+func statusIdentity(pid, pgid int, started *time.Time) procid.Process {
 	if started == nil {
-		return driver.Process{PID: pid, PGID: pgid}
+		return procid.Process{PID: pid, PGID: pgid}
 	}
-	return recordedIdentity(pid, pgid, *started)
+	return procid.Process{PID: pid, PGID: pgid, StartedAt: *started, StartedExact: !started.IsZero()}
 }
 
 // IntentStatus is a lifecycle message waiting for a person. The body is not
@@ -629,22 +640,4 @@ FROM task_events WHERE task_id = ? ORDER BY event_id`, taskID)
 		out = append(out, e)
 	}
 	return out, rows.Err()
-}
-
-// UnfinishedFromOthers counts the records not yet finished that someone other
-// than operatorID asked for: admitted, queued, held or dispatched, or blocked
-// after its worker failed to start, by the person admission trusted at the
-// gate (the performer, else the creator). A record only seen, or blocked on
-// any other reason, is judged again under the trust the connector runs with
-// now, so it isn't counted: one stuck request from someone else would
-// otherwise keep dangerous mode off for good.
-func (l *Ledger) UnfinishedFromOthers(ctx context.Context, operatorID int64) (int, error) {
-	var n int
-	err := l.db.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM events
-WHERE (state IN (?, ?, ?, ?) OR (state = ? AND reason = ?))
-  AND COALESCE(performed_by_id, creator_id) <> ?`,
-		string(StateAdmitted), string(StateQueued), string(StateHeld), string(StateDispatched),
-		string(StateBlocked), ReasonSpawnFailed, operatorID).Scan(&n)
-	return n, err
 }

@@ -1,6 +1,6 @@
 //go:build darwin
 
-package driver
+package procid
 
 import (
 	"os/exec"
@@ -13,7 +13,7 @@ import (
 )
 
 // macOS refuses any signal to a process group whose only members are
-// zombies. That refusal is the absent group it is on Linux: signalGroup
+// zombies. That refusal is the absent group it is on Linux: zeroSignalGroup
 // answers ESRCH, so the group can be confirmed gone.
 func TestAZombieOnlyGroupIsNoSuchGroupOnMacOS(t *testing.T) {
 	leader := exec.CommandContext(t.Context(), "/bin/sleep", "300")
@@ -26,21 +26,21 @@ func TestAZombieOnlyGroupIsNoSuchGroupOnMacOS(t *testing.T) {
 	require.Eventually(t, func() bool { _, err := processStartTime(pgid); return err != nil }, 5*time.Second, 10*time.Millisecond)
 	require.ErrorIs(t, syscall.Kill(-pgid, 0), syscall.EPERM, "macOS refuses a zombie-only group")
 
-	assert.ErrorIs(t, signalGroup(pgid, 0), syscall.ESRCH)
+	assert.ErrorIs(t, zeroSignalGroup(pgid), syscall.ESRCH)
 	assert.NoError(t, groupGone(pgid))
 }
 
 // A group whose leader is a zombie but whose child still runs is not gone:
-// the signal reaches the child.
-func TestAGroupWithALiveMemberIsStillSignaledOnMacOS(t *testing.T) {
+// the zero signal reaches the child.
+func TestAGroupWithALiveMemberIsStillThereOnMacOS(t *testing.T) {
 	leader := exec.CommandContext(t.Context(), "/bin/sh", "-c", "/bin/sleep 300 & exit 0")
 	leader.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	require.NoError(t, leader.Start())
 	pgid := leader.Process.Pid
-	t.Cleanup(func() { _ = signalGroup(pgid, syscall.SIGKILL); _ = leader.Wait() })
+	t.Cleanup(func() { _ = syscall.Kill(-pgid, syscall.SIGKILL); _ = leader.Wait() })
 	require.Eventually(t, func() bool { _, err := processStartTime(pgid); return err != nil }, 5*time.Second, 10*time.Millisecond, "the leader has exited")
 
-	err := signalGroup(pgid, 0)
+	err := zeroSignalGroup(pgid)
 	assert.NoError(t, err, "the live child receives it")
 	assert.Error(t, groupGone(pgid), "a group with a live member is not gone")
 }

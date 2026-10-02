@@ -7,7 +7,7 @@
 // Feed rows are pointers — id, type, bucket, creator, recording — and nothing
 // else. No title, no body, no URL, no names. Intake writes that pointer to the
 // ledger if the id is new and hands the id to a queue. That is the whole of
-// the work on the feed's delivery path: a slow admission or a busy dispatcher
+// the work on the feed's delivery path: a slow admission or a slow hand-off
 // is absorbed by the backlog rather than felt by the socket.
 //
 // Absorbed, not unbounded. The backlog is a bounded queue, and at its pause

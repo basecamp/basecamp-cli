@@ -200,33 +200,12 @@ func TestLockRefusesASecondSetup(t *testing.T) {
 	unlockAgain()
 }
 
-// The dispatcher's form: it never waits, so a pass that overlaps a setup
-// gives up its turn instead of parking on a file another process writes.
-func TestTryLockDoesNotWaitForAHolder(t *testing.T) {
-	path, err := Path(configDir(t), "agent")
-	require.NoError(t, err)
-	unlock, err := TryLock(path)
-	require.NoError(t, err)
-
-	// LockWait is left long on purpose: if TryLock ever waited, this would
-	// take it rather than return inside the window asserted below.
-	start := time.Now()
-	_, err = TryLock(path)
-	assert.ErrorIs(t, err, ErrSetupRunning)
-	assert.Less(t, time.Since(start), LockWait/2, "TryLock returns rather than waits")
-
-	unlock()
-	again, err := TryLock(path)
-	require.NoError(t, err)
-	again()
-}
-
-// Lock waits for a holder that finishes inside LockWait, so a `connect
-// setup` does not fail because a dispatcher pass happened to overlap it.
+// Lock waits for a holder that finishes inside LockWait, so a second
+// `connect setup` runs after the first rather than failing.
 func TestLockWaitsForAHolderThatFinishes(t *testing.T) {
 	path, err := Path(configDir(t), "agent")
 	require.NoError(t, err)
-	unlock, err := TryLock(path)
+	unlock, err := Lock(context.Background(), path)
 	require.NoError(t, err)
 
 	released := make(chan struct{})
@@ -275,7 +254,7 @@ func TestCheckPrivateFileCreatesNothingAndHoldsTheRules(t *testing.T) {
 func TestLockStopsWaitingWhenTheContextEnds(t *testing.T) {
 	path, err := Path(configDir(t), "agent")
 	require.NoError(t, err)
-	unlock, err := TryLock(path)
+	unlock, err := Lock(context.Background(), path)
 	require.NoError(t, err)
 	t.Cleanup(unlock)
 
@@ -307,7 +286,7 @@ func TestLockRefusesAnAlreadyEndedContext(t *testing.T) {
 	assert.Nil(t, held)
 
 	// Proof that it refused rather than failed to acquire: the lock is free.
-	free, err := TryLock(path)
+	free, err := Lock(context.Background(), path)
 	require.NoError(t, err)
 	free()
 }
@@ -344,7 +323,7 @@ func TestLockGivesBackALockItAcquiredForAnEndedContext(t *testing.T) {
 	assert.Nil(t, held)
 	require.Equal(t, 2, ctx.looks, "the wait looked before it tried and again once it held")
 
-	free, err := TryLock(path)
+	free, err := Lock(context.Background(), path)
 	require.NoError(t, err, "and gave back what it had taken: nothing is left holding it")
 	free()
 }
@@ -361,7 +340,7 @@ func TestLockRefusesAnEndedContextWithoutTakingTheLock(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Nil(t, held)
 
-	free, err := TryLock(path)
+	free, err := Lock(context.Background(), path)
 	require.NoError(t, err)
 	free()
 }
@@ -376,7 +355,7 @@ func TestAnExpiredWaitOnAnEndedContextReportsTheInterruption(t *testing.T) {
 
 	path, err := Path(configDir(t), "agent")
 	require.NoError(t, err)
-	unlock, err := TryLock(path)
+	unlock, err := Lock(context.Background(), path)
 	require.NoError(t, err)
 	t.Cleanup(unlock)
 

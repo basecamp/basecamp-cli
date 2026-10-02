@@ -85,7 +85,6 @@ type Ledger struct {
 	file   *openLedgerFile
 	closed sync.Once
 	now    func() time.Time
-	hooks  Hooks
 	// blockedScheduleReads counts the reads the retry sweep makes against the
 	// schedule to prune its claims. The sweep must make none when it holds no
 	// claims: the read it used to make was over the whole live backlog, and a
@@ -96,44 +95,25 @@ type Ledger struct {
 // OpenLedger opens (creating if absent) the ledger at path and brings its
 // schema up to date.
 func OpenLedger(path string) (*Ledger, error) {
-	return openLedger(context.Background(), path, true)
+	return openLedger(context.Background(), path)
 }
 
 // ErrLedgerSchema is a ledger whose schema is not the one this binary writes.
 var ErrLedgerSchema = errors.New("the connector ledger's schema is not the version this basecamp writes")
 
-// OpenExistingLedger opens a ledger the connector already created, for a
-// process that reads and reports into it rather than owns it — a worker's
-// MCP server. It never creates the file and never migrates: a different
-// basecamp binary started as a worker must not change the schema under the
-// connector that holds it, so a ledger at any other schema version is
-// refused.
-//
-// Neither the privacy check nor SQLite may create the file on this path: the
-// check only inspects, and the database is opened with mode=rw, so a ledger
-// removed at any moment is an error rather than a new empty one.
-func OpenExistingLedger(ctx context.Context, path string) (*Ledger, error) {
-	return openLedger(ctx, path, false)
-}
-
-// ledgerDSN is the SQLite URI for the ledger at path. owner opens it the way
-// the connector does, creating it when absent; otherwise mode=rw makes SQLite
-// refuse a file that is not there.
+// ledgerDSN is the SQLite URI for the ledger at path, opened the way the
+// connector does, creating it when absent.
 //
 // _txlock=immediate takes the write lock when a transaction opens rather than
 // on its first write. Without it two connectors racing on one file can both
 // start, both read, and one is refused at COMMIT with the work already done.
-func ledgerDSN(path string, owner bool) string {
-	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate"
-	if !owner {
-		dsn += "&mode=rw"
-	}
-	return dsn
+func ledgerDSN(path string) string {
+	return "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate"
 }
 
-// openLedger opens the ledger; owner is the connector itself, which creates
-// and migrates it. Any other opener does neither.
-func openLedger(ctx context.Context, path string, owner bool) (*Ledger, error) {
+// openLedger opens the ledger as the connector does: it creates the file when
+// absent and migrates its schema.
+func openLedger(ctx context.Context, path string) (*Ledger, error) {
 	if path == "" {
 		return nil, errors.New("connector: ledger path is required")
 	}
@@ -158,12 +138,12 @@ func openLedger(ctx context.Context, path string, owner bool) (*Ledger, error) {
 		releaseLedger(file)
 		return nil, fmt.Errorf("connector: %s and %s are one file: %w", abs, file.key, ErrLedgerUnderAnotherName)
 	}
-	if err := checkLedgerFile(file, path, abs, owner); err != nil {
+	if err := checkLedgerFile(file, path, abs, true); err != nil {
 		releaseLedger(file)
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite", ledgerDSN(path, owner))
+	db, err := sql.Open("sqlite", ledgerDSN(path))
 	if err != nil {
 		releaseLedger(file)
 		return nil, fmt.Errorf("connector: open ledger: %w", err)
@@ -173,26 +153,9 @@ func openLedger(ctx context.Context, path string, owner bool) (*Ledger, error) {
 	db.SetMaxOpenConns(1)
 
 	l := &Ledger{db: db, file: file, now: time.Now}
-	if owner {
-		if err := retryBusy(func() error { return l.migrate(ctx) }); err != nil {
-			_ = l.Close()
-			return nil, err
-		}
-	} else {
-		var version int
-		err := retryBusy(func() error {
-			var err error
-			version, err = l.schemaVersion(ctx)
-			return err
-		})
-		if err != nil {
-			_ = l.Close()
-			return nil, fmt.Errorf("connector: read ledger schema: %w", err)
-		}
-		if version != len(migrations) {
-			_ = l.Close()
-			return nil, fmt.Errorf("connector: ledger at schema %d, this basecamp writes %d: %w", version, len(migrations), ErrLedgerSchema)
-		}
+	if err := retryBusy(func() error { return l.migrate(ctx) }); err != nil {
+		_ = l.Close()
+		return nil, err
 	}
 	// The WAL and shared-memory sidecars exist now and were created under the
 	// process umask. The private directory already keeps other users out;
@@ -908,7 +871,7 @@ END;
 	// that is the whole reason it is not blocked_at. blocked_at is when the
 	// record entered its current run of blocked states and survives every
 	// blocked-to-blocked verdict, which is right for what reads it (a
-	// person's authorization, AuthorizedBlocked) and wrong for a window: the
+	// person's authorization, status's authorized_blocked) and wrong for a window: the
 	// reasons carry different ones. A record that spent a week as the
 	// unbounded config_unreadable and then blocks read_failed would be
 	// measured against a week-old clock and get none of the twenty-four

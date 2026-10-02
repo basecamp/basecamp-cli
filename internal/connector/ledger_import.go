@@ -214,11 +214,6 @@ UPDATE outbox SET state = 'canceled', finished_at = ?, note = 'discarded by a pe
 WHERE event_id = ? AND state = 'pending' AND kind IN ('guard_ack', 'holding_reply')`, now, e.EventID); err != nil {
 				return ImportResult{}, fmt.Errorf("connector: cancel lifecycle messages for %d: %w", e.EventID, err)
 			}
-			if l.hooks.RecordDecided != nil {
-				if err := l.hooks.RecordDecided(ctx, tx, RecordDecision{EventID: e.EventID, Action: DecisionDiscard, At: at}); err != nil {
-					return ImportResult{}, err
-				}
-			}
 			if !recorded {
 				if err := recordDecision(ctx, tx, decision{action: "import", eventID: e.EventID, by: by, at: now,
 					fromState: RecordState(state), toState: toState, note: "done"}); err != nil {

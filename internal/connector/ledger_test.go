@@ -296,7 +296,7 @@ func TestASecondNameForALiveLedgerIsRefusedWithoutOpeningIt(t *testing.T) {
 
 	link := filepath.Join(dir, "hard.db")
 	require.NoError(t, os.Link(path, link))
-	_, err = OpenExistingLedger(context.Background(), link)
+	_, err = OpenLedgerReadOnly(context.Background(), link)
 
 	// Refused, because SQLite names its write-ahead log after the path and
 	// one file under two names is two logs — and refused before the check

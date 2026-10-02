@@ -27,7 +27,7 @@ const migrationsBeforeRoutePathsDropped = 12
 func applyMigrationsThrough(t *testing.T, path string, n int) *sql.DB {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
-	old, err := sql.Open("sqlite", ledgerDSN(path, true))
+	old, err := sql.Open("sqlite", ledgerDSN(path))
 	require.NoError(t, err)
 	_, err = old.ExecContext(context.Background(), `CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`)
 	require.NoError(t, err)
