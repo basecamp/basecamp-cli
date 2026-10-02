@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/connector/fakebasecamp"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 )
 
@@ -27,7 +28,7 @@ import (
 func TestConnectSetupSeesTheGlobalBindingThroughALocalEntry(t *testing.T) {
 	s := startConnectSetupServer(t)
 	connectSetupApp(t, s, "agent")
-	trustedLocalConfig(t, fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q,"project_id":"42"}}}`, s.srv.URL))
+	trustedLocalConfig(t, fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q,"project_id":"42"}}}`, s.URL()))
 
 	app := newConnectSetupApp(t, s, "agent")
 	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
@@ -176,9 +177,9 @@ func TestUnusableGlobalConfigIsReportedAsItself(t *testing.T) {
 func TestConnectSetupReportsAnUnusableGlobalConfigAsItself(t *testing.T) {
 	s := startConnectSetupServer(t)
 	bareSetupApp(t, s, "agent")
-	trustedLocalConfig(t, fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q}}}`, s.srv.URL))
+	trustedLocalConfig(t, fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q}}}`, s.URL()))
 	for _, global := range []string{
-		fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q,"account_id":"999"`, s.srv.URL), // never closed
+		fmt.Sprintf(`{"profiles":{"agent":{"base_url":%q,"account_id":"999"`, s.URL()), // never closed
 		`{"profiles":[]}`,   // a shape every writer refuses
 		`{"profiles":null}`, // and so is null
 	} {
@@ -187,7 +188,7 @@ func TestConnectSetupReportsAnUnusableGlobalConfigAsItself(t *testing.T) {
 	}
 }
 
-func assertSetupReportsTheGlobalConfig(t *testing.T, s *connectSetupServer) {
+func assertSetupReportsTheGlobalConfig(t *testing.T, s *fakebasecamp.Server) {
 	t.Helper()
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), serveArg())
 	require.Error(t, err, out)

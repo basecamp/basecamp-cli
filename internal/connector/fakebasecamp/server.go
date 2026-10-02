@@ -153,6 +153,8 @@ type Server struct {
 	events  []*fedEvent
 	conns   map[*cableConn]struct{}
 	tickets map[string]streamTicket
+	// issued is every ticket ever minted, expired or not, for Tickets.
+	issued []string
 	// devices are the agent connection codes issued and not yet spent.
 	devices map[string]bool
 	// serial numbers every token, ticket and code the fake issues.

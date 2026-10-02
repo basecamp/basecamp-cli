@@ -45,6 +45,7 @@ func (c *call) streamTicket() answer {
 	maps.DeleteFunc(c.s.tickets, func(_ string, t streamTicket) bool { return !now.Before(t.expires) })
 	ticket := fmt.Sprintf("fake-ticket-%d", c.s.nextSerialLocked())
 	c.s.tickets[ticket] = streamTicket{caller: c.caller, expires: now.Add(streamTicketLifetime)}
+	c.s.issued = append(c.s.issued, ticket)
 	return c.jsonAnswer(http.StatusOK, map[string]any{
 		"ticket":     ticket,
 		"expires_in": int(streamTicketLifetime / time.Second),
@@ -60,6 +61,17 @@ func (s *Server) ticketLocked(req *http.Request) (int64, bool) {
 		return 0, false
 	}
 	return t.caller, true
+}
+
+// Tickets is every stream ticket issued so far, sorted. A ticket is a
+// bearer credential, so a test that a command never echoes one needs to
+// know what the fake handed out.
+func (s *Server) Tickets() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := slices.Clone(s.issued)
+	slices.Sort(out)
+	return out
 }
 
 // cableConn is one live connection.
