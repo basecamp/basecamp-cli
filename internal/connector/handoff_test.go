@@ -93,6 +93,51 @@ func TestARequestFromBeforeTheRunIsNotHandedOff(t *testing.T) {
 	assert.Equal(t, ReasonBeforeThisRun, r.Reason)
 }
 
+// Grace replaces HandoffGrace when set: a request made thirty seconds
+// before the run started is handed off under a grace of thirty seconds, the
+// boundary included, and not under one of twenty-nine.
+func TestTheGraceSetIsTheOneTheHandoffUses(t *testing.T) {
+	for _, tc := range []struct {
+		grace  time.Duration
+		reason string
+		lines  int
+	}{
+		{grace: 30 * time.Second, reason: ReasonHandedOff, lines: 1},
+		{grace: 29 * time.Second, reason: ReasonBeforeThisRun, lines: 0},
+	} {
+		t.Run(tc.grace.String(), func(t *testing.T) {
+			ledger := newTestLedger(t)
+			admitOn(t, ledger, 1, "recording:1")
+			var out bytes.Buffer
+			opts := handoffOptions(ledger, &out)
+			opts.Grace = tc.grace
+
+			require.NoError(t, handOffReady(context.Background(), opts))
+
+			assert.Len(t, handedOffLines(t, &out), tc.lines)
+			r := getRecord(t, ledger, 1)
+			assert.Equal(t, StateDiscarded, r.State)
+			assert.Equal(t, tc.reason, r.Reason)
+		})
+	}
+}
+
+// With no Grace set, HandoffGrace applies: a request made exactly that long
+// before the run started is still handed off.
+func TestNoGraceSetMeansHandoffGrace(t *testing.T) {
+	ledger := newTestLedger(t)
+	admitOn(t, ledger, 1, "recording:1")
+	var out bytes.Buffer
+	opts := handoffOptions(ledger, &out)
+	// testEvent's requests were made at 10:00.
+	opts.Started = time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC).Add(HandoffGrace)
+
+	require.NoError(t, handOffReady(context.Background(), opts))
+
+	assert.Len(t, handedOffLines(t, &out), 1)
+	assert.Equal(t, ReasonHandedOff, getRecord(t, ledger, 1).Reason)
+}
+
 // Only the projects the agent serves, narrowed to the run's --project.
 func TestOnlyServedProjectsAreHandedOff(t *testing.T) {
 	ledger := newTestLedger(t)
