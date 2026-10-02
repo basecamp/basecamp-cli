@@ -52,6 +52,10 @@
 // removed. Gate holds a route's requests open until it is released. Before
 // runs a function as a route is reached, for a change that has to land in
 // the middle of a command. DropCable severs the live connections and
-// StopPings silences them. Every request is logged, and Await waits, with a
-// deadline and never a sleep, for whatever a test needs to have happened.
+// StopPings silences them. Disconnect does what disconnecting an agent in
+// Basecamp does: its tokens stop working and its secret stops minting. An
+// agent's client can mint tokens that say they last as little as a second
+// (AgentClient.TokenLifetime), so a renewal comes due within a test.
+// Every request is logged, and Await waits, with a deadline and never a
+// sleep, for whatever a test needs to have happened.
 package fakebasecamp

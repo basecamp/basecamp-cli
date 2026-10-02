@@ -2,7 +2,9 @@ package fakebasecamp
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
+	"time"
 )
 
 // The authorization server: discovery, the agent connection ceremony, and
@@ -80,9 +82,10 @@ func (c *call) agentConnectionTokens() answer {
 }
 
 // token mints a client_credentials token for an agent's client. A secret
-// the client does not hold now, rotated away or never issued, is
-// invalid_client. The token carries the scope the request asks for, or the
-// client's own when it asks for none; asking for more than the client was
+// the client does not hold now, rotated away, cleared by a disconnect or
+// never issued, is invalid_client. The token carries the scope the request
+// asks for, or the client's own when it asks for none, and says it lasts
+// the client's TokenLifetime; asking for more than the client was
 // approved for, or for a scope there is no such thing as, is invalid_scope
 // (RFC 6749 section 5.2), as Basecamp refuses to widen a credential.
 func (c *call) token() answer {
@@ -91,7 +94,7 @@ func (c *call) token() answer {
 		return oauthError(http.StatusBadRequest, "unsupported_grant_type")
 	}
 	client, ok := c.s.world.Agents[form.Get("client_id")]
-	if !ok || client.Secret != form.Get("client_secret") {
+	if !ok || client.Secret == "" || client.Secret != form.Get("client_secret") {
 		return oauthError(http.StatusUnauthorized, "invalid_client")
 	}
 	scope := client.Scope
@@ -102,11 +105,15 @@ func (c *call) token() answer {
 		scope = asked
 	}
 	token := fmt.Sprintf("fake-token-%d", c.s.nextSerialLocked())
-	c.s.world.Tokens[token] = &Token{PersonID: client.PersonID, Scope: scope}
+	c.s.world.Tokens[token] = &Token{PersonID: client.PersonID, Scope: scope, ClientID: client.ID}
+	lifetime := int64(time.Hour / time.Second)
+	if client.TokenLifetime > 0 {
+		lifetime = max(int64(client.TokenLifetime/time.Second), 1)
+	}
 	return c.jsonAnswer(http.StatusOK, map[string]any{
 		"access_token": token,
 		"token_type":   "bearer",
-		"expires_in":   3600,
+		"expires_in":   lifetime,
 		"resource":     fmt.Sprintf("urn:bc:agent:%d", client.PersonID),
 		"scope":        scope,
 	})
@@ -123,4 +130,27 @@ func within(asked, approved string) bool {
 	default:
 		return false
 	}
+}
+
+// Disconnect disconnects an agent's client, as Basecamp's disconnect does:
+// every token it minted is revoked, so a request carrying one is answered
+// 401, and its secret is cleared, so a mint is refused invalid_client. The
+// live connections stay up, as they do on Basecamp: a stream ticket is not
+// a token. A later connection ceremony hands the client over again.
+func (s *Server) Disconnect(clientID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	client, ok := s.world.Agents[clientID]
+	if !ok {
+		s.r.Errorf("fakebasecamp: disconnecting client %q, which the world does not hold", clientID)
+		return
+	}
+	s.revokeLocked(clientID)
+	client.Secret = ""
+	s.notifyLocked()
+}
+
+// revokeLocked forgets every token a client minted.
+func (s *Server) revokeLocked(clientID string) {
+	maps.DeleteFunc(s.world.Tokens, func(_ string, t *Token) bool { return t.ClientID == clientID })
 }

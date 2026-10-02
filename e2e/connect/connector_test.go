@@ -65,7 +65,14 @@ type Output struct {
 // harness's home.
 func (h *Harness) Connect(t *testing.T, extra ...string) *Connector {
 	t.Helper()
-	return h.Start(t, h.Home, append([]string{"connect", "-P", Agent}, extra...)...)
+	return h.ConnectProfile(t, DefaultAgent, extra...)
+}
+
+// ConnectProfile starts `basecamp connect` for p's profile with extra
+// flags, in the harness's home.
+func (h *Harness) ConnectProfile(t *testing.T, p Profile, extra ...string) *Connector {
+	t.Helper()
+	return h.Start(t, h.Home, append([]string{"connect", "-P", p.Name}, extra...)...)
 }
 
 // Start starts a CLI command in the background, in dir, with the harness's
@@ -208,6 +215,9 @@ func (c *Connector) WaitStreaming(t *testing.T, nth int) {
 	t.Helper()
 	c.WaitLogged(t, MsgStreaming, nth)
 }
+
+// Pid is the process's id.
+func (c *Connector) Pid() int { return c.cmd.Process.Pid }
 
 // Signal sends sig to the process as it stands. Interrupt is the safe way
 // to send SIGINT.

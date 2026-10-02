@@ -28,6 +28,18 @@ const waitFor = 30 * time.Second
 // Agent is the profile every test connects the default world's agent as.
 const Agent = "agent"
 
+// Profile is an agent a test connects, and the profile it connects it as.
+type Profile struct {
+	// Name is the CLI profile, as -P takes it.
+	Name string
+	// ClientID is the agent's OAuth client in the fake's world: the one the
+	// operator approves in the profile's connection ceremony.
+	ClientID string
+}
+
+// DefaultAgent is the default world's agent, as the Agent profile.
+var DefaultAgent = Profile{Name: Agent, ClientID: fakebasecamp.AgentClientID}
+
 // Harness is one test's Basecamp, and a home of its own to run the CLI in:
 // its config, its credentials and the connector's state are the test's
 // alone.
@@ -119,16 +131,33 @@ func (h *Harness) MustRun(t *testing.T, args ...string) Result {
 }
 
 // Setup connects the default world's agent as the Agent profile and sets
-// it up to serve the default project for the operator, the way a person
-// does: the connection ceremony with no browser, which the fake approves as
-// soon as it is asked, then `connect setup`.
+// it up to serve the default project for the operator.
 func (h *Harness) Setup(t *testing.T) {
 	t.Helper()
-	h.MustRun(t, "auth", "agent", "connect", "-P", Agent, "--no-browser")
-	h.MustRun(t, "connect", "setup", "-P", Agent,
+	h.SetupProfile(t, DefaultAgent)
+}
+
+// SetupProfile connects p's agent as p's profile and sets it up to serve
+// the default project for the operator, the way a person does: the
+// connection ceremony with no browser, in which the fake's operator
+// approves p's agent as soon as it is asked, then `connect setup`.
+func (h *Harness) SetupProfile(t *testing.T, p Profile) {
+	t.Helper()
+	h.Fake.Update(func(w *fakebasecamp.World) { w.Connection.ClientID = p.ClientID })
+	h.MustRun(t, "auth", "agent", "connect", "-P", p.Name, "--no-browser")
+	h.MustRun(t, "connect", "setup", "-P", p.Name,
 		"--operator", strconv.FormatInt(fakebasecamp.OperatorID, 10),
 		"--serve", strconv.FormatInt(fakebasecamp.ProjectID, 10),
 		"--json")
+}
+
+// AnotherComputer is a home of its own against the same Basecamp: the
+// operator's other computer, with nothing of this one's config,
+// credentials or connector state.
+func (h *Harness) AnotherComputer(t *testing.T) *Harness {
+	t.Helper()
+	home := t.TempDir()
+	return &Harness{t: t, Fake: h.Fake, Home: home, env: cliEnv(home, h.Fake.URL())}
 }
 
 // ConnectJSON is where `connect setup` writes the Agent profile's
