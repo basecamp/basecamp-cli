@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -363,4 +364,154 @@ func TestSubtasksShowAcceptsACardSubtaskURL(t *testing.T) {
 		"https://3.basecamp.com/99999/buckets/89/card_tables/cards/123#__recording_456"))
 
 	assert.Equal(t, subtaskPath(456), transport.last(t).Path)
+}
+
+// stepsJSON renders n subtasks with ids from 1.
+func stepsJSON(n int) string {
+	items := make([]string, n)
+	for i := range items {
+		items[i] = fmt.Sprintf(`{"id":%d,"title":"Step %d","type":"Kanban::Step","position":%d,"completed":false}`,
+			i+1, i+1, i+1)
+	}
+	return "[" + strings.Join(items, ",") + "]"
+}
+
+// parentJSON is a card or to-do embedding `inline` steps out of `count`.
+func parentJSON(id int64, typ string, inline, count int) string {
+	return fmt.Sprintf(`{"id":%d,"title":"Big checklist","type":%q,"subtasks_count":%d,"bucket":{"id":123,"name":"Test Project","type":"Project"},"steps":%s}`,
+		id, typ, count, stepsJSON(inline))
+}
+
+func cardGetRoute(id int64, body string) stubRoute {
+	return stubRoute{method: http.MethodGet, path: fmt.Sprintf("/99999/card_tables/cards/%d", id), status: http.StatusOK, body: body}
+}
+
+func todoGetRoute(id int64, body string) stubRoute {
+	return stubRoute{method: http.MethodGet, path: fmt.Sprintf("/99999/todos/%d", id), status: http.StatusOK, body: body}
+}
+
+func decodeSteps(t *testing.T, raw json.RawMessage) []map[string]any {
+	t.Helper()
+	var steps []map[string]any
+	require.NoError(t, json.Unmarshal(raw, &steps), string(raw))
+	return steps
+}
+
+// A card embeds at most 100 steps; when subtasks_count says there are more,
+// `cards steps` reads the whole list instead of reporting the first 100.
+func TestCardsStepsReadsEveryStepPastTheEmbedCap(t *testing.T) {
+	app, transport, out := setupPersonalFeedApp(t,
+		projectsRoute(),
+		cardGetRoute(777, parentJSON(777, "Kanban::Card", 100, 135)),
+		subtaskRoute(http.MethodGet, subtasksListPath(777), http.StatusOK, stepsJSON(135)))
+
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "steps", "777", "--in", "123"))
+
+	data, summary := subtaskEnvelope(t, out)
+	steps := decodeSteps(t, data)
+	require.Equal(t, 135, len(steps))
+	assert.Equal(t, "Step 135", steps[134]["title"])
+	assert.Equal(t, "135 steps on card #777", summary)
+	assert.Len(t, transport.queriesFor(subtasksListPath(777)), 1)
+}
+
+// A complete embed costs no extra request.
+func TestCardsStepsTrustsACompleteEmbed(t *testing.T) {
+	app, transport, out := setupPersonalFeedApp(t,
+		projectsRoute(),
+		cardGetRoute(777, parentJSON(777, "Kanban::Card", 3, 3)))
+
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "steps", "777", "--in", "123"))
+
+	data, summary := subtaskEnvelope(t, out)
+	assert.Equal(t, 3, len(decodeSteps(t, data)))
+	assert.Equal(t, "3 steps on card #777", summary)
+	assert.Empty(t, transport.queriesFor(subtasksListPath(777)))
+}
+
+func TestCardsShowCarriesEveryStepPastTheEmbedCap(t *testing.T) {
+	app, _, out := setupPersonalFeedApp(t,
+		cardGetRoute(777, parentJSON(777, "Kanban::Card", 100, 135)),
+		subtaskRoute(http.MethodGet, subtasksListPath(777), http.StatusOK, stepsJSON(135)))
+
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "show", "777"))
+
+	data, _ := subtaskEnvelope(t, out)
+	var card struct {
+		Steps         json.RawMessage `json:"steps"`
+		SubtasksCount int             `json:"subtasks_count"`
+	}
+	require.NoError(t, json.Unmarshal(data, &card))
+	assert.Equal(t, 135, len(decodeSteps(t, card.Steps)))
+	assert.Equal(t, 135, card.SubtasksCount)
+}
+
+func TestTodosShowCarriesEveryStepPastTheEmbedCap(t *testing.T) {
+	app, _, out := setupPersonalFeedApp(t,
+		todoGetRoute(888, parentJSON(888, "Todo", 100, 135)),
+		subtaskRoute(http.MethodGet, subtasksListPath(888), http.StatusOK, stepsJSON(135)))
+
+	require.NoError(t, executeRecordingCommand(NewTodosCmd(), app, "show", "888"))
+
+	data, _ := subtaskEnvelope(t, out)
+	var todo struct {
+		Steps json.RawMessage `json:"steps"`
+	}
+	require.NoError(t, json.Unmarshal(data, &todo))
+	assert.Equal(t, 135, len(decodeSteps(t, todo.Steps)))
+}
+
+func TestTodosShowTrustsACompleteEmbed(t *testing.T) {
+	app, transport, _ := setupPersonalFeedApp(t,
+		todoGetRoute(888, parentJSON(888, "Todo", 2, 2)))
+
+	require.NoError(t, executeRecordingCommand(NewTodosCmd(), app, "show", "888"))
+
+	assert.Empty(t, transport.queriesFor(subtasksListPath(888)))
+}
+
+// A known cut-off that can't be completed is an error, not a short list.
+func TestCardsStepsFailsWhenAKnownCutOffCannotBeRead(t *testing.T) {
+	app, _, _ := setupPersonalFeedApp(t,
+		projectsRoute(),
+		cardGetRoute(777, parentJSON(777, "Kanban::Card", 100, 135)))
+
+	require.Error(t, executeRecordingCommand(NewCardsCmd(), app, "steps", "777", "--in", "123"))
+}
+
+func TestShowCarriesEveryStepPastTheEmbedCap(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, path, typ string
+		id                    int64
+	}{
+		{"card", "card", "/99999/card_tables/cards/777.json", "Kanban::Card", 777},
+		{"todo", "todo", "/99999/todos/888.json", "Todo", 888},
+		{"todolist todo", "todo", "/99999/todos/889.json", "Todolist::Todo", 889},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, _, out := setupPersonalFeedApp(t,
+				stubRoute{method: http.MethodGet, path: tc.path, status: http.StatusOK, body: parentJSON(tc.id, tc.typ, 100, 135)},
+				subtaskRoute(http.MethodGet, subtasksListPath(tc.id), http.StatusOK, stepsJSON(135)))
+
+			require.NoError(t, executeRecordingCommand(NewShowCmd(), app, tc.kind, fmt.Sprint(tc.id)))
+
+			data, _ := subtaskEnvelope(t, out)
+			var parent struct {
+				Steps json.RawMessage `json:"steps"`
+			}
+			require.NoError(t, json.Unmarshal(data, &parent))
+			steps := decodeSteps(t, parent.Steps)
+			require.Equal(t, 135, len(steps))
+			assert.Equal(t, "Step 135", steps[134]["title"])
+		})
+	}
+}
+
+func TestShowTrustsACompleteEmbed(t *testing.T) {
+	app, transport, _ := setupPersonalFeedApp(t,
+		stubRoute{method: http.MethodGet, path: "/99999/card_tables/cards/777.json", status: http.StatusOK, body: parentJSON(777, "Kanban::Card", 3, 3)})
+
+	require.NoError(t, executeRecordingCommand(NewShowCmd(), app, "card", "777"))
+
+	assert.Empty(t, transport.queriesFor(subtasksListPath(777)))
 }

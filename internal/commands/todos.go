@@ -1159,6 +1159,9 @@ You can pass either a todo ID or a Basecamp URL:
 		if err != nil {
 			return convertSDKError(err)
 		}
+		if todo.Steps, err = everySubtask(cmd.Context(), app, todoID, todo.Steps, todo.SubtasksCount); err != nil {
+			return err
+		}
 
 		enrichment := fetchCommentsForRecording(cmd.Context(), app, todoIDStr, cf)
 

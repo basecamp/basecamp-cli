@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -246,6 +247,10 @@ You can also pass a Basecamp URL directly:
 						}
 					}
 				}
+			}
+
+			if err := expandCutOffSteps(cmd.Context(), app, data); err != nil {
+				return err
 			}
 
 			// Skip comment fetch for non-commentable types.
@@ -534,4 +539,39 @@ func joinShowNotices(parts ...string) string {
 
 func commentsFetchFailedNotice(count int, id string) string {
 	return fmt.Sprintf("%s available, but fetching them failed — view: basecamp comments list --all %s", pluralizeComments(count), id)
+}
+
+// expandCutOffSteps replaces a card's or to-do's embedded steps with the full
+// list when the embed is cut off (see fullSubtasks), keeping the raw map shape.
+func expandCutOffSteps(ctx context.Context, app *appctx.App, data map[string]any) error {
+	switch data["type"] {
+	case "Kanban::Card", "Todo", "Todolist::Todo":
+	default:
+		return nil
+	}
+	idNum, _ := data["id"].(json.Number)
+	parentID, _ := idNum.Int64()
+	if parentID == 0 {
+		return nil
+	}
+	countNum, _ := data["subtasks_count"].(json.Number)
+	count, _ := countNum.Int64()
+	embedded, _ := data["steps"].([]any)
+
+	full, err := fullSubtasks(ctx, app, parentID, len(embedded), int(count))
+	if err != nil || full == nil {
+		return err
+	}
+	raw, err := json.Marshal(full)
+	if err != nil {
+		return err
+	}
+	var steps []any
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&steps); err != nil {
+		return err
+	}
+	data["steps"] = steps
+	return nil
 }
