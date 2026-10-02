@@ -60,7 +60,7 @@ func checkinsNotifyRoute(body string) stubRoute {
 // explicit --no-... must send false. A single bool could not tell those apart
 // and would silently overwrite a setting nobody asked about.
 //
-// The keys are the two bc3's Questions::NotificationSettingsController reads.
+// bc3's Questions::NotificationSettingsController reads only these two keys.
 // It ignores any other key and still answers 200, so a wrong name is a silent
 // no-op rather than an error.
 func TestCheckinsQuestionNotifyIsTriState(t *testing.T) {
