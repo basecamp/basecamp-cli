@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -612,4 +613,39 @@ func subtaskIDArg(arg string) (int64, error) {
 		)
 	}
 	return id, nil
+}
+
+// everySubtask returns all of a card's or to-do's subtasks: the embedded steps
+// when they are complete, otherwise the full list.
+func everySubtask(ctx context.Context, app *appctx.App, parentID int64, embedded []basecamp.Subtask, count int) ([]basecamp.Subtask, error) {
+	full, err := fullSubtasks(ctx, app, parentID, len(embedded), count)
+	if err != nil || full == nil {
+		return embedded, err
+	}
+	return full, nil
+}
+
+// fullSubtasks reads every subtask of a card or to-do whose embedded steps are
+// cut off, and returns nil when the embed is already complete. A parent embeds
+// at most basecamp.DefaultSubtaskLimit subtasks under steps, with nothing
+// marking the list as cut off; subtasks_count is the real total. A count above
+// the embed means steps are missing. With no count at all, an embed at exactly
+// the cap may be missing some, so read the list — but that is a guess, and a
+// failed read leaves the embed standing rather than failing the command.
+func fullSubtasks(ctx context.Context, app *appctx.App, parentID int64, embedded, count int) ([]basecamp.Subtask, error) {
+	known := count > embedded
+	guessed := count == 0 && embedded >= basecamp.DefaultSubtaskLimit
+	if !known && !guessed {
+		return nil, nil
+	}
+	result, err := app.Account().Subtasks().List(ctx, parentID, &basecamp.SubtaskListOptions{Limit: -1})
+	switch {
+	case err != nil && guessed:
+		return nil, nil
+	case err != nil:
+		return nil, convertSDKError(err)
+	case result.Subtasks == nil:
+		return []basecamp.Subtask{}, nil
+	}
+	return result.Subtasks, nil
 }

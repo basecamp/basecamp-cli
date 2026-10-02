@@ -754,6 +754,9 @@ You can pass either a card ID or a Basecamp URL:
 		if err != nil {
 			return convertSDKError(err)
 		}
+		if card.Steps, err = everySubtask(cmd.Context(), app, cardID, card.Steps, card.SubtasksCount); err != nil {
+			return err
+		}
 
 		enrichment := fetchCommentsForRecording(cmd.Context(), app, cardIDStr, cf)
 
@@ -2827,9 +2830,13 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 			if err != nil {
 				return convertSDKError(err)
 			}
+			steps, err := everySubtask(cmd.Context(), app, cardIDInt, card.Steps, card.SubtasksCount)
+			if err != nil {
+				return err
+			}
 
-			return app.OK(card.Steps,
-				output.WithSummary(fmt.Sprintf("%d steps on card #%s", len(card.Steps), cardID)),
+			return app.OK(steps,
+				output.WithSummary(fmt.Sprintf("%d steps on card #%s", len(steps), cardID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "create",
