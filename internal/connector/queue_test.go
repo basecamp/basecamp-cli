@@ -299,3 +299,19 @@ func TestAPanickingPauseCallbackLeavesNoPhantomBacklog(t *testing.T) {
 	assert.Equal(t, int32(2), resumes.Load())
 	assert.Equal(t, 1, queue.Depth())
 }
+
+// The report is the queue's, not the callback's: a callback that panics is
+// contained after the edge has already been reported.
+func TestAPanickingCallbackDoesNotSilenceTheReport(t *testing.T) {
+	queue, err := NewQueue(1, 4)
+	require.NoError(t, err)
+	var logs bytes.Buffer
+	queue.SetLogger(slog.New(slog.NewTextHandler(&logs, nil)))
+	queue.OnWarn = func(int) { panic("a warning callback panics") }
+
+	require.NoError(t, queue.Offer(context.Background(), 1))
+
+	assert.Contains(t, logs.String(), "the backlog reached its warning depth")
+	assert.Contains(t, logs.String(), "depth=1 warn_at=1 pause_at=4")
+	assert.Contains(t, logs.String(), "a backlog callback panicked")
+}
