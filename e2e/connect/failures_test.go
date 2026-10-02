@@ -37,15 +37,16 @@ const MsgShuttingDown = "connector: shutting down"
 // not have.
 func TestSIGINTShutsTheConnectorDownCleanly(t *testing.T) {
 	t.Parallel()
-	_, c := streaming(t)
-	out := c.Stop(t)
+	onEachTarget(t, func(t *testing.T, tg Target) {
+		out := streamingOn(t, tg).Stop(t)
 
-	shutdown := out.Logged(MsgShuttingDown)
-	require.Len(t, shutdown, 1, out.Transcript())
-	assert.Equal(t, "interrupt", shutdown[0].Attrs["signal"])
-	for _, l := range out.Logs {
-		assert.NotEqual(t, "ERROR", l.Level, "%q", l.Raw)
-	}
+		shutdown := out.Logged(MsgShuttingDown)
+		require.Len(t, shutdown, 1, out.Transcript())
+		assert.Equal(t, "interrupt", shutdown[0].Attrs["signal"])
+		for _, l := range out.Logs {
+			assert.NotEqual(t, "ERROR", l.Level, "%q", l.Raw)
+		}
+	})
 }
 
 // A second connector for an agent already running, started from another
@@ -53,19 +54,28 @@ func TestSIGINTShutsTheConnectorDownCleanly(t *testing.T) {
 // holds the agent, and asks Basecamp for nothing, not even a token.
 func TestASecondConnectorForTheSameAgentRefusesAtOnce(t *testing.T) {
 	t.Parallel()
-	h, first := streaming(t)
-	before := len(h.Fake.Requests())
+	onEachTarget(t, func(t *testing.T, tg Target) {
+		first := streamingOn(t, tg)
+		fake, observed := fakeOf(tg)
+		before := 0
+		if observed {
+			before = len(fake.Requests())
+		}
 
-	second := h.Start(t, t.TempDir(), "connect", "-P", Agent).Wait(t)
-	require.Equal(t, exitLock, second.ExitCode, second.Transcript())
-	assert.Empty(t, second.Lines, "nothing on stdout")
-	refusal := strings.Join(rawLogs(second), "\n")
-	assert.Contains(t, refusal, strconv.Itoa(first.Pid()), "the refusal names the process that holds the agent")
+		second := tg.CLI().Start(t, t.TempDir(), "connect", "-P", tg.Agent().Profile).Wait(t)
+		require.Equal(t, exitLock, second.ExitCode, second.Transcript())
+		assert.Empty(t, second.Lines, "nothing on stdout")
+		refusal := strings.Join(rawLogs(second), "\n")
+		assert.Contains(t, refusal, strconv.Itoa(first.Pid()), "the refusal names the process that holds the agent")
 
-	for _, r := range h.Fake.Requests()[before:] {
-		t.Errorf("the refused connector reached the fake: %s %s", r.Method, r.Path)
-	}
-	first.Stop(t)
+		// Only the fake sees every request made of it.
+		if observed {
+			for _, r := range fake.Requests()[before:] {
+				t.Errorf("the refused connector reached the fake: %s %s", r.Method, r.Path)
+			}
+		}
+		first.Stop(t)
+	})
 }
 
 // SecondAgentID is a second agent on the default project, connected through
@@ -83,6 +93,7 @@ var SecondAgent = Profile{Name: "second", ClientID: SecondAgentClientID}
 // off only what was asked of it.
 func TestTwoAgentsRunSideBySideAndEachGetsItsOwnMentions(t *testing.T) {
 	t.Parallel()
+	fakeOnly(t, "it needs a second agent connected in the same world")
 	w := world()
 	w.People[SecondAgentID] = &fakebasecamp.Person{ID: SecondAgentID, Name: SecondAgentName, Agent: true}
 	w.Agents[SecondAgentClientID] = &fakebasecamp.AgentClient{
@@ -132,6 +143,7 @@ const disconnected = "was disconnected in Basecamp, or connected on another comp
 // how to reconnect.
 func TestAnAgentDisconnectedWhileRunningStopsTheConnector(t *testing.T) {
 	t.Parallel()
+	fakeOnly(t, "it disconnects the agent in Basecamp")
 	h, c := streaming(t)
 	h.Fake.Disconnect(fakebasecamp.AgentClientID)
 	ev := comment(h, fakebasecamp.OperatorID, askAgent(), fakebasecamp.Live)
@@ -145,6 +157,7 @@ func TestAnAgentDisconnectedWhileRunningStopsTheConnector(t *testing.T) {
 // and the reconnect's stream ticket is refused.
 func TestAnAgentDisconnectedWhileRunningStopsTheConnectorOnReconnect(t *testing.T) {
 	t.Parallel()
+	fakeOnly(t, "it disconnects the agent in Basecamp and drops the live connection")
 	h, c := streaming(t)
 	h.Fake.Disconnect(fakebasecamp.AgentClientID)
 	require.Equal(t, 1, h.Fake.DropCable())
@@ -157,6 +170,7 @@ func TestAnAgentDisconnectedWhileRunningStopsTheConnectorOnReconnect(t *testing.
 // renewal is refused invalid_client, and the connector exits 3, saying so.
 func TestAnAgentConnectedElsewhereStopsTheConnectorAtItsNextRenewal(t *testing.T) {
 	t.Parallel()
+	fakeOnly(t, "it connects the agent again on another computer, and needs tokens that last a second")
 	h := NewHarness(t, shortTokens(world()))
 	h.Setup(t)
 	c := h.Connect(t)
@@ -182,6 +196,7 @@ func TestAnAgentConnectedElsewhereStopsTheConnectorAtItsNextRenewal(t *testing.T
 // comes up and hands off a mention.
 func TestARateLimitedTokenAtStartIsWaitedOut(t *testing.T) {
 	t.Parallel()
+	fakeOnly(t, "it rate-limits the token endpoint, and needs tokens that last a second")
 	h := NewHarness(t, shortTokens(world()))
 	h.Setup(t)
 	h.waitTokenDue(t, DefaultAgent)
@@ -209,6 +224,7 @@ func TestARateLimitedTokenAtStartIsWaitedOut(t *testing.T) {
 // and it is handed off once.
 func TestAnEventCommittedWhileTheCableIsDownArrivesByCatchUp(t *testing.T) {
 	t.Parallel()
+	fakeOnly(t, "it holds the reconnect and publishes on the poll lane alone")
 	h, c := streaming(t)
 	// Hold the reconnect at its stream ticket, so the event is committed
 	// while the connector is certainly between connections.
@@ -234,6 +250,7 @@ func TestAnEventCommittedWhileTheCableIsDownArrivesByCatchUp(t *testing.T) {
 // option shortens, so this runs once.
 func TestAStaleCableIsReplaced(t *testing.T) {
 	t.Parallel()
+	fakeOnly(t, "it silences the live connection's pings")
 	h, c := streaming(t)
 	h.Fake.StopPings()
 	c.WaitStreaming(t, 2)
@@ -248,6 +265,7 @@ func TestAStaleCableIsReplaced(t *testing.T) {
 // verdict and handed off once.
 func TestAReadThatFailsTwiceThenServesIsAdmittedInOneDecision(t *testing.T) {
 	t.Parallel()
+	fakeOnly(t, "it fails recording reads")
 	h, c := streaming(t)
 	failing := h.Fake.Inject(fakebasecamp.ServerError(2, fakebasecamp.RouteComment))
 	ev := comment(h, fakebasecamp.OperatorID, askAgent(), fakebasecamp.Live)
@@ -274,22 +292,22 @@ func TestAReadThatFailsTwiceThenServesIsAdmittedInOneDecision(t *testing.T) {
 // off is handed off now, once.
 func TestARequestAdmittedBeforeACrashIsHandedOffOnRestart(t *testing.T) {
 	t.Parallel()
-	h := NewHarness(t, world())
-	h.Setup(t)
-	held := h.Connect(t, "--hold")
-	held.WaitStreaming(t, 1)
-	ev := comment(h, fakebasecamp.OperatorID, askAgent(), fakebasecamp.Live)
-	before := held.WaitFor(t, "the event line", func(o Output) bool { return len(o.EventsFor(ev.ID)) > 0 })
-	require.Equal(t, "admitted", before.EventsFor(ev.ID)[0].State)
-	require.Empty(t, before.RequestsFor(ev.ID), "held: nothing is handed off")
-	held.Kill(t)
-	require.Equal(t, -1, held.Wait(t).ExitCode, "killed")
+	onEachTarget(t, func(t *testing.T, tg Target) {
+		held := connectAs(t, tg, "--hold")
+		held.WaitStreaming(t, 1)
+		p := tg.OperatorMentionsAgent(t)
+		before := held.WaitFor(t, "the event line", func(o Output) bool { return len(o.EventsOn(p)) > 0 })
+		require.Equal(t, "admitted", before.EventsOn(p)[0].State)
+		require.Empty(t, before.RequestsOn(p), "held: nothing is handed off")
+		held.Kill(t)
+		require.Equal(t, -1, held.Wait(t).ExitCode, "killed")
 
-	h.MustRun(t, "connect", "release", "-P", Agent)
-	c := h.Connect(t)
-	c.WaitFor(t, "the request line", func(o Output) bool { return len(o.RequestsFor(ev.ID)) > 0 })
-	out := c.Stop(t)
-	assert.Len(t, out.RequestsFor(ev.ID), 1)
+		tg.CLI().MustRun(t, "connect", "release", "-P", tg.Agent().Profile)
+		c := connectAs(t, tg)
+		c.WaitFor(t, "the request line", func(o Output) bool { return len(o.RequestsOn(p)) > 0 })
+		out := c.Stop(t)
+		assert.Len(t, out.RequestsOn(p), 1)
+	})
 }
 
 // Admission falls behind the feed: Basecamp holds every recording read
@@ -298,6 +316,7 @@ func TestARequestAdmittedBeforeACrashIsHandedOffOnRestart(t *testing.T) {
 // the backlog falls below it.
 func TestABacklogPastItsWarningDepthIsReportedAndRecovers(t *testing.T) {
 	t.Parallel()
+	fakeOnly(t, "it holds every recording read open")
 	h, c := streaming(t)
 	reads := h.Fake.Gate(fakebasecamp.RecordingReads...)
 	// Each admission worker takes one event off the backlog and is held at

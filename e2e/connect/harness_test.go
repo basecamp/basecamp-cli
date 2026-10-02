@@ -40,15 +40,23 @@ type Profile struct {
 // DefaultAgent is the default world's agent, as the Agent profile.
 var DefaultAgent = Profile{Name: Agent, ClientID: fakebasecamp.AgentClientID}
 
-// Harness is one test's Basecamp, and a home of its own to run the CLI in:
+// Harness runs the CLI for one test: the environment every command gets,
+// and the directory it runs in.
+//
+// Against the fake it is also the test's Basecamp, and a home of its own:
 // its config, its credentials and the connector's state are the test's
-// alone.
+// alone. Against a local Basecamp (devTarget) it has no fake and no home of
+// its own: the developer's config and credentials are used as they are, and
+// only the connector's state is the test's.
 type Harness struct {
 	t *testing.T
-	// Fake is the Basecamp the CLI talks to.
+	// Fake is the Basecamp the CLI talks to; nil against a local Basecamp.
 	Fake *fakebasecamp.Server
-	// Home is HOME; the XDG directories are under it.
+	// Home is HOME against the fake; the XDG directories are under it.
+	// Empty against a local Basecamp, whose HOME is the developer's.
 	Home string
+	// Dir is the directory every command runs in.
+	Dir string
 
 	env []string
 }
@@ -59,7 +67,7 @@ func NewHarness(t *testing.T, world *fakebasecamp.World, opts ...fakebasecamp.Op
 	t.Helper()
 	s := fakebasecamp.Start(t, world, opts...)
 	home := t.TempDir()
-	return &Harness{t: t, Fake: s, Home: home, env: cliEnv(home, s.URL())}
+	return &Harness{t: t, Fake: s, Home: home, Dir: home, env: cliEnv(home, s.URL())}
 }
 
 // cliEnv is the whole environment a CLI subprocess gets. It starts empty
@@ -99,12 +107,19 @@ type Result struct {
 // did not finish.
 func (h *Harness) Run(t *testing.T, args ...string) Result {
 	t.Helper()
+	return h.run(t.Context(), t, args...)
+}
+
+// run is Run under ctx: t.Context() for a command the test runs, and a
+// context of its own for one a cleanup runs, after t.Context() has ended.
+func (h *Harness) run(parent context.Context, t *testing.T, args ...string) Result {
+	t.Helper()
 	bin := binary(t) // before the clock starts: the first build can be slow
-	ctx, cancel := context.WithTimeout(t.Context(), waitFor)
+	ctx, cancel := context.WithTimeout(parent, waitFor)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = h.env
-	cmd.Dir = h.Home
+	cmd.Dir = h.Dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
@@ -157,7 +172,7 @@ func (h *Harness) SetupProfile(t *testing.T, p Profile) {
 func (h *Harness) AnotherComputer(t *testing.T) *Harness {
 	t.Helper()
 	home := t.TempDir()
-	return &Harness{t: t, Fake: h.Fake, Home: home, env: cliEnv(home, h.Fake.URL())}
+	return &Harness{t: t, Fake: h.Fake, Home: home, Dir: home, env: cliEnv(home, h.Fake.URL())}
 }
 
 // ConnectJSON is where `connect setup` writes the Agent profile's

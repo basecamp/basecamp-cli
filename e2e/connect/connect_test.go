@@ -64,17 +64,15 @@ func askAgent() string {
 // event published live reaches it.
 func streaming(t *testing.T) (*Harness, *Connector) {
 	t.Helper()
-	h := NewHarness(t, world())
-	h.Setup(t)
-	c := h.Connect(t)
-	c.WaitStreaming(t, 1)
-	return h, c
+	f := newFakeTarget(t)
+	return f.h, streamingOn(t, f)
 }
 
 // The setup a person runs, through the CLI: the connection ceremony, then
 // connect setup, which writes connect.json owner-only.
 func TestSetupThroughTheCLIWritesConnectJSON(t *testing.T) {
 	t.Parallel()
+	fakeOnly(t, "it runs setup, which a local Basecamp's developer has run already, and connect.json there is theirs")
 	h := NewHarness(t, world())
 	h.Setup(t)
 
@@ -114,41 +112,47 @@ func TestSetupThroughTheCLIWritesConnectJSON(t *testing.T) {
 // mention taken out of the words.
 func TestATrustedMentionIsHandedOffInOneRequestLine(t *testing.T) {
 	t.Parallel()
-	h, c := streaming(t)
-	ev := comment(h, fakebasecamp.OperatorID, askAgent(), fakebasecamp.Live)
-	c.WaitFor(t, "the request line", func(o Output) bool { return len(o.RequestsFor(ev.ID)) > 0 })
-	out := c.Stop(t)
+	onEachTarget(t, func(t *testing.T, tg Target) {
+		c := streamingOn(t, tg)
+		p := tg.OperatorMentionsAgent(t)
+		c.WaitFor(t, "the request line", func(o Output) bool { return len(o.RequestsOn(p)) > 0 })
+		out := c.Stop(t)
 
-	pointers := out.PointersFor(ev.ID)
-	require.Len(t, pointers, 1)
-	assert.Equal(t, "live", pointers[0].Lane)
-	assert.Equal(t, ev.RecordingID, pointers[0].RecordingID)
+		pointers := out.PointersOn(p)
+		require.Len(t, pointers, 1)
+		assert.Equal(t, "live", pointers[0].Lane, "Basecamp publishes live first")
+		assert.Equal(t, p.BucketID, pointers[0].BucketID)
+		assert.Equal(t, p.AuthorID, pointers[0].CreatorID)
 
-	events := out.EventsFor(ev.ID)
-	require.Len(t, events, 1)
-	assert.Equal(t, "admitted", events[0].State)
-	assert.Equal(t, "mentioned", events[0].Trigger)
+		events := out.EventsOn(p)
+		require.Len(t, events, 1)
+		assert.Equal(t, pointers[0].EventID, events[0].EventID)
+		assert.Equal(t, "admitted", events[0].State)
+		assert.Equal(t, "mentioned", events[0].Trigger)
+		assert.Equal(t, p.URL, events[0].RecordingURL)
 
-	requests := out.RequestsFor(ev.ID)
-	require.Len(t, requests, 1)
-	req := requests[0]
-	assert.Equal(t, "request", req.Type)
-	assert.Equal(t, "comment.created", req.EventType)
-	assert.Equal(t, "mentioned", req.Trigger)
-	assert.Equal(t, RequestRecording{
-		BucketID:    fakebasecamp.ProjectID,
-		ProjectName: fakebasecamp.ProjectName,
-		RecordingID: ev.RecordingID,
-		Type:        "Comment",
-		URL:         h.Fake.URL() + "/" + strconv.FormatInt(fakebasecamp.AccountID, 10) + "/comments/" + strconv.FormatInt(ev.RecordingID, 10),
-	}, req.Recording)
-	assert.Equal(t, RequestReplyTo{Kind: "comment", RecordingID: kickoffID}, req.ReplyTo)
-	assert.Equal(t, fakebasecamp.OperatorID, req.RequesterID)
-	assert.Equal(t, fakebasecamp.OperatorName, req.RequesterName)
-	assert.True(t, req.Acknowledge, "a person asked for something")
-	// The mention leaves a space where it was, so no markup can close over
-	// the gap, and nothing else of the words changes.
-	assert.Equal(t, strings.Replace(askAgent(), fakebasecamp.Mention(fakebasecamp.AgentID), " ", 1), req.Content)
+		requests := out.RequestsOn(p)
+		require.Len(t, requests, 1)
+		req := requests[0]
+		assert.Equal(t, pointers[0].EventID, req.EventID)
+		assert.Equal(t, "request", req.Type)
+		assert.Equal(t, "mentioned", req.Trigger)
+		assert.Equal(t, RequestRecording{
+			BucketID:    p.BucketID,
+			ProjectName: p.ProjectName,
+			RecordingID: p.RecordingID,
+			Type:        "Comment",
+			Title:       p.Title,
+			URL:         p.URL,
+		}, req.Recording)
+		assert.Equal(t, RequestReplyTo{Kind: "comment", RecordingID: p.ParentID}, req.ReplyTo)
+		assert.Equal(t, p.AuthorID, req.RequesterID)
+		assert.Equal(t, p.AuthorName, req.RequesterName)
+		assert.True(t, req.Acknowledge, "a person asked for something")
+		// The mention leaves a space where it was, so no markup can close over
+		// the gap, and nothing else of the words changes.
+		assert.Equal(t, p.Instruction, req.Content)
+	})
 }
 
 // Basecamp publishes an event on both lanes: live first, and on the poll
@@ -156,6 +160,7 @@ func TestATrustedMentionIsHandedOffInOneRequestLine(t *testing.T) {
 // one pointer line and one request line.
 func TestAnEventOnBothLanesIsHandedOffOnce(t *testing.T) {
 	t.Parallel()
+	fakeOnly(t, "it decides what each lane serves and drops the live connection")
 	h, c := streaming(t)
 	ev := comment(h, fakebasecamp.OperatorID, askAgent(), fakebasecamp.Both)
 	c.WaitFor(t, "the request line", func(o Output) bool { return len(o.RequestsFor(ev.ID)) > 0 })
@@ -188,18 +193,20 @@ func TestAnEventOnBothLanesIsHandedOffOnce(t *testing.T) {
 // connector says so in an event line, and hands nothing off.
 func TestAnUntrustedMentionIsDiscardedAndNotHandedOff(t *testing.T) {
 	t.Parallel()
-	h, c := streaming(t)
-	ev := comment(h, BystanderID, askAgent(), fakebasecamp.Live)
-	c.WaitFor(t, "the event line", func(o Output) bool { return len(o.EventsFor(ev.ID)) > 0 })
-	out := c.Stop(t)
+	onEachTarget(t, func(t *testing.T, tg Target) {
+		c := streamingOn(t, tg)
+		p := tg.UntrustedMentionsAgent(t)
+		c.WaitFor(t, "the event line", func(o Output) bool { return len(o.EventsOn(p)) > 0 })
+		out := c.Stop(t)
 
-	events := out.EventsFor(ev.ID)
-	require.Len(t, events, 1)
-	assert.Equal(t, "discarded", events[0].State)
-	assert.Equal(t, "untrusted_performer", events[0].Reason)
-	assert.Equal(t, BystanderID, events[0].RequesterID)
-	assert.Empty(t, out.RequestsFor(ev.ID))
-	assert.Empty(t, out.Requests())
+		events := out.EventsOn(p)
+		require.Len(t, events, 1)
+		assert.Equal(t, "discarded", events[0].State)
+		assert.Equal(t, "untrusted_performer", events[0].Reason)
+		assert.Equal(t, p.AuthorID, events[0].RequesterID)
+		assert.Empty(t, out.RequestsOn(p))
+		assert.Empty(t, out.RequestsAbout(p), "nothing on the recording is handed off")
+	})
 }
 
 // Stdout is a protocol a program parses: every line one JSON object of a
@@ -207,32 +214,35 @@ func TestAnUntrustedMentionIsDiscardedAndNotHandedOff(t *testing.T) {
 // stderr, as slog lines, starting with the connector saying it runs.
 func TestStdoutIsOnlyNDJSONAndStderrSaysItRuns(t *testing.T) {
 	t.Parallel()
-	h, c := streaming(t)
-	trusted := comment(h, fakebasecamp.OperatorID, askAgent(), fakebasecamp.Live)
-	untrusted := comment(h, BystanderID, askAgent(), fakebasecamp.Live)
-	c.WaitFor(t, "both verdicts and the request", func(o Output) bool {
-		return len(o.RequestsFor(trusted.ID)) > 0 && len(o.EventsFor(untrusted.ID)) > 0
+	onEachTarget(t, func(t *testing.T, tg Target) {
+		c := streamingOn(t, tg)
+		trusted := tg.OperatorMentionsAgent(t)
+		untrusted := tg.UntrustedMentionsAgent(t)
+		c.WaitFor(t, "both verdicts and the request", func(o Output) bool {
+			return len(o.RequestsOn(trusted)) > 0 && len(o.EventsOn(untrusted)) > 0
+		})
+		out := c.Stop(t)
+
+		require.NotEmpty(t, out.Lines)
+		for _, l := range out.Lines {
+			assert.True(t, json.Valid([]byte(l.Raw)), "not JSON: %q", l.Raw)
+			assert.NoError(t, l.Err, "%q", l.Raw)
+		}
+		assert.NotEmpty(t, out.Pointers())
+		assert.NotEmpty(t, out.Events())
+		assert.NotEmpty(t, out.Requests())
+
+		agent := tg.Agent()
+		running := out.Logged(MsgRunning)
+		require.Len(t, running, 1)
+		assert.Equal(t, "INFO", running[0].Level)
+		assert.Equal(t, agent.Profile, running[0].Attrs["profile"])
+		assert.Equal(t, strconv.FormatInt(agent.AccountID, 10), running[0].Attrs["account"])
+		assert.Equal(t, strconv.FormatInt(agent.PersonID, 10), running[0].Attrs["agent_person_id"])
+		for _, l := range out.Logs {
+			assert.NotEmpty(t, l.Msg, "stderr line is not a slog record: %q", l.Raw)
+		}
 	})
-	out := c.Stop(t)
-
-	require.NotEmpty(t, out.Lines)
-	for _, l := range out.Lines {
-		assert.True(t, json.Valid([]byte(l.Raw)), "not JSON: %q", l.Raw)
-		assert.NoError(t, l.Err, "%q", l.Raw)
-	}
-	assert.NotEmpty(t, out.Pointers())
-	assert.NotEmpty(t, out.Events())
-	assert.NotEmpty(t, out.Requests())
-
-	running := out.Logged(MsgRunning)
-	require.Len(t, running, 1)
-	assert.Equal(t, "INFO", running[0].Level)
-	assert.Equal(t, Agent, running[0].Attrs["profile"])
-	assert.Equal(t, strconv.FormatInt(fakebasecamp.AccountID, 10), running[0].Attrs["account"])
-	assert.Equal(t, strconv.FormatInt(fakebasecamp.AgentID, 10), running[0].Attrs["agent_person_id"])
-	for _, l := range out.Logs {
-		assert.NotEmpty(t, l.Msg, "stderr line is not a slog record: %q", l.Raw)
-	}
 }
 
 // cursorBefore reports whether a poll position the fake issued is before

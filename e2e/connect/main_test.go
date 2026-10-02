@@ -1,11 +1,12 @@
 //go:build linux || darwin
 
 // Package connect runs `basecamp connect` end to end: the real binary, as
-// subprocesses, against the fake Basecamp in internal/connector/fakebasecamp.
+// subprocesses, against the fake Basecamp in internal/connector/fakebasecamp,
+// or, under `make test-connect-dev`, against a local Basecamp (see Target).
 //
-// Every test sets the agent up the way a person does, with `basecamp auth
-// agent connect` and `basecamp connect setup`, in a home of its own, and
-// then runs `basecamp connect` and reads what it writes. Its stdout is read
+// Against the fake, every test sets the agent up the way a person does, with
+// `basecamp auth agent connect` and `basecamp connect setup`, in a home of
+// its own, and then runs `basecamp connect` and reads what it writes. Its stdout is read
 // as the protocol it is (typed NDJSON lines), its stderr as the slog lines
 // they are, both continuously, so the process never blocks on a full pipe.
 // Nothing waits on a timer: a test waits for a line, or for the fake to have

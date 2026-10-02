@@ -79,6 +79,25 @@ test: check-toolchain
 test-e2e: build
 	./e2e/run.sh
 
+# Run the connector's end-to-end scenarios (e2e/connect) against a local
+# Basecamp instead of the fake: the conformance check between the two.
+# Scenarios that need a fault only the fake can produce are skipped, by name.
+# See CONTRIBUTING.md, "Running basecamp connect against a local Basecamp".
+# Required env vars:
+#   BASECAMP_BASE_URL                      - the local Basecamp (e.g. http://3.basecamp.localhost:3001)
+#   BASECAMP_CONNECT_DEV_AGENT_PROFILE     - an agent connected and set up to serve the project
+#   BASECAMP_CONNECT_DEV_OPERATOR_PROFILE  - the agent's operator, logged in
+#   BASECAMP_CONNECT_DEV_UNTRUSTED_PROFILE - someone else on the project, logged in
+#   BASECAMP_CONNECT_DEV_PROJECT_ID        - the served project the scenarios post in
+.PHONY: test-connect-dev
+test-connect-dev: check-toolchain
+	@test -n "$(BASECAMP_BASE_URL)" || { echo "Set BASECAMP_BASE_URL (e.g. http://3.basecamp.localhost:3001); see CONTRIBUTING.md"; exit 1; }
+	@test -n "$(BASECAMP_CONNECT_DEV_AGENT_PROFILE)" || { echo "Set BASECAMP_CONNECT_DEV_AGENT_PROFILE (an agent connected and set up to serve the project); see CONTRIBUTING.md"; exit 1; }
+	@test -n "$(BASECAMP_CONNECT_DEV_OPERATOR_PROFILE)" || { echo "Set BASECAMP_CONNECT_DEV_OPERATOR_PROFILE (the agent's operator, logged in); see CONTRIBUTING.md"; exit 1; }
+	@test -n "$(BASECAMP_CONNECT_DEV_UNTRUSTED_PROFILE)" || { echo "Set BASECAMP_CONNECT_DEV_UNTRUSTED_PROFILE (someone else on the project, logged in); see CONTRIBUTING.md"; exit 1; }
+	@test -n "$(BASECAMP_CONNECT_DEV_PROJECT_ID)" || { echo "Set BASECAMP_CONNECT_DEV_PROJECT_ID (the served project the scenarios post in); see CONTRIBUTING.md"; exit 1; }
+	BASECAMP_CONNECT_DEV=1 $(GOTEST) -count=1 -failfast -v ./e2e/connect
+
 # Record cassettes for happy-path replay tests.
 # Required env vars:
 #   BASECAMP_RECORD_TOKEN   - valid API token for the target server
@@ -625,6 +644,7 @@ help:
 	@echo "  race-test        Run tests with race detector"
 	@echo "  test-coverage    Run tests with coverage report"
 	@echo "  coverage         Run tests with coverage and open in browser"
+	@echo "  test-connect-dev Run the connector's e2e scenarios against a local Basecamp (see CONTRIBUTING.md)"
 	@echo "  record-cassettes Record happy-path cassettes (TOKEN+TARGET+ACCOUNT+PROJECT)"
 	@echo "  smoke            Run pre-release smoke suite (BASECAMP_TOKEN=...)"
 	@echo "  check-race-shards Test the race shards' union check"
