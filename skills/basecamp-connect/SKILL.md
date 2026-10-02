@@ -536,6 +536,10 @@ output and tell the person what it means:
 - **"was disconnected in Basecamp, or connected on another computer"**: run
   `basecamp connect setup -P '<profile>'` (it reconnects with one approval),
   then start it again.
+- **"is no longer signed in: Basecamp refused its login"** (a bot user): the
+  person signs the bot in again with the command in the hint,
+  `basecamp auth login -P '<profile>' --expect-identity <bot-identity-id>`,
+  then you start it again.
 - **Already running**: another connector for this agent holds its lock, on
   this computer or in another session. Don't start a second.
 - **`BASECAMP_TOKEN` is set**: the person unsets it, then you start it again.
