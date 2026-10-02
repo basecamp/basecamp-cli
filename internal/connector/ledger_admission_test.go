@@ -132,10 +132,10 @@ func TestAdmissionSkipsARecordPastDeciding(t *testing.T) {
 				require.NoError(t, ledger.SetState(ctx, 1, StateDiscarded, "untrusted_author"))
 			case StateCompleted:
 				require.NoError(t, reachTerminal(t, ledger, 7, StateCompleted))
-				dispatchForTest(t, ledger, 1)
+				olderDispatch(t, ledger, 1)
 				require.NoError(t, ledger.SetState(ctx, 1, StateCompleted, ""))
 			case StateDispatched:
-				dispatchForTest(t, ledger, 1)
+				olderDispatch(t, ledger, 1)
 			default:
 				require.NoError(t, ledger.SetState(ctx, 1, state, ""))
 			}
@@ -252,7 +252,7 @@ func TestAdmissionNeverDecidesARecordPastDeciding(t *testing.T) {
 			require.NoError(t, l.SetState(context.Background(), 1, StateAdmitted, ""))
 		},
 		"dispatched": func(t *testing.T, l *Ledger) {
-			dispatchForTest(t, l, 1)
+			olderDispatch(t, l, 1)
 		},
 		"discarded": func(t *testing.T, l *Ledger) {
 			require.NoError(t, l.SetState(context.Background(), 1, StateDiscarded, "by_operator"))
@@ -303,21 +303,21 @@ func TestAdmissionQueuesBehindALiveConversation(t *testing.T) {
 		{"a dispatched record is a running task", func(t *testing.T, l *Ledger) {
 			_, err := l.Admission().Commit(context.Background(), admittedVerdict(2, 0, key))
 			require.NoError(t, err)
-			dispatchForTest(t, l, 2)
+			olderDispatch(t, l, 2)
 		}, admission.StateQueued},
 		{"a queued record alone is not a task", func(t *testing.T, l *Ledger) {
 			_, err := l.Admission().Commit(context.Background(), admittedVerdict(2, 0, key))
 			require.NoError(t, err)
 			_, err = l.Admission().Commit(context.Background(), admittedVerdict(3, 0, key))
 			require.NoError(t, err)
-			dispatchForTest(t, l, 2)
+			olderDispatch(t, l, 2)
 			require.NoError(t, l.SetState(context.Background(), 2, StateCompleted, ""))
 			require.Equal(t, StateQueued, getRecord(t, l, 3).State)
 		}, admission.StateAdmitted},
 		{"a completed task is not live", func(t *testing.T, l *Ledger) {
 			_, err := l.Admission().Commit(context.Background(), admittedVerdict(2, 0, key))
 			require.NoError(t, err)
-			dispatchForTest(t, l, 2)
+			olderDispatch(t, l, 2)
 			require.NoError(t, l.SetState(context.Background(), 2, StateCompleted, ""))
 		}, admission.StateAdmitted},
 		{"a blocked record is not a task", func(t *testing.T, l *Ledger) {
@@ -467,12 +467,11 @@ func TestEveryMoveKeepsTheBlockedScheduleInputs(t *testing.T) {
 	assert.Nil(t, d.BlockedAt, "a record that left blocked is not blocked")
 	assert.Nil(t, d.RetryAt)
 
-	// Blocked again after a dispatch that was superseded: a new window from
-	// now, and the verdict that follows keeps it. Superseding a task returns
-	// an event no worker was handed to admitted, and it is blocked from
-	// there.
-	grant := dispatchForTest(t, ledger, 1)
-	require.NoError(t, ledger.SupersedeTask(ctx, grant.ID))
+	// Blocked again after a dispatch an older build superseded: a new window
+	// from now, and the verdict that follows keeps it. Superseding a task
+	// returned an event no worker was handed to admitted, and it is blocked
+	// from there.
+	olderSupersede(t, ledger, olderDispatch(t, ledger, 1))
 	require.NoError(t, ledger.SetState(ctx, 1, StateBlocked, "read_failed"))
 	record := getRecord(t, ledger, 1)
 	require.NotNil(t, record.Decision.BlockedAt)
@@ -515,7 +514,7 @@ func TestAMoveToBlockedOrDiscardedDropsTheSnapshot(t *testing.T) {
 		seenRecord(t, ledger, 1)
 		_, err := ledger.Admission().Commit(ctx, admittedVerdict(1, 0, "recording:9"))
 		require.NoError(t, err)
-		dispatchForTest(t, ledger, 1)
+		olderDispatch(t, ledger, 1)
 		require.NoError(t, ledger.SetState(ctx, 1, StateCompleted, ""))
 		assert.NotEmpty(t, getRecord(t, ledger, 1).Decision.Snapshot)
 	})
@@ -580,7 +579,7 @@ func TestDropContentTakesTheVerdictToo(t *testing.T) {
 	seenRecord(t, ledger, 1)
 	_, err := ledger.Admission().Commit(ctx, admittedVerdict(1, 0, "recording:9"))
 	require.NoError(t, err)
-	dispatchForTest(t, ledger, 1)
+	olderDispatch(t, ledger, 1)
 	require.NoError(t, ledger.SetState(ctx, 1, StateCompleted, ""))
 
 	dropped, err := ledger.DropContent(ctx, at.Add(time.Hour), at.Add(time.Hour))
@@ -751,18 +750,14 @@ func mentionMarkup(id int64) string {
 }
 
 // A connect.json that cannot be read holds its records rather than discarding
-// them or answering that the project is not served, and a person's
-// redispatch runs them once the file is back.
-//
-// Waiting for a person is what every other blocked record does, and it is
-// what this asserts — deliberately, and after taking an automatic sweep back
-// out. A retry that offers due blocked records is a scheduler of its own,
-// with its own claiming, and it turned out to re-decide five other blocked
-// reasons that have nothing to do with this change. It is carded rather than
-// carried here, so nothing in the code or the comments promises a timer that
-// does not run.
-func TestAnUnreadableConfigHoldsItsRecordsUntilTheFileAndAPersonAreBack(t *testing.T) {
+// them or answering that the project is not served, and the record's timed
+// retry runs it once the file is back.
+func TestAnUnreadableConfigHoldsItsRecordsUntilTheFileIsBack(t *testing.T) {
 	ledger := newTestLedger(t)
+	// The ledger's clock is read by admission's worker goroutine, so the
+	// test moves it through an atomic rather than by writing the field.
+	var ahead atomic.Int64
+	ledger.now = func() time.Time { return time.Now().Add(time.Duration(ahead.Load())) }
 	queue, err := NewQueue(10, 100)
 	require.NoError(t, err)
 
@@ -817,12 +812,9 @@ func TestAnUnreadableConfigHoldsItsRecordsUntilTheFileAndAPersonAreBack(t *testi
 	require.Equal(t, string(admission.ReasonConfigUnreadable), held.Reason)
 	assert.NotEqual(t, StateDiscarded, held.State, "a discard is the one outcome repairing the file could not undo")
 
-	// The operator repairs the file and redispatches, which is the remedy
-	// for a blocked record and the one the holding reply names.
+	// The operator repairs the file, and the record's retry comes due.
 	broken.Store(false)
-	res, err := ledger.Redispatch(ctx, ev.ID, "local:tester", []int64{adapterBucketID})
-	require.NoError(t, err)
-	require.True(t, res.Rerun, "a blocked record's prerequisite is run again")
+	ahead.Store(int64(admission.BlockedRetryInterval))
 	require.NoError(t, queue.Offer(ctx, ev.ID))
 
 	require.Eventually(t, func() bool {

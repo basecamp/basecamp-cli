@@ -457,7 +457,7 @@ type transition struct {
 	// set is further columns written in the same statement.
 	set []assignment
 	// byOperator adds the edges only a person's decision has (operatorEdges):
-	// out of held, and out of completed by a redispatch or a discard. The
+	// out of held, and out of completed by a discard or an import. The
 	// database refuses them to anything that does not also write the
 	// decision (ledger_hold.go).
 	byOperator bool
@@ -554,15 +554,16 @@ func (l *Ledger) move(ctx context.Context, db dbtx, t transition) (bool, error) 
 	switch t.state {
 	case StateDispatched:
 		// A record is dispatched exactly while a live task carries it: it
-		// enters dispatched only with its task row already written
-		// (createTask), and a repeat is a repeat.
+		// enters dispatched only with its task row already written, which an
+		// older build's dispatcher did and this build never does, and a
+		// repeat is a repeat.
 		query.WriteString(" AND (state = 'dispatched' OR " + onLiveTask + ")")
 	case StateCompleted:
 	default:
 		// Invariant 4 of the dispatch lifecycle (ledger_dispatch.go): a
-		// record a worker was handed leaves dispatched only to completed —
+		// record a worker was handed leaves dispatched only to completed,
 		// and any other record leaves it only once no live task carries it
-		// (supersedeTask retires the row first).
+		// (an older build's supersession retired the row first).
 		query.WriteString(" AND NOT (" + heldByWorker + ")")
 		query.WriteString(" AND NOT (state = 'dispatched' AND " + onLiveTask + ")")
 	}

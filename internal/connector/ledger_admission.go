@@ -55,9 +55,9 @@ var undecided = []RecordState{StateSeen, StateBlocked}
 // run. Absent information is not consent: read the other way, a record with
 // no schedule would be eligible immediately and on every tick after it.
 // Nothing gives an untimed record an attempt today. A person's redispatch
-// used to (Ledger.Redispatch stamps next_retry_at as it authorizes, through
-// authorizeBlocked), but no command has called it since the worker side was
-// removed in #815; such a record stays blocked until a person discards it.
+// used to, stamping next_retry_at as it authorized the record, and went with
+// the worker side in #815; such a record stays blocked until a person
+// discards it.
 func (a Admission) LoadUndecided(ctx context.Context, id int64) (admission.Event, bool, error) {
 	record, ok, err := a.ledger.Get(ctx, id)
 	if err != nil || !ok {
@@ -181,26 +181,12 @@ func (a Admission) commit(ctx context.Context, v admission.Verdict, state Record
 	if state == StateAdmitted || state == StateQueued {
 		// A record a hold tagged for review is written held by the database
 		// instead (ledger_hold.go). The verdict reports what was written, so
-		// neither the hooks nor the stdout line call it admitted.
+		// the stdout line does not call it admitted.
 		var written string
 		if err := tx.QueryRowContext(ctx, `SELECT state FROM events WHERE id = ?`, v.EventID).Scan(&written); err != nil {
 			return "", fmt.Errorf("connector: read verdict on %d back: %w", v.EventID, err)
 		}
 		state = RecordState(written)
-	}
-	if l.hooks.VerdictCommitted != nil {
-		committed := CommittedVerdict{
-			EventID:          v.EventID,
-			State:            state,
-			Reason:           string(v.Reason),
-			Trigger:          string(v.Trigger),
-			Acknowledge:      v.Acknowledge,
-			ReplyKind:        string(reply.Kind),
-			ReplyRecordingID: reply.RecordingID,
-		}
-		if err := l.hooks.VerdictCommitted(ctx, tx, committed); err != nil {
-			return "", fmt.Errorf("connector: verdict hook for %d: %w", v.EventID, err)
-		}
 	}
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("connector: commit verdict on %d: %w", v.EventID, err)

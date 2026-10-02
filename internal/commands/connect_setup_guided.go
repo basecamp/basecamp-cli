@@ -20,7 +20,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
-	"github.com/basecamp/basecamp-cli/internal/connector/driver"
+	"github.com/basecamp/basecamp-cli/internal/connector/procid"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -565,7 +565,7 @@ func holderStillRuns(holder connector.InstanceHolderInfo) bool {
 	if err != nil {
 		return false
 	}
-	p, err := driver.LookupProcess(holder.PID)
+	p, err := procid.LookupProcess(holder.PID)
 	if err != nil {
 		return false
 	}

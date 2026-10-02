@@ -160,7 +160,7 @@ func TestConnectDiscardAndRelease(t *testing.T) {
 	l, err = connector.OpenLedgerReadOnly(context.Background(), filepath.Join(dir, connector.LedgerFile))
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
-	held, err := l.Held(ctx)
+	_, held, err := l.HoldMarker(ctx)
 	require.NoError(t, err)
 	assert.False(t, held)
 	two, _, err := l.Get(ctx, 2)

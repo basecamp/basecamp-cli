@@ -41,7 +41,6 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
-	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
@@ -117,28 +116,6 @@ type Agent struct {
 	// IdentityID is the bot user's account-independent identity, the value
 	// --expect-identity pins. Zero for an Agent person, which has none.
 	IdentityID int64 `json:"identity_id,omitempty"`
-}
-
-// Duration is a time.Duration written as Go's duration string ("45m0s").
-type Duration time.Duration
-
-// MarshalJSON implements json.Marshaler.
-func (d Duration) MarshalJSON() ([]byte, error) {
-	return json.Marshal(time.Duration(d).String())
-}
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (d *Duration) UnmarshalJSON(b []byte) error {
-	var s string
-	if err := json.Unmarshal(b, &s); err != nil {
-		return fmt.Errorf("deadline must be a duration string such as \"45m\": %w", err)
-	}
-	v, err := time.ParseDuration(s)
-	if err != nil {
-		return fmt.Errorf("deadline: %w", err)
-	}
-	*d = Duration(v)
-	return nil
 }
 
 // New is an empty connect.json for a profile, with the spec's defaults.

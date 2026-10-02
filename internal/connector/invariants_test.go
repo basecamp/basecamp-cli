@@ -397,7 +397,7 @@ func reachTerminal(t *testing.T, ledger *Ledger, id int64, terminal RecordState)
 	if terminal == StateDiscarded {
 		return ledger.SetState(ctx, id, StateDiscarded, "untrusted_author")
 	}
-	dispatchForTest(t, ledger, id)
+	olderDispatch(t, ledger, id)
 	return ledger.SetState(ctx, id, StateCompleted, "")
 }
 
@@ -474,16 +474,14 @@ func TestInvariantE4TheLifecycleCarriesTheEdgesLaterCardsCommit(t *testing.T) {
 		assert.Equal(t, StateQueued, record.State)
 	})
 
-	// A dispatched record never handed to a worker returns to admitted when
-	// its task is superseded.
+	// A dispatched record never handed to a worker returned to admitted when
+	// an older build superseded its task.
 	t.Run("dispatched back to admitted", func(t *testing.T) {
 		ledger := newTestLedger(t)
 		ctx := context.Background()
 		_, err := ledger.RecordSeen(ctx, testEvent(1), LanePoll)
 		require.NoError(t, err)
-		grant := dispatchForTest(t, ledger, 1)
-
-		require.NoError(t, ledger.SupersedeTask(ctx, grant.ID))
+		olderSupersede(t, ledger, olderDispatch(t, ledger, 1))
 
 		record, ok, err := ledger.Get(ctx, 1)
 		require.NoError(t, err)

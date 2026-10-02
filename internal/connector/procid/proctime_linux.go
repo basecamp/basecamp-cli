@@ -1,4 +1,4 @@
-package driver
+package procid
 
 import (
 	"bufio"
@@ -31,21 +31,21 @@ func readProcStat(pid int) (procStat, error) {
 	// the fields after the last ')' are fixed.
 	end := strings.LastIndexByte(string(raw), ')')
 	if end < 0 {
-		return procStat{}, errors.New("driver: unreadable /proc stat")
+		return procStat{}, errors.New("procid: unreadable /proc stat")
 	}
 	fields := strings.Fields(string(raw)[end+1:])
 	// fields[0] is the state (field 3), fields[2] the process group (field
 	// 5), fields[19] the start time (field 22).
 	if len(fields) < 20 || len(fields[0]) != 1 {
-		return procStat{}, errors.New("driver: short /proc stat")
+		return procStat{}, errors.New("procid: short /proc stat")
 	}
 	pgrp, err := strconv.Atoi(fields[2])
 	if err != nil {
-		return procStat{}, fmt.Errorf("driver: /proc stat pgrp: %w", err)
+		return procStat{}, fmt.Errorf("procid: /proc stat pgrp: %w", err)
 	}
 	ticks, err := strconv.ParseInt(fields[19], 10, 64)
 	if err != nil {
-		return procStat{}, fmt.Errorf("driver: /proc stat starttime: %w", err)
+		return procStat{}, fmt.Errorf("procid: /proc stat starttime: %w", err)
 	}
 	return procStat{state: fields[0][0], pgrp: pgrp, ticks: ticks}, nil
 }
@@ -127,5 +127,5 @@ func readBootTime() (time.Time, error) {
 			return time.Unix(secs, 0), nil
 		}
 	}
-	return time.Time{}, errors.New("driver: no btime in /proc/stat")
+	return time.Time{}, errors.New("procid: no btime in /proc/stat")
 }

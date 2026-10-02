@@ -30,7 +30,7 @@ type HandoffLine struct {
 	Trigger   string `json:"trigger"`
 
 	Recording   HandoffRecording `json:"recording"`
-	ReplyTo     InstructionReply `json:"reply_to"`
+	ReplyTo     HandoffReply     `json:"reply_to"`
 	RequesterID int64            `json:"requester_id"`
 	// RequesterName is known when the requester wrote the recording.
 	RequesterName string `json:"requester_name,omitempty"`
@@ -50,6 +50,12 @@ type HandoffRecording struct {
 	Type        string `json:"type"`
 	Title       string `json:"title"`
 	URL         string `json:"url"`
+}
+
+// HandoffReply is where the session's acknowledgement and reply go.
+type HandoffReply struct {
+	Kind        string `json:"kind"`
+	RecordingID int64  `json:"recording_id"`
 }
 
 // Discard reasons the handoff writes.
@@ -212,7 +218,7 @@ func handoffLine(record Record, agentID int64) (HandoffLine, error) {
 			Title:       richtext.SanitizeTerminal(snapshot.Title),
 			URL:         richtext.SanitizeTerminal(record.Decision.RecordingURL),
 		},
-		ReplyTo:       InstructionReply{Kind: record.Decision.ReplyKind, RecordingID: record.Decision.ReplyRecordingID},
+		ReplyTo:       HandoffReply{Kind: record.Decision.ReplyKind, RecordingID: record.Decision.ReplyRecordingID},
 		RequesterID:   record.Decision.RequesterID,
 		RequesterName: richtext.SanitizeTerminal(snapshot.RequesterName),
 		Acknowledge:   record.Decision.Acknowledge,

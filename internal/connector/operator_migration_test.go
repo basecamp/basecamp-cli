@@ -75,7 +75,7 @@ func TestShadowPromoteYieldsAHeldLedger(t *testing.T) {
 	l, err := OpenLedger(filepath.Join(stateDir, LedgerFile))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = l.Close() })
-	held, err := l.Held(ctx)
+	_, held, err := l.HoldMarker(ctx)
 	require.NoError(t, err)
 	assert.True(t, held)
 	assert.Equal(t, StateHeld, stateOf(t, l, 1))
@@ -134,7 +134,7 @@ func assertUntouchedShadow(t *testing.T, shadowDir string) {
 	l, err := OpenLedgerReadOnly(context.Background(), filepath.Join(shadowDir, LedgerFile))
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
-	held, err := l.Held(context.Background())
+	_, held, err := l.HoldMarker(context.Background())
 	require.NoError(t, err)
 	assert.False(t, held)
 	assert.Equal(t, StateAdmitted, stateOf(t, l, 1))
@@ -254,7 +254,7 @@ func ledgerIsHeld(t *testing.T, path string) bool {
 	l, err := OpenLedgerReadOnly(context.Background(), path)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
-	held, err := l.Held(context.Background())
+	_, held, err := l.HoldMarker(context.Background())
 	require.NoError(t, err)
 	return held
 }
@@ -264,7 +264,7 @@ func assertHeld(t *testing.T, path string) {
 	l, err := OpenLedger(path)
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
-	held, err := l.Held(context.Background())
+	_, held, err := l.HoldMarker(context.Background())
 	require.NoError(t, err)
 	require.True(t, held, "%s is held", path)
 	assert.Equal(t, StateHeld, stateOf(t, l, 1), "the waiting record is held")
@@ -321,7 +321,7 @@ func TestImportRefusesAFileItCannotApplyWhole(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			l := newTestLedger(t)
 			opAdmit(t, l, 1, "recording:1")
-			launchOf(t, l, 1)
+			olderLaunch(t, l, 1)
 			seenRecord(t, l, 2)
 
 			_, err := l.Import(ctx, Reconciliation{Version: 1, Entries: entries}, opBy)

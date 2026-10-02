@@ -1,4 +1,4 @@
-package driver
+package procid
 
 import (
 	"context"
@@ -16,8 +16,8 @@ import (
 )
 
 // startUnreaped starts script as the leader of its own group and never waits
-// for it until the test ends, the way the connector's own worker sits between
-// its exit and the Wait that reaps it. The script runs once stdin closes.
+// for it until the test ends, the way a worker sat between its exit and the
+// Wait that reaped it. The script runs once stdin closes.
 func startUnreaped(t *testing.T, script string) (*exec.Cmd, Process) {
 	t.Helper()
 	cmd := exec.CommandContext(context.Background(), "/bin/sh", "-c", "read _; "+script)
@@ -45,17 +45,10 @@ func startUnreaped(t *testing.T, script string) (*exec.Cmd, Process) {
 func TestAGroupOfOnlyAnUnreapedLeaderIsGone(t *testing.T) {
 	_, p := startUnreaped(t, "exit 0")
 
-	begin := time.Now()
-	require.NoError(t, ConfirmGroupGone(p, 2*time.Second))
-	assert.Less(t, time.Since(begin), time.Second, "not held for the grace")
-	assert.False(t, GroupMembersRemain(p))
+	assert.NoError(t, groupGone(p.PGID))
 
 	owns, err := OwnsWorker(p)
 	assert.False(t, owns, "a zombie is not the worker")
-	assert.NoError(t, err)
-
-	signaled, err := TerminateRecorded(p, 2*time.Second)
-	assert.False(t, signaled)
 	assert.NoError(t, err)
 }
 
@@ -73,7 +66,7 @@ func TestAnUnreapedLeaderWithALiveChildIsStillHeld(t *testing.T) {
 		return err == nil
 	}, 5*time.Second, 10*time.Millisecond)
 
-	assert.True(t, GroupMembersRemain(p))
+	assert.ErrorIs(t, groupGone(p.PGID), ErrGroupOutlivedLeader)
 	owns, err := OwnsWorker(p)
 	assert.False(t, owns)
 	assert.ErrorIs(t, err, ErrGroupOutlivedLeader)

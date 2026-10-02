@@ -60,7 +60,7 @@ func TestASecondOpenVetsTheDirectoryChain(t *testing.T) {
 	require.NoError(t, os.Chmod(home, 0o777))
 	t.Cleanup(func() { _ = os.Chmod(home, 0o700) })
 
-	_, err = OpenExistingLedger(context.Background(), path)
+	_, err = OpenLedgerReadOnly(context.Background(), path)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "secure the ledger")
@@ -80,7 +80,7 @@ func TestASecondOpenVetsTheFileMode(t *testing.T) {
 
 	require.NoError(t, os.Chmod(path, 0o644))
 
-	_, err = OpenExistingLedger(context.Background(), path)
+	_, err = OpenLedgerReadOnly(context.Background(), path)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "can be read by other users (mode 0644)")
