@@ -120,7 +120,7 @@ func TestCheckinsQuestionNotifyReportsTheServersSettings(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope))
 	assert.Equal(t, map[string]any{"responding": false, "subscribed": true}, envelope.Data)
-	assert.Equal(t, "Question 789: you are not asked it, and you are notified when someone answers", envelope.Summary)
+	assert.Equal(t, "Question 789: the question does not ask you, and you are notified when someone answers", envelope.Summary)
 }
 
 // A 200 whose settings differ from what was asked is not a success. bc3
@@ -136,6 +136,17 @@ func TestCheckinsQuestionNotifyFailsWhenTheServerDidNotApplyIt(t *testing.T) {
 	require.ErrorAs(t, err, &outErr)
 	assert.Equal(t, output.CodeAPI, outErr.Code)
 	assert.Contains(t, outErr.Message, "you are notified when someone answers")
+	assert.NotContains(t, outErr.Hint, "agent", "only a refused --responding is explained by the agent rule")
+}
+
+func TestCheckinsQuestionNotifyExplainsARefusedResponding(t *testing.T) {
+	app, _, _ := setupPersonalFeedApp(t, checkinsNotifyRoute(`{"responding": false, "subscribed": false}`))
+
+	err := executeRecordingCommand(NewCheckinsCmd(), app, "question", "notify", "789", "--responding")
+
+	var outErr *output.Error
+	require.ErrorAs(t, err, &outErr)
+	assert.Contains(t, outErr.Hint, "agent accounts")
 }
 
 func TestCheckinsQuestionNotifyRejectsContradictoryFlags(t *testing.T) {

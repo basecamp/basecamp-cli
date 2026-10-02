@@ -395,10 +395,14 @@ they differ from what you asked for.`,
 			state := checkinsNotificationState(settings)
 			if (req.Responding != nil && *req.Responding != settings.Responding) ||
 				(req.Subscribed != nil && *req.Subscribed != settings.Subscribed) {
+				hint := "Basecamp accepted the request but kept the old settings. Check the question in Basecamp."
+				if req.Responding != nil && *req.Responding && !settings.Responding {
+					hint = "Basecamp accepted the request but did not add you. It does not ask agent accounts check-in questions."
+				}
 				return &output.Error{
 					Code:    output.CodeAPI,
 					Message: fmt.Sprintf("Basecamp did not apply the change to question %d: %s", questionID, state),
-					Hint:    "Basecamp accepted the request but kept the old settings. It does not ask agent accounts check-in questions.",
+					Hint:    hint,
 				}
 			}
 
@@ -422,9 +426,9 @@ they differ from what you asked for.`,
 }
 
 func checkinsNotificationState(settings *basecamp.QuestionNotificationSettings) string {
-	asked, notified := "you are asked it", "you are notified when someone answers"
+	asked, notified := "the question asks you", "you are notified when someone answers"
 	if !settings.Responding {
-		asked = "you are not asked it"
+		asked = "the question does not ask you"
 	}
 	if !settings.Subscribed {
 		notified = "you are not notified when someone answers"
