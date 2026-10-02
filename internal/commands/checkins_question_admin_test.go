@@ -46,41 +46,57 @@ func TestCheckinsQuestionPauseAndResume(t *testing.T) {
 	}
 }
 
+func checkinsNotifyRoute(body string) stubRoute {
+	return stubRoute{
+		method: http.MethodPut,
+		path:   checkinsQuestionSubPath(789, "notification_settings.json"),
+		status: http.StatusOK,
+		body:   body,
+	}
+}
+
 // The notification settings are tri-state: an unpassed flag must stay out of
 // the request entirely so the server leaves that setting alone, while an
 // explicit --no-... must send false. A single bool could not tell those apart
 // and would silently overwrite a setting nobody asked about.
+//
+// The keys are the two bc3's Questions::NotificationSettingsController reads.
+// It ignores any other key and still answers 200, so a wrong name is a silent
+// no-op rather than an error.
 func TestCheckinsQuestionNotifyIsTriState(t *testing.T) {
-	settingsRoute := stubRoute{
-		method: http.MethodPut,
-		path:   checkinsQuestionSubPath(789, "notification_settings.json"),
-		status: http.StatusOK,
-		body:   `{"responding": true, "subscribed": true}`,
-	}
-
 	for _, tc := range []struct {
-		name string
-		args []string
-		want map[string]any
+		name     string
+		args     []string
+		response string
+		want     map[string]any
 	}{
 		{
-			name: "only --on-answer is sent",
-			args: []string{"question", "notify", "789", "--on-answer"},
-			want: map[string]any{"notify_on_answer": true},
+			name:     "only --on-answer is sent",
+			args:     []string{"question", "notify", "789", "--on-answer"},
+			response: `{"responding": true, "subscribed": true}`,
+			want:     map[string]any{"subscribed": true},
 		},
 		{
-			name: "--no-on-answer sends an explicit false",
-			args: []string{"question", "notify", "789", "--no-on-answer"},
-			want: map[string]any{"notify_on_answer": false},
+			name:     "--no-on-answer sends an explicit false",
+			args:     []string{"question", "notify", "789", "--no-on-answer"},
+			response: `{"responding": true, "subscribed": false}`,
+			want:     map[string]any{"subscribed": false},
 		},
 		{
-			name: "the untouched setting is omitted",
-			args: []string{"question", "notify", "789", "--digest-include-unanswered"},
-			want: map[string]any{"digest_include_unanswered": true},
+			name:     "only --responding is sent",
+			args:     []string{"question", "notify", "789", "--responding"},
+			response: `{"responding": true, "subscribed": true}`,
+			want:     map[string]any{"responding": true},
+		},
+		{
+			name:     "both settings at once",
+			args:     []string{"question", "notify", "789", "--no-responding", "--on-answer"},
+			response: `{"responding": false, "subscribed": true}`,
+			want:     map[string]any{"responding": false, "subscribed": true},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			app, transport, _ := setupPersonalFeedApp(t, settingsRoute)
+			app, transport, _ := setupPersonalFeedApp(t, checkinsNotifyRoute(tc.response))
 
 			require.NoError(t, executeRecordingCommand(NewCheckinsCmd(), app, tc.args...))
 
@@ -89,6 +105,37 @@ func TestCheckinsQuestionNotifyIsTriState(t *testing.T) {
 			assert.Equal(t, tc.want, body, "only the named settings may reach the wire")
 		})
 	}
+}
+
+// The summary describes the settings the server answered with, not the ones
+// the caller asked for.
+func TestCheckinsQuestionNotifyReportsTheServersSettings(t *testing.T) {
+	app, _, out := setupPersonalFeedApp(t, checkinsNotifyRoute(`{"responding": false, "subscribed": true}`))
+
+	require.NoError(t, executeRecordingCommand(NewCheckinsCmd(), app, "question", "notify", "789", "--on-answer"))
+
+	var envelope struct {
+		Data    map[string]any `json:"data"`
+		Summary string         `json:"summary"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope))
+	assert.Equal(t, map[string]any{"responding": false, "subscribed": true}, envelope.Data)
+	assert.Equal(t, "Question 789: you are not asked it, and you are notified when someone answers", envelope.Summary)
+}
+
+// A 200 whose settings differ from what was asked is not a success. bc3
+// answered exactly that for every call while the request used field names it
+// does not read.
+func TestCheckinsQuestionNotifyFailsWhenTheServerDidNotApplyIt(t *testing.T) {
+	app, _, _ := setupPersonalFeedApp(t, checkinsNotifyRoute(`{"responding": true, "subscribed": true}`))
+
+	err := executeRecordingCommand(NewCheckinsCmd(), app, "question", "notify", "789", "--no-on-answer")
+
+	require.Error(t, err)
+	var outErr *output.Error
+	require.ErrorAs(t, err, &outErr)
+	assert.Equal(t, output.CodeAPI, outErr.Code)
+	assert.Contains(t, outErr.Message, "you are notified when someone answers")
 }
 
 func TestCheckinsQuestionNotifyRejectsContradictoryFlags(t *testing.T) {

@@ -851,13 +851,17 @@ basecamp checkins question resume <id> --json     # Start asking it again
 basecamp checkins question answerers <id> --json  # Who answers it
 basecamp checkins question notify <id> --on-answer --json
 basecamp checkins question notify <id> --no-on-answer --json
-basecamp checkins question notify <id> --digest-include-unanswered --json
+basecamp checkins question notify <id> --responding --json     # Have it ask you
+basecamp checkins question notify <id> --no-responding --json
 ```
 
 `notify` changes **your own** settings, and each one is left alone unless you
-name it — so `--on-answer` does not silently reset the digest setting. The
+name it — so `--on-answer` does not silently reset `--responding`. The one
+exception is Basecamp's: `--responding` also turns on `--on-answer`, unless you
+pass `--no-on-answer` with it. The
 `--no-...` spellings send an explicit false; passing neither setting is refused
-rather than sent as an empty update.
+rather than sent as an empty update. The result is the settings Basecamp
+answered with, and the command fails if they differ from what you asked for.
 
 **Your pending reminders** (account-wide, no `--in`):
 

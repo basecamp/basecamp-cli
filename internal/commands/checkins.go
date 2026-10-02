@@ -336,10 +336,10 @@ func runCheckinsQuestionSchedule(cmd *cobra.Command, arg string, pause bool) err
 
 func newCheckinsQuestionNotifyCmd() *cobra.Command {
 	var (
-		onAnswer          bool
-		noOnAnswer        bool
-		includeUnanswered bool
-		noIncludeUnanswer bool
+		onAnswer     bool
+		noOnAnswer   bool
+		responding   bool
+		noResponding bool
 	)
 
 	cmd := &cobra.Command{
@@ -347,12 +347,17 @@ func newCheckinsQuestionNotifyCmd() *cobra.Command {
 		Short: "Change your notification settings for a question",
 		Long: `Change your own notification settings for a check-in question.
 
-Each setting is left alone unless you name it, so you can change one without
-restating the other:
+--on-answer notifies you when someone answers; --responding has the question
+ask you. Each setting is left alone unless you name it, so you can change one
+without restating the other. The exception is Basecamp's own: --responding also
+turns on --on-answer, unless you pass --no-on-answer with it.
 
   basecamp checkins question notify 789 --on-answer
   basecamp checkins question notify 789 --no-on-answer
-  basecamp checkins question notify 789 --digest-include-unanswered`,
+  basecamp checkins question notify 789 --responding
+
+The result is the settings Basecamp answered with, and the command fails if
+they differ from what you asked for.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -366,18 +371,16 @@ restating the other:
 			// setting alone, and an explicit --no-... sends false rather than
 			// being indistinguishable from "not mentioned".
 			req := &basecamp.UpdateQuestionNotificationSettingsRequest{}
-			if req.NotifyOnAnswer, err = checkinsTriState(cmd, "on-answer", "no-on-answer", onAnswer, noOnAnswer); err != nil {
+			if req.Subscribed, err = checkinsTriState(cmd, "on-answer", "no-on-answer", onAnswer, noOnAnswer); err != nil {
 				return err
 			}
-			if req.DigestIncludeUnanswered, err = checkinsTriState(cmd,
-				"digest-include-unanswered", "no-digest-include-unanswered",
-				includeUnanswered, noIncludeUnanswer); err != nil {
+			if req.Responding, err = checkinsTriState(cmd, "responding", "no-responding", responding, noResponding); err != nil {
 				return err
 			}
-			if req.NotifyOnAnswer == nil && req.DigestIncludeUnanswered == nil {
+			if req.Subscribed == nil && req.Responding == nil {
 				return output.ErrUsageHint(
 					"no notification setting was named",
-					"Pass --on-answer/--no-on-answer or --digest-include-unanswered/--no-digest-include-unanswered")
+					"Pass --on-answer/--no-on-answer or --responding/--no-responding")
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -389,8 +392,18 @@ restating the other:
 				return convertSDKError(err)
 			}
 
+			state := checkinsNotificationState(settings)
+			if (req.Responding != nil && *req.Responding != settings.Responding) ||
+				(req.Subscribed != nil && *req.Subscribed != settings.Subscribed) {
+				return &output.Error{
+					Code:    output.CodeAPI,
+					Message: fmt.Sprintf("Basecamp did not apply the change to question %d: %s", questionID, state),
+					Hint:    "Basecamp accepted the request but kept the old settings. It does not ask agent accounts check-in questions.",
+				}
+			}
+
 			return app.OK(settings,
-				output.WithSummary(fmt.Sprintf("Updated your notification settings for question %d", questionID)),
+				output.WithSummary(fmt.Sprintf("Question %d: %s", questionID, state)),
 				output.WithBreadcrumbs(output.Breadcrumb{
 					Action:      "show",
 					Cmd:         fmt.Sprintf("basecamp checkins question show %d", questionID),
@@ -402,10 +415,21 @@ restating the other:
 
 	cmd.Flags().BoolVar(&onAnswer, "on-answer", false, "Notify you when someone answers")
 	cmd.Flags().BoolVar(&noOnAnswer, "no-on-answer", false, "Stop notifying you when someone answers")
-	cmd.Flags().BoolVar(&includeUnanswered, "digest-include-unanswered", false, "Include unanswered questions in your digest")
-	cmd.Flags().BoolVar(&noIncludeUnanswer, "no-digest-include-unanswered", false, "Exclude unanswered questions from your digest")
+	cmd.Flags().BoolVar(&responding, "responding", false, "Have the question ask you")
+	cmd.Flags().BoolVar(&noResponding, "no-responding", false, "Stop the question asking you")
 
 	return cmd
+}
+
+func checkinsNotificationState(settings *basecamp.QuestionNotificationSettings) string {
+	asked, notified := "you are asked it", "you are notified when someone answers"
+	if !settings.Responding {
+		asked = "you are not asked it"
+	}
+	if !settings.Subscribed {
+		notified = "you are not notified when someone answers"
+	}
+	return asked + ", and " + notified
 }
 
 // checkinsTriState resolves an on/off flag pair into the SDK's *bool.

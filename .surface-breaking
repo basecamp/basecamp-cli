@@ -1498,3 +1498,7 @@ SUB basecamp connect shadow
 SUB basecamp connect shadow promote
 SUB basecamp connect show
 SUB basecamp connect status
+FLAG basecamp checkin question notify --digest-include-unanswered type=bool
+FLAG basecamp checkin question notify --no-digest-include-unanswered type=bool
+FLAG basecamp checkins question notify --digest-include-unanswered type=bool
+FLAG basecamp checkins question notify --no-digest-include-unanswered type=bool
