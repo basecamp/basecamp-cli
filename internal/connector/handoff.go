@@ -85,6 +85,9 @@ type HandoffOptions struct {
 	// Interval is how often admitted records are looked for. Zero means
 	// DefaultHandoffInterval.
 	Interval time.Duration
+	// Grace is how long before Started a request may have been made and
+	// still be handed off. Zero means HandoffGrace.
+	Grace time.Duration
 }
 
 func (o HandoffOptions) log() *slog.Logger {
@@ -92,6 +95,13 @@ func (o HandoffOptions) log() *slog.Logger {
 		return slog.New(slog.DiscardHandler)
 	}
 	return o.Logger
+}
+
+func (o HandoffOptions) grace() time.Duration {
+	if o.Grace <= 0 {
+		return HandoffGrace
+	}
+	return o.Grace
 }
 
 // DefaultHandoffInterval is how often the handoff looks for admitted records.
@@ -164,9 +174,14 @@ func handOffReady(ctx context.Context, opts HandoffOptions) error {
 // handOff writes one record and closes it. A record made before the run
 // started is closed without being written.
 func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
-	if record.CreatedAt.Before(opts.Started.Add(-HandoffGrace)) {
+	if record.CreatedAt.Before(opts.Started.Add(-opts.grace())) {
+		// Said once it is so: a run stopped before the record is closed
+		// leaves it to the next run, and must not have said it was closed.
+		if err := opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonBeforeThisRun); err != nil {
+			return err
+		}
 		opts.log().Info("connector: a request from before this run started is not handed off", "event_id", record.ID, "created_at", record.CreatedAt)
-		return opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonBeforeThisRun)
+		return nil
 	}
 	line, err := handoffLine(record, opts.AgentID)
 	if err != nil {

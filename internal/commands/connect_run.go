@@ -138,6 +138,11 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if err != nil {
 		return err
 	}
+	// Only a dev build reads it; a release build's is always zero.
+	grace, err := connectHandoffGrace()
+	if err != nil {
+		return output.ErrUsage(err.Error())
+	}
 
 	path, err := setup.Path(config.GlobalConfigDir(), name)
 	if err != nil {
@@ -184,6 +189,9 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	}
 
 	logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
+	if grace > 0 {
+		logger.Warn("connector: the handoff grace is overridden for this dev build", "grace", grace, "default", connector.HandoffGrace)
+	}
 	tokens := &managerTokens{mgr: app.Auth}
 	// Every read below needs a token first. One the running feed would
 	// wait for is waited for here too, rather than ending the start.
@@ -358,7 +366,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		runPart("handoff", func(ctx context.Context) error {
 			return connector.RunHandoff(ctx, connector.HandoffOptions{
 				Ledger: ledger, Served: served.Current, Buckets: buckets, AgentID: agentID,
-				Lines: lines, Logger: logger, Started: started,
+				Lines: lines, Logger: logger, Started: started, Grace: grace,
 			})
 		})
 	}
