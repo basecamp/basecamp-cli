@@ -15,6 +15,18 @@ import (
 // ErrAlreadyRunning reports a second connector for the same agent.
 var ErrAlreadyRunning = errors.New("connector: another connector already holds this account and agent")
 
+// AlreadyRunningError is ErrAlreadyRunning with who holds the lock, so a
+// caller can word the refusal itself and still name the holder.
+type AlreadyRunningError struct {
+	// Holder says who holds the lock: "held by pid 4242 since <time>", or
+	// "held by another process" when the holder did not describe itself.
+	Holder string
+}
+
+func (e *AlreadyRunningError) Error() string { return ErrAlreadyRunning.Error() + ": " + e.Holder }
+
+func (e *AlreadyRunningError) Unwrap() error { return ErrAlreadyRunning }
+
 // InstanceLock is the refusal of a second connector on one agent identity.
 //
 // It is keyed on the ACCOUNT and the agent's Person id, not on the profile
@@ -64,7 +76,7 @@ func AcquireInstanceLock(dir, accountID string, agentPersonID int64, now time.Ti
 	unlock, err := setup.TryLockPrivate(path)
 	switch {
 	case errors.Is(err, setup.ErrLockHeld):
-		return nil, fmt.Errorf("%w: %s", ErrAlreadyRunning, describeHolder(path))
+		return nil, &AlreadyRunningError{Holder: describeHolder(path)}
 	case err != nil:
 		// No lock means no connector. There is no degraded mode here.
 		return nil, fmt.Errorf("connector: take the instance lock: %w", err)

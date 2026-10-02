@@ -64,8 +64,8 @@
 //     retained and recovered.
 //  4. Only an admitted verdict carries the recording's content. A blocked or
 //     discarded verdict carries the pointer, the reason, and for a blocked
-//     one what its holding reply needs. Nothing written to stdout carries
-//     content.
+//     one its trigger and reply destination. Nothing written to stdout
+//     carries content.
 //  5. One verdict per event, chosen and written in one ledger transaction.
 //     The ledger refuses a verdict whose record changed after the decision
 //     loaded it, and decides admitted or queued against the conversation as
@@ -85,9 +85,10 @@
 //
 // # What is not here
 //
-// Tasks, attempts, the outbox, acknowledgements, and the holding reply a
-// blocked(no_route) record receives are dispatch and lifecycle (plan steps 17
-// to 20). The boosted and queued triggers are step 25 and edited is step 28:
-// each is a row added to the Matrix plus its rule, and the gate does not
-// change.
+// Handing a request off, acknowledging it, and replying. The connector writes
+// each admitted request to stdout (internal/connector, RunHandoff), and the
+// session reading it acknowledges and replies; a blocked(no_route) record gets
+// no reply from either. The boosted and queued triggers are step 25 and edited
+// is step 28: each is a row added to the Matrix plus its rule, and the gate
+// does not change.
 package admission

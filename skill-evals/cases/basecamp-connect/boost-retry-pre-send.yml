@@ -1,0 +1,39 @@
+task: >-
+  Handle the request the connector just printed.
+context: |
+  You are the orchestrator session. The connector is already running for the
+  agent's profile helper, and the monitor just delivered this line:
+
+  {"type":"request","event_id":123,"event_type":"comment_created","trigger":"mentioned","recording":{"bucket_id":456,"project_name":"BC5 Calendar","recording_id":789,"type":"Comment","title":"Fix the date picker","url":"https://3.basecamp.com/999/buckets/456/recordings/789"},"reply_to":{"kind":"comment","recording_id":700},"requester_id":1001,"requester_name":"Jorge Manrubia","acknowledge":true,"content":"<p>the date picker is off by one, please fix</p>","content_updated_at":"2026-10-01T15:00:00Z"}
+
+  ~/.config/basecamp-connect/last.json holds:
+  {"profile":"helper","repos":{"456":{"name":"BC5 Calendar","path":"/home/me/code/calendar"}},"saved_at":"2026-10-01T15:00:00Z"}
+
+  There is no subagent tool here: once you have acknowledged the request and
+  chosen the repo, say what you would hand the subagent, and stop.
+tags: [connect]
+mocks:
+  # Every boost fails before a request is sent: the credential store under
+  # concurrent use. These are the two failures the skill retries, and the
+  # only ones: nothing reached Basecamp, so a retry cannot boost twice.
+  - match: 'boost create'
+    output: '{"ok":false,"code":"auth_required","error":"Not authenticated for profile: helper"}'
+expect_sequence:
+  # A retry: the same boost at least twice.
+  - match: '^boost create .*recordings/789.*(-P|--profile)[ =]''?helper\b'
+  - match: '^boost create .*recordings/789.*(-P|--profile)[ =]''?helper\b'
+# Three attempts at most, and nothing else: the orchestrator reads no thread
+# and posts no reply itself.
+max_commands: 3
+reject:
+  # A transient failure, not a missing login.
+  - 'auth (login|logout)'
+  - 'auth agent connect'
+  - 'profile create'
+  - 'connect setup'
+  # The orchestrator does not do the subagent's work.
+  - '^(show|comments create|chat (post|line|messages))\b'
+accept_response:
+  # The boost did not verifiably land, so the handoff says the subagent
+  # still owes the acknowledgement.
+  - '(?i)(not|n.t|never|failed|unable)[^.\n]{0,80}\b(land|boost|acknowledg)'

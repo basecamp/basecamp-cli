@@ -1,0 +1,31 @@
+task: >-
+  Handle the request the connector just printed.
+context: |
+  You are the orchestrator session. The connector is already running for the
+  agent's profile helper, and the monitor just delivered this line:
+
+  {"type":"request","event_id":123,"event_type":"comment_created","trigger":"mentioned","recording":{"bucket_id":456,"project_name":"BC5 Calendar","recording_id":789,"type":"Comment","title":"Fix the date picker","url":"https://3.basecamp.com/999/buckets/456/recordings/789"},"reply_to":{"kind":"comment","recording_id":700},"requester_id":1001,"requester_name":"Jorge Manrubia","acknowledge":true,"content":"<p>the date picker is off by one, please fix</p>","content_updated_at":"2026-10-01T15:00:00Z"}
+
+  ~/.config/basecamp-connect/last.json holds:
+  {"profile":"helper","repos":{"456":{"name":"BC5 Calendar","path":"/home/me/code/calendar"}},"saved_at":"2026-10-01T15:00:00Z"}
+
+  There is no subagent tool here: once you have acknowledged the request and
+  chosen the repo, say what you would hand the subagent, and stop.
+tags: [connect]
+mocks:
+  # The request was sent and the answer never came back: the boost may well
+  # have landed, and a second one would show twice on the comment.
+  - match: 'boost create'
+    output: '{"ok":false,"code":"network","error":"Post \"https://3.basecampapi.com/999/buckets/456/recordings/789/boosts.json\": context deadline exceeded"}'
+accept:
+  - '^boost create .*recordings/789.*(-P|--profile)[ =]''?helper\b'
+# One attempt and nothing else: any failure but the two pre-send ones is
+# never retried.
+max_commands: 1
+reject:
+  - 'auth (login|logout)'
+  - 'connect setup'
+accept_response:
+  # Not verifiably landed: the handoff says so, so the subagent can check
+  # and boost as a fallback.
+  - '(?i)(not|n.t|never|unclear|unknown|may|might)[^.\n]{0,80}\b(land|boost|acknowledg)'

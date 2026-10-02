@@ -322,8 +322,11 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 	for reason, n := range s.Blocked {
 		fmt.Fprintf(w, "  Blocked        %s: %d\n", clean(reason), n)
 	}
+	// A pending redispatch waits for its task to end. Only a build that ran
+	// workers wrote one or ended a task, so on this build the count is what
+	// an older one left, and none of them will run.
 	if s.Review > 0 || s.AuthorizedBlocked > 0 || s.RedispatchPending > 0 {
-		fmt.Fprintf(w, "  Review         %d tagged, %d authorized and blocked, %d redispatches waiting for their task\n", s.Review, s.AuthorizedBlocked, s.RedispatchPending)
+		fmt.Fprintf(w, "  Review         %d tagged, %d authorized and blocked, %d redispatches left by an older build, which this one never runs\n", s.Review, s.AuthorizedBlocked, s.RedispatchPending)
 	}
 
 	fmt.Fprintf(w, "\n  Live tasks     %d\n", len(s.Tasks))

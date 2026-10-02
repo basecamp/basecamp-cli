@@ -12,8 +12,9 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
 )
 
-// ErrDecisionRefused is a redispatch or discard the record's state does not
-// accept. The message says why.
+// ErrDecisionRefused is a decision the record's state does not accept: a
+// discard, or a redispatch through Ledger.Redispatch, which no command calls
+// since #815. The message says why.
 var ErrDecisionRefused = errors.New("refused")
 
 // eventTask is the latest task an event was on, as a decision reads it.
@@ -77,7 +78,8 @@ type operatorRecord struct {
 	review       bool
 	authorizedAt sql.NullString
 	// redispatchDecision is the redispatch waiting for the record's task to
-	// end; zero when none is.
+	// end; zero when none is. Only a ledger written before #815 removed the
+	// worker side, or Ledger.Redispatch, which no command calls now, holds one.
 	redispatchDecision int64
 }
 
@@ -142,6 +144,9 @@ func (w LiveWorker) Identity() driver.Process {
 // Redispatch authorizes a record to run again, or for the first time, and
 // records who authorized it (invariants 4 to 6).
 //
+// No command calls it: `connect redispatch` went with the worker side in
+// #815. It stays with the schema it writes, which the ledger keeps as it is.
+//
 //   - completed with outcome unknown or failed: the task's token is
 //     superseded; admitted at once when the task has ended, otherwise when it
 //     ends. Refused without a snapshot, or in a project connect.json does
@@ -190,11 +195,11 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string, serve
 	// reported success and left the record for a dispatcher that will refuse
 	// to launch it is worse than one that refuses here (Copilot on #765).
 	//
-	// served is a reading its caller took under connect.json's own lock and
-	// holds until this commits (`connect redispatch`'s authorizedRedispatch,
-	// in internal/commands), so an unserve lands wholly before that read or
-	// wholly after this write. This checks the set it was given; the caller
-	// is what makes the set current.
+	// served must be a reading its caller took under connect.json's own lock
+	// and holds until this commits, so an unserve lands wholly before that
+	// read or wholly after this write; the removed `connect redispatch` did
+	// exactly that. This checks the set it was given; the caller is what
+	// makes the set current.
 	dispatchable := !record.ContentDropped && len(record.Decision.Snapshot) > 0 &&
 		record.Decision.Served && slices.Contains(served, record.BucketID) &&
 		record.Decision.ConversationKey != ""
@@ -468,8 +473,8 @@ WHERE event_id = ? AND state = 'pending' AND kind IN ('guard_ack', 'holding_repl
 // AuthorizedBlocked lists blocked records a person authorized, oldest first:
 // authorized since the record entered its current run of blocked states, so
 // an authorization that answered an earlier outcome does not count.
-// The redispatch command runs the prerequisite itself; this would be for
-// running it again when that did not settle it. Nothing calls it. The timed
+// It was for running a redispatched record's prerequisite again when the
+// redispatch's own run did not settle it. Nothing calls it. The timed
 // retry that now runs (Intake.sweepBlockedRetries) is not it: that schedule
 // is keyed on the reason, not on who authorized the record, and the reasons
 // it leaves alone — no_route, unroutable, bucket_mismatch — are the ones a
@@ -514,13 +519,14 @@ func pendingNote(task eventTask) string {
 // (AuthorizedBlocked), and neither a move's own later stamp nor a clock that
 // stepped back may make a fresh one look stale.
 // It also makes the record due now, whatever it was blocked on. A person
-// asking for a rerun is not a timer and does not wait for one: the redispatch
-// command runs admission itself straight after this, and a blocked record
-// with no attempt owed it is not one admission will load (LoadUndecided) —
-// which is every untimed reason, no_route above all, the one a person is
-// most likely to redispatch. Writing "due now" rather than leaving the
-// schedule as it was is also what keeps a rerun that never happened — the
-// command died between the two — on the sweep's list instead of stranding it.
+// asking for a rerun is not a timer and does not wait for one: the removed
+// redispatch command ran admission itself straight after this, and a blocked
+// record with no attempt owed it is not one admission will load
+// (LoadUndecided): every untimed reason, no_route above all, the one a
+// person is most likely to redispatch. Writing "due now" rather than
+// leaving the schedule as it was also keeps a rerun that never happened on
+// the sweep's list instead of stranding it. Its only caller is
+// Ledger.Redispatch, which no command calls since #815.
 func authorizeBlocked(ctx context.Context, tx *sql.Tx, eventID int64, now, by string) error {
 	if _, err := tx.ExecContext(ctx, `
 UPDATE events SET authorized_at = MAX(?, COALESCE(blocked_at, '')), authorized_by = ?,

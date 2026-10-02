@@ -109,6 +109,10 @@ person has confirmed it (see *Choose the repo*). A start that fails must not
 overwrite the file. Invoked with no arguments, show the stored profile and
 mappings and ask before starting. Never start silently from the store.
 
+Other sessions running other agents write the same file. Read it again just
+before each write and keep the `repos` already there: change only the profile,
+the mapping you are adding, and `saved_at`.
+
 ## Rules without exceptions
 
 **Credentials**
@@ -245,11 +249,22 @@ first. Every change goes through setup, which keeps whatever you don't pass.
 
 ## Running the connector
 
+### One connector per agent, any number of repos
+
+- **One agent, many repos.** One connector serves them all. The repo is not
+  the connector's choice: this session picks it for each request's project,
+  from `repos` in `last.json` (*Choose the repo*), so a second connector for
+  the same agent is never needed. Only one can run at a time: a second refuses to start and
+  names the one holding the agent.
+- **Many agents.** Each agent gets its own connector, in a Claude Code session
+  of its own: start this skill once per session, naming the agent
+  (`/basecamp-connect as Marie`). Connectors for different agents run side by
+  side, each started from any folder.
+
 ### 1. Start it, and watch its output
 
-Only one connector per agent can run at a time. If it's already running
-elsewhere, it refuses to start and says so: tell the person, and don't start a
-second.
+If the agent's connector is already running elsewhere, this one refuses to
+start and says so: tell the person, and don't start a second.
 
 Start it in the background with the Bash tool (`run_in_background: true`), and
 note the output file the harness reports:
@@ -536,8 +551,11 @@ output and tell the person what it means:
 - **"was disconnected in Basecamp, or connected on another computer"**: run
   `basecamp connect setup -P '<profile>'` (it reconnects with one approval),
   then start it again.
-- **Already running**: another connector for this agent holds its lock, on
-  this computer or in another session. Don't start a second.
+- **"Another connector for this agent is already running"**: it names the
+  process holding the agent's lock, in another session or terminal on this
+  computer. One connector serves every repo, so don't start a second: use the
+  session already running it, or ask the person to stop that one first. A
+  connector for a different agent never blocks this one.
 - **`BASECAMP_TOKEN` is set**: the person unsets it, then you start it again.
 - **Anything else**: show the error, and run `basecamp connect doctor -P
   '<profile>'`.

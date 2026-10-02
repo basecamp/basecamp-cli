@@ -1433,8 +1433,10 @@ It starts no workers and posts nothing: the `basecamp-connect` skill runs it fro
 your own Claude Code session, which acknowledges each request, picks the repo and
 hands it to a subagent that replies as the agent. Use that skill to drive an
 agent from Basecamp. SIGINT and SIGTERM exit 130 and 143. It runs on Linux and
-macOS, refuses a second connector for the same agent, and takes `--project`
-(repeatable) to hear only those projects.
+macOS, and takes `--project` (repeatable) to hear only those projects. It refuses
+a second connector for the same agent, and a second is never needed: one
+connector serves every repo, because the session picks the repo for each
+request's project. Each agent runs its own connector.
 
 **Before running ANY of the logins above, check `oauth_type`.** `basecamp auth
 status --json` reports it, and `agent` means the profile is a Basecamp agent: a

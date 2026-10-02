@@ -22,8 +22,8 @@ type IDSource interface {
 }
 
 // Records loads a record for admission. It returns a record still being
-// decided — seen, or blocked (recovery and redispatch decide a blocked record
-// again) — with Event.Revision set to the record's revision as loaded. ok is
+// decided (seen, or blocked, which the timed retry decides again) with
+// Event.Revision set to the record's revision as loaded. ok is
 // false when the id is unknown or the record is past deciding, so it is
 // skipped rather than decided twice.
 //

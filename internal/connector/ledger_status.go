@@ -103,6 +103,9 @@ type Status struct {
 	Blocked map[string]int `json:"blocked"`
 	// Review counts records tagged for review that have not reached a
 	// person yet, and Authorized those a person authorized that have not run.
+	// RedispatchPending counts redispatches waiting for their task to end:
+	// only a build that ran workers (before #815) wrote one or ended a task,
+	// so on this build they are what an older one left, and never run.
 	Review            int `json:"review_tagged"`
 	AuthorizedBlocked int `json:"authorized_blocked"`
 	RedispatchPending int `json:"redispatch_pending"`
