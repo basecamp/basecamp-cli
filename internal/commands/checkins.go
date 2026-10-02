@@ -395,7 +395,7 @@ they differ from what you asked for.`,
 			state := checkinsNotificationState(settings)
 			if (req.Responding != nil && *req.Responding != settings.Responding) ||
 				(req.Subscribed != nil && *req.Subscribed != settings.Subscribed) {
-				hint := "Basecamp accepted the request but kept the old settings. Check the question in Basecamp."
+				hint := "Basecamp accepted the request but answered with different settings from the ones asked for. Check the question in Basecamp."
 				if req.Responding != nil && *req.Responding && !settings.Responding {
 					hint = "Basecamp accepted the request but did not add you. It does not ask agent accounts check-in questions."
 				}
