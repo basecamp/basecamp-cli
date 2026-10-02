@@ -15,7 +15,11 @@ import (
 const (
 	campfireType   = "Chat::Transcript"
 	chatLinePrefix = "Chat::Lines::"
-	// recordingEventsPage is how many history entries a page carries.
+	// recordingEventsPage is how many history entries a page carries:
+	// fifteen, the first page Basecamp's geared pagination serves. The
+	// connector walks pages until one comes back empty and never counts on
+	// the size, so the fake keeps one size for every page; a small one
+	// makes a walk past the first page cheap to set up.
 	recordingEventsPage = 15
 )
 

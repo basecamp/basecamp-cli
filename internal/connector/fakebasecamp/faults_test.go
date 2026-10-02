@@ -52,6 +52,44 @@ func TestTokenFaults(t *testing.T) {
 	assert.Equal(t, 4, s.Count(fakebasecamp.RouteToken), "a faulted mint is still a mint")
 }
 
+// A mint carries the scope it asks for, within what the client was
+// approved for: read from a full client, never full from a read one.
+func TestTokenMintHonorsTheAskedScope(t *testing.T) {
+	s, _ := start(t)
+	mint := func(scope string) (int, string) {
+		t.Helper()
+		form := url.Values{
+			"grant_type": {"client_credentials"}, "client_id": {fakebasecamp.AgentClientID},
+			"client_secret": {fakebasecamp.AgentSecret}, "scope": {scope},
+		}
+		status, _, body := do(t, s, http.MethodPost, "/oauth/tokens", "", form.Encode())
+		return status, body
+	}
+	scopeOf := func(body string) string {
+		t.Helper()
+		var token struct {
+			Scope string `json:"scope"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(body), &token), body)
+		return token.Scope
+	}
+
+	status, body := mint(fakebasecamp.ScopeRead)
+	require.Equal(t, http.StatusOK, status, body)
+	assert.Equal(t, fakebasecamp.ScopeRead, scopeOf(body), "narrowed to what was asked")
+	status, body = mint("admin")
+	assert.Equal(t, http.StatusBadRequest, status)
+	assert.JSONEq(t, `{"error":"invalid_scope"}`, body)
+
+	s.Update(func(w *fakebasecamp.World) { w.Agents[fakebasecamp.AgentClientID].Scope = fakebasecamp.ScopeRead })
+	status, body = mint(fakebasecamp.ScopeFull)
+	assert.Equal(t, http.StatusBadRequest, status, "a read client is not widened")
+	assert.JSONEq(t, `{"error":"invalid_scope"}`, body)
+	status, body = mint("")
+	require.Equal(t, http.StatusOK, status, body)
+	assert.Equal(t, fakebasecamp.ScopeRead, scopeOf(body), "no scope asked is the client's own")
+}
+
 // A fault can be limited to a number of requests, and to the requests a
 // predicate picks, such as an Agent's.
 func TestFaultsNarrowAndLapse(t *testing.T) {
@@ -102,7 +140,7 @@ func TestGatesAndHooks(t *testing.T) {
 	assert.True(t, requests[0].Agent)
 	gate.Release()
 	assert.Equal(t, http.StatusOK, <-answered)
-	await(t, s, "the logged answer", func() bool { return s.Requests()[0].Status == http.StatusOK })
+	assert.Equal(t, http.StatusOK, s.Requests()[0].Status, "logged before the client had it")
 
 	remove := s.Before(fakebasecamp.RouteStreamTicket, func(fakebasecamp.Request) {
 		s.Update(func(w *fakebasecamp.World) { delete(w.Tokens, bearer) })
@@ -110,6 +148,61 @@ func TestGatesAndHooks(t *testing.T) {
 	status, _, _ := do(t, s, http.MethodPost, "/999/events/stream_ticket.json", bearer, "")
 	assert.Equal(t, http.StatusUnauthorized, status, "the token the hook removed is refused")
 	remove()
+}
+
+// Overlapping gates hold a request until every one of them is released, in
+// either order.
+func TestOverlappingGates(t *testing.T) {
+	s, bearer := start(t)
+	first := s.Gate(fakebasecamp.RouteProjects)
+	second := s.Gate(fakebasecamp.RouteProjects, fakebasecamp.RouteProfile)
+	answered := make(chan int, 1)
+	go func() {
+		status, _, _ := do(t, s, http.MethodGet, "/999/projects.json", bearer, "")
+		answered <- status
+	}()
+	await(t, s, "the request at the first gate", func() bool { return first.Waiting() == 1 })
+	second.Release()
+	first.Release()
+	await(t, s, "the answer", func() bool { return s.Requests()[0].Status != 0 })
+	assert.Equal(t, http.StatusOK, <-answered)
+
+	first = s.Gate(fakebasecamp.RouteProjects)
+	second = s.Gate(fakebasecamp.RouteProjects)
+	go func() {
+		status, _, _ := do(t, s, http.MethodGet, "/999/projects.json", bearer, "")
+		answered <- status
+	}()
+	await(t, s, "the request at the first gate", func() bool { return first.Waiting() == 1 })
+	first.Release()
+	await(t, s, "the request at the second gate", func() bool { return second.Waiting() == 1 })
+	assert.Zero(t, s.Requests()[1].Status, "still held by the second gate")
+	second.Release()
+	assert.Equal(t, http.StatusOK, <-answered)
+}
+
+// Await gives up once the fake is closed, rather than waiting out its
+// context for a change that can no longer come.
+func TestAwaitEndsWhenClosed(t *testing.T) {
+	s, _ := start(t)
+	done := make(chan error, 1)
+	go func() { done <- s.Await(t.Context(), func() bool { return false }) }()
+	s.Close()
+	assert.ErrorIs(t, <-done, fakebasecamp.ErrClosed)
+	assert.ErrorIs(t, s.Await(t.Context(), func() bool { return false }), fakebasecamp.ErrClosed)
+	assert.NoError(t, s.Await(t.Context(), func() bool { return true }), "a condition that holds still returns")
+}
+
+// Requests hands out copies: changing one changes nothing the fake logged.
+func TestRequestsAreCopies(t *testing.T) {
+	s, bearer := start(t)
+	do(t, s, http.MethodGet, "/999/events.json?since=now", bearer, "")
+	do(t, s, http.MethodPost, "/oauth/tokens", "", mintForm(fakebasecamp.AgentSecret))
+	requests := s.Requests()
+	requests[0].Query.Set("since", "0")
+	requests[1].Form.Set("client_secret", "changed")
+	assert.Equal(t, "now", s.Requests()[0].Query.Get("since"))
+	assert.Equal(t, fakebasecamp.AgentSecret, s.Requests()[1].Form.Get("client_secret"))
 }
 
 // The poll lane's own contract: the present is an empty page at the head,

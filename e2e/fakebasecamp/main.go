@@ -103,19 +103,23 @@ func readCommands(s *fakebasecamp.Server) {
 	}
 }
 
+// mentions counts the comments mention has added. Only readCommands calls
+// mention, one line at a time, so it needs no lock.
+var mentions int64
+
 // mention adds a comment by the operator that mentions the agent, on a
 // message it adds the first time, and publishes the comment's event on both
 // lanes.
 func mention(s *fakebasecamp.Server) fakebasecamp.Event {
 	const message int64 = 1_000_000
-	var id int64
+	mentions++
+	id := message + mentions
 	s.Update(func(w *fakebasecamp.World) {
 		if _, ok := w.Recordings[message]; !ok {
 			w.Recordings[message] = &fakebasecamp.Recording{
 				ID: message, Type: "Message", BucketID: fakebasecamp.ProjectID, CreatorID: fakebasecamp.OperatorID, Title: "Kickoff",
 			}
 		}
-		id = message + int64(len(w.Recordings))
 		w.Recordings[id] = &fakebasecamp.Recording{
 			ID: id, Type: "Comment", BucketID: fakebasecamp.ProjectID, ParentID: message, CreatorID: fakebasecamp.OperatorID,
 			Content: "<p>Could you take a look, " + fakebasecamp.Mention(fakebasecamp.AgentID) + "?</p>",

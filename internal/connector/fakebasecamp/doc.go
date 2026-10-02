@@ -26,9 +26,10 @@
 // # The two lanes are published explicitly
 //
 // Basecamp's poll lane runs about thirty seconds behind its live lane. The
-// fake has no clock and no lag: Emit puts an event on the lanes it is told
-// to (Live, Poll, or Both), and Publish adds an emitted event to another lane
-// later. A test therefore says exactly what each lane serves, which is what
+// fake has no lag, and nothing in it runs on its clock: Emit puts an event
+// on the lanes it is told to (Live, Poll, or Both), and Publish adds an
+// emitted event to another lane later. The clock (WithClock) only stamps
+// an event's created_at and ages stream tickets. A test therefore says exactly what each lane serves, which is what
 // makes a catch-up, a gap or a duplicate a deterministic scenario rather
 // than a race.
 //

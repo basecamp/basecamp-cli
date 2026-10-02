@@ -70,8 +70,7 @@ func (c *call) agentConnectionTokens() answer {
 	if client.Scope == "" {
 		client.Scope = ScopeFull
 	}
-	client.rotations++
-	client.Secret = fmt.Sprintf("%s-secret-%d", client.ID, client.rotations)
+	client.Secret = fmt.Sprintf("%s-secret-%d", client.ID, c.s.nextSerialLocked())
 	return c.jsonAnswer(http.StatusOK, map[string]any{
 		"client_id":     client.ID,
 		"client_secret": client.Secret,
@@ -82,7 +81,10 @@ func (c *call) agentConnectionTokens() answer {
 
 // token mints a client_credentials token for an agent's client. A secret
 // the client does not hold now, rotated away or never issued, is
-// invalid_client.
+// invalid_client. The token carries the scope the request asks for, or the
+// client's own when it asks for none; asking for more than the client was
+// approved for, or for a scope there is no such thing as, is invalid_scope
+// (RFC 6749 section 5.2), as Basecamp refuses to widen a credential.
 func (c *call) token() answer {
 	form := c.req.PostForm
 	if form.Get("grant_type") != "client_credentials" {
@@ -92,13 +94,33 @@ func (c *call) token() answer {
 	if !ok || client.Secret != form.Get("client_secret") {
 		return oauthError(http.StatusUnauthorized, "invalid_client")
 	}
+	scope := client.Scope
+	if asked := form.Get("scope"); asked != "" {
+		if !within(asked, client.Scope) {
+			return oauthError(http.StatusBadRequest, "invalid_scope")
+		}
+		scope = asked
+	}
 	token := fmt.Sprintf("fake-token-%d", c.s.nextSerialLocked())
-	c.s.world.Tokens[token] = &Token{PersonID: client.PersonID, Scope: client.Scope}
+	c.s.world.Tokens[token] = &Token{PersonID: client.PersonID, Scope: scope}
 	return c.jsonAnswer(http.StatusOK, map[string]any{
 		"access_token": token,
 		"token_type":   "bearer",
 		"expires_in":   3600,
 		"resource":     fmt.Sprintf("urn:bc:agent:%d", client.PersonID),
-		"scope":        client.Scope,
+		"scope":        scope,
 	})
+}
+
+// within reports whether asked is a scope no wider than approved: read is
+// within either, full only within full.
+func within(asked, approved string) bool {
+	switch asked {
+	case ScopeRead:
+		return approved == ScopeRead || approved == ScopeFull
+	case ScopeFull:
+		return approved == ScopeFull
+	default:
+		return false
+	}
 }

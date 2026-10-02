@@ -141,8 +141,6 @@ type AgentClient struct {
 	PersonID int64
 	// Scope is what the client was approved for.
 	Scope string
-	// rotations counts the secrets the connection ceremony has issued.
-	rotations int
 }
 
 // Token is what a bearer token authenticates as.

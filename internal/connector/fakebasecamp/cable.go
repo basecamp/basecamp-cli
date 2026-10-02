@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,18 +23,43 @@ const (
 	// cableWriteTimeout bounds one frame's write: a client that stops
 	// reading for longer is dropped, as a server drops it.
 	cableWriteTimeout = 10 * time.Second
+	// streamTicketLifetime is how long a stream ticket opens the cable:
+	// about 120 seconds, the SDK's StreamTicket says.
+	streamTicketLifetime = 120 * time.Second
 )
 
+// streamTicket is who a ticket was minted for, and until when it opens the
+// cable. A ticket is not spent by the connection it opens: the SDK's
+// StreamTicket is "an opaque replayable bearer for its window", minted
+// statelessly, so it opens any number of connections until it expires.
+type streamTicket struct {
+	caller  int64
+	expires time.Time
+}
+
 // streamTicket mints a ticket for the caller, and the cable URL that
-// carries it: a ws:// URL on the fake's own loopback port.
+// carries it: a ws:// URL on the fake's own loopback port. Minting forgets
+// the tickets that have expired.
 func (c *call) streamTicket() answer {
+	now := c.s.opts.now()
+	maps.DeleteFunc(c.s.tickets, func(_ string, t streamTicket) bool { return !now.Before(t.expires) })
 	ticket := fmt.Sprintf("fake-ticket-%d", c.s.nextSerialLocked())
-	c.s.tickets[ticket] = c.caller
+	c.s.tickets[ticket] = streamTicket{caller: c.caller, expires: now.Add(streamTicketLifetime)}
 	return c.jsonAnswer(http.StatusOK, map[string]any{
 		"ticket":     ticket,
-		"expires_in": 120,
+		"expires_in": int(streamTicketLifetime / time.Second),
 		"url":        "ws" + strings.TrimPrefix(c.base(), "http") + "/cable?ticket=" + ticket,
 	})
+}
+
+// ticketLocked is who the request's stream ticket was minted for, and
+// whether it carried one the fake minted that has not expired.
+func (s *Server) ticketLocked(req *http.Request) (int64, bool) {
+	t, ok := s.tickets[req.URL.Query().Get("ticket")]
+	if !ok || !s.opts.now().Before(t.expires) {
+		return 0, false
+	}
+	return t.caller, true
 }
 
 // cableConn is one live connection.
@@ -46,23 +73,23 @@ type cableConn struct {
 	cancel context.CancelFunc
 	wake   chan struct{}
 
-	// Guarded by the Server's lock.
-	identifier string
-	filters    filters
-	queue      [][]byte
-	silent     bool
-	detached   bool
+	// Guarded by the Server's lock. subscriptions are the confirmed ones,
+	// by identifier.
+	subscriptions map[string]filters
+	queue         [][]byte
+	silent        bool
+	detached      bool
 }
 
-// statusRecorder notes the status an upgrade answers, and hands the
-// connection over to the WebSocket.
+// statusRecorder logs the status an upgrade answers before it is written,
+// and hands the connection over to the WebSocket.
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
+	logStatus func(int)
 }
 
 func (r *statusRecorder) WriteHeader(code int) {
-	r.status = code
+	r.logStatus(code)
 	r.ResponseWriter.WriteHeader(code)
 }
 
@@ -76,15 +103,14 @@ func (s *Server) serveCable(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	caller, known := s.tickets[req.URL.Query().Get("ticket")]
+	caller, known := s.ticketLocked(req)
 	s.mu.Unlock()
 	if !known {
 		s.finish(c, w, answer{status: http.StatusUnauthorized})
 		return
 	}
-	rec := &statusRecorder{ResponseWriter: w}
+	rec := &statusRecorder{ResponseWriter: w, logStatus: func(status int) { s.setStatus(c.index, status) }}
 	ws, err := websocket.Accept(rec, req, &websocket.AcceptOptions{Subprotocols: []string{cableSubprotocol}})
-	s.setStatus(c.index, rec.status)
 	if err != nil {
 		return
 	}
@@ -97,7 +123,10 @@ func (s *Server) serveCable(w http.ResponseWriter, req *http.Request) {
 	// The connection outlives the request that opened it: it keeps the
 	// request's values, and ends when either side closes it.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(req.Context()))
-	cc := &cableConn{s: s, ws: ws, caller: caller, cancel: cancel, wake: make(chan struct{}, 1)}
+	cc := &cableConn{
+		s: s, ws: ws, caller: caller, cancel: cancel, wake: make(chan struct{}, 1),
+		subscriptions: map[string]filters{},
+	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -144,8 +173,8 @@ func (cc *cableConn) read(ctx context.Context) {
 			cc.subscribe(cmd.Identifier)
 		case "unsubscribe":
 			cc.s.mu.Lock()
-			if cc.identifier == cmd.Identifier {
-				cc.identifier = ""
+			if _, ok := cc.subscriptions[cmd.Identifier]; ok {
+				delete(cc.subscriptions, cmd.Identifier)
 				cc.s.notifyLocked()
 			}
 			cc.s.mu.Unlock()
@@ -156,8 +185,11 @@ func (cc *cableConn) read(ctx context.Context) {
 }
 
 // subscribe confirms a subscription to the account's events, or rejects
-// one the fake does not serve. An identical resubscribe is absorbed, and a
-// different one rejected, as Action Cable does.
+// one the fake does not serve. As in Action Cable, a connection holds any
+// number of subscriptions, one per identifier, each confirmed and pushed to
+// on its own; subscribing again to an identifier already held answers
+// nothing at all (Action Cable raises AlreadySubscribedError on the server,
+// and sends the client no frame).
 func (cc *cableConn) subscribe(identifier string) {
 	var params map[string]any
 	f, err := filters{}, json.Unmarshal([]byte(identifier), &params)
@@ -166,15 +198,14 @@ func (cc *cableConn) subscribe(identifier string) {
 	}
 	cc.s.mu.Lock()
 	defer cc.s.mu.Unlock()
+	_, held := cc.subscriptions[identifier]
 	switch {
 	case err != nil:
 		cc.s.r.Errorf("fakebasecamp: rejecting the cable subscription %s: %v", identifier, err)
 		cc.enqueueLocked(cableFrame("reject_subscription", identifier))
-	case cc.identifier == identifier:
-	case cc.identifier != "":
-		cc.enqueueLocked(cableFrame("reject_subscription", identifier))
+	case held:
 	default:
-		cc.identifier, cc.filters = identifier, f
+		cc.subscriptions[identifier] = f
 		cc.enqueueLocked(cableFrame("confirm_subscription", identifier))
 		cc.s.notifyLocked()
 	}
@@ -216,18 +247,22 @@ func cableFrame(typ, identifier string) []byte {
 func (s *Server) pushLocked(ev Event) {
 	payload := pushPayload{pollRow: rowOf(ev), ActorType: ev.ActorType, VisibleToClients: ev.VisibleToClients}
 	for cc := range s.conns {
-		if cc.identifier == "" || !s.visibleLocked(ev, cc.filters, cc.caller) {
-			continue
+		// In identifier order, so the frames' order does not hang on map
+		// iteration.
+		for _, identifier := range slices.Sorted(maps.Keys(cc.subscriptions)) {
+			if !s.visibleLocked(ev, cc.subscriptions[identifier], cc.caller) {
+				continue
+			}
+			frame, err := json.Marshal(struct {
+				Identifier string      `json:"identifier"`
+				Message    pushPayload `json:"message"`
+			}{identifier, payload})
+			if err != nil {
+				s.r.Errorf("fakebasecamp: rendering event %d: %v", ev.ID, err)
+				return
+			}
+			cc.enqueueLocked(frame)
 		}
-		frame, err := json.Marshal(struct {
-			Identifier string      `json:"identifier"`
-			Message    pushPayload `json:"message"`
-		}{cc.identifier, payload})
-		if err != nil {
-			s.r.Errorf("fakebasecamp: rendering event %d: %v", ev.ID, err)
-			return
-		}
-		cc.enqueueLocked(frame)
 	}
 }
 
@@ -355,7 +390,7 @@ func (s *Server) Subscribers() int {
 	defer s.mu.Unlock()
 	n := 0
 	for cc := range s.conns {
-		if cc.identifier != "" {
+		if len(cc.subscriptions) > 0 {
 			n++
 		}
 	}

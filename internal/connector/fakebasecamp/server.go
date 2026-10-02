@@ -3,6 +3,7 @@ package fakebasecamp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -69,23 +70,42 @@ type Request struct {
 	Form url.Values
 	// Route is the route it reached; empty for a request no route serves.
 	Route Route
-	// Caller is the person its bearer token authenticates as, zero for none;
-	// Agent says the caller is an Agent principal.
+	// Caller is the person its credential authenticates as, zero for none:
+	// the bearer token's person, or on RouteCable the person the stream
+	// ticket was minted for. Agent says the caller is an Agent principal.
 	Caller int64
 	Agent  bool
 	// Status is what it was answered, zero while it is unanswered: held at
-	// a gate, or being answered now.
+	// a gate, or not yet answered. It is set before the response is
+	// written, so a client that has its answer finds it here.
 	Status int
 }
 
+// clone is the request with maps of its own, so what one reader is handed
+// cannot change what another reads.
+func (r Request) clone() Request {
+	r.Query = cloneValues(r.Query)
+	r.Form = cloneValues(r.Form)
+	return r
+}
+
+func cloneValues(v url.Values) url.Values {
+	if v == nil {
+		return nil
+	}
+	out := make(url.Values, len(v))
+	for key, values := range v {
+		out[key] = slices.Clone(values)
+	}
+	return out
+}
+
+// ErrClosed is what Await returns once the fake is closed: nothing will
+// change any more, so a condition that does not hold then never will.
+var ErrClosed = errors.New("fakebasecamp: the server is closed")
+
 // Option configures a Server.
 type Option func(*options)
-
-type options struct {
-	pageSize     int
-	pingInterval time.Duration
-	listener     net.Listener
-}
 
 // WithPageSize sets how many poll-lane rows a page walks. The default is
 // 100.
@@ -98,6 +118,14 @@ func WithPingInterval(d time.Duration) Option { return func(o *options) { o.ping
 
 // WithListener serves on l instead of a fresh loopback port.
 func WithListener(l net.Listener) Option { return func(o *options) { o.listener = l } }
+
+// WithClock sets what the fake reads the time from: the default created_at
+// of an emitted event, and when a stream ticket expires. The default is
+// time.Now. A clock that does not keep up with real time has to stay close
+// to it: the connector discards a request created more than
+// connector.HandoffGrace before its run started, judging by the event's
+// created_at.
+func WithClock(now func() time.Time) Option { return func(o *options) { o.now = now } }
 
 // Server is the fake Basecamp.
 type Server struct {
@@ -124,7 +152,7 @@ type Server struct {
 	// events is every event emitted, in id order, on either lane.
 	events  []*fedEvent
 	conns   map[*cableConn]struct{}
-	tickets map[string]int64
+	tickets map[string]streamTicket
 	// devices are the agent connection codes issued and not yet spent.
 	devices map[string]bool
 	// serial numbers every token, ticket and code the fake issues.
@@ -134,7 +162,7 @@ type Server struct {
 // Start serves world on a loopback port until the Reporter's cleanup.
 func Start(r Reporter, world *World, opts ...Option) *Server {
 	r.Helper()
-	o := options{pageSize: 100, pingInterval: 3 * time.Second}
+	o := options{pageSize: 100, pingInterval: 3 * time.Second, now: time.Now}
 	for _, opt := range opts {
 		opt(&o)
 	}
@@ -148,7 +176,7 @@ func Start(r Reporter, world *World, opts ...Option) *Server {
 		changed: make(chan struct{}),
 		world:   world,
 		conns:   map[*cableConn]struct{}{},
-		tickets: map[string]int64{},
+		tickets: map[string]streamTicket{},
 		devices: map[string]bool{},
 	}
 	s.srv = httptest.NewUnstartedServer(s.routes())
@@ -206,11 +234,16 @@ func (s *Server) View(fn func(w *World)) {
 	fn(s.world)
 }
 
-// Requests is every request received so far, in arrival order.
+// Requests is every request received so far, in arrival order. The
+// requests are copies: changing one changes nothing the fake holds.
 func (s *Server) Requests() []Request {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return slices.Clone(s.log)
+	out := make([]Request, len(s.log))
+	for i, r := range s.log {
+		out[i] = r.clone()
+	}
+	return out
 }
 
 // Count is how many requests reached any of routes, answered or not.
@@ -226,16 +259,20 @@ func (s *Server) Count(routes ...Route) int {
 	return n
 }
 
-// Await returns once cond holds, or with ctx's error when ctx ends first.
-// cond is called without the fake's lock, so it may call the Server; it is
-// called again after every change the fake makes, never on a timer.
+// Await returns once cond holds, with ctx's error when ctx ends first, or
+// with ErrClosed when the fake is closed first. cond is called without the
+// fake's lock, so it may call the Server; it is called again after every
+// change the fake makes, never on a timer.
 func (s *Server) Await(ctx context.Context, cond func() bool) error {
 	for {
 		s.mu.Lock()
-		changed := s.changed
+		changed, closed := s.changed, s.closed
 		s.mu.Unlock()
 		if cond() {
 			return nil
+		}
+		if closed {
+			return ErrClosed
 		}
 		select {
 		case <-changed:
@@ -243,18 +280,6 @@ func (s *Server) Await(ctx context.Context, cond func() bool) error {
 			return ctx.Err()
 		}
 	}
-}
-
-// notifyLocked wakes every Await.
-func (s *Server) notifyLocked() {
-	close(s.changed)
-	s.changed = make(chan struct{})
-}
-
-// nextSerialLocked numbers the next thing the fake issues.
-func (s *Server) nextSerialLocked() int {
-	s.serial++
-	return s.serial
 }
 
 // Fault answers matching requests in place of their route. Its answer can
@@ -303,23 +328,6 @@ func (i *Injected) Hits() int {
 	i.s.mu.Lock()
 	defer i.s.mu.Unlock()
 	return i.hits
-}
-
-// faultLocked claims the fault that answers r, if one does.
-func (s *Server) faultLocked(r Request) (answer, bool) {
-	for idx := len(s.faults) - 1; idx >= 0; idx-- {
-		in := s.faults[idx]
-		f := in.fault
-		if !slices.Contains(f.Routes, r.Route) || (f.When != nil && !f.When(r)) {
-			continue
-		}
-		in.hits++
-		if f.Times > 0 && in.hits >= f.Times {
-			s.faults = slices.Delete(s.faults, idx, idx+1)
-		}
-		return answer{status: f.Status, header: f.Header.Clone(), body: []byte(f.Body)}, true
-	}
-	return answer{}, false
 }
 
 // TokenRateLimited is the token endpoint answering 429, asking for
@@ -372,7 +380,9 @@ type Gate struct {
 	released bool
 }
 
-// Gate holds every request to routes open, unanswered, until Release.
+// Gate holds every request to routes open, unanswered, until Release. Gates
+// may overlap: a request is held until every gate on its route is
+// released, whichever order they are released in.
 func (s *Server) Gate(routes ...Route) *Gate {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -401,11 +411,6 @@ func (g *Gate) Release() {
 	g.s.notifyLocked()
 }
 
-type hook struct {
-	route Route
-	fn    func(Request)
-}
-
 // Before runs fn as each request reaches route, before it is answered and
 // outside the fake's lock, so fn may call the Server. The returned function
 // stops it.
@@ -419,6 +424,47 @@ func (s *Server) Before(route Route, fn func(Request)) (remove func()) {
 		defer s.mu.Unlock()
 		s.hooks = slices.DeleteFunc(s.hooks, func(o *hook) bool { return o == h })
 	}
+}
+
+type options struct {
+	pageSize     int
+	pingInterval time.Duration
+	listener     net.Listener
+	now          func() time.Time
+}
+
+// notifyLocked wakes every Await.
+func (s *Server) notifyLocked() {
+	close(s.changed)
+	s.changed = make(chan struct{})
+}
+
+// nextSerialLocked numbers the next thing the fake issues.
+func (s *Server) nextSerialLocked() int {
+	s.serial++
+	return s.serial
+}
+
+// faultLocked claims the fault that answers r, if one does.
+func (s *Server) faultLocked(r Request) (answer, bool) {
+	for idx := len(s.faults) - 1; idx >= 0; idx-- {
+		in := s.faults[idx]
+		f := in.fault
+		if !slices.Contains(f.Routes, r.Route) || (f.When != nil && !f.When(r)) {
+			continue
+		}
+		in.hits++
+		if f.Times > 0 && in.hits >= f.Times {
+			s.faults = slices.Delete(s.faults, idx, idx+1)
+		}
+		return answer{status: f.Status, header: f.Header.Clone(), body: []byte(f.Body)}, true
+	}
+	return answer{}, false
+}
+
+type hook struct {
+	route Route
+	fn    func(Request)
 }
 
 // answer is a response worked out under the lock and written outside it.
@@ -497,6 +543,9 @@ func (s *Server) begin(route Route, w http.ResponseWriter, req *http.Request) (*
 	}
 	s.mu.Lock()
 	caller, _ := s.callerLocked(req)
+	if route == RouteCable {
+		caller, _ = s.ticketLocked(req)
+	}
 	c := &call{s: s, req: req, route: route, index: len(s.log)}
 	r := Request{
 		Method: req.Method,
@@ -518,7 +567,7 @@ func (s *Server) begin(route Route, w http.ResponseWriter, req *http.Request) (*
 	s.mu.Unlock()
 
 	for _, fn := range hooks {
-		fn(r)
+		fn(r.clone())
 	}
 	if !s.hold(req.Context(), c) {
 		s.finish(c, w, answer{status: http.StatusServiceUnavailable})
@@ -534,40 +583,47 @@ func (s *Server) begin(route Route, w http.ResponseWriter, req *http.Request) (*
 	return c, true
 }
 
-// hold waits at the first gate that holds the request's route. It reports
-// false when the fake closed, or the client left, before the gate opened.
+// hold waits until no gate holds the request's route: at one gate after
+// another, since a released gate leaves the list and the next one on the
+// route is then the first. It reports false when the fake closed, or the
+// client left, before every gate opened.
 func (s *Server) hold(ctx context.Context, c *call) bool {
-	s.mu.Lock()
-	var gate *Gate
-	for _, g := range s.gates {
-		if slices.Contains(g.routes, c.route) {
-			gate = g
-			break
+	for {
+		s.mu.Lock()
+		var gate *Gate
+		for _, g := range s.gates {
+			if slices.Contains(g.routes, c.route) {
+				gate = g
+				break
+			}
+		}
+		if gate == nil {
+			s.mu.Unlock()
+			return true
+		}
+		gate.waiting++
+		s.notifyLocked()
+		s.mu.Unlock()
+
+		released := false
+		select {
+		case <-gate.release:
+			released = true
+		case <-s.done:
+		case <-ctx.Done():
+		}
+		s.mu.Lock()
+		gate.waiting--
+		s.notifyLocked()
+		s.mu.Unlock()
+		if !released {
+			return false
 		}
 	}
-	if gate == nil {
-		s.mu.Unlock()
-		return true
-	}
-	gate.waiting++
-	s.notifyLocked()
-	s.mu.Unlock()
-
-	released := false
-	select {
-	case <-gate.release:
-		released = true
-	case <-s.done:
-	case <-ctx.Done():
-	}
-	s.mu.Lock()
-	gate.waiting--
-	s.notifyLocked()
-	s.mu.Unlock()
-	return released
 }
 
-// finish writes an answer and logs its status.
+// finish logs an answer's status and writes it. The status is logged first,
+// so a client that has read its answer finds it logged.
 func (s *Server) finish(c *call, w http.ResponseWriter, a answer) {
 	for name, values := range a.header {
 		for _, v := range values {
@@ -581,9 +637,9 @@ func (s *Server) finish(c *call, w http.ResponseWriter, a answer) {
 	if status == 0 {
 		status = http.StatusOK
 	}
+	s.setStatus(c.index, status)
 	w.WriteHeader(status)
 	_, _ = w.Write(a.body)
-	s.setStatus(c.index, status)
 }
 
 func (s *Server) setStatus(index, status int) {

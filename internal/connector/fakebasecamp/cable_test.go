@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -121,12 +122,26 @@ func TestCableSpeaksActionCable(t *testing.T) {
 		"visible_to_clients": false,
 	}, message)
 
-	// A different subscription on the same connection is rejected; the same
-	// one again is absorbed.
-	c.send(map[string]string{"command": "subscribe", "identifier": `{"channel":"EventsChannel"}`})
-	assert.Equal(t, "reject_subscription", c.next()["type"])
+	// As in Action Cable, the same subscription again answers nothing, and
+	// a different one is a second subscription, confirmed and pushed to on
+	// its own.
+	c.send(map[string]string{"command": "subscribe", "identifier": identifier})
+	everything := `{"channel":"EventsChannel"}`
+	c.send(map[string]string{"command": "subscribe", "identifier": everything})
+	assert.Equal(t, map[string]any{"type": "confirm_subscription", "identifier": everything}, c.next(),
+		"the repeated subscribe sent no frame ahead of this one")
+	assert.Equal(t, 1, s.Subscribers(), "one connection, however many subscriptions")
+	both := s.Emit(commentBy(fakebasecamp.OperatorID, fakebasecamp.ProjectID), fakebasecamp.Live)
+	pushed := map[string]float64{}
+	for range 2 {
+		frame := c.next()
+		pushed[frame["identifier"].(string)] = frame["message"].(map[string]any)["id"].(float64)
+	}
+	assert.Equal(t, map[string]float64{identifier: float64(both.ID), everything: float64(both.ID)}, pushed)
+
 	c.send(map[string]string{"command": "unsubscribe", "identifier": identifier})
-	await(t, s, "the unsubscribe", func() bool { return s.Subscribers() == 0 })
+	c.send(map[string]string{"command": "unsubscribe", "identifier": everything})
+	await(t, s, "the unsubscribes", func() bool { return s.Subscribers() == 0 })
 }
 
 // The cable pings on its interval until it is silenced; then nothing more
@@ -181,4 +196,85 @@ func TestCableRefusesAnUnknownTicketAndDrops(t *testing.T) {
 	_, err = c.frame(waitFor)
 	assert.Error(t, err)
 	assert.Equal(t, 2, s.Count(fakebasecamp.RouteCable))
+}
+
+// A stream ticket opens the cable as the person it was minted for, and
+// again, until it expires by the fake's clock; then it is refused before
+// the upgrade.
+func TestStreamTicketsOpenTheCableUntilTheyExpire(t *testing.T) {
+	var mu sync.Mutex
+	now := time.Now()
+	clock := func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return now
+	}
+	s, bearer := start(t, fakebasecamp.WithClock(clock))
+	status, _, body := do(t, s, http.MethodPost, "/999/events/stream_ticket.json", bearer, "")
+	require.Equal(t, http.StatusOK, status, body)
+	var ticket struct {
+		ExpiresIn int    `json:"expires_in"`
+		URL       string `json:"url"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &ticket))
+	assert.Equal(t, 120, ticket.ExpiresIn)
+
+	dial := func() (int, error) {
+		t.Helper()
+		ws, resp, err := websocket.Dial(bounded(t), ticket.URL, &websocket.DialOptions{Subprotocols: []string{"actioncable-v1-json"}})
+		if ws != nil {
+			_ = ws.CloseNow()
+		}
+		require.NotNil(t, resp)
+		return resp.StatusCode, err
+	}
+	for range 2 {
+		status, err := dial()
+		require.NoError(t, err, "a ticket is replayable within its window")
+		assert.Equal(t, http.StatusSwitchingProtocols, status)
+	}
+	mu.Lock()
+	now = now.Add(time.Duration(ticket.ExpiresIn) * time.Second)
+	mu.Unlock()
+	status, err := dial()
+	require.Error(t, err)
+	assert.Equal(t, http.StatusUnauthorized, status)
+
+	var cable []fakebasecamp.Request
+	for _, r := range s.Requests() {
+		if r.Route == fakebasecamp.RouteCable {
+			cable = append(cable, r)
+		}
+	}
+	require.Len(t, cable, 3)
+	for _, r := range cable[:2] {
+		assert.Equal(t, fakebasecamp.AgentID, r.Caller, "the caller is the ticket's")
+		assert.True(t, r.Agent)
+		assert.Equal(t, http.StatusSwitchingProtocols, r.Status)
+	}
+	assert.Zero(t, cable[2].Caller, "an expired ticket names nobody")
+	assert.Equal(t, http.StatusUnauthorized, cable[2].Status)
+	ev := s.Emit(commentBy(fakebasecamp.OperatorID, fakebasecamp.ProjectID), fakebasecamp.Poll)
+	assert.True(t, clock().Equal(ev.CreatedAt), "an event is stamped by the same clock")
+}
+
+// A fault narrowed to Agents reaches the cable, whose caller comes from the
+// ticket rather than a bearer token.
+func TestCableFaultsNarrowByTicketCaller(t *testing.T) {
+	s, bearer := start(t)
+	refused := fakebasecamp.Refused(http.StatusForbidden, fakebasecamp.RouteCable)
+	refused.When = fakebasecamp.ByAgents
+	s.Inject(refused)
+	status, _, body := do(t, s, http.MethodPost, "/999/events/stream_ticket.json", bearer, "")
+	require.Equal(t, http.StatusOK, status, body)
+	var ticket struct {
+		URL string `json:"url"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &ticket))
+	_, resp, err := websocket.Dial(bounded(t), ticket.URL, &websocket.DialOptions{Subprotocols: []string{"actioncable-v1-json"}})
+	require.Error(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+
+	dialCable(t, s, fakebasecamp.OperatorToken)
 }

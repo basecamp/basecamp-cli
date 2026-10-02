@@ -45,7 +45,12 @@ type Event struct {
 	// performer is.
 	ActorType        string
 	VisibleToClients bool
-	// CreatedAt defaults to the moment it is emitted.
+	// CreatedAt defaults to the moment it is emitted, by the fake's clock
+	// (WithClock). It is a real time and not the fake's fixed epoch: the
+	// connector hands off only a request created at most
+	// connector.HandoffGrace before its run started, judging by this
+	// created_at as the feed served it, so an event stamped in the past is
+	// discarded as before_this_run.
 	CreatedAt time.Time
 	// Details is the feed's own detail object, for the types that publish
 	// one (boost.created, card.moved).
@@ -149,7 +154,7 @@ func (s *Server) completeLocked(ev *Event, last int64) error {
 		}
 	}
 	if ev.CreatedAt.IsZero() {
-		ev.CreatedAt = time.Now().UTC()
+		ev.CreatedAt = s.opts.now().UTC()
 	}
 	return nil
 }
@@ -319,6 +324,11 @@ func (c *call) events() answer {
 		}
 		cursor = n
 	case since == "" || since == "now":
+		// Neither is the bare present entry, which Basecamp reads as
+		// since=now (the SDK's PollEventsOptions: "leave both empty to
+		// enter at the present"). eventfeed never sends one, but `basecamp
+		// events poll` does on purpose, so it is on the contract and not
+		// reported.
 		return c.jsonAnswer(http.StatusOK, map[string]any{"events": []pollRow{}, "position": position(head)})
 	default:
 		n, err := strconv.ParseInt(since, 10, 64)
