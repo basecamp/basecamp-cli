@@ -628,26 +628,17 @@ func everySubtask(ctx context.Context, app *appctx.App, parentID int64, embedded
 // fullSubtasks reads every subtask of a card or to-do whose embedded steps are
 // cut off, and returns nil when the embed is already complete. A parent embeds
 // at most basecamp.DefaultSubtaskLimit subtasks under steps, with nothing
-// marking the list as cut off; subtasks_count is the real total. A count above
-// the embed means steps are missing. With no count at all, an embed at exactly
-// the cap may be missing some, so read the list — but that is a guess, so the
-// read replaces the embed only when it succeeds and finds more.
+// marking the list as cut off; subtasks_count is the real total.
 func fullSubtasks(ctx context.Context, app *appctx.App, parentID int64, embedded, count int) ([]basecamp.Subtask, error) {
-	known := count > embedded
-	guessed := count == 0 && embedded >= basecamp.DefaultSubtaskLimit
-	if !known && !guessed {
+	if count <= embedded {
 		return nil, nil
 	}
 	result, err := app.Account().Subtasks().List(ctx, parentID, &basecamp.SubtaskListOptions{Limit: -1})
-	if err != nil && known {
+	if err != nil {
 		return nil, convertSDKError(err)
 	}
-	listed := []basecamp.Subtask{}
-	if err == nil && result.Subtasks != nil {
-		listed = result.Subtasks
+	if result.Subtasks == nil {
+		return []basecamp.Subtask{}, nil
 	}
-	if guessed && len(listed) <= embedded {
-		return nil, nil
-	}
-	return listed, nil
+	return result.Subtasks, nil
 }

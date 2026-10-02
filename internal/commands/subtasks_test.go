@@ -376,15 +376,10 @@ func stepsJSON(n int) string {
 	return "[" + strings.Join(items, ",") + "]"
 }
 
-// parentJSON is a card or to-do embedding `inline` steps. A negative count
-// omits subtasks_count, as a server predating the field would.
+// parentJSON is a card or to-do embedding `inline` steps out of `count`.
 func parentJSON(id int64, typ string, inline, count int) string {
-	countField := ""
-	if count >= 0 {
-		countField = fmt.Sprintf(`"subtasks_count":%d,`, count)
-	}
-	return fmt.Sprintf(`{"id":%d,"title":"Big checklist","type":%q,%s"bucket":{"id":123,"name":"Test Project","type":"Project"},"steps":%s}`,
-		id, typ, countField, stepsJSON(inline))
+	return fmt.Sprintf(`{"id":%d,"title":"Big checklist","type":%q,"subtasks_count":%d,"bucket":{"id":123,"name":"Test Project","type":"Project"},"steps":%s}`,
+		id, typ, count, stepsJSON(inline))
 }
 
 func cardGetRoute(id int64, body string) stubRoute {
@@ -418,21 +413,6 @@ func TestCardsStepsReadsEveryStepPastTheEmbedCap(t *testing.T) {
 	assert.Equal(t, "Step 135", steps[134]["title"])
 	assert.Equal(t, "135 steps on card #777", summary)
 	assert.Len(t, transport.queriesFor(subtasksListPath(777)), 1)
-}
-
-// With no subtasks_count to compare against, exactly 100 embedded steps may be
-// a cut-off list, so read the whole list.
-func TestCardsStepsReadsEveryStepWhenTheCountIsMissingAndTheEmbedIsFull(t *testing.T) {
-	app, _, out := setupPersonalFeedApp(t,
-		projectsRoute(),
-		cardGetRoute(777, parentJSON(777, "Kanban::Card", 100, -1)),
-		subtaskRoute(http.MethodGet, subtasksListPath(777), http.StatusOK, stepsJSON(135)))
-
-	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "steps", "777", "--in", "123"))
-
-	data, summary := subtaskEnvelope(t, out)
-	assert.Equal(t, 135, len(decodeSteps(t, data)))
-	assert.Equal(t, "135 steps on card #777", summary)
 }
 
 // A complete embed costs no extra request.
@@ -490,21 +470,6 @@ func TestTodosShowTrustsACompleteEmbed(t *testing.T) {
 	assert.Empty(t, transport.queriesFor(subtasksListPath(888)))
 }
 
-// With no count, a full embed is only possibly cut off; when the full list
-// can't be read, the embed stands rather than failing the command.
-func TestCardsStepsKeepsTheEmbedWhenAGuessedReadFails(t *testing.T) {
-	app, transport, out := setupPersonalFeedApp(t,
-		projectsRoute(),
-		cardGetRoute(777, parentJSON(777, "Kanban::Card", 100, -1)))
-
-	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "steps", "777", "--in", "123"))
-
-	data, summary := subtaskEnvelope(t, out)
-	assert.Equal(t, 100, len(decodeSteps(t, data)))
-	assert.Equal(t, "100 steps on card #777", summary)
-	assert.Len(t, transport.queriesFor(subtasksListPath(777)), 1)
-}
-
 // A known cut-off that can't be completed is an error, not a short list.
 func TestCardsStepsFailsWhenAKnownCutOffCannotBeRead(t *testing.T) {
 	app, _, _ := setupPersonalFeedApp(t,
@@ -549,18 +514,4 @@ func TestShowTrustsACompleteEmbed(t *testing.T) {
 	require.NoError(t, executeRecordingCommand(NewShowCmd(), app, "card", "777"))
 
 	assert.Empty(t, transport.queriesFor(subtasksListPath(777)))
-}
-
-// A guessed read that finds no more than the embed doesn't replace it.
-func TestCardsStepsKeepsTheEmbedWhenAGuessedReadFindsNoMore(t *testing.T) {
-	app, _, out := setupPersonalFeedApp(t,
-		projectsRoute(),
-		cardGetRoute(777, parentJSON(777, "Kanban::Card", 100, -1)),
-		subtaskRoute(http.MethodGet, subtasksListPath(777), http.StatusOK, "[]"))
-
-	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "steps", "777", "--in", "123"))
-
-	data, summary := subtaskEnvelope(t, out)
-	assert.Equal(t, 100, len(decodeSteps(t, data)))
-	assert.Equal(t, "100 steps on card #777", summary)
 }
