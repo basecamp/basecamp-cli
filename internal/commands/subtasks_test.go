@@ -521,6 +521,7 @@ func TestShowCarriesEveryStepPastTheEmbedCap(t *testing.T) {
 	}{
 		{"card", "/99999/card_tables/cards/777.json", "Kanban::Card", 777},
 		{"todo", "/99999/todos/888.json", "Todo", 888},
+		{"todo", "/99999/todos/889.json", "Todolist::Todo", 889},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {
 			app, _, out := setupPersonalFeedApp(t,

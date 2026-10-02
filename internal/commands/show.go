@@ -544,7 +544,9 @@ func commentsFetchFailedNotice(count int, id string) string {
 // expandCutOffSteps replaces a card's or to-do's embedded steps with the full
 // list when the embed is cut off (see fullSubtasks), keeping the raw map shape.
 func expandCutOffSteps(ctx context.Context, app *appctx.App, data map[string]any) error {
-	if t, _ := data["type"].(string); t != "Kanban::Card" && t != "Todo" {
+	switch data["type"] {
+	case "Kanban::Card", "Todo", "Todolist::Todo":
+	default:
 		return nil
 	}
 	idNum, _ := data["id"].(json.Number)
