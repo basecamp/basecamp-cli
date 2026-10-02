@@ -366,12 +366,12 @@ func TestSubtasksShowAcceptsACardSubtaskURL(t *testing.T) {
 	assert.Equal(t, subtaskPath(456), transport.last(t).Path)
 }
 
-// stepsJSON renders n subtasks with ids from 1, the first `done` completed.
-func stepsJSON(n, done int) string {
+// stepsJSON renders n subtasks with ids from 1.
+func stepsJSON(n int) string {
 	items := make([]string, n)
 	for i := range items {
-		items[i] = fmt.Sprintf(`{"id":%d,"title":"Step %d","type":"Kanban::Step","position":%d,"completed":%t}`,
-			i+1, i+1, i+1, i < done)
+		items[i] = fmt.Sprintf(`{"id":%d,"title":"Step %d","type":"Kanban::Step","position":%d,"completed":false}`,
+			i+1, i+1, i+1)
 	}
 	return "[" + strings.Join(items, ",") + "]"
 }
@@ -384,7 +384,7 @@ func parentJSON(id int64, typ string, inline, count int) string {
 		countField = fmt.Sprintf(`"subtasks_count":%d,`, count)
 	}
 	return fmt.Sprintf(`{"id":%d,"title":"Big checklist","type":%q,%s"bucket":{"id":123,"name":"Test Project","type":"Project"},"steps":%s}`,
-		id, typ, countField, stepsJSON(inline, 0))
+		id, typ, countField, stepsJSON(inline))
 }
 
 func cardGetRoute(id int64, body string) stubRoute {
@@ -408,7 +408,7 @@ func TestCardsStepsReadsEveryStepPastTheEmbedCap(t *testing.T) {
 	app, transport, out := setupPersonalFeedApp(t,
 		projectsRoute(),
 		cardGetRoute(777, parentJSON(777, "Kanban::Card", 100, 135)),
-		subtaskRoute(http.MethodGet, subtasksListPath(777), http.StatusOK, stepsJSON(135, 0)))
+		subtaskRoute(http.MethodGet, subtasksListPath(777), http.StatusOK, stepsJSON(135)))
 
 	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "steps", "777", "--in", "123"))
 
@@ -426,7 +426,7 @@ func TestCardsStepsReadsEveryStepWhenTheCountIsMissingAndTheEmbedIsFull(t *testi
 	app, _, out := setupPersonalFeedApp(t,
 		projectsRoute(),
 		cardGetRoute(777, parentJSON(777, "Kanban::Card", 100, -1)),
-		subtaskRoute(http.MethodGet, subtasksListPath(777), http.StatusOK, stepsJSON(135, 0)))
+		subtaskRoute(http.MethodGet, subtasksListPath(777), http.StatusOK, stepsJSON(135)))
 
 	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "steps", "777", "--in", "123"))
 
@@ -452,7 +452,7 @@ func TestCardsStepsTrustsACompleteEmbed(t *testing.T) {
 func TestCardsShowCarriesEveryStepPastTheEmbedCap(t *testing.T) {
 	app, _, out := setupPersonalFeedApp(t,
 		cardGetRoute(777, parentJSON(777, "Kanban::Card", 100, 135)),
-		subtaskRoute(http.MethodGet, subtasksListPath(777), http.StatusOK, stepsJSON(135, 0)))
+		subtaskRoute(http.MethodGet, subtasksListPath(777), http.StatusOK, stepsJSON(135)))
 
 	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "show", "777"))
 
@@ -469,7 +469,7 @@ func TestCardsShowCarriesEveryStepPastTheEmbedCap(t *testing.T) {
 func TestTodosShowCarriesEveryStepPastTheEmbedCap(t *testing.T) {
 	app, _, out := setupPersonalFeedApp(t,
 		todoGetRoute(888, parentJSON(888, "Todo", 100, 135)),
-		subtaskRoute(http.MethodGet, subtasksListPath(888), http.StatusOK, stepsJSON(135, 0)))
+		subtaskRoute(http.MethodGet, subtasksListPath(888), http.StatusOK, stepsJSON(135)))
 
 	require.NoError(t, executeRecordingCommand(NewTodosCmd(), app, "show", "888"))
 
@@ -516,17 +516,17 @@ func TestCardsStepsFailsWhenAKnownCutOffCannotBeRead(t *testing.T) {
 
 func TestShowCarriesEveryStepPastTheEmbedCap(t *testing.T) {
 	for _, tc := range []struct {
-		kind, path, typ string
-		id              int64
+		name, kind, path, typ string
+		id                    int64
 	}{
-		{"card", "/99999/card_tables/cards/777.json", "Kanban::Card", 777},
-		{"todo", "/99999/todos/888.json", "Todo", 888},
-		{"todo", "/99999/todos/889.json", "Todolist::Todo", 889},
+		{"card", "card", "/99999/card_tables/cards/777.json", "Kanban::Card", 777},
+		{"todo", "todo", "/99999/todos/888.json", "Todo", 888},
+		{"todolist todo", "todo", "/99999/todos/889.json", "Todolist::Todo", 889},
 	} {
-		t.Run(tc.kind, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			app, _, out := setupPersonalFeedApp(t,
 				stubRoute{method: http.MethodGet, path: tc.path, status: http.StatusOK, body: parentJSON(tc.id, tc.typ, 100, 135)},
-				subtaskRoute(http.MethodGet, subtasksListPath(tc.id), http.StatusOK, stepsJSON(135, 0)))
+				subtaskRoute(http.MethodGet, subtasksListPath(tc.id), http.StatusOK, stepsJSON(135)))
 
 			require.NoError(t, executeRecordingCommand(NewShowCmd(), app, tc.kind, fmt.Sprint(tc.id)))
 
