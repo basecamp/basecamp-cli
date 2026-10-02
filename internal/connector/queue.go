@@ -61,21 +61,24 @@ type Queue struct {
 	paused  bool
 
 	// OnWarn fires when the depth first crosses the warning threshold, and
-	// OnRecover when it falls back below. Both are optional.
+	// OnRecover when it falls back below. Both are optional, and neither is
+	// needed for the operator to hear of it: every edge is reported on the
+	// logger first.
 	OnWarn    func(depth int)
 	OnRecover func(depth int)
 	// OnPause fires when an offer begins waiting for room, and OnResume when
 	// it stops. The feed is not being consumed in between.
 	OnPause  func(depth int)
 	OnResume func(depth int)
-	// log reports a callback that panicked. Held under edges: a queue can be
-	// adopted by intake while another component is already using it, and a
-	// field written by one and read by the other is a race.
+	// log reports every edge and any callback that panicked. Held under
+	// edges: a queue can be adopted by intake while another component is
+	// already using it, and a field written by one and read by the other is a
+	// race.
 	log *slog.Logger
 }
 
-// SetLogger sets where a callback that panicked is reported. Safe to call
-// while the queue is in use.
+// SetLogger sets where the backlog's edges, and a callback that panicked, are
+// reported. Safe to call while the queue is in use.
 func (q *Queue) SetLogger(log *slog.Logger) {
 	q.edges.Lock()
 	defer q.edges.Unlock()
@@ -227,10 +230,10 @@ func (q *Queue) stage(delta int) {
 	switch {
 	case depth >= q.warnAt && !q.warned:
 		q.warned = true
-		q.pending = append(q.pending, queueEdge{fire: q.OnWarn, depth: depth})
+		q.pending = append(q.pending, queueEdge{kind: edgeWarn, fire: q.OnWarn, depth: depth})
 	case depth < q.warnAt && q.warned:
 		q.warned = false
-		q.pending = append(q.pending, queueEdge{fire: q.OnRecover, depth: depth})
+		q.pending = append(q.pending, queueEdge{kind: edgeRecover, fire: q.OnRecover, depth: depth})
 	}
 }
 
@@ -250,10 +253,10 @@ func (q *Queue) stageWait(delta int) {
 	switch {
 	case q.waiting > 0 && !q.paused:
 		q.paused = true
-		q.pending = append(q.pending, queueEdge{fire: q.OnPause, depth: q.depth})
+		q.pending = append(q.pending, queueEdge{kind: edgePause, fire: q.OnPause, depth: q.depth})
 	case q.waiting == 0 && q.paused:
 		q.paused = false
-		q.pending = append(q.pending, queueEdge{fire: q.OnResume, depth: q.depth})
+		q.pending = append(q.pending, queueEdge{kind: edgeResume, fire: q.OnResume, depth: q.depth})
 	}
 }
 
@@ -290,7 +293,12 @@ func (q *Queue) deliver() {
 	}
 }
 
-// fire runs one callback with the lock released and a panic contained.
+// fire reports one edge and runs its callback, with the lock released and a
+// panic contained.
+//
+// The report comes first and does not depend on the callback: a caller that
+// set none, as production does, still has the backlog reported rather than
+// hidden, and one that panics cannot take the report down with it.
 //
 // The callbacks belong to whoever built the queue, and the goroutine they run
 // on is the feed's delivery path or a worker taking work off it. A callback
@@ -299,14 +307,37 @@ func (q *Queue) deliver() {
 // callback is told about was committed before it ran, so what it does cannot
 // change it.
 func (q *Queue) fire(edge queueEdge) {
+	log := q.logger()
+	q.report(log, edge)
 	defer func() {
 		if p := recover(); p != nil {
-			q.logger().Error("a backlog callback panicked; the queue carried on without it",
+			log.Error("a backlog callback panicked; the queue carried on without it",
 				"panic", richtext.SanitizeSingleLine(fmt.Sprint(p)))
 		}
 	}()
 	if edge.fire != nil {
 		edge.fire(edge.depth)
+	}
+}
+
+// report tells the operator about one edge, with the depth it was decided at
+// and the threshold it crossed. The depth of a pause or a resume counts the id
+// the waiting offer is holding: it is backlog either way.
+func (q *Queue) report(log *slog.Logger, edge queueEdge) {
+	pauseAt := cap(q.ids)
+	switch edge.kind {
+	case edgeWarn:
+		log.Warn("the backlog reached its warning depth; admission is falling behind the feed",
+			"depth", edge.depth, "warn_at", q.warnAt, "pause_at", pauseAt)
+	case edgeRecover:
+		log.Info("the backlog fell back below its warning depth",
+			"depth", edge.depth, "warn_at", q.warnAt)
+	case edgePause:
+		log.Warn("the backlog reached its pause depth; reading the feed is paused until admission makes room, so the backlog cannot outgrow memory",
+			"depth", edge.depth, "pause_at", pauseAt)
+	case edgeResume:
+		log.Info("the backlog has room again; reading the feed resumed",
+			"depth", edge.depth, "pause_at", pauseAt)
 	}
 }
 
@@ -322,6 +353,17 @@ func (q *Queue) logger() *slog.Logger {
 }
 
 type queueEdge struct {
+	kind  edgeKind
 	fire  func(int)
 	depth int
 }
+
+// edgeKind is which of the backlog's transitions an edge is.
+type edgeKind int
+
+const (
+	edgeWarn edgeKind = iota
+	edgeRecover
+	edgePause
+	edgeResume
+)
