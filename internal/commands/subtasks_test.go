@@ -550,3 +550,17 @@ func TestShowTrustsACompleteEmbed(t *testing.T) {
 
 	assert.Empty(t, transport.queriesFor(subtasksListPath(777)))
 }
+
+// A guessed read that finds no more than the embed doesn't replace it.
+func TestCardsStepsKeepsTheEmbedWhenAGuessedReadFindsNoMore(t *testing.T) {
+	app, _, out := setupPersonalFeedApp(t,
+		projectsRoute(),
+		cardGetRoute(777, parentJSON(777, "Kanban::Card", 100, -1)),
+		subtaskRoute(http.MethodGet, subtasksListPath(777), http.StatusOK, "[]"))
+
+	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "steps", "777", "--in", "123"))
+
+	data, summary := subtaskEnvelope(t, out)
+	assert.Equal(t, 100, len(decodeSteps(t, data)))
+	assert.Equal(t, "100 steps on card #777", summary)
+}

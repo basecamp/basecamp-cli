@@ -630,8 +630,8 @@ func everySubtask(ctx context.Context, app *appctx.App, parentID int64, embedded
 // at most basecamp.DefaultSubtaskLimit subtasks under steps, with nothing
 // marking the list as cut off; subtasks_count is the real total. A count above
 // the embed means steps are missing. With no count at all, an embed at exactly
-// the cap may be missing some, so read the list — but that is a guess, and a
-// failed read leaves the embed standing rather than failing the command.
+// the cap may be missing some, so read the list — but that is a guess, so the
+// read replaces the embed only when it succeeds and finds more.
 func fullSubtasks(ctx context.Context, app *appctx.App, parentID int64, embedded, count int) ([]basecamp.Subtask, error) {
 	known := count > embedded
 	guessed := count == 0 && embedded >= basecamp.DefaultSubtaskLimit
@@ -639,13 +639,15 @@ func fullSubtasks(ctx context.Context, app *appctx.App, parentID int64, embedded
 		return nil, nil
 	}
 	result, err := app.Account().Subtasks().List(ctx, parentID, &basecamp.SubtaskListOptions{Limit: -1})
-	switch {
-	case err != nil && guessed:
-		return nil, nil
-	case err != nil:
+	if err != nil && known {
 		return nil, convertSDKError(err)
-	case result.Subtasks == nil:
-		return []basecamp.Subtask{}, nil
 	}
-	return result.Subtasks, nil
+	listed := []basecamp.Subtask{}
+	if err == nil && result.Subtasks != nil {
+		listed = result.Subtasks
+	}
+	if guessed && len(listed) <= embedded {
+		return nil, nil
+	}
+	return listed, nil
 }
