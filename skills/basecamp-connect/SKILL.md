@@ -307,7 +307,8 @@ thing to check.
 - **`reply_to`**: where the answer goes. `kind` `comment` means a comment on
   `recording_id` (the card or message the comment belongs to, already chosen for
   you). `kind` `chat_line` means a line in the Campfire `recording_id`.
-- **`requester_id`**: the person who asked. Mention them on failure.
+- **`requester_id`**: the person who asked. Mention them on failure, except in
+  Campfire.
   `requester_name` is their name when they wrote the recording; it's missing
   for an assignment someone else's recording carries.
 - **`content`**: the request as it was written, with the agent's own mention
@@ -369,7 +370,8 @@ Work out which local repo the project's work goes in, quickly:
 
 **If you can't map it confidently, ask the person. Don't guess, and don't fall
 back to this folder.** Before asking, post one short holding reply as the agent
-at `reply_to`, mentioning the requester: received, waiting for the operator to
+at `reply_to`, mentioning the requester (never in Campfire, where Basecamp
+refuses an agent's mention): received, waiting for the operator to
 pick a repo. Never leave an acknowledged request with nobody holding it. Once
 they answer, store the mapping in `last.json`.
 
@@ -503,6 +505,9 @@ basecamp chat post - --project <bucket_id> --room <reply_to.recording_id> --prof
   mention, and tell the main session so it can tell the person directly. The
   same goes for every reply that mentions someone, the main session's holding
   reply included.
+  In Campfire (`kind` `chat_line`), never mention anyone, since Basecamp
+  refuses it there: post the reply without the mention, and tell the main
+  session so it can tell the person directly.
 - Never mention the agent.
 
 **Rich text.** In comments, messages, documents and cards, the CLI converts
@@ -519,6 +524,8 @@ detail, load the `basecamp` skill.
 
 - **Links carry a title, not a bare URL**:
   `[Skip the ack boost when the reply is immediate](https://github.com/basecamp/bc3/pull/1234)`.
+  In a plain-text Campfire line, where Markdown isn't converted, write the
+  title and then the full URL: `Skip the ack boost: https://github.com/…/pull/1234`.
 - **Anything in another app gets its full URL**: `[#1234 Skip the ack boost](https://github.com/…/pull/1234)`,
   never a bare `#1234`, `abc123f` or `SENTRY-4F`.
 - **Campfire replies stay chat-sized**: a few lines of plain text (or HTML), no
