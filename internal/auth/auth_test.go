@@ -1960,6 +1960,7 @@ func TestRefresh_InvalidGrantForgetsTheCredential(t *testing.T) {
 	assert.True(t, strings.HasPrefix(cliErr.Message, "Your session has expired or was revoked (The refresh token was revoked"), cliErr.Message)
 	assert.NotContains(t, cliErr.Message, "\x1b", "the server's description is sanitized for the terminal")
 	assert.Equal(t, "Run: basecamp auth login -P work", cliErr.Hint)
+	assert.ErrorIs(t, err, ErrLoginRefused, "a connector tells this refusal from every other failure by its cause")
 
 	_, loadErr := m.store.Load(key)
 	assert.Error(t, loadErr, "the dead credential must be forgotten")
@@ -1994,6 +1995,7 @@ func TestRefresh_InvalidRequestKeepsTheCredential(t *testing.T) {
 	require.ErrorAs(t, err, &cliErr)
 	assert.Equal(t, output.CodeAPI, cliErr.Code)
 	assert.True(t, strings.HasPrefix(cliErr.Message, "token refresh failed: "), cliErr.Message)
+	assert.NotErrorIs(t, err, ErrLoginRefused)
 
 	creds, loadErr := m.store.Load(key)
 	require.NoError(t, loadErr)
@@ -2011,8 +2013,24 @@ func TestAccessToken_InvalidGrantHintsTheProfile(t *testing.T) {
 	require.ErrorAs(t, err, &cliErr)
 	assert.Equal(t, output.CodeAuth, cliErr.Code)
 	assert.Equal(t, "Run: basecamp auth login -P work", cliErr.Hint)
+	assert.ErrorIs(t, err, ErrLoginRefused)
 	_, loadErr := m.store.Load(key)
 	assert.Error(t, loadErr)
+}
+
+// TestRefresh_ARefusalThatCanPassIsNotTheLoginRefused: a rate limit or a
+// server fault at the token endpoint says nothing about the login, so it
+// never carries the cause that says Basecamp refused it.
+func TestRefresh_ARefusalThatCanPassIsNotTheLoginRefused(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		m, key := refreshRefusedBy(t, status, `{"error":"temporarily_unavailable"}`)
+
+		err := m.Refresh(context.Background())
+		require.Error(t, err, status)
+		assert.NotErrorIs(t, err, ErrLoginRefused, status)
+		_, loadErr := m.store.Load(key)
+		assert.NoError(t, loadErr, status)
+	}
 }
 
 // TestRefresh_PreservesIdentityAndBinding: a rotation replaces the tokens

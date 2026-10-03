@@ -198,15 +198,17 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		}
 	default:
 	}
+	who := connectRunAs{Kind: kind, Profile: name, IdentityID: file.Agent.IdentityID}
 	if err != nil {
-		return connectStartFailure(ctx, kind, name, err)
+		return connectStartFailure(ctx, who, err)
 	}
 	client := connectSDKClient(app, tokens)
 	accountClient := client.ForAccount(account)
 	me, err := (setup.SDKReader{Client: accountClient}).Me(ctx)
 	if err != nil {
-		return connectStartFailure(ctx, kind, name, err)
+		return connectStartFailure(ctx, who, err)
 	}
+	who.Name = me.Name
 	if _, err := checkConnectIdentity(ctx, app, client, kind, creds.OAuthType, me, file.Agent.IdentityID); err != nil {
 		return err
 	}
@@ -249,6 +251,14 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	}
 	lines := ndjson.NewWriter(cmd.OutOrStdout())
 
+	// The reads admission and intake make are watched for Basecamp refusing
+	// the agent's credential, an Agent's or a bot user's, which the feed
+	// alone would not see while its live connection stays up. The start's
+	// own reads are not: a refusal there ends the start as it is.
+	watch := newCredentialWatch()
+	watchedOpts := append(connectSDKOptions(), basecamp.WithTransportWrapper(watch))
+	watchedTokens := watch.Tokens(tokens)
+
 	queue, err := connector.NewQueue(connector.DefaultBacklogWarn, connector.DefaultBacklogPause)
 	if err != nil {
 		return err
@@ -266,7 +276,9 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	intakeOpts.Queue = queue
 	intakeOpts.Lines = lines
 	intakeOpts.Logger = logger
-	intakeOpts.Membership = connector.SDKMembership{Client: accountClient}
+	intakeOpts.Membership = connector.SDKMembership{
+		Client: basecamp.NewClient(&basecamp.Config{BaseURL: app.Config.BaseURL}, watchedTokens, watchedOpts...).ForAccount(account),
+	}
 	intake, err := connector.New(intakeOpts)
 	if err != nil {
 		return err
@@ -278,7 +290,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	// is at most connectServedTTL old — see TestConnectServedTTLStaysSmall.
 	served := newConnectServed(path, file, logger)
 
-	reads := admission.NewSDKReads(&basecamp.Config{BaseURL: app.Config.BaseURL}, tokens, account, connectSDKOptions()...)
+	reads := admission.NewSDKReads(&basecamp.Config{BaseURL: app.Config.BaseURL}, watchedTokens, account, watchedOpts...)
 	admitter, err := admission.NewAdmitter(policy, reads, admission.WithServed(served.Current))
 	if err != nil {
 		return output.ErrUsage(err.Error())
@@ -347,6 +359,9 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if err := ledger.NoteConnection(ctx, connector.ConnectionRunning, ""); err != nil {
 		logger.Warn("connector: could not record that it runs, for status", "error", err)
 	}
+	runPart("credential", func(ctx context.Context) error {
+		return watch.Run(ctx, func(ctx context.Context) bool { return confirmCredentialRefused(ctx, app, kind, name) })
+	})
 	runPart("intake", intake.Run)
 	runPart("admission", func(ctx context.Context) error {
 		return connector.RunAdmission(ctx, connector.AdmissionOptions{Ledger: ledger, Queue: queue, Admitter: admitter, Lines: lines, Logger: logger})
@@ -372,8 +387,8 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return connectStoppedBySignal(sig)
 	case firstErr != nil:
 		var err error
-		refused := func() bool { return confirmAgentRefused(context.WithoutCancel(ctx), app, kind, name) }
-		stopState, stopDetail, err = connectorStoppedBy(firstErr, me.Name, name, refused)
+		refused := func() bool { return confirmCredentialRefused(context.WithoutCancel(ctx), app, kind, name) }
+		stopState, stopDetail, err = connectorStoppedBy(firstErr, who, refused)
 		if err != firstErr { //nolint:errorlint // identity: was firstErr put in the person's words
 			logger.Error("connector: Basecamp refused the agent's credential", "error", firstErr)
 		}
@@ -384,20 +399,44 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	return nil
 }
 
+// connectRunAs is who a connector runs as, for the words its refusals use:
+// the kind of credential, the name Basecamp gave (empty until it is read),
+// the profile, and a bot user's pinned identity.
+type connectRunAs struct {
+	Kind       string
+	Name       string
+	Profile    string
+	IdentityID int64
+}
+
 // connectorStoppedBy is what the connector exits with when one of its parts
 // stopped it with err, and the connection state status keeps for that. The
-// stop people meet — the agent was disconnected in Basecamp, or connected on
-// another computer — is said in their words; anything else is returned as it
-// is. The feed's authorization_failed counts forbidden answers too, so it is
-// called a disconnect only when refused, asking Basecamp, confirms it; a
-// refused token renewal is already Basecamp's answer.
-func connectorStoppedBy(err error, agent, profile string, refused func() bool) (state, detail string, exit error) {
-	disconnected := errors.Is(err, auth.ErrAgentCredentialRefused) || (feedAuthorizationFailed(err) && refused())
-	if !disconnected {
+// stop people meet, Basecamp refusing the agent's credential, is said in
+// their words (errCredentialRefused); anything else is returned as it is.
+// The feed's authorization_failed counts forbidden answers too, so it is
+// called a refusal only when refused, asking Basecamp, confirms it; a
+// refused token renewal is already Basecamp's answer, and so is a refusal
+// the credential watch has confirmed.
+func connectorStoppedBy(err error, who connectRunAs, refused func() bool) (state, detail string, exit error) {
+	credentialRefused := renewalRefused(err) ||
+		errors.Is(err, errCredentialNotTaken) ||
+		(feedAuthorizationFailed(err) && refused())
+	if !credentialRefused {
 		return connector.ConnectionStopped, "", err
 	}
-	e := errAgentDisconnected(agent, profile)
-	return connector.ConnectionDisconnected, e.Message, e
+	state, e := errCredentialRefused(who)
+	return state, e.Message, e
+}
+
+// errCredentialRefused says Basecamp refused who's credential in the words
+// for its kind, with the connection state status keeps for it: an Agent was
+// disconnected and is reconnected; a bot user's login was refused and the
+// bot signs in again.
+func errCredentialRefused(who connectRunAs) (state string, e *output.Error) {
+	if who.Kind == setup.KindBotUser {
+		return connector.ConnectionSignedOut, errBotSignedOut(who.Name, who.Profile, who.IdentityID)
+	}
+	return connector.ConnectionDisconnected, errAgentDisconnected(who.Name, who.Profile)
 }
 
 // acquireConnectLock takes the connector's instance lock for the run, or
@@ -423,26 +462,27 @@ func connectLockFree(stateDir, account string, agentID int64) error {
 // connectStartFailure is what a start that could not learn who it is exits
 // with. Stopped by a signal, or because ctx itself ended, it says so as it
 // is; a request's own timeout is not the connector stopping.
-// Disconnected while the connector wasn't running, it is said the way a
-// running connector says it, with no name, since reading it failed.
+// Refused while the connector wasn't running, it is said the way a running
+// connector says it, with no name, since reading it failed.
 // Anything else is a failure to read who the profile is.
-func connectStartFailure(ctx context.Context, kind, profile string, err error) error {
+func connectStartFailure(ctx context.Context, who connectRunAs, err error) error {
 	var e *output.Error
 	switch {
 	case ctx.Err() != nil,
 		errors.As(err, &e) && (e.Code == output.CodeTerminated || e.Code == output.CodeInterrupted):
 		return err
-	case agentDisconnectedAtStart(kind, err):
-		return errAgentDisconnected("", profile)
+	case agentDisconnectedAtStart(who.Kind, err), botSignedOutAtStart(who.Kind, err):
+		_, refused := errCredentialRefused(who)
+		return refused
 	}
-	return output.ErrAuth(fmt.Sprintf("Could not read who profile %q is: %s", profile, setup.ErrorText(err)))
+	return output.ErrAuth(fmt.Sprintf("Could not read who profile %q is: %s", who.Profile, setup.ErrorText(err)))
 }
 
 // agentDisconnectedAtStart reports whether the connector's first read of who
 // it is failed because Basecamp refused an Agent's credential: a token
 // renewal it refused, or a token minted before the disconnect that it no
 // longer takes (disconnecting doesn't revoke tokens, so one can still be
-// cached). A bot user's login keeps its own error.
+// cached).
 func agentDisconnectedAtStart(kind string, err error) bool {
 	if kind != setup.KindAgent || err == nil {
 		return false
@@ -452,17 +492,58 @@ func agentDisconnectedAtStart(kind string, err error) bool {
 		(errors.As(err, &apiErr) && apiErr.HTTPStatus == http.StatusUnauthorized)
 }
 
-// confirmAgentRefused asks Basecamp whether it still takes the profile's
-// Agent credential. Only an Agent is asked: a bot user whose login was
-// revoked keeps its own error and remedy.
-func confirmAgentRefused(ctx context.Context, app *appctx.App, kind, name string) bool {
-	if kind != setup.KindAgent {
-		return false
-	}
+// botSignedOutAtStart reports whether the connector's first read of who it
+// is failed because Basecamp refused a bot user's refresh. A 401 alone is
+// not that answer for a bot user, whose access token can be turned away
+// while its login stands; it keeps its own error.
+func botSignedOutAtStart(kind string, err error) bool {
+	return kind == setup.KindBotUser && errors.Is(err, auth.ErrLoginRefused)
+}
+
+// confirmCredentialRefused asks Basecamp whether it still takes the
+// profile's credential, and reports true when Basecamp says it does not.
+// Anything short of that answer, a rate limit, a server fault, the network,
+// a timeout, reports false: the run goes on.
+func confirmCredentialRefused(ctx context.Context, app *appctx.App, kind, name string) bool {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	if kind == setup.KindBotUser {
+		return botLoginRefused(ctx, app, name)
+	}
 	refused, _ := agentCredentialRefused(ctx, app, name)
 	return refused
+}
+
+// botLoginRefused reports whether Basecamp refuses the profile's bot-user
+// login. A 401 for the token in hand cannot say: it may only have been
+// turned away before its time, which a refresh repairs. So the login is
+// refreshed first, and a refresh the token endpoint refuses is Basecamp's
+// answer; then who the fresh token is is read, and a 401 for it is the
+// answer too. A login that cannot be refreshed at all, one stored from a
+// bare token, is asked about with the token it has, the only one it will
+// ever have.
+func botLoginRefused(ctx context.Context, app *appctx.App, name string) bool {
+	creds, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
+	if err != nil {
+		return false
+	}
+	if app.Auth.RefreshRefusal(creds) == nil {
+		if err := app.Auth.Refresh(ctx); err != nil {
+			return errors.Is(err, auth.ErrLoginRefused)
+		}
+	}
+	token, err := app.Auth.AccessToken(ctx)
+	if err != nil {
+		return errors.Is(err, auth.ErrLoginRefused)
+	}
+	accountID, err := connectAccount(app, name)
+	if err != nil {
+		return false
+	}
+	client := connectSDKClient(app, &basecamp.StaticTokenProvider{Token: token}).ForAccount(accountID)
+	_, err = client.People().Me(ctx)
+	var apiErr *basecamp.Error
+	return errors.As(err, &apiErr) && apiErr.HTTPStatus == http.StatusUnauthorized
 }
 
 // feedAuthorizationFailed reports whether err is the event feed ending on
@@ -483,6 +564,24 @@ func errAgentDisconnected(agent, profile string) *output.Error {
 	e := output.ErrAuth(who + " was disconnected in Basecamp, or connected on another computer")
 	e.Hint = "Reconnect it: basecamp connect setup -P " + richtext.ShellQuote(profile)
 	return e
+}
+
+// errBotSignedOut says the connector stopped because Basecamp refused its
+// bot user's login, and how to sign the bot in again: the login setup's own
+// refusal names, pinned to the identity connect.json records.
+func errBotSignedOut(bot, profile string, identity int64) *output.Error {
+	who := richtext.SanitizeSingleLine(bot)
+	if who == "" {
+		who = "Your bot user"
+	}
+	e := output.ErrAuth(who + " is no longer signed in: Basecamp refused its login")
+	e.Hint = botSignInHint(profile, identity)
+	return e
+}
+
+// botSignInHint is the command that signs a connector's bot user in again.
+func botSignInHint(profile string, identity int64) string {
+	return fmt.Sprintf("Sign it in again: basecamp auth login -P %s --expect-identity %d", richtext.ShellQuote(profile), identity)
 }
 
 // connectSinceOverride is the feed position --since asks for. Zero is the
