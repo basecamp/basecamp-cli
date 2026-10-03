@@ -1145,7 +1145,8 @@ Content is Markdown, converted to HTML, and supports @mentions (@Name or
 @First.Last):
   basecamp comments create 789 "Hey @Jane.Smith, **please review**"
 
-To send HTML exactly as written, pass --format html:
+To send HTML without Markdown conversion, pass --format html (@mentions and
+local images are still resolved):
   basecamp comments create 789 "<p>Looks <strong>good</strong></p>" --format html
 
 Use - as the content argument to read content from stdin:

@@ -33,7 +33,7 @@ func NewFilesCmd() *cobra.Command {
 		Long: `Manage Docs & Files.
 
 Each project has a root folder containing documents, uploads, and subfolders.`,
-		Annotations: map[string]string{"agent_notes": "files is the unified view — use uploads, docs, folders for type-specific listing\n--vault <id> filters to contents of a specific folder\nDocument content and upload descriptions are Markdown by default; --format html sends HTML exactly as written\nCross-project: basecamp recordings documents --json or basecamp recordings uploads --json"},
+		Annotations: map[string]string{"agent_notes": "files is the unified view — use uploads, docs, folders for type-specific listing\n--vault <id> filters to contents of a specific folder\nDocument content and upload descriptions are Markdown by default; --format html skips Markdown conversion (local images are still resolved)\nCross-project: basecamp recordings documents --json or basecamp recordings uploads --json"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")

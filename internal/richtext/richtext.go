@@ -471,7 +471,7 @@ func (r *trixRenderer) renderEscapedAt(w util.BufWriter, _ []byte, _ ast.Node, e
 //
 // The input is always read as Markdown: it never decides from the content that
 // the input is already HTML. HTML written inside the Markdown is kept when its
-// tag is one Basecamp's rich text supports (see richTextTags) and escaped, to
+// tag is one that Basecamp's rich text supports (see richTextTags) and escaped, to
 // show as text, otherwise. An inline tag is judged on its own. A raw HTML block
 // is judged as a unit by the tag it opens with — what it holds is kept or
 // escaped with it — and a kept block gets a separator between directly adjacent
