@@ -18909,6 +18909,117 @@
         }
       }
     },
+    "/{accountId}/recordings/{recordingId}/filing.json": {
+      "post": {
+        "description": "Move a document, upload or vault into another vault in its project, or reorder it in its own vault.\n\nPassing the vault it is already in changes only its position. The\nrecording moves in place: its id, comments, bookmarks and history stay with\nit, and a vault takes everything inside it along. A destination in another\nproject is 404; moves to another project are not this operation. 404, 403 and\nsome 422s carry no body.\n\n403 when the caller may not move the recording (an account can restrict moves\nto admins and creators). 422 when position is not a positive whole number, the\ndestination is not a vault or is not active, the recording is not active, or a\nvault would move into one of its own vaults; only the position and vault-cycle\nrefusals carry an `error` message.",
+        "operationId": "MoveRecordingToVault",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveRecordingToVaultRequestContent"
+              }
+            }
+          },
+          "required": true
+        },
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "recordingId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "MoveRecordingToVault 204 response"
+          },
+          "400": {
+            "description": "BadRequestError 400 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestErrorResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "BareForbiddenError 403 response"
+          },
+          "404": {
+            "description": "BareNotFoundError 404 response"
+          },
+          "422": {
+            "description": "ValidationError 422 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Recordings"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 2,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
     "/{accountId}/recordings/{recordingId}/spotlight.json": {
       "delete": {
         "description": "Remove a recording from the spotlight area.\nIdempotent: removing an absent spotlight also returns 204.",
@@ -34766,6 +34877,24 @@
           "column_id"
         ]
       },
+      "MoveRecordingToVaultRequestContent": {
+        "type": "object",
+        "properties": {
+          "parent_id": {
+            "type": "integer",
+            "description": "The destination vault. The recording's current vault keeps it where it is\nand changes only its position.",
+            "format": "int64"
+          },
+          "position": {
+            "type": "integer",
+            "description": "1-indexed position within the destination vault. Defaults to 1 (first); a\nposition past the end places it last.",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "parent_id"
+        ]
+      },
       "MyAssignment": {
         "type": "object",
         "properties": {
@@ -39273,13 +39402,13 @@
       "UpdateQuestionNotificationSettingsRequestContent": {
         "type": "object",
         "properties": {
-          "notify_on_answer": {
+          "responding": {
             "type": "boolean",
-            "description": "Notify when someone answers"
+            "description": "Whether the authenticated user is asked this question. Omit to leave it unchanged.\nTurning it on also subscribes the user unless `subscribed: false` is sent with it."
           },
-          "digest_include_unanswered": {
+          "subscribed": {
             "type": "boolean",
-            "description": "Include unanswered in digest"
+            "description": "Whether the authenticated user is notified when someone answers. Omit to leave it unchanged."
           }
         }
       },
