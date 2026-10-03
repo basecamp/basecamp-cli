@@ -2308,7 +2308,7 @@ You can pass IDs or Basecamp URLs for both the item and the folder:
 			}
 			itemID, itemProjectID, itemKind := item.id, item.project, item.kind
 			folderID, folderProjectID := folder.id, folder.project
-			if itemProjectID != "" && folderProjectID != "" && itemProjectID != folderProjectID {
+			if itemProjectID != "" && folderProjectID != "" && !sameNumericID(itemProjectID, folderProjectID) {
 				return output.ErrUsageHint("The folder is in a different project",
 					"files move only moves within a project; use the Move menu in Basecamp to move to another project")
 			}
@@ -2382,6 +2382,14 @@ You can pass IDs or Basecamp URLs for both the item and the folder:
 type filesMoveRef struct {
 	id                     int64
 	kind, project, account string
+}
+
+// sameNumericID compares two IDs taken from URLs as numbers, so zero-padded
+// spellings of one ID agree. An unparsable side never matches.
+func sameNumericID(first, second string) bool {
+	a, errA := strconv.ParseInt(first, 10, 64)
+	b, errB := strconv.ParseInt(second, 10, 64)
+	return errA == nil && errB == nil && a == b
 }
 
 // parseFilesMoveRef accepts a positive ID, or a URL on a trusted Basecamp host

@@ -1717,6 +1717,16 @@ func TestFilesMoveAcceptsAZeroPaddedAccountInAURL(t *testing.T) {
 	require.Equal(t, []string{"/99999/recordings/123/filing.json"}, transport.movePaths)
 }
 
+// The same holds for the project: two spellings of one bucket are one project.
+func TestFilesMoveAcceptsZeroPaddedProjectsInURLs(t *testing.T) {
+	transport := &mockFilesMoveTransport{}
+	_, err := runFilesMove(t, transport,
+		"https://3.basecamp.com/99999/buckets/077/uploads/123",
+		"--to", "https://3.basecamp.com/99999/buckets/77/vaults/456")
+	require.NoError(t, err)
+	require.Equal(t, []string{"/99999/recordings/123/filing.json"}, transport.movePaths)
+}
+
 func TestFilesMoveFallsBackToIDsWhenTitlesAreUnavailable(t *testing.T) {
 	transport := &mockFilesMoveTransport{}
 	envelope, err := runFilesMove(t, transport, "321", "--to", "654")
