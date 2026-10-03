@@ -18,8 +18,8 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 basecamp/bc3#13098 added — `PUT /projects/:id/people/client_users.json` and
 `POST`/`DELETE /projects/:id/client_enablement.json` — land as `people clients`.
 SDK v0.16.0 adds the three to-do
-list template-library operations, available through `templates library`,
-`templates copy`, and `templates copy-status`. The previous last gap — `GET
+list template-library operations, available through `templates todolists list`,
+`templates todolists duplicate`, and `templates todolists duplication`. The previous last gap — `GET
 /uploads/:id/versions.json` — closed with the v0.14.0 SDK bump. The command
 (`files versions`) was written earlier but held: the SDK's
 `UploadsService.ListVersions` decoded the response as `[]Upload` when the API
@@ -240,7 +240,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | **Webhooks** |
 | webhooks | 7 | `webhooks` | ✅ | BC4 | - | list, show, create, update, delete |
 | **Templates** |
-| templates | 10 | `templates` | ✅ | BC4 | - | list, show, create, update, delete, construct, construction, library, copy, copy-status |
+| templates | 15 | `templates projects`, `templates todolists`, `templates card-tables`, `todolists templatify`, `card-tables templatify` | ✅ | BC4 | - | projects: list, show, create, update, delete, construct, construction; todolists and card-tables: list, create, duplicate, duplication, archive, trash, restore; templatify, templatification. The flat `templates list/library/copy/…` spellings remain as hidden, deprecated aliases |
 | **Time Tracking** |
 | timesheets | 6 | `timesheet` | ✅ | BC4 | - | list, show, create, update, delete |
 | **Subscriptions** |
