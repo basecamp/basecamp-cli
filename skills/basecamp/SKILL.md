@@ -778,7 +778,16 @@ basecamp files doc create "For client" "..." --visible-to-clients --in <project>
 basecamp files update <document_id> --title "New" --content "Updated"
 basecamp files update <document_id> --title "New" --in <project>      # Preserves existing document content
 basecamp files update <document_id> --content "Updated" --in <project> # Preserves existing document title
+basecamp files move <id> --to <folder_id>               # Move a doc, upload or folder into another folder (same project)
+basecamp files move <id> --to <folder_id> --position 1  # ...at a position (1 = first, the default)
 ```
+
+**Moving between folders:** `basecamp files move <id|url> --to <folder_id|url>` moves a
+document, upload or folder in place, so its ID, URL and comments stay the same, and a
+folder takes its contents along. It only moves within one project; a folder in another
+project is refused, and moves between projects go through the Move menu in Basecamp.
+Archived, trashed and draft items can't be moved, and neither can anything into an
+archived or trashed folder.
 
 **Document update semantics:** `basecamp files update <document_id>` is safe for partial updates in the CLI: when you pass only `--title` or only `--content`, the CLI first fetches the current document and preserves the untouched field.
 

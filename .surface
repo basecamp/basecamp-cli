@@ -140,6 +140,7 @@ ARG basecamp docs documents create 01 [content]
 ARG basecamp docs download 00 <upload-id|url>
 ARG basecamp docs folder create 00 <name>
 ARG basecamp docs folders create 00 <name>
+ARG basecamp docs move 00 <id|url>
 ARG basecamp docs new-version 00 <upload-id|url>
 ARG basecamp docs new-version 01 <file>
 ARG basecamp docs replace 00 <upload-id|url>
@@ -163,6 +164,7 @@ ARG basecamp documents documents create 01 [content]
 ARG basecamp documents download 00 <upload-id|url>
 ARG basecamp documents folder create 00 <name>
 ARG basecamp documents folders create 00 <name>
+ARG basecamp documents move 00 <id|url>
 ARG basecamp documents new-version 00 <upload-id|url>
 ARG basecamp documents new-version 01 <file>
 ARG basecamp documents replace 00 <upload-id|url>
@@ -187,6 +189,7 @@ ARG basecamp file documents create 01 [content]
 ARG basecamp file download 00 <upload-id|url>
 ARG basecamp file folder create 00 <name>
 ARG basecamp file folders create 00 <name>
+ARG basecamp file move 00 <id|url>
 ARG basecamp file new-version 00 <upload-id|url>
 ARG basecamp file new-version 01 <file>
 ARG basecamp file replace 00 <upload-id|url>
@@ -210,6 +213,7 @@ ARG basecamp files documents create 01 [content]
 ARG basecamp files download 00 <upload-id|url>
 ARG basecamp files folder create 00 <name>
 ARG basecamp files folders create 00 <name>
+ARG basecamp files move 00 <id|url>
 ARG basecamp files new-version 00 <upload-id|url>
 ARG basecamp files new-version 01 <file>
 ARG basecamp files replace 00 <upload-id|url>
@@ -233,6 +237,7 @@ ARG basecamp folders documents create 01 [content]
 ARG basecamp folders download 00 <upload-id|url>
 ARG basecamp folders folder create 00 <name>
 ARG basecamp folders folders create 00 <name>
+ARG basecamp folders move 00 <id|url>
 ARG basecamp folders new-version 00 <upload-id|url>
 ARG basecamp folders new-version 01 <file>
 ARG basecamp folders replace 00 <upload-id|url>
@@ -451,6 +456,7 @@ ARG basecamp vault documents create 01 [content]
 ARG basecamp vault download 00 <upload-id|url>
 ARG basecamp vault folder create 00 <name>
 ARG basecamp vault folders create 00 <name>
+ARG basecamp vault move 00 <id|url>
 ARG basecamp vault new-version 00 <upload-id|url>
 ARG basecamp vault new-version 01 <file>
 ARG basecamp vault replace 00 <upload-id|url>
@@ -474,6 +480,7 @@ ARG basecamp vaults documents create 01 [content]
 ARG basecamp vaults download 00 <upload-id|url>
 ARG basecamp vaults folder create 00 <name>
 ARG basecamp vaults folders create 00 <name>
+ARG basecamp vaults move 00 <id|url>
 ARG basecamp vaults new-version 00 <upload-id|url>
 ARG basecamp vaults new-version 01 <file>
 ARG basecamp vaults replace 00 <upload-id|url>
@@ -697,6 +704,7 @@ CMD basecamp docs folders
 CMD basecamp docs folders create
 CMD basecamp docs folders list
 CMD basecamp docs list
+CMD basecamp docs move
 CMD basecamp docs new-version
 CMD basecamp docs replace
 CMD basecamp docs restore
@@ -736,6 +744,7 @@ CMD basecamp documents folders
 CMD basecamp documents folders create
 CMD basecamp documents folders list
 CMD basecamp documents list
+CMD basecamp documents move
 CMD basecamp documents new-version
 CMD basecamp documents replace
 CMD basecamp documents restore
@@ -779,6 +788,7 @@ CMD basecamp file folders
 CMD basecamp file folders create
 CMD basecamp file folders list
 CMD basecamp file list
+CMD basecamp file move
 CMD basecamp file new-version
 CMD basecamp file replace
 CMD basecamp file restore
@@ -817,6 +827,7 @@ CMD basecamp files folders
 CMD basecamp files folders create
 CMD basecamp files folders list
 CMD basecamp files list
+CMD basecamp files move
 CMD basecamp files new-version
 CMD basecamp files replace
 CMD basecamp files restore
@@ -855,6 +866,7 @@ CMD basecamp folders folders
 CMD basecamp folders folders create
 CMD basecamp folders folders list
 CMD basecamp folders list
+CMD basecamp folders move
 CMD basecamp folders new-version
 CMD basecamp folders replace
 CMD basecamp folders restore
@@ -1155,6 +1167,7 @@ CMD basecamp vault folders
 CMD basecamp vault folders create
 CMD basecamp vault folders list
 CMD basecamp vault list
+CMD basecamp vault move
 CMD basecamp vault new-version
 CMD basecamp vault replace
 CMD basecamp vault restore
@@ -1193,6 +1206,7 @@ CMD basecamp vaults folders
 CMD basecamp vaults folders create
 CMD basecamp vaults folders list
 CMD basecamp vaults list
+CMD basecamp vaults move
 CMD basecamp vaults new-version
 CMD basecamp vaults replace
 CMD basecamp vaults restore
@@ -5860,6 +5874,31 @@ FLAG basecamp docs list --styled type=bool
 FLAG basecamp docs list --todolist type=string
 FLAG basecamp docs list --vault type=string
 FLAG basecamp docs list --verbose type=count
+FLAG basecamp docs move --account type=string
+FLAG basecamp docs move --agent type=bool
+FLAG basecamp docs move --cache-dir type=string
+FLAG basecamp docs move --count type=bool
+FLAG basecamp docs move --folder type=string
+FLAG basecamp docs move --help type=bool
+FLAG basecamp docs move --hints type=bool
+FLAG basecamp docs move --ids-only type=bool
+FLAG basecamp docs move --in type=string
+FLAG basecamp docs move --jq type=string
+FLAG basecamp docs move --json type=bool
+FLAG basecamp docs move --markdown type=bool
+FLAG basecamp docs move --md type=bool
+FLAG basecamp docs move --no-hints type=bool
+FLAG basecamp docs move --no-stats type=bool
+FLAG basecamp docs move --position type=int
+FLAG basecamp docs move --profile type=string
+FLAG basecamp docs move --project type=string
+FLAG basecamp docs move --quiet type=bool
+FLAG basecamp docs move --stats type=bool
+FLAG basecamp docs move --styled type=bool
+FLAG basecamp docs move --to type=string
+FLAG basecamp docs move --todolist type=string
+FLAG basecamp docs move --vault type=string
+FLAG basecamp docs move --verbose type=count
 FLAG basecamp docs new-version --account type=string
 FLAG basecamp docs new-version --agent type=bool
 FLAG basecamp docs new-version --base-name type=string
@@ -6858,6 +6897,31 @@ FLAG basecamp documents list --styled type=bool
 FLAG basecamp documents list --todolist type=string
 FLAG basecamp documents list --vault type=string
 FLAG basecamp documents list --verbose type=count
+FLAG basecamp documents move --account type=string
+FLAG basecamp documents move --agent type=bool
+FLAG basecamp documents move --cache-dir type=string
+FLAG basecamp documents move --count type=bool
+FLAG basecamp documents move --folder type=string
+FLAG basecamp documents move --help type=bool
+FLAG basecamp documents move --hints type=bool
+FLAG basecamp documents move --ids-only type=bool
+FLAG basecamp documents move --in type=string
+FLAG basecamp documents move --jq type=string
+FLAG basecamp documents move --json type=bool
+FLAG basecamp documents move --markdown type=bool
+FLAG basecamp documents move --md type=bool
+FLAG basecamp documents move --no-hints type=bool
+FLAG basecamp documents move --no-stats type=bool
+FLAG basecamp documents move --position type=int
+FLAG basecamp documents move --profile type=string
+FLAG basecamp documents move --project type=string
+FLAG basecamp documents move --quiet type=bool
+FLAG basecamp documents move --stats type=bool
+FLAG basecamp documents move --styled type=bool
+FLAG basecamp documents move --to type=string
+FLAG basecamp documents move --todolist type=string
+FLAG basecamp documents move --vault type=string
+FLAG basecamp documents move --verbose type=count
 FLAG basecamp documents new-version --account type=string
 FLAG basecamp documents new-version --agent type=bool
 FLAG basecamp documents new-version --base-name type=string
@@ -7957,6 +8021,31 @@ FLAG basecamp file list --styled type=bool
 FLAG basecamp file list --todolist type=string
 FLAG basecamp file list --vault type=string
 FLAG basecamp file list --verbose type=count
+FLAG basecamp file move --account type=string
+FLAG basecamp file move --agent type=bool
+FLAG basecamp file move --cache-dir type=string
+FLAG basecamp file move --count type=bool
+FLAG basecamp file move --folder type=string
+FLAG basecamp file move --help type=bool
+FLAG basecamp file move --hints type=bool
+FLAG basecamp file move --ids-only type=bool
+FLAG basecamp file move --in type=string
+FLAG basecamp file move --jq type=string
+FLAG basecamp file move --json type=bool
+FLAG basecamp file move --markdown type=bool
+FLAG basecamp file move --md type=bool
+FLAG basecamp file move --no-hints type=bool
+FLAG basecamp file move --no-stats type=bool
+FLAG basecamp file move --position type=int
+FLAG basecamp file move --profile type=string
+FLAG basecamp file move --project type=string
+FLAG basecamp file move --quiet type=bool
+FLAG basecamp file move --stats type=bool
+FLAG basecamp file move --styled type=bool
+FLAG basecamp file move --to type=string
+FLAG basecamp file move --todolist type=string
+FLAG basecamp file move --vault type=string
+FLAG basecamp file move --verbose type=count
 FLAG basecamp file new-version --account type=string
 FLAG basecamp file new-version --agent type=bool
 FLAG basecamp file new-version --base-name type=string
@@ -8934,6 +9023,31 @@ FLAG basecamp files list --styled type=bool
 FLAG basecamp files list --todolist type=string
 FLAG basecamp files list --vault type=string
 FLAG basecamp files list --verbose type=count
+FLAG basecamp files move --account type=string
+FLAG basecamp files move --agent type=bool
+FLAG basecamp files move --cache-dir type=string
+FLAG basecamp files move --count type=bool
+FLAG basecamp files move --folder type=string
+FLAG basecamp files move --help type=bool
+FLAG basecamp files move --hints type=bool
+FLAG basecamp files move --ids-only type=bool
+FLAG basecamp files move --in type=string
+FLAG basecamp files move --jq type=string
+FLAG basecamp files move --json type=bool
+FLAG basecamp files move --markdown type=bool
+FLAG basecamp files move --md type=bool
+FLAG basecamp files move --no-hints type=bool
+FLAG basecamp files move --no-stats type=bool
+FLAG basecamp files move --position type=int
+FLAG basecamp files move --profile type=string
+FLAG basecamp files move --project type=string
+FLAG basecamp files move --quiet type=bool
+FLAG basecamp files move --stats type=bool
+FLAG basecamp files move --styled type=bool
+FLAG basecamp files move --to type=string
+FLAG basecamp files move --todolist type=string
+FLAG basecamp files move --vault type=string
+FLAG basecamp files move --verbose type=count
 FLAG basecamp files new-version --account type=string
 FLAG basecamp files new-version --agent type=bool
 FLAG basecamp files new-version --base-name type=string
@@ -9911,6 +10025,31 @@ FLAG basecamp folders list --styled type=bool
 FLAG basecamp folders list --todolist type=string
 FLAG basecamp folders list --vault type=string
 FLAG basecamp folders list --verbose type=count
+FLAG basecamp folders move --account type=string
+FLAG basecamp folders move --agent type=bool
+FLAG basecamp folders move --cache-dir type=string
+FLAG basecamp folders move --count type=bool
+FLAG basecamp folders move --folder type=string
+FLAG basecamp folders move --help type=bool
+FLAG basecamp folders move --hints type=bool
+FLAG basecamp folders move --ids-only type=bool
+FLAG basecamp folders move --in type=string
+FLAG basecamp folders move --jq type=string
+FLAG basecamp folders move --json type=bool
+FLAG basecamp folders move --markdown type=bool
+FLAG basecamp folders move --md type=bool
+FLAG basecamp folders move --no-hints type=bool
+FLAG basecamp folders move --no-stats type=bool
+FLAG basecamp folders move --position type=int
+FLAG basecamp folders move --profile type=string
+FLAG basecamp folders move --project type=string
+FLAG basecamp folders move --quiet type=bool
+FLAG basecamp folders move --stats type=bool
+FLAG basecamp folders move --styled type=bool
+FLAG basecamp folders move --to type=string
+FLAG basecamp folders move --todolist type=string
+FLAG basecamp folders move --vault type=string
+FLAG basecamp folders move --verbose type=count
 FLAG basecamp folders new-version --account type=string
 FLAG basecamp folders new-version --agent type=bool
 FLAG basecamp folders new-version --base-name type=string
@@ -16893,6 +17032,31 @@ FLAG basecamp vault list --styled type=bool
 FLAG basecamp vault list --todolist type=string
 FLAG basecamp vault list --vault type=string
 FLAG basecamp vault list --verbose type=count
+FLAG basecamp vault move --account type=string
+FLAG basecamp vault move --agent type=bool
+FLAG basecamp vault move --cache-dir type=string
+FLAG basecamp vault move --count type=bool
+FLAG basecamp vault move --folder type=string
+FLAG basecamp vault move --help type=bool
+FLAG basecamp vault move --hints type=bool
+FLAG basecamp vault move --ids-only type=bool
+FLAG basecamp vault move --in type=string
+FLAG basecamp vault move --jq type=string
+FLAG basecamp vault move --json type=bool
+FLAG basecamp vault move --markdown type=bool
+FLAG basecamp vault move --md type=bool
+FLAG basecamp vault move --no-hints type=bool
+FLAG basecamp vault move --no-stats type=bool
+FLAG basecamp vault move --position type=int
+FLAG basecamp vault move --profile type=string
+FLAG basecamp vault move --project type=string
+FLAG basecamp vault move --quiet type=bool
+FLAG basecamp vault move --stats type=bool
+FLAG basecamp vault move --styled type=bool
+FLAG basecamp vault move --to type=string
+FLAG basecamp vault move --todolist type=string
+FLAG basecamp vault move --vault type=string
+FLAG basecamp vault move --verbose type=count
 FLAG basecamp vault new-version --account type=string
 FLAG basecamp vault new-version --agent type=bool
 FLAG basecamp vault new-version --base-name type=string
@@ -17870,6 +18034,31 @@ FLAG basecamp vaults list --styled type=bool
 FLAG basecamp vaults list --todolist type=string
 FLAG basecamp vaults list --vault type=string
 FLAG basecamp vaults list --verbose type=count
+FLAG basecamp vaults move --account type=string
+FLAG basecamp vaults move --agent type=bool
+FLAG basecamp vaults move --cache-dir type=string
+FLAG basecamp vaults move --count type=bool
+FLAG basecamp vaults move --folder type=string
+FLAG basecamp vaults move --help type=bool
+FLAG basecamp vaults move --hints type=bool
+FLAG basecamp vaults move --ids-only type=bool
+FLAG basecamp vaults move --in type=string
+FLAG basecamp vaults move --jq type=string
+FLAG basecamp vaults move --json type=bool
+FLAG basecamp vaults move --markdown type=bool
+FLAG basecamp vaults move --md type=bool
+FLAG basecamp vaults move --no-hints type=bool
+FLAG basecamp vaults move --no-stats type=bool
+FLAG basecamp vaults move --position type=int
+FLAG basecamp vaults move --profile type=string
+FLAG basecamp vaults move --project type=string
+FLAG basecamp vaults move --quiet type=bool
+FLAG basecamp vaults move --stats type=bool
+FLAG basecamp vaults move --styled type=bool
+FLAG basecamp vaults move --to type=string
+FLAG basecamp vaults move --todolist type=string
+FLAG basecamp vaults move --vault type=string
+FLAG basecamp vaults move --verbose type=count
 FLAG basecamp vaults new-version --account type=string
 FLAG basecamp vaults new-version --agent type=bool
 FLAG basecamp vaults new-version --base-name type=string
@@ -18839,6 +19028,7 @@ SUB basecamp docs folders
 SUB basecamp docs folders create
 SUB basecamp docs folders list
 SUB basecamp docs list
+SUB basecamp docs move
 SUB basecamp docs new-version
 SUB basecamp docs replace
 SUB basecamp docs restore
@@ -18878,6 +19068,7 @@ SUB basecamp documents folders
 SUB basecamp documents folders create
 SUB basecamp documents folders list
 SUB basecamp documents list
+SUB basecamp documents move
 SUB basecamp documents new-version
 SUB basecamp documents replace
 SUB basecamp documents restore
@@ -18921,6 +19112,7 @@ SUB basecamp file folders
 SUB basecamp file folders create
 SUB basecamp file folders list
 SUB basecamp file list
+SUB basecamp file move
 SUB basecamp file new-version
 SUB basecamp file replace
 SUB basecamp file restore
@@ -18959,6 +19151,7 @@ SUB basecamp files folders
 SUB basecamp files folders create
 SUB basecamp files folders list
 SUB basecamp files list
+SUB basecamp files move
 SUB basecamp files new-version
 SUB basecamp files replace
 SUB basecamp files restore
@@ -18997,6 +19190,7 @@ SUB basecamp folders folders
 SUB basecamp folders folders create
 SUB basecamp folders folders list
 SUB basecamp folders list
+SUB basecamp folders move
 SUB basecamp folders new-version
 SUB basecamp folders replace
 SUB basecamp folders restore
@@ -19297,6 +19491,7 @@ SUB basecamp vault folders
 SUB basecamp vault folders create
 SUB basecamp vault folders list
 SUB basecamp vault list
+SUB basecamp vault move
 SUB basecamp vault new-version
 SUB basecamp vault replace
 SUB basecamp vault restore
@@ -19335,6 +19530,7 @@ SUB basecamp vaults folders
 SUB basecamp vaults folders create
 SUB basecamp vaults folders list
 SUB basecamp vaults list
+SUB basecamp vaults move
 SUB basecamp vaults new-version
 SUB basecamp vaults replace
 SUB basecamp vaults restore
