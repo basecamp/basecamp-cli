@@ -2319,7 +2319,7 @@ You can pass IDs or Basecamp URLs for both the item and the folder:
 			// A pasted URL names its own account. The IDs alone would retarget
 			// same-numbered records in the session's account, so refuse a mismatch.
 			for _, ref := range []filesMoveRef{item, folder} {
-				if ref.account != "" && ref.account != app.Config.AccountID {
+				if ref.account != "" && !accountIDsEqual(ref.account, app.Config.AccountID) {
 					return output.ErrUsage(fmt.Sprintf("URL is for account %s, but this session uses account %s", ref.account, app.Config.AccountID))
 				}
 			}

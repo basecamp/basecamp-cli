@@ -1706,6 +1706,17 @@ func TestFilesMoveAcceptsURLsAndOmitsAnUnsetPosition(t *testing.T) {
 	assert.Len(t, transport.getPaths, 2, "one lookup for the item and one for the folder: %v", transport.getPaths)
 }
 
+// An account ID is a number, so a zero-padded spelling of the session's
+// account is the same account, not another one.
+func TestFilesMoveAcceptsAZeroPaddedAccountInAURL(t *testing.T) {
+	transport := &mockFilesMoveTransport{}
+	_, err := runFilesMove(t, transport,
+		"https://3.basecamp.com/099999/buckets/77/uploads/123",
+		"--to", "https://3.basecamp.com/0099999/buckets/77/vaults/456")
+	require.NoError(t, err)
+	require.Equal(t, []string{"/99999/recordings/123/filing.json"}, transport.movePaths)
+}
+
 func TestFilesMoveFallsBackToIDsWhenTitlesAreUnavailable(t *testing.T) {
 	transport := &mockFilesMoveTransport{}
 	envelope, err := runFilesMove(t, transport, "321", "--to", "654")

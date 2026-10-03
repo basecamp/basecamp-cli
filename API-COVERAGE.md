@@ -55,8 +55,8 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 **SDK version:** the pin in `go.mod`, with
 `internal/version/sdk-provenance.json` authoritative for the exact commit. That
-pin is basecamp-sdk v0.21.0 plus basecamp/basecamp-sdk#960
-(`Recordings().MoveToVault`); v0.21.0 ships the Subtasks service
+pin is basecamp-sdk v0.22.0, which ships `Recordings().MoveToVault`
+(basecamp/basecamp-sdk#960). v0.21.0 shipped the Subtasks service
 (basecamp/basecamp-sdk#883). v0.19.0 shipped the event-feed operations.
 The command surface below largely dates to the v0.12.0 bump, which added 20 exported
 Go methods over 13 new backend operations; the extra seven wrapped endpoints
