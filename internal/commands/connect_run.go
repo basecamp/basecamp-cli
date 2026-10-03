@@ -179,7 +179,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if err != nil {
 		return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
 	}
-	if err := connectLockFree(stateDir, account, file.Agent.PersonID); err != nil {
+	if err := connectLockFree(stateDir, account, file.Agent.PersonID, f.shadow); err != nil {
 		return err
 	}
 
@@ -214,7 +214,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return output.ErrAuth(err.Error())
 	}
 	agentID := me.ID
-	lock, err := acquireConnectLock(stateDir, account, agentID)
+	lock, err := acquireConnectLock(stateDir, account, agentID, f.shadow)
 	if err != nil {
 		return err
 	}
@@ -402,18 +402,41 @@ func connectorStoppedBy(err error, agent, profile string, refused func() bool) (
 
 // acquireConnectLock takes the connector's instance lock for the run, or
 // says another connector for this agent already holds it.
-func acquireConnectLock(stateDir, account string, agentID int64) (*connector.InstanceLock, error) {
+func acquireConnectLock(stateDir, account string, agentID int64, shadow bool) (*connector.InstanceLock, error) {
 	lock, err := connector.AcquireInstanceLock(stateDir, account, agentID, time.Now())
-	if errors.Is(err, connector.ErrAlreadyRunning) {
-		return nil, &output.Error{Code: output.CodeLockUnavailable, Message: err.Error()}
+	if running, ok := errors.AsType[*connector.AlreadyRunningError](err); ok {
+		return nil, errConnectorAlreadyRunning(running.Holder, shadow)
 	}
 	return lock, err
 }
 
+// errConnectorAlreadyRunning is the refusal of a second connector for one
+// agent. It names the holder, and says why a second one is never the answer:
+// people reach for one to serve another repo, and the repo is not the
+// connector's to choose. The session reading its lines picks the repo for
+// each request's project, so one connector serves every repo the agent works
+// in.
+//
+// A shadow run keeps its own state directory and lock (connectStateParts), so
+// it never meets the connector's lock and the connector never meets its. A
+// shadow refused here met another shadow, and is told so rather than told
+// about connectors it does not compete with.
+func errConnectorAlreadyRunning(holder string, shadow bool) *output.Error {
+	if shadow {
+		return &output.Error{Code: output.CodeLockUnavailable,
+			Message: "Another shadow run for this agent is already running: its lock is " + holder,
+			Hint:    "A shadow run has its own state and lock, apart from the connector's, so only another shadow run holds this one. Stop it first."}
+	}
+	return &output.Error{Code: output.CodeLockUnavailable,
+		Message: "Another connector for this agent is already running: its lock is " + holder,
+		Hint: "One connector serves every repo: the session reading its requests picks the repo for each project, " +
+			"so an agent never needs a second connector. Use the session already running it, or stop that connector before starting another."}
+}
+
 // connectLockFree reports, by taking and at once releasing it, whether the
 // instance lock is free: the start's look before it waits for a token.
-func connectLockFree(stateDir, account string, agentID int64) error {
-	lock, err := acquireConnectLock(stateDir, account, agentID)
+func connectLockFree(stateDir, account string, agentID int64, shadow bool) error {
+	lock, err := acquireConnectLock(stateDir, account, agentID, shadow)
 	if err != nil {
 		return err
 	}

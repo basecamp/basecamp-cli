@@ -1,0 +1,30 @@
+task: >-
+  Handle the requests the connector just printed.
+context: |
+  You are the orchestrator session. The connector is running for the agent's
+  profile helper. Earlier in this session you handled the request with
+  event_id 123: you boosted recording 789 and handed it to a subagent, which
+  is still working on it. The connector then crashed and was restarted
+  within a minute, and the monitor just delivered these two lines:
+
+  {"type":"request","event_id":123,"event_type":"comment_created","trigger":"mentioned","recording":{"bucket_id":456,"project_name":"BC5 Calendar","recording_id":789,"type":"Comment","title":"Fix the date picker","url":"https://3.basecamp.com/999/buckets/456/recordings/789"},"reply_to":{"kind":"comment","recording_id":700},"requester_id":1001,"requester_name":"Jorge Manrubia","acknowledge":true,"content":"<p>the date picker is off by one, please fix</p>","content_updated_at":"2026-10-01T15:00:00Z"}
+  {"type":"request","event_id":124,"event_type":"comment_created","trigger":"mentioned","recording":{"bucket_id":456,"project_name":"BC5 Calendar","recording_id":790,"type":"Comment","title":"Week starts on Monday","url":"https://3.basecamp.com/999/buckets/456/recordings/790"},"reply_to":{"kind":"comment","recording_id":701},"requester_id":1001,"requester_name":"Jorge Manrubia","acknowledge":true,"content":"<p>can weeks start on Monday?</p>","content_updated_at":"2026-10-01T15:05:00Z"}
+
+  ~/.config/basecamp-connect/last.json holds:
+  {"profile":"helper","repos":{"456":{"name":"BC5 Calendar","path":"/home/me/code/calendar"}},"saved_at":"2026-10-01T15:00:00Z"}
+
+  There is no subagent tool here: for each request you take, once you have
+  acknowledged it and chosen the repo, say what you would hand the subagent.
+tags: [connect]
+mocks:
+  - match: 'boost create'
+    output: '{"ok":true,"data":{"id":9001,"content":"on it"},"summary":"Boosted"}'
+accept:
+  # The new request is handled as usual.
+  - '^boost create .*recordings/790.*(-P|--profile)[ =]''?helper\b'
+reject:
+  # The repeated one is skipped: no second boost, no second subagent, nothing
+  # posted on its thread.
+  - '\b(789|700)\b'
+  - 'connect setup'
+max_commands: 1

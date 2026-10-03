@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -156,4 +158,40 @@ func TestAShadowRunHasACheckpointLineageOfItsOwn(t *testing.T) {
 	assert.Equal(t, "basecamp-connect-52007412", connectConsumerNamespace(52007412, false),
 		"and the connector's own lineage does not move")
 	assert.NotEqual(t, connectConsumerNamespace(52007412, false), connectConsumerNamespace(52007412, true))
+}
+
+// A second connector for an agent is refused with the holder named, and with
+// why a second one is never needed: one connector serves every repo, because
+// the session reading its requests picks the repo. A shadow run keeps its own
+// lock, so a shadow refused met another shadow and is told only that.
+func TestASecondConnectorIsToldOneServesEveryRepo(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		shadow  bool
+		message string
+		hint    string
+		notHint string
+	}{
+		{name: "connector", message: "Another connector for this agent is already running",
+			hint: "One connector serves every repo", notHint: "shadow"},
+		{name: "shadow", shadow: true, message: "Another shadow run for this agent is already running",
+			hint: "only another shadow run holds this one", notHint: "every repo"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			holder, err := connector.AcquireInstanceLock(dir, "2914079", 52007412, time.Now())
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = holder.Release() })
+
+			_, err = acquireConnectLock(dir, "2914079", 52007412, tc.shadow)
+			var refusal *output.Error
+			require.ErrorAs(t, err, &refusal)
+			assert.Equal(t, output.CodeLockUnavailable, refusal.Code)
+			assert.Equal(t, output.ExitRateLimit, output.ExitCodeFor(refusal.Code), "exit 5, as every lock refusal")
+			assert.Contains(t, refusal.Message, tc.message)
+			assert.Contains(t, refusal.Message, fmt.Sprintf("held by pid %d since ", os.Getpid()), "the refusal names the holder")
+			assert.Contains(t, refusal.Hint, tc.hint)
+			assert.NotContains(t, refusal.Hint, tc.notHint)
+		})
+	}
 }

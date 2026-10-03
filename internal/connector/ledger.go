@@ -42,8 +42,9 @@ const (
 	StateQueued RecordState = "queued"
 	// StateBlocked is retained and retried: a reason, never a transport
 	// failure dressed up as a verdict. Retried by the intake sweep, on
-	// admission.NextBlockedRetry's schedule (Intake.sweepBlockedRetries), and
-	// by a person at any time with `basecamp connect redispatch <id>`.
+	// admission.NextBlockedRetry's schedule (Intake.sweepBlockedRetries). A
+	// record that schedule leaves alone stays blocked until a person discards
+	// it.
 	StateBlocked RecordState = "blocked"
 	// StateDispatched was handed to a worker.
 	StateDispatched RecordState = "dispatched"
@@ -551,8 +552,9 @@ END;
 	// decided_at is when the latest verdict was written, blocked_at when the
 	// record entered its current run of blocked verdicts (the retry window
 	// counts from it), and retry_at a throttled verdict's server deadline.
-	// The rest is the verdict itself — what dispatch starts a task from, and
-	// what a blocked(no_route) record's holding reply needs. snapshot is the
+	// The rest is the verdict itself: what the handoff writes a request line
+	// from, and the trigger and reply destination a blocked record keeps (a
+	// worker-era build also started tasks from it). snapshot is the
 	// recording's content as admission read it. Only an admitted verdict
 	// writes one, whether the ledger writes it as admitted or as queued; a
 	// record keeps it through dispatch and completion until retention drops

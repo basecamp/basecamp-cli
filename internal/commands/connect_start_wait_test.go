@@ -518,7 +518,10 @@ func TestASecondConnectorIsRefusedBeforeItWaitsForAToken(t *testing.T) {
 
 	select {
 	case err := <-done:
-		assert.Equal(t, output.CodeLockUnavailable, usageError(t, err).Code, buf.String())
+		refusal := usageError(t, err)
+		assert.Equal(t, output.CodeLockUnavailable, refusal.Code, buf.String())
+		assert.Contains(t, refusal.Message, fmt.Sprintf("held by pid %d", os.Getpid()), "the refusal names the holder")
+		assert.Contains(t, refusal.Hint, "One connector serves every repo")
 	case <-time.After(10 * time.Second):
 		cancel()
 		<-done

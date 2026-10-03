@@ -20,10 +20,9 @@ type Rule struct {
 	// on the assigner's say-so, so no broadened mode extends to them.
 	OperatorOnly bool
 	// RequiresServed discards the rule at the gate when connect.json does not
-	// serve the project. Only mentioned and assigned are answered in an
-	// unserved project (blocked(no_route) and a holding reply); every other
-	// trigger is discarded there, so it is cheaper to discard it before any
-	// read.
+	// serve the project. Only mentioned and assigned are kept in an unserved
+	// project (blocked no_route, and logged on stdout); every other trigger is
+	// discarded there, so it is cheaper to discard it before any read.
 	RequiresServed bool
 	// Acknowledge says a person asked for something, so the worker's
 	// acknowledgement and the thirty-second guard apply. A completion or a
@@ -133,30 +132,31 @@ const (
 	// named — moved since the event, most likely.
 	ReasonBucketMismatch Reason = "bucket_mismatch"
 	// ReasonUnroutable: the SDK has no typed read for the pointer's type. Not
-	// retried on a timer; only a redispatch re-runs it.
+	// retried on a timer, and nothing else re-runs it.
 	ReasonUnroutable Reason = "unroutable"
 	// ReasonNoRoute: shared by both states — a mentioned or assigned record in
-	// a project connect.json does not serve is blocked (and answered with a
-	// holding reply); any other trigger there is discarded.
+	// a project connect.json does not serve is blocked; any other trigger
+	// there is discarded. The blocked record is logged on stdout as an event
+	// line with this reason, and nothing replies to it: the connector posts
+	// nothing, and the session acts only on request lines.
 	//
 	// The stored value stays "no_route", the word a served project was called
 	// by when it also named a directory. It is not renamed with the concept:
-	// it is written onto the record, and both the holding reply and the
-	// retraction that answers it read the record's reason back (askStillOpen,
-	// holdingReplyReason). A ledger in use carries rows and pending outbox
-	// intents written with this value, and a row is read as it was written.
+	// it is written onto the record, and a ledger in use carries rows and
+	// outbox intents, from when the connector posted holding replies, written
+	// with this value. A row is read as it was written.
 	ReasonNoRoute Reason = "no_route"
 	// ReasonConfigUnreadable: the record's answer turns on which projects
 	// connect.json serves, and connect.json could not be read. Not
 	// no_route: that says the operator has not served this project, which
-	// would be a false thing to say — and to post a holding reply about —
-	// when the truth is that nothing could read the file.
+	// would be a false thing to say when the truth is that nothing could read
+	// the file.
 	//
 	// It is the one blocked reason with no window: the intake sweep re-offers
 	// it every BlockedRetryInterval for as long as it stands (NextBlockedRetry,
 	// internal/connector Intake.sweepBlockedRetries). A day is the right bound
 	// for a failing server, which is not coming back on its own after one; a
 	// broken connect.json is a local file, and an operator away for a week is
-	// ordinary. `basecamp connect redispatch <id>` still runs one at once.
+	// ordinary.
 	ReasonConfigUnreadable Reason = "config_unreadable"
 )

@@ -187,13 +187,10 @@ func WithSleep(sleep func(context.Context, time.Duration) error) Option {
 // WithServed makes the served projects live: admission reads them at each
 // decision instead of from the policy it was built with.
 //
-// The dispatcher already rereads connect.json, so without this, serving a
-// project while the connector runs changed only half the answer. Unserving
-// one left its events admitted and then never started — no work and no
-// holding reply, so the person who mentioned the agent got nothing. Serving
-// one left them blocked no_route until a restart, and the holding reply's own
-// remedy could not work: a redispatch re-runs admission, against the same
-// stale policy (Copilot on #765).
+// Without this, serving or unserving a project while the connector runs
+// would not reach admission until a restart: a mention in a project just
+// unserved would still be admitted, and one in a project just served would
+// still be blocked no_route (Copilot on #765).
 //
 // Only the projects are live. Trust is not: who may drive the agent is a
 // different kind of decision, and changing it under a running connector is
@@ -269,8 +266,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 			// discarded: a discard is the one outcome repairing the file
 			// cannot reverse, and a blocked record can still be run. It
 			// comes round on the blocked schedule until the file is back,
-			// with no window (NextBlockedRetry), and a person may run
-			// `basecamp connect redispatch <id>` sooner.
+			// with no window (NextBlockedRetry).
 			return v.end(StateBlocked, ReasonConfigUnreadable), nil
 		}
 		// Every other gate discard turns on the trust set, the matrix or the
@@ -357,11 +353,11 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	v.address(summary)
 
 	if !v.Served {
-		// Mentioned and assigned are answered in an unserved project rather
-		// than dropped: the record keeps its trigger and reply destination
-		// for the holding reply, and is read again once the operator serves
-		// the project. The gate already discarded every trigger that requires
-		// a served project.
+		// Mentioned and assigned are kept in an unserved project rather than
+		// dropped: the record is blocked with its trigger and reply
+		// destination, and its event line says why it was not handed off.
+		// Nothing runs it again. The gate already discarded every trigger
+		// that requires a served project.
 		return v.end(StateBlocked, ReasonNoRoute), nil
 	}
 	v.State = StateAdmitted

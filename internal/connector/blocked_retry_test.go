@@ -476,12 +476,11 @@ func mustStamp(t *testing.T, s string) time.Time {
 }
 
 // Copilot on #770, in code the first round did not change: the queue carries
-// an id, not the revision it was claimed at. `basecamp connect redispatch`
-// runs beside a live connector (openConnectLedger takes the instance lock
-// only for an import), so a person can re-decide the record after the sweep
-// offered it and before admission took it. Admission would then load the
-// newer revision and decide it at once, inside the interval the re-decision
-// just wrote.
+// an id, not the revision it was claimed at, so the record can be decided
+// again after the sweep offered it and before admission took it (the
+// redispatch command, removed in #815, did that beside a live connector).
+// Admission would then load the newer revision and decide it at once, inside
+// the interval the newer decision just wrote.
 //
 // Nothing decides a blocked record before its own schedule says so, whoever
 // offered it — so the stale hand-off is dropped where it is loaded.

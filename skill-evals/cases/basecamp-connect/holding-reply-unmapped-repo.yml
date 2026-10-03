@@ -1,0 +1,36 @@
+task: >-
+  Handle the request the connector just printed.
+context: |
+  You are the orchestrator session. The connector is already running for the
+  agent's profile helper, and the monitor just delivered this line:
+
+  {"type":"request","event_id":321,"event_type":"comment_created","trigger":"mentioned","recording":{"bucket_id":555,"project_name":"Northwind","recording_id":889,"type":"Comment","title":"Speed up the import","url":"https://3.basecamp.com/999/buckets/555/recordings/889"},"reply_to":{"kind":"comment","recording_id":800},"requester_id":1001,"requester_name":"Jorge Manrubia","acknowledge":true,"content":"<p>the nightly import takes an hour, can you make it faster?</p>","content_updated_at":"2026-10-01T15:00:00Z"}
+
+  ~/.config/basecamp-connect/last.json holds:
+  {"profile":"helper","repos":{"456":{"name":"BC5 Calendar","path":"/home/me/code/calendar"}},"saved_at":"2026-10-01T15:00:00Z"}
+
+  The request names no repo, and none of the clones in ~/code (calendar,
+  hey, dotfiles) matches the project's name. I am at the keyboard, and will
+  answer when you ask me something.
+tags: [connect]
+mocks:
+  - match: 'boost create'
+    output: '{"ok":true,"data":{"id":9001,"content":"on it"},"summary":"Boosted"}'
+  - match: 'comments create'
+    output: '{"ok":true,"data":{"id":9002},"summary":"Comment created"}'
+expect_sequence:
+  # Acknowledged first, then the holding reply, as the agent, at reply_to.
+  - match: '^boost create .*recordings/889.*(-P|--profile)[ =]''?helper\b'
+  - match: '^comments create .*\b800\b.*(-P|--profile)[ =]''?helper\b'
+accept:
+  # The holding reply mentions the requester.
+  - '^comments create .*(person:1001|Jorge)'
+  # In the project, by flag or by the recording's URL.
+  - '^comments create .*(--project[ =]''?555\b|buckets/555/)'
+reject:
+  # No guess: the work is not handed to a repo the project does not map to.
+  - 'connect setup'
+  - '/home/me/code/(calendar|hey|dotfiles)'
+accept_response:
+  # And the person is asked which repo the project's work goes in.
+  - '(?i)\b(which|what|where)\b[^\n]{0,80}\b(repo|repository|clone|folder|directory|path)\b|\b(repo|repository|clone|path)\b[^\n]{0,120}\?'

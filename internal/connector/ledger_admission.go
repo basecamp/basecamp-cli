@@ -34,8 +34,7 @@ var (
 func (l *Ledger) Admission() Admission { return Admission{ledger: l} }
 
 // undecided is where a record may be for admission to decide it: seen, which
-// nothing has judged yet, and blocked, which recovery and redispatch decide
-// again. Everything past these was decided by admission or moved on by
+// nothing has judged yet, and blocked, which the timed retry decides again. Everything past these was decided by admission or moved on by
 // dispatch, and is never decided a second time.
 var undecided = []RecordState{StateSeen, StateBlocked}
 
@@ -45,20 +44,20 @@ var undecided = []RecordState{StateSeen, StateBlocked}
 //
 // A blocked record is loaded only when something has given it an attempt to
 // make, and only once that attempt is due — whoever handed the id over. The
-// queue carries an id and not the revision it was claimed at, and `basecamp
-// connect redispatch` runs beside a live connector, so a person can re-decide
-// a record between the sweep's offer and admission taking it; without this,
-// admission would load the newer revision and decide it at once, inside the
-// interval that re-decision had just written (Copilot on #770).
+// queue carries an id and not the revision it was claimed at, so the record
+// can be decided again between the sweep's offer and admission taking it;
+// without this, admission would load the newer revision and decide it at
+// once, inside the interval that newer decision had just written (Copilot on
+// #770).
 //
 // No next_retry_at means no attempt is owed — an untimed reason, or a window
 // that has passed — and that is a reason to stay blocked, not permission to
 // run. Absent information is not consent: read the other way, a record with
-// no schedule would be eligible immediately and on every tick after it. What
-// gives an untimed record an attempt is a person: a redispatch stamps
-// next_retry_at as it authorizes (authorizeBlocked), so the rerun it asks for
-// runs at once and a rerun that never happened is picked up by the sweep
-// rather than stranded.
+// no schedule would be eligible immediately and on every tick after it.
+// Nothing gives an untimed record an attempt today. A person's redispatch
+// used to (Ledger.Redispatch stamps next_retry_at as it authorizes, through
+// authorizeBlocked), but no command has called it since the worker side was
+// removed in #815; such a record stays blocked until a person discards it.
 func (a Admission) LoadUndecided(ctx context.Context, id int64) (admission.Event, bool, error) {
 	record, ok, err := a.ledger.Get(ctx, id)
 	if err != nil || !ok {

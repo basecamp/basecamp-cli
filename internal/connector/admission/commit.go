@@ -21,7 +21,7 @@ type Ledger interface {
 	//   - apply only when the record's revision is still v.Revision, the one
 	//     the decision was loaded at, and bump it; otherwise return
 	//     ErrAlreadyDecided. So an event is admitted at most once however many
-	//     fetches, restarts or redispatches decide it, and a decision made on
+	//     fetches, restarts or retries decide it, and a decision made on
 	//     an older load never overwrites a newer verdict, blocked ones
 	//     included;
 	//   - for an admitted verdict, read the conversation in the same
@@ -133,18 +133,20 @@ func (k *keyedMutex) lock(ctx context.Context, key string) (func(), error) {
 // Blocked-record recovery. A record blocked on a read (read_failed,
 // read_unresolved), on unverified trust (trust_unverified) or on an
 // unverified assignment delta is retried every ten minutes for a day after it
-// was first blocked, and on redispatch at any time after that. A throttled
-// record (throttled) is on the same schedule, never before the server's
-// deadline. A record blocked because connect.json could not be read
-// (config_unreadable) is on the same interval with no window at all: that is
-// a local file a person repairs, and an operator away for a week is
-// ordinary, where a day of a failing server means the server is not coming
-// back on its own. bucket_mismatch and unroutable are not timed: the
-// pointer's bucket and type never change, so only a person's redispatch
-// re-runs them. no_route is not timed either — it waits for the operator to
-// serve the project, which is a decision, not a delay. A blocked record is
-// never discarded for having failed: the checkpoint may already be past the
-// event, and a tombstone would turn an outage into a permanent loss.
+// was first blocked, and not after that. A throttled record (throttled) is on
+// the same schedule, never before the server's deadline. A record blocked
+// because connect.json could not be read (config_unreadable) is on the same
+// interval with no window at all: that is a local file a person repairs, and
+// an operator away for a week is ordinary, where a day of a failing server
+// means the server is not coming back on its own. bucket_mismatch and
+// unroutable are not timed: the pointer's bucket and type never change, so a
+// re-run could only repeat the answer. no_route is not timed either: serving
+// the project is a decision, not a delay. Nothing re-runs an untimed record,
+// or one past its window. A person's redispatch did, and no command offers
+// one since #815 removed it, so such a record stays blocked until a person
+// discards it. A blocked record is never discarded for having failed: the
+// checkpoint may already be past the event, and a tombstone would turn an
+// outage into a permanent loss.
 //
 // The intake sweep is what runs this schedule (internal/connector,
 // Intake.sweepBlockedRetries): it asks the ledger for the records this
@@ -173,11 +175,10 @@ var timedBlockedReasons = map[Reason]bool{
 }
 
 // NextBlockedRetry returns when a blocked record should next be re-run, and
-// false when it waits for something other than time: the operator serving the
-// project (no_route), or a person's redispatch once the window has passed.
-// notBefore is a throttled record's Verdict.RetryAt; no retry is scheduled
-// before it, and a deadline past the window hands the record to redispatch
-// rather than asking early.
+// false when time will not settle it: an untimed reason (no_route among them),
+// or a window that has passed. notBefore is a throttled record's
+// Verdict.RetryAt; no retry is scheduled before it, and a deadline past the
+// window ends the schedule rather than asking early.
 //
 // since is when the record entered the reason it is blocked on NOW, which is
 // not when it entered blocked. The reasons carry different windows, so a

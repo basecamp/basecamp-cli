@@ -2,6 +2,7 @@ package connector
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,6 +27,9 @@ func TestSecondConnectorOnTheSameAgentIsRefused(t *testing.T) {
 	_, err = AcquireInstanceLock(dir, "2914079", 52007412, now)
 	require.ErrorIs(t, err, ErrAlreadyRunning)
 	assert.Contains(t, err.Error(), "pid", "the refusal says who is holding it")
+	var running *AlreadyRunningError
+	require.ErrorAs(t, err, &running, "a caller wording the refusal itself can still name the holder")
+	assert.Equal(t, fmt.Sprintf("held by pid %d since %s", os.Getpid(), now.UTC().Format(time.RFC3339)), running.Holder)
 }
 
 // The key is the identity, not the profile that names it: two profiles can
