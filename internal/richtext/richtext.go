@@ -494,6 +494,44 @@ func MarkdownToHTML(md string) string {
 	return strings.TrimSpace(buf.String())
 }
 
+// HasRichTextHTML reports whether MarkdownToHTML would keep any raw HTML from
+// md other than <bc-attachment> markup: whether the Markdown parser finds an
+// inline tag or an HTML block whose tag is in richTextTags. HTML inside code is
+// not raw HTML to the parser, so it never counts.
+func HasRichTextHTML(md string) bool {
+	if md == "" {
+		return false
+	}
+	source := []byte(strings.ReplaceAll(strings.ReplaceAll(md, "\r\n", "\n"), "\r", "\n"))
+	doc := mdConverter.Parser().Parse(text.NewReader(source))
+	found := false
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		var raw []byte
+		switch v := n.(type) {
+		case *ast.RawHTML:
+			raw = v.Segments.Value(source)
+		case *ast.HTMLBlock:
+			raw = v.Lines().Value(source)
+		default:
+			return ast.WalkContinue, nil
+		}
+		if isRichTextTag(raw) && !reLeadingAttachmentTag.Match(raw) {
+			found = true
+			return ast.WalkStop, nil
+		}
+		return ast.WalkSkipChildren, nil
+	})
+	return found
+}
+
+// reLeadingAttachmentTag matches a <bc-attachment> open or close tag at the
+// start of raw HTML: the mention and attachment markup Markdown content carries
+// routinely.
+var reLeadingAttachmentTag = regexp.MustCompile(`(?i)^\s*</?bc-attachment\b`)
+
 // insertParagraphSeparators puts an empty separator paragraph between directly
 // adjacent, non-empty paragraph blocks so that a raw HTML block written in
 // Markdown renders with visible paragraph spacing.

@@ -133,6 +133,12 @@ func TestRichTextHTMLInMarkdownWarns(t *testing.T) {
 		{"explicit html", []string{"create", "789", "<p>A</p>", "--format", "html"}, false},
 		{"plain markdown", []string{"create", "789", "**bold** and `<p>` in code"}, false},
 		{"mention markup only", []string{"create", "789", `Hi <bc-attachment sgid="X" content-type="application/vnd.basecamp.mention"></bc-attachment>`}, false},
+		{"uppercase tag", []string{"create", "789", "<P>A</P>"}, true},
+		{"table row tags", []string{"create", "789", "Row: <tr><td>x</td></tr>"}, true},
+		{"underline tag", []string{"create", "789", "Some <u>underline</u>"}, true},
+		{"html in a tilde fence", []string{"create", "789", "~~~\n<p>x</p>\n~~~"}, false},
+		{"html in indented code", []string{"create", "789", "Example:\n\n    <p>x</p>"}, false},
+		{"angle brackets in prose", []string{"create", "789", "A Vec<String> here"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -2,7 +2,6 @@ package commands
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -48,18 +47,14 @@ func addRichTextFormatFlag(cmd *cobra.Command) {
 		cobra.FixedCompletions([]string{string(richTextMarkdown), string(richTextHTML)}, cobra.ShellCompDirectiveNoFileComp))
 }
 
-// reAttachmentMarkup matches the <bc-attachment> open and close tags that
-// Markdown content carries for mentions and attachments.
-var reAttachmentMarkup = regexp.MustCompile(`(?i)</?bc-attachment\b[^>]*>`)
-
 // richTextToHTML is the one place a command turns rich-text input into the
 // HTML Basecamp stores. With --format html the content is returned exactly as
 // given. Otherwise it is read as Markdown, whatever it contains.
 //
 // Content that holds HTML tags was sent as written before Markdown became the
-// only default, so when --format was left unset a one-line warning on stderr
-// says how to get that result back. The check only words the warning; it does
-// not choose the format.
+// only default, so when --format was left unset and the Markdown keeps raw HTML
+// (richtext.HasRichTextHTML), a one-line warning on stderr says how to get that
+// result back. The check only words the warning; it does not choose the format.
 func richTextToHTML(cmd *cobra.Command, content string) string {
 	flag := cmd.Flags().Lookup("format")
 	if flag == nil {
@@ -68,7 +63,7 @@ func richTextToHTML(cmd *cobra.Command, content string) string {
 	if flag.Value.String() == string(richTextHTML) {
 		return content
 	}
-	if !flag.Changed && richtext.IsHTML(reAttachmentMarkup.ReplaceAllString(content, "")) {
+	if !flag.Changed && richtext.HasRichTextHTML(content) {
 		fmt.Fprintln(cmd.ErrOrStderr(), "Warning: content contains HTML tags and was read as Markdown, the default. "+
 			"Supported tags are kept and the Markdown around them is converted. "+
 			"To send HTML exactly as written, pass --format html.")
