@@ -1350,7 +1350,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 				effectiveGroupOn = checkinsNow().Format("2006-01-02")
 			}
 
-			html := richtext.MarkdownToHTML(content)
+			html := richTextToHTML(cmd, content)
 
 			// Resolve inline images
 			html, imgErr := resolveLocalImages(cmd, app, html)
@@ -1405,6 +1405,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 
 	allowDash(cmd, "arg:1+")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
@@ -1472,7 +1473,7 @@ You can pass either an answer ID or a Basecamp URL:
 				return output.ErrUsage("Invalid answer ID")
 			}
 
-			answerHTML := richtext.MarkdownToHTML(content)
+			answerHTML := richTextToHTML(cmd, content)
 			answerHTML, resolveErr := resolveLocalImages(cmd, app, answerHTML)
 			if resolveErr != nil {
 				return resolveErr
@@ -1518,6 +1519,7 @@ You can pass either an answer ID or a Basecamp URL:
 
 	allowDash(cmd, "arg:1+")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 

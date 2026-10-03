@@ -489,6 +489,7 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the schedule entry visible to clients on the project (omit for the server default; client-authenticated callers always post client-visible)")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
@@ -532,7 +533,7 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 	// Convert description through rich text pipeline
 	var mentionNotice string
 	if description != "" {
-		description = richtext.MarkdownToHTML(description)
+		description = richTextToHTML(cmd, description)
 		description, err = resolveLocalImages(cmd, app, description)
 		if err != nil {
 			return err
@@ -718,7 +719,7 @@ You can pass either an entry ID or a Basecamp URL:
 			}
 			var mentionNotice string
 			if description != "" {
-				html := richtext.MarkdownToHTML(description)
+				html := richTextToHTML(cmd, description)
 				html, err = resolveLocalImages(cmd, app, html)
 				if err != nil {
 					return err
@@ -823,6 +824,7 @@ You can pass either an entry ID or a Basecamp URL:
 
 	allowDash(cmd, "flag:description", "flag:desc")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 

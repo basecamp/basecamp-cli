@@ -980,7 +980,7 @@ Use - as the body argument to read the body from stdin:
 			// Convert content through rich text pipeline
 			var mentionNotice string
 			if content != "" {
-				content = richtext.MarkdownToHTML(content)
+				content = richTextToHTML(cmd, content)
 				content, err = resolveLocalImages(cmd, app, content)
 				if err != nil {
 					return err
@@ -1079,6 +1079,7 @@ Use - as the body argument to read the body from stdin:
 	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
@@ -1155,7 +1156,7 @@ You can pass either a card ID or a Basecamp URL:
 			var mentionNotice string
 			var html string
 			if content != "" {
-				html = richtext.MarkdownToHTML(content)
+				html = richTextToHTML(cmd, content)
 				html, err = resolveLocalImages(cmd, app, html)
 				if err != nil {
 					return err
@@ -1225,6 +1226,7 @@ You can pass either a card ID or a Basecamp URL:
 
 	allowDash(cmd, "flag:body")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
