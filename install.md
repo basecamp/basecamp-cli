@@ -152,7 +152,7 @@ plugin, run `basecamp upgrade` and start a new session; `basecamp agent-hook
 basecamp setup codex
 ```
 
-This installs the shared Basecamp skill, registers the 37signals Codex marketplace, and installs the native plugin. After setup, review and trust the plugin hooks with `/hooks` (Codex lists untrusted hooks but does not run them until trusted), then start a new Codex thread to load the skills and hooks.
+This installs the shared Basecamp skill, registers the 37signals Codex marketplace, and installs the native plugin. After setup, review and trust the plugin's commit-reference hooks with `/hooks` (Codex lists untrusted hooks but does not run them until trusted), then start a new Codex thread to load the skills and hooks. The plugin does not inject Basecamp context at session start; Codex selects the skill when a request is relevant or explicitly references Basecamp.
 
 For a manual install:
 
