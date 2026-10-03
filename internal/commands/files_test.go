@@ -584,7 +584,7 @@ func TestFilesUpdateUploadWhitespaceTitleRealContentSendsOnlyDescription(t *test
 	err = json.Unmarshal(transport.capturedBody, &body)
 	require.NoError(t, err)
 
-	assert.Equal(t, "Quarterly report", body["description"])
+	assert.Equal(t, "<p>Quarterly report</p>", body["description"], "an upload description is rich text, read as Markdown like every other")
 	_, hasBaseName := body["base_name"]
 	assert.False(t, hasBaseName, "base_name must not be sent for whitespace-only --title")
 }

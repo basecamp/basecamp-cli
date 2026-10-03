@@ -33,7 +33,7 @@ func NewFilesCmd() *cobra.Command {
 		Long: `Manage Docs & Files.
 
 Each project has a root folder containing documents, uploads, and subfolders.`,
-		Annotations: map[string]string{"agent_notes": "files is the unified view — use uploads, docs, folders for type-specific listing\n--vault <id> filters to contents of a specific folder\nDocuments support Markdown content\nCross-project: basecamp recordings documents --json or basecamp recordings uploads --json"},
+		Annotations: map[string]string{"agent_notes": "files is the unified view — use uploads, docs, folders for type-specific listing\n--vault <id> filters to contents of a specific folder\nDocument content and upload descriptions are Markdown by default; --format html sends HTML exactly as written\nCross-project: basecamp recordings documents --json or basecamp recordings uploads --json"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
@@ -906,6 +906,7 @@ as an upload in the target folder (vault).`,
 
 	allowDash(cmd, "flag:description")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
@@ -951,6 +952,7 @@ attachment and then created as an upload in the target folder.`,
 
 	allowDash(cmd, "flag:description")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
@@ -1072,7 +1074,7 @@ func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description s
 		VisibleToClients: vis,
 	}
 	if description != "" {
-		descHTML := richtext.MarkdownToHTML(description)
+		descHTML := richTextToHTML(cmd, description)
 		descHTML, resolveErr := resolveLocalImages(cmd, app, descHTML)
 		if resolveErr != nil {
 			return resolveErr
@@ -1348,7 +1350,7 @@ Use - as the content argument to read the document body from stdin:
 
 			// Create document using SDK
 			// Convert Markdown content to HTML
-			html := richtext.MarkdownToHTML(content)
+			html := richTextToHTML(cmd, content)
 
 			// Resolve inline images
 			html, imgErr := resolveLocalImages(cmd, app, html)
@@ -1408,6 +1410,7 @@ Use - as the content argument to read the document body from stdin:
 
 	allowDash(cmd, "arg:1")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
@@ -1831,7 +1834,7 @@ You can pass either an upload ID or a Basecamp URL:
 			if cmd.Flags().Changed("description") {
 				descHTML := ""
 				if description != "" {
-					descHTML = richtext.MarkdownToHTML(description)
+					descHTML = richTextToHTML(cmd, description)
 					if descHTML, err = resolveLocalImages(cmd, app, descHTML); err != nil {
 						return err
 					}
@@ -1896,6 +1899,7 @@ You can pass either an upload ID or a Basecamp URL:
 
 	allowDash(cmd, "flag:description")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
@@ -2072,7 +2076,11 @@ You can pass either an item ID or a Basecamp URL:
 						req.BaseName = title
 					}
 					if nonDocContentSet {
-						req.Description = basecamp.Ptr(content)
+						descHTML, err := resolveLocalImages(cmd, app, richTextToHTML(cmd, content))
+						if err != nil {
+							return err
+						}
+						req.Description = basecamp.Ptr(descHTML)
 					}
 					upload, err := app.Account().Uploads().Update(cmd.Context(), itemID, req)
 					if err != nil {
@@ -2130,7 +2138,11 @@ You can pass either an item ID or a Basecamp URL:
 								req.BaseName = title
 							}
 							if nonDocContentSet {
-								req.Description = basecamp.Ptr(content)
+								descHTML, err := resolveLocalImages(cmd, app, richTextToHTML(cmd, content))
+								if err != nil {
+									return err
+								}
+								req.Description = basecamp.Ptr(descHTML)
 							}
 							upload, err := app.Account().Uploads().Update(cmd.Context(), itemID, req)
 							if err != nil {
@@ -2172,6 +2184,7 @@ You can pass either an item ID or a Basecamp URL:
 
 	allowDash(cmd, "flag:content")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
@@ -2201,7 +2214,7 @@ func updateDocument(cmd *cobra.Command, app *appctx.App, itemID int64, existingD
 
 	var docHTML string
 	if setContent && content != "" {
-		docHTML = richtext.MarkdownToHTML(content)
+		docHTML = richTextToHTML(cmd, content)
 		var err error
 		docHTML, err = resolveLocalImages(cmd, app, docHTML)
 		if err != nil {

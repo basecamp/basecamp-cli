@@ -12,7 +12,6 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/output"
-	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // NewNotesCmd creates the notes command for the current user's personal note.
@@ -110,9 +109,8 @@ func newNotesSetCmd() *cobra.Command {
 		Long: `Replace your personal note with new content.
 
 Content comes from a positional argument or --file; either accepts - to read
-from stdin. Markdown is converted to HTML, since the note is a rich text
-field — passing raw text through would store escaped markup rather than
-formatting.
+from stdin. Content is Markdown, converted to HTML, since the note is a rich
+text field; pass --format html to send HTML exactly as written.
 
 This replaces the whole note; it does not append. The first write creates the
 note, so there is no separate "create" step.
@@ -147,7 +145,7 @@ a destructive verb deserves its own review, not a rider on a bump.`,
 			// The note is rich text (my_notes.md: content | HTML), so Markdown
 			// is converted like every other content-writing command. Sending the
 			// raw string would store escaped or malformed markup.
-			note, err := app.Account().MyNotes().Update(cmd.Context(), richtext.MarkdownToHTML(content))
+			note, err := app.Account().MyNotes().Update(cmd.Context(), richTextToHTML(cmd, content))
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -169,6 +167,7 @@ a destructive verb deserves its own review, not a rider on a bump.`,
 
 	allowDash(cmd, "arg:0", "flag:file")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 

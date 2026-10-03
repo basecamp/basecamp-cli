@@ -520,6 +520,130 @@ func TestMarkdownToHTMLRawHTMLBlock(t *testing.T) {
 	}
 }
 
+// MarkdownToHTML never decides from the content that it is HTML: Markdown is
+// converted wherever it appears, and HTML Basecamp's rich text supports is
+// kept where it appears. These are the inputs that used to post as literal
+// Markdown because one supported tag anywhere sent the whole body unconverted.
+func TestMarkdownToHTMLConvertsMarkdownBesideHTML(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    []string
+		notWant []string
+	}{
+		{
+			name:  "markdown with an inline table block",
+			input: "## Results\n\n**LCP** dropped:\n\n<table>\n<tr><td>662ms</td><td>218ms</td></tr>\n</table>\n\n- one\n- two",
+			want: []string{
+				"<h2>Results</h2>",
+				"<strong>LCP</strong>",
+				"<table>\n<tr><td>662ms</td><td>218ms</td></tr>\n</table>",
+				"<li>one</li>",
+			},
+			notWant: []string{"## Results", "**LCP**", "- one", "&lt;table&gt;"},
+		},
+		{
+			name:    "markdown with an inline tag in a paragraph",
+			input:   "Some **bold** and <em>emphasis</em>",
+			want:    []string{"<p>Some <strong>bold</strong> and <em>emphasis</em></p>"},
+			notWant: []string{"**bold**"},
+		},
+		{
+			name:    "markdown with a heading tag on its own line",
+			input:   "<h2>Plan</h2>\n\n1. first\n2. second",
+			want:    []string{"<h2>Plan</h2>", "<ol>", "<li>first</li>"},
+			notWant: []string{"1. first"},
+		},
+		{
+			name:    "markdown beside a mention attachment",
+			input:   `**Ready** for you <bc-attachment sgid="X" content-type="application/vnd.basecamp.mention"></bc-attachment>`,
+			want:    []string{`<strong>Ready</strong> for you <bc-attachment sgid="X" content-type="application/vnd.basecamp.mention"></bc-attachment>`},
+			notWant: []string{"**Ready**"},
+		},
+		{
+			name:    "markdown link beside a paragraph tag",
+			input:   "<p>Intro</p>\n\nSee [the PR](https://example.com/1)",
+			want:    []string{"<p>Intro</p>", `<a href="https://example.com/1">the PR</a>`},
+			notWant: []string{"[the PR]"},
+		},
+		{
+			name:    "unsupported tag beside a supported one is text",
+			input:   "<p>hi</p>\n\n<script>alert(1)</script>",
+			want:    []string{"<p>hi</p>", "&lt;script&gt;alert(1)&lt;/script&gt;"},
+			notWant: []string{"<script>"},
+		},
+		{
+			name:    "unsupported inline tag is text",
+			input:   "Use <details>open</details> and <strong>this</strong>",
+			want:    []string{"&lt;details&gt;open&lt;/details&gt;", "<strong>this</strong>"},
+			notWant: []string{"<details>"},
+		},
+		{
+			name:  "angle brackets in prose stay text",
+			input: "A Vec<String> is fine",
+			want:  []string{"<p>A Vec&lt;String&gt; is fine</p>"},
+		},
+		{
+			name:    "HTML in a fenced code block is code",
+			input:   "```html\n<table><tr><td>x</td></tr></table>\n```\n\n**after**",
+			want:    []string{`<pre language="html"><code>&lt;table&gt;&lt;tr&gt;&lt;td&gt;x&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;`, "<strong>after</strong>"},
+			notWant: []string{"<table>"},
+		},
+		{
+			name:  "HTML in a code span is code",
+			input: "Wrap it in `<p>` and **bold** it",
+			want:  []string{"<code>&lt;p&gt;</code>", "<strong>bold</strong>"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MarkdownToHTML(tt.input)
+			for _, w := range tt.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("MarkdownToHTML(%q)\ngot:  %q\nmissing: %q", tt.input, got, w)
+				}
+			}
+			for _, nw := range tt.notWant {
+				if strings.Contains(got, nw) {
+					t.Errorf("MarkdownToHTML(%q)\ngot:  %q\nunexpected: %q", tt.input, got, nw)
+				}
+			}
+		})
+	}
+}
+
+// A raw HTML block is kept or escaped as a unit, by the tag it opens with; the
+// tags inside it go with it.
+func TestMarkdownToHTMLJudgesAnHTMLBlockByItsOpeningTag(t *testing.T) {
+	tests := []struct {
+		name, input, expected string
+	}{
+		{
+			name:     "supported opening tag keeps the whole block",
+			input:    "<div>\n<p>x</p>\n</div>",
+			expected: "<div>\n<p>x</p>\n</div>",
+		},
+		{
+			name:     "unsupported opening tag escapes the whole block",
+			input:    "<section>\n<p>x</p>\n</section>",
+			expected: "<p>&lt;section&gt; &lt;p&gt;x&lt;/p&gt; &lt;/section&gt;</p>",
+		},
+		{
+			name:     "a pre block is kept without separators inside it",
+			input:    "<pre><p>A</p><p>B</p></pre>",
+			expected: "<pre><p>A</p><p>B</p></pre>",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := MarkdownToHTML(tt.input); got != tt.expected {
+				t.Errorf("MarkdownToHTML(%q)\ngot:  %q\nwant: %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
 // Tag-match regexes use (?:\s[^>]*)? to require whitespace or `>` after the
 // tag name. Without that, `<p[^>]*>` false-matches `<pre>`, `<b[^>]*>` matches
 // `<br>`, `<em[^>]*>` matches `<embed>`, etc. — leading to garbled output when

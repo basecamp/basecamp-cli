@@ -1372,7 +1372,7 @@ Use - as the content argument to read the todo title from stdin:
 
 			// Process description with Markdown + attachments
 			if description != "" || len(attachFiles) > 0 {
-				descHTML := richtext.MarkdownToHTML(description)
+				descHTML := richTextToHTML(cmd, description)
 
 				// Resolve inline images
 				descHTML, descErr := resolveLocalImages(cmd, app, descHTML)
@@ -1491,6 +1491,7 @@ Use - as the content argument to read the todo title from stdin:
 	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("notify-on-completion", completer.PeopleNameCompletion())
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
@@ -1624,7 +1625,7 @@ Set or clear the people notified when the todo is completed:
 			// todo can't orphan uploaded attachments.
 			var descHTML string
 			if !clearDescription && description != "" {
-				descHTML = richtext.MarkdownToHTML(description)
+				descHTML = richTextToHTML(cmd, description)
 			}
 
 			var assigneeIDs []int64
@@ -1735,6 +1736,7 @@ Set or clear the people notified when the todo is completed:
 
 	allowDash(cmd, "flag:description")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
@@ -2007,7 +2009,7 @@ Examples:
 			commentHTML := comment
 			var mentionNotice string
 			if comment != "" {
-				commentHTML = richtext.MarkdownToHTML(comment)
+				commentHTML = richTextToHTML(cmd, comment)
 				var pipelineErr error
 				commentHTML, pipelineErr = resolveLocalImages(cmd, app, commentHTML)
 				if pipelineErr != nil {
@@ -2096,6 +2098,7 @@ Examples:
 	_ = cmd.RegisterFlagCompletionFunc("in", completer.ProjectNameCompletion())
 	_ = cmd.RegisterFlagCompletionFunc("assignee", completer.PeopleNameCompletion())
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
