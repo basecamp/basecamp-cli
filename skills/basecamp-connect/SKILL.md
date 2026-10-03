@@ -390,6 +390,10 @@ to finish without this session:
 
 Then go straight back to watching. There's no limit on requests in flight.
 
+Keep the terminal quiet. The reply in Basecamp is the record: don't recap
+routine requests here. Speak up only for a failure, a refusal, or something
+the person must decide (a repo to pick, a mention that couldn't be posted).
+
 ## The subagent's instructions
 
 Give each subagent this section.
@@ -483,6 +487,10 @@ basecamp comments create <reply_to.recording_id> - --project <bucket_id> --profi
 basecamp chat post - --project <bucket_id> --room <reply_to.recording_id> --profile '<profile>' < reply.md
 ```
 
+- **Post exactly once.** Never repost to fix formatting, or because you're
+  unsure it landed: read the thread or room to check instead. Basecamp
+  doesn't let agents delete what they post, so a duplicate stays until a
+  person removes it.
 - **Lead with the answer.** The first line says what happened. Detail goes
   under it.
 - **Success**: the results, where the request was written.
@@ -497,17 +505,24 @@ basecamp chat post - --project <bucket_id> --room <reply_to.recording_id> --prof
   reply included.
 - Never mention the agent.
 
-**Rich text.** The CLI converts Markdown: headings, **bold**, lists, quotes,
-fenced code for commands, diffs and errors, and pipe tables for real grids. Don't
-hand-write HTML: raw tags post as visible text.
+**Rich text.** In comments, messages, documents and cards, the CLI converts
+Markdown: headings, **bold**, lists, quotes, fenced code for commands, diffs
+and errors, and pipe tables for real grids. Don't hand-write HTML there: raw
+tags switch off the conversion for the whole field.
+
+Campfire is different: `chat post` sends plain text and leaves Markdown as
+typed. The exception is a line with an `@`: the CLI reads it as a mention and
+converts the line to HTML, and Basecamp refuses an agent's chat post that
+carries a mention. So keep `@` out of the agent's chat lines, and write them as
+plain text, or as real HTML with `--content-type text/html`. For any other CLI
+detail, load the `basecamp` skill.
 
 - **Links carry a title, not a bare URL**:
   `[Skip the ack boost when the reply is immediate](https://github.com/basecamp/bc3/pull/1234)`.
 - **Anything in another app gets its full URL**: `[#1234 Skip the ack boost](https://github.com/…/pull/1234)`,
   never a bare `#1234`, `abc123f` or `SENTRY-4F`.
-- **Campfire replies stay chat-sized**: a few lines, bold, bullets and titled
-  links, no headings. Spill a long result into a comment or document and link
-  it.
+- **Campfire replies stay chat-sized**: a few lines of plain text (or HTML), no
+  headings. Spill a long result into a comment or document and link it.
 
 **By trigger:**
 
@@ -527,6 +542,10 @@ failed:`. That's the credential store under concurrent use, not a missing
 login. Retry 2 or 3 times with a short pause, and only on those two messages.
 Never run `basecamp auth login` in response, and never report the profile as
 missing.
+
+**6. Report back in one line**: posted or failed, the line or comment id,
+and any refusal the main session must pass on. Don't repeat the reply: the
+person reads it in Basecamp.
 
 ## When the connector stops
 
