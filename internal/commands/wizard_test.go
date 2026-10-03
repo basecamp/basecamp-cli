@@ -799,6 +799,44 @@ func TestRunClaudeSetupRepairsSkillLink(t *testing.T) {
 	assert.NoError(t, statErr, "skill link should exist after setup repairs it")
 }
 
+func TestClaudeSetupRejectsRelativeConfigBeforeSideEffects(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		run  func(*cobra.Command) error
+	}{
+		{
+			name: "interactive",
+			run: func(cmd *cobra.Command) error {
+				styles := tui.NewStylesWithTheme(tui.ResolveTheme(false))
+				return runClaudeSetup(cmd, styles)
+			},
+		},
+		{name: "non-interactive", run: runClaudeSetupNonInteractive},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("CLAUDE_CONFIG_DIR", "relative/claude")
+			binDir := filepath.Join(home, "bin")
+			require.NoError(t, os.MkdirAll(binDir, 0o755))
+			logFile := filepath.Join(home, "claude-calls.log")
+			script := "#!/bin/sh\necho \"$*\" >> \"" + logFile + "\"\n"
+			require.NoError(t, os.WriteFile(filepath.Join(binDir, "claude"), []byte(script), 0o755)) //nolint:gosec // test helper
+			t.Setenv("PATH", binDir)
+
+			cmd := &cobra.Command{}
+			cmd.SetContext(context.Background())
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(&bytes.Buffer{})
+			err := test.run(cmd)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "CLAUDE_CONFIG_DIR must be an absolute path")
+			_, statErr := os.Stat(logFile)
+			assert.True(t, os.IsNotExist(statErr), "Claude must not run before config validation")
+		})
+	}
+}
+
 // TestSetupClaudeNonInteractiveRemovesStalePlugins verifies that non-interactive
 // setup detects and removes stale plugin entries from old marketplaces.
 func TestSetupClaudeNonInteractiveRemovesStalePlugins(t *testing.T) {
