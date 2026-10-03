@@ -521,8 +521,8 @@ func TestMarkdownToHTMLRawHTMLBlock(t *testing.T) {
 }
 
 // MarkdownToHTML never decides from the content that it is HTML: Markdown is
-// converted wherever it appears, and HTML Basecamp's rich text supports is
-// kept where it appears. These are the inputs that used to post as literal
+// converted everywhere outside a raw HTML block, and HTML Basecamp's rich text
+// supports is kept where it appears. These are the inputs that used to post as literal
 // Markdown because one supported tag anywhere sent the whole body unconverted.
 func TestMarkdownToHTMLConvertsMarkdownBesideHTML(t *testing.T) {
 	tests := []struct {
