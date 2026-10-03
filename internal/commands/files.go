@@ -2296,36 +2296,32 @@ You can pass IDs or Basecamp URLs for both the item and the folder:
 				return output.ErrUsage("--position must be a positive integer (1-indexed)")
 			}
 
-			itemIDStr, itemProjectID := extractWithProject(args[0])
-			var itemKind string
-			if parsed := urlarg.Parse(args[0]); parsed != nil {
-				itemKind = parsed.Type
-				if !slices.Contains([]string{"documents", "uploads", "vaults"}, itemKind) || parsed.IsCollection {
-					return output.ErrUsageHint("files move moves a document, upload, or folder",
-						"Pass its ID or its URL (…/documents/<id>, …/uploads/<id>, or …/vaults/<id>)")
-				}
-			}
-			itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
+			app := appctx.FromContext(cmd.Context())
+			item, err := parseFilesMoveRef(app, args[0], []string{"documents", "uploads", "vaults"})
 			if err != nil {
-				return output.ErrUsage("Invalid item ID")
+				return output.ErrUsageHint("files move moves a document, upload, or folder: "+err.Error(),
+					"Pass its ID or its URL (…/documents/<id>, …/uploads/<id>, or …/vaults/<id>)")
 			}
-
-			folderIDStr, folderProjectID := extractWithProject(to)
-			if parsed := urlarg.Parse(to); parsed != nil && parsed.Type != "vaults" {
-				return output.ErrUsageHint("--to must be a folder", "Pass a folder ID or a folder URL (…/vaults/<id>)")
-			}
-			folderID, err := strconv.ParseInt(folderIDStr, 10, 64)
+			folder, err := parseFilesMoveRef(app, to, []string{"vaults"})
 			if err != nil {
-				return output.ErrUsageHint("Invalid folder ID", "Pass a folder ID or a folder URL (…/vaults/<id>)")
+				return output.ErrUsageHint("--to must be a folder: "+err.Error(), "Pass a folder ID or a folder URL (…/vaults/<id>)")
 			}
+			itemID, itemProjectID, itemKind := item.id, item.project, item.kind
+			folderID, folderProjectID := folder.id, folder.project
 			if itemProjectID != "" && folderProjectID != "" && itemProjectID != folderProjectID {
 				return output.ErrUsageHint("The folder is in a different project",
 					"files move only moves within a project; use the Move menu in Basecamp to move to another project")
 			}
 
-			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
+			}
+			// A pasted URL names its own account. The IDs alone would retarget
+			// same-numbered records in the session's account, so refuse a mismatch.
+			for _, ref := range []filesMoveRef{item, folder} {
+				if ref.account != "" && ref.account != app.Config.AccountID {
+					return output.ErrUsage(fmt.Sprintf("URL is for account %s, but this session uses account %s", ref.account, app.Config.AccountID))
+				}
 			}
 
 			var opts *basecamp.MoveToVaultOptions
@@ -2376,9 +2372,41 @@ You can pass IDs or Basecamp URLs for both the item and the folder:
 	}
 
 	cmd.Flags().StringVar(&to, "to", "", "Destination folder ID or URL")
-	cmd.Flags().IntVar(&position, "position", 0, "Position in the folder (1-indexed, default: first)")
+	cmd.Flags().IntVar(&position, "position", 0, "Position in the folder (1-indexed, default: first; past the end means last)")
 
 	return cmd
+}
+
+// filesMoveRef is an ID or URL given to files move, reduced to what the move
+// needs. kind, project and account are empty for a bare ID.
+type filesMoveRef struct {
+	id                     int64
+	kind, project, account string
+}
+
+// parseFilesMoveRef accepts a positive ID, or a URL on a trusted Basecamp host
+// naming a single recording of one of the given kinds. The URL router is
+// host-agnostic, so the host check is what keeps a look-alike URL from
+// retargeting the configured account (as files replace does).
+func parseFilesMoveRef(app *appctx.App, arg string, kinds []string) (filesMoveRef, error) {
+	var ref filesMoveRef
+	idStr := arg
+	if urlarg.IsURL(arg) {
+		if !hostutil.IsTrustedBasecampHost(arg, app.Config.BaseURL) {
+			return ref, errors.New("not a Basecamp URL")
+		}
+		parsed := urlarg.Parse(arg)
+		if parsed == nil || !slices.Contains(kinds, parsed.Type) || parsed.IsCollection || parsed.RecordingID == "" {
+			return ref, errors.New("the URL names something else")
+		}
+		idStr, ref.kind, ref.project, ref.account = parsed.RecordingID, parsed.Type, parsed.ProjectID, parsed.AccountID
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		return ref, errors.New("invalid ID")
+	}
+	ref.id = id
+	return ref, nil
 }
 
 // fileItemTitle names a Docs & Files item for a summary line. kind is the URL's

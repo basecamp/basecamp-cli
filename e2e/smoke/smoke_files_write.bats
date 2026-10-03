@@ -13,8 +13,6 @@ setup_file() {
   assert_success
   assert_json_value '.ok' 'true'
   assert_json_not_null '.data.id'
-
-  echo "$output" | jq -r '.data.id' > "$BATS_FILE_TMPDIR/folder_id"
 }
 
 @test "attach uploads a file" {
@@ -135,11 +133,19 @@ setup_file() {
 }
 
 @test "files move moves a file into a folder" {
-  local id_file="$BATS_FILE_TMPDIR/upload_id" folder_file="$BATS_FILE_TMPDIR/folder_id"
-  [[ -f "$id_file" && -f "$folder_file" ]] || mark_unverifiable "No upload or folder created in prior tests"
-  local file_id folder_id
-  file_id=$(<"$id_file")
-  folder_id=$(<"$folder_file")
+  # Self-contained: bats -j may run this file's tests in any order.
+  local tmpfile="$BATS_FILE_TMPDIR/smoke_files_move.txt"
+  echo "smoke files move content $(date +%s)" > "$tmpfile"
+
+  run_smoke basecamp files folders create "Smoke move target $(date +%s)" -p "$QA_PROJECT" --json
+  assert_success
+  local folder_id
+  folder_id=$(echo "$output" | jq -r '.data.id')
+
+  run_smoke basecamp files uploads create "$tmpfile" -p "$QA_PROJECT" --json
+  assert_success
+  local file_id
+  file_id=$(echo "$output" | jq -r '.data.id')
 
   run_smoke basecamp files move "$file_id" --to "$folder_id" --json
   assert_success

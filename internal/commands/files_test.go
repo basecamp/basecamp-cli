@@ -1727,15 +1727,22 @@ func TestFilesMoveWithoutDestinationShowsHelp(t *testing.T) {
 
 func TestFilesMoveRefusesBadArgumentsBeforeTheWire(t *testing.T) {
 	cases := map[string][]string{
-		"--folder for --to":       {"123", "--folder", "456"},
-		"--vault beside --to":     {"123", "--to", "456", "--vault", "789"},
-		"zero position":           {"123", "--to", "456", "--position", "0"},
-		"negative position":       {"123", "--to", "456", "--position", "-1"},
-		"non-numeric destination": {"123", "--to", "Designs"},
-		"non-folder destination":  {"123", "--to", "https://3.basecamp.com/99999/buckets/77/documents/456"},
-		"non-file item URL":       {"https://3.basecamp.com/99999/buckets/77/messages/123", "--to", "456"},
-		"folder listing item URL": {"https://3.basecamp.com/99999/buckets/77/vaults/456/documents", "--to", "789"},
-		"another project":         {"https://3.basecamp.com/99999/buckets/77/documents/123", "--to", "https://3.basecamp.com/99999/buckets/88/vaults/456"},
+		"--folder for --to":         {"123", "--folder", "456"},
+		"--vault beside --to":       {"123", "--to", "456", "--vault", "789"},
+		"zero position":             {"123", "--to", "456", "--position", "0"},
+		"negative position":         {"123", "--to", "456", "--position", "-1"},
+		"non-numeric destination":   {"123", "--to", "Designs"},
+		"non-folder destination":    {"123", "--to", "https://3.basecamp.com/99999/buckets/77/documents/456"},
+		"non-file item URL":         {"https://3.basecamp.com/99999/buckets/77/messages/123", "--to", "456"},
+		"folder listing item URL":   {"https://3.basecamp.com/99999/buckets/77/vaults/456/documents", "--to", "789"},
+		"zero item ID":              {"0", "--to", "456"},
+		"zero folder ID":            {"123", "--to", "0"},
+		"folder listing --to":       {"123", "--to", "https://3.basecamp.com/99999/buckets/77/vaults/456/vaults"},
+		"untrusted item host":       {"https://evil.example/99999/buckets/77/documents/123", "--to", "456"},
+		"untrusted folder host":     {"123", "--to", "https://evil.example/99999/buckets/77/vaults/456"},
+		"item in another account":   {"https://3.basecamp.com/11111/buckets/77/documents/123", "--to", "456"},
+		"folder in another account": {"123", "--to", "https://3.basecamp.com/11111/buckets/77/vaults/456"},
+		"another project":           {"https://3.basecamp.com/99999/buckets/77/documents/123", "--to", "https://3.basecamp.com/99999/buckets/88/vaults/456"},
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
