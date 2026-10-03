@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"cmp"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -50,6 +52,7 @@ Each project has a root folder containing documents, uploads, and subfolders.`,
 		newFilesVersionsCmd(&project),
 		newFilesReplaceCmd(&project),
 		newFilesUpdateCmd(&project),
+		newFilesMoveCmd(),
 		newFilesDownloadCmd(&project),
 		newRecordableTrashCmd("file"),
 		newRecordableArchiveCmd("file"),
@@ -2257,6 +2260,198 @@ func updateDocument(cmd *cobra.Command, app *appctx.App, itemID int64, existingD
 		req.Content = basecamp.Ptr(effective)
 	}
 	return app.Account().Documents().Replace(cmd.Context(), itemID, req)
+}
+
+func newFilesMoveCmd() *cobra.Command {
+	var to string
+	var position int
+
+	cmd := &cobra.Command{
+		Use:   "move <id|url>",
+		Short: "Move a document, upload, or folder into another folder",
+		Long: `Move a document, upload, or folder into another folder in the same project.
+
+The item keeps its ID, comments, and history, and a folder takes everything
+inside it along. Moving into the folder an item is already in changes only its
+position. To move something to another project, use the Move menu in Basecamp.
+
+You can pass IDs or Basecamp URLs for both the item and the folder:
+  basecamp files move 789 --to 456
+  basecamp files move https://3.basecamp.com/123/buckets/1/documents/789 --to https://3.basecamp.com/123/buckets/1/vaults/456`,
+		Example: `  basecamp files move 789 --to 456
+  basecamp files move 789 --to 456 --position 1`,
+		Annotations: map[string]string{"agent_notes": "Moves in place within one project: the ID, URL, and comments stay the same. --position is 1-indexed (default: first). A folder in another project is refused."},
+		Args:        cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// --vault/--folder filter the files group's listings; here they would be
+			// silently ignored, and reading them as the destination is a guess.
+			if cmd.Flags().Changed("vault") || cmd.Flags().Changed("folder") {
+				return output.ErrUsageHint("files move takes its destination from --to", "basecamp files move <id|url> --to <folder-id|url>")
+			}
+			if to == "" {
+				return missingArg(cmd, "--to")
+			}
+			positionSet := cmd.Flags().Changed("position")
+			if positionSet && (position < 1 || position > math.MaxInt32) {
+				return output.ErrUsage("--position must be a positive integer (1-indexed)")
+			}
+
+			itemIDStr, itemProjectID := extractWithProject(args[0])
+			var itemKind string
+			if parsed := urlarg.Parse(args[0]); parsed != nil {
+				itemKind = parsed.Type
+				if !slices.Contains([]string{"documents", "uploads", "vaults"}, itemKind) || parsed.IsCollection {
+					return output.ErrUsageHint("files move moves a document, upload, or folder",
+						"Pass its ID or its URL (…/documents/<id>, …/uploads/<id>, or …/vaults/<id>)")
+				}
+			}
+			itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid item ID")
+			}
+
+			folderIDStr, folderProjectID := extractWithProject(to)
+			if parsed := urlarg.Parse(to); parsed != nil && parsed.Type != "vaults" {
+				return output.ErrUsageHint("--to must be a folder", "Pass a folder ID or a folder URL (…/vaults/<id>)")
+			}
+			folderID, err := strconv.ParseInt(folderIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsageHint("Invalid folder ID", "Pass a folder ID or a folder URL (…/vaults/<id>)")
+			}
+			if itemProjectID != "" && folderProjectID != "" && itemProjectID != folderProjectID {
+				return output.ErrUsageHint("The folder is in a different project",
+					"files move only moves within a project; use the Move menu in Basecamp to move to another project")
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			var opts *basecamp.MoveToVaultOptions
+			if positionSet {
+				opts = &basecamp.MoveToVaultOptions{Position: int32(position)} // #nosec G115 -- bounds checked above
+			}
+			if err := app.Account().Recordings().MoveToVault(cmd.Context(), itemID, folderID, opts); err != nil {
+				return filesMoveError(err)
+			}
+
+			itemName := fmt.Sprintf("#%d", itemID)
+			if title := fileItemTitle(cmd, app, itemID, itemKind); title != "" {
+				itemName = title
+			}
+			folderName := fmt.Sprintf("folder #%d", folderID)
+			folderProject := cmp.Or(folderProjectID, itemProjectID)
+			if folder, err := app.Account().Vaults().Get(cmd.Context(), folderID); err == nil {
+				if folder.Title != "" {
+					folderName = folder.Title
+				}
+				if folder.Bucket != nil {
+					folderProject = strconv.FormatInt(folder.Bucket.ID, 10)
+				}
+			}
+
+			result := map[string]any{"id": itemID, "status": "moved", "folder_id": folderID}
+			summary := fmt.Sprintf("Moved %s into %s", itemName, folderName)
+			if positionSet {
+				result["position"] = position
+				summary += fmt.Sprintf(" at position %d", position)
+			}
+
+			breadcrumbs := []output.Breadcrumb{{
+				Action:      "show",
+				Cmd:         strings.TrimSpace(fmt.Sprintf("basecamp files show %d %s", itemID, inFlag(folderProject))),
+				Description: "View item",
+			}}
+			if folderProject != "" {
+				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+					Action:      "contents",
+					Cmd:         fmt.Sprintf("basecamp files list --vault %d --in %s", folderID, folderProject),
+					Description: "List folder contents",
+				})
+			}
+
+			return app.OK(result, output.WithSummary(summary), output.WithBreadcrumbs(breadcrumbs...))
+		},
+	}
+
+	cmd.Flags().StringVar(&to, "to", "", "Destination folder ID or URL")
+	cmd.Flags().IntVar(&position, "position", 0, "Position in the folder (1-indexed, default: first)")
+
+	return cmd
+}
+
+// fileItemTitle names a Docs & Files item for a summary line. kind is the URL's
+// type when the item was given as a URL, so only that lookup runs; a bare ID
+// tries each kind in turn. It is best-effort: the move has already happened, so
+// a failed lookup leaves the caller to fall back to the ID.
+func fileItemTitle(cmd *cobra.Command, app *appctx.App, id int64, kind string) string {
+	ctx := cmd.Context()
+	if kind == "" || kind == "documents" {
+		if doc, err := app.Account().Documents().Get(ctx, id); err == nil {
+			return doc.Title
+		}
+	}
+	if kind == "" || kind == "uploads" {
+		if upload, err := app.Account().Uploads().Get(ctx, id); err == nil {
+			return cmp.Or(upload.Filename, upload.Title)
+		}
+	}
+	if kind == "" || kind == "vaults" {
+		if vault, err := app.Account().Vaults().Get(ctx, id); err == nil {
+			return vault.Title
+		}
+	}
+	return ""
+}
+
+// inFlag spells a project as an --in flag for a breadcrumb, or nothing when the
+// project isn't known.
+func inFlag(project string) string {
+	if project == "" {
+		return ""
+	}
+	return "--in " + project
+}
+
+// filesMoveError turns the filing endpoint's refusals into messages that say
+// what to change. Only some of its 422s carry a reason, so the hint lists them.
+func filesMoveError(err error) error {
+	var sdkErr *basecamp.Error
+	if !errors.As(err, &sdkErr) {
+		return convertSDKError(err)
+	}
+	switch sdkErr.Code {
+	case basecamp.CodeValidation:
+		message := "Basecamp refused the move"
+		if sdkErr.Message != "" && sdkErr.Message != "validation error" {
+			message += ": " + sdkErr.Message
+		}
+		return &output.Error{
+			Code:       output.CodeValidation,
+			Message:    message,
+			Hint:       "The destination must be an active folder, the item must be active (not archived, trashed, or a draft), and a folder can't move into one of its own folders",
+			HTTPStatus: sdkErr.HTTPStatus,
+			Cause:      sdkErr,
+		}
+	case basecamp.CodeForbidden:
+		return &output.Error{
+			Code:       output.CodeForbidden,
+			Message:    "You don't have permission to move this item",
+			Hint:       "This account may limit moving to admins and the person who created the item",
+			HTTPStatus: sdkErr.HTTPStatus,
+			Cause:      sdkErr,
+		}
+	case basecamp.CodeNotFound:
+		return &output.Error{
+			Code:       output.CodeNotFound,
+			Message:    "Item or folder not found",
+			Hint:       "Check both IDs; the folder must be in the same project as the item (use the Move menu in Basecamp to move to another project)",
+			HTTPStatus: sdkErr.HTTPStatus,
+			Cause:      sdkErr,
+		}
+	}
+	return convertSDKError(err)
 }
 
 func newFilesDownloadCmd(project *string) *cobra.Command {
