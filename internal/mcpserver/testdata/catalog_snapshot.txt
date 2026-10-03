@@ -272,6 +272,7 @@ ACTIONS (RO = read-only):
 - list_recordings (RO, paginated): List recordings of a given type across projects
 - list_templates (RO, paginated): List all templates visible to the current user
 - list_webhooks (RO, paginated): List all webhooks for a project
+- move_recording_to_vault: Move a document, upload or vault into another vault in its project, or reorder it in its own vault
 - pause_question: Pause a check-in question (stops sending reminders)
 - reposition_tool: Reposition a tool on the project dock
 - resume_question: Resume a paused check-in question (resumes sending reminders)
