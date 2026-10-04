@@ -68,7 +68,12 @@ func TestBasecampSkillStaysDiscoveryFirstAndFocused(t *testing.T) {
 		"basecamp skill is a routing and safety guide, not a command reference; use --agent --help")
 
 	content := string(data)
-	assert.Contains(t, content, "basecamp --agent --help")
+	leafHelp := "basecamp <group> <subcommand> --agent --help"
+	rootHelp := "basecamp --agent --help"
+	require.Contains(t, content, leafHelp)
+	require.Contains(t, content, rootHelp)
+	assert.Less(t, strings.Index(content, leafHelp), strings.Index(content, rootHelp),
+		"leaf help must be taught before root help")
 	assert.Contains(t, content, "source of truth")
 	assert.NotContains(t, content, "## Resource Reference")
 	assert.NotContains(t, content, "## Quick Reference")

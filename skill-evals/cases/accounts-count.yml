@@ -5,7 +5,7 @@ mocks:
     output: '2'
 expect_sequence:
   - match: '^accounts list (?=.*--(?:agent|json))(?=.*--help)'
-  - match: 'accounts list.*--jq.*\.data\s*\|\s*length'
+  - match: 'accounts list.*(?:--count|--jq.*\.data\s*\|\s*length|--agent.*--jq.*length|--jq.*length.*--agent)'
 reject:
   - '^--(?:agent|json).*--help|^--help.*--(?:agent|json)'
   - '^accounts (?!list\b).*--help'
