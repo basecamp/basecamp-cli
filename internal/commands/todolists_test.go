@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -26,6 +27,21 @@ import (
 )
 
 // --- A. Guard tests (no-network transport, guards fire before any request) ---
+
+func TestTodolistDescriptionHelpDeclaresHTML(t *testing.T) {
+	project := ""
+	todosetID := ""
+	commands := []*cobra.Command{
+		newTodolistsCreateCmd(&project, &todosetID),
+		newTodolistsUpdateCmd(&project),
+	}
+
+	for _, cmd := range commands {
+		flag := cmd.Flags().Lookup("description")
+		require.NotNil(t, flag)
+		assert.Contains(t, flag.Usage, "rich text HTML")
+	}
+}
 
 func TestTodolistsPositionSingleRequiresTo(t *testing.T) {
 	t.Setenv("BASECAMP_NONINTERACTIVE", "1")
