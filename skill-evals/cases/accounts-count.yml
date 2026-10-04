@@ -1,0 +1,11 @@
+task: How many Basecamp accounts do I have? Use CLI introspection to discover the command before answering.
+tags: [discovery, semantics]
+mocks:
+  - match: 'accounts list(?!.*--help)'
+    output: '2'
+expect_sequence:
+  - match: 'accounts(?: list)? .*--agent.*--help|accounts(?: list)? .*--help.*--agent'
+  - match: 'accounts list.*--jq.*\.data\s*\|\s*length'
+accept_response:
+  - '\b2\b'
+max_commands: 4

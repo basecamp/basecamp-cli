@@ -1,9 +1,7 @@
 package commands_test
 
 import (
-	"bufio"
 	"os"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -61,69 +59,19 @@ func TestDocContractArgs(t *testing.T) {
 	}
 }
 
-// TestSkillMDQuickReferenceCommands validates that every command path mentioned
-// in the Quick Reference table of SKILL.md exists in the live command tree.
-// Skips schematic examples containing angle-bracket placeholders.
-func TestSkillMDQuickReferenceCommands(t *testing.T) {
-	root := buildRootWithAllCommands()
-
-	// Read SKILL.md
+func TestBasecampSkillStaysDiscoveryFirstAndFocused(t *testing.T) {
 	data, err := os.ReadFile("../../skills/basecamp/SKILL.md")
 	require.NoError(t, err)
 
-	// Extract Quick Reference section (from "## Quick Reference" to next "##")
-	lines := extractSection(string(data), "## Quick Reference")
-	require.NotEmpty(t, lines, "Quick Reference section not found in SKILL.md")
+	const maxSkillBytes = 16 * 1024
+	assert.LessOrEqual(t, len(data), maxSkillBytes,
+		"basecamp skill is a routing and safety guide, not a command reference; use --agent --help")
 
-	// Parse table rows: | Task | `basecamp ...` |
-	cmdRe := regexp.MustCompile("`(basecamp [^`]+)`")
-
-	var checked int
-	scanner := bufio.NewScanner(strings.NewReader(strings.Join(lines, "\n")))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "|") || strings.HasPrefix(line, "|--") {
-			continue
-		}
-
-		matches := cmdRe.FindAllStringSubmatch(line, -1)
-		for _, m := range matches {
-			fullCmd := m[1]
-			// Extract command path (words before any flag or quoted arg)
-			path := extractCommandPath(fullCmd)
-			if path == "" {
-				continue
-			}
-
-			// Skip schematic examples with angle-bracket placeholders in the
-			// command name position (e.g., "basecamp <type> list")
-			if strings.Contains(path, "<") {
-				continue
-			}
-
-			// Try the full path, then progressively shorter paths to handle
-			// cases where args follow the command (e.g., "basecamp recordings todos").
-			cmd := findDeepestCommand(root, path)
-			assert.NotNilf(t, cmd, "SKILL.md Quick Reference references %q but command not found (from: %s)", path, fullCmd)
-			checked++
-		}
-	}
-	require.NoError(t, scanner.Err())
-	assert.Greater(t, checked, 0, "no commands found in Quick Reference table")
-}
-
-// findDeepestCommand tries progressively shorter paths until it finds a match.
-// This handles cases where positional args follow the command name in examples
-// (e.g., "basecamp recordings todos" where "todos" is an arg, not a subcommand).
-func findDeepestCommand(root *cobra.Command, path string) *cobra.Command {
-	parts := strings.Fields(path)
-	for len(parts) >= 2 { // at least "basecamp <something>"
-		if cmd := findCommand(root, strings.Join(parts, " ")); cmd != nil {
-			return cmd
-		}
-		parts = parts[:len(parts)-1]
-	}
-	return nil
+	content := string(data)
+	assert.Contains(t, content, "basecamp --agent --help")
+	assert.Contains(t, content, "source of truth")
+	assert.NotContains(t, content, "## Resource Reference")
+	assert.NotContains(t, content, "## Quick Reference")
 }
 
 // findCommand traverses the command tree to find a command by its full path.
@@ -158,45 +106,4 @@ func containsAlias(cmd *cobra.Command, name string) bool {
 		}
 	}
 	return false
-}
-
-// extractSection returns lines from a markdown section starting at the given
-// heading until the next heading of the same or higher level.
-func extractSection(content, heading string) []string {
-	lines := strings.Split(content, "\n")
-	var result []string
-	inSection := false
-	headingLevel := strings.Count(strings.Fields(heading)[0], "#")
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, heading) {
-			inSection = true
-			continue
-		}
-		if inSection {
-			// Stop at next heading of same or higher level
-			trimmed := strings.TrimLeft(line, "#")
-			if len(line) > 0 && line[0] == '#' && len(line)-len(trimmed) <= headingLevel {
-				break
-			}
-			result = append(result, line)
-		}
-	}
-	return result
-}
-
-// extractCommandPath extracts the command path (basecamp subcommand ...) from
-// a full command string, stopping at flags (--) or quoted args.
-func extractCommandPath(full string) string {
-	var parts []string
-	for _, word := range strings.Fields(full) {
-		if strings.HasPrefix(word, "-") || strings.HasPrefix(word, `"`) || strings.HasPrefix(word, "'") {
-			break
-		}
-		parts = append(parts, word)
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return strings.Join(parts, " ")
 }
