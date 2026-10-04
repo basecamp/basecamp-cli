@@ -4,8 +4,11 @@ mocks:
   - match: 'accounts list(?!.*--help)'
     output: '2'
 expect_sequence:
-  - match: 'accounts(?: list)? .*--agent.*--help|accounts(?: list)? .*--help.*--agent'
+  - match: '^accounts list (?=.*--(?:agent|json))(?=.*--help)'
   - match: 'accounts list.*--jq.*\.data\s*\|\s*length'
+reject:
+  - '^--(?:agent|json).*--help|^--help.*--(?:agent|json)'
+  - '^accounts (?!list\b).*--help'
 accept_response:
   - '\b2\b'
-max_commands: 4
+max_commands: 2

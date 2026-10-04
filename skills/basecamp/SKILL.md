@@ -80,26 +80,33 @@ rules; it intentionally does not duplicate the CLI's command catalog.
 
 For each task:
 
-1. Identify the nearest likely command group from the user's words.
-2. If the exact command, arguments, or flags are not already established by a
-   tool result in this conversation, inspect them with structured help:
+1. Infer the deepest plausible leaf command from the user's words.
+2. If its exact arguments or flags are not already established by a tool result
+   in this conversation, inspect that leaf directly:
 
    ```bash
-   basecamp --agent --help
-   basecamp <group> --agent --help
    basecamp <group> <subcommand> --agent --help
    ```
 
-3. Continue to the leaf command before acting. Treat its `usage`, `args`,
-   `flags`, `notes`, and `subcommands` as the source of truth. Do not guess
-   positional arguments, flags, aliases, scope, or whether a group runs bare.
-4. Execute with an explicit output mode.
-5. Read structured errors and breadcrumbs before deciding what to do next.
+3. If the leaf does not exist, inspect its nearest parent group. Use root help
+   only when the top-level group itself is unclear:
 
-Help is cheap and local. Prefer one targeted help call over loading or carrying a
-static command reference. A subcommand's `inherited_flags` is intentionally
-short; global flags such as `--agent`, `--jq`, `--profile`, and `--verbose` are
-documented at the root and still apply where supported.
+   ```bash
+   basecamp <group> --agent --help   # fallback
+   basecamp --agent --help           # last resort
+   ```
+
+4. Treat leaf `usage`, `args`, `flags`, and `notes` as the source of truth. Do
+   not guess positional arguments, flags, aliases, scope, or whether a group
+   runs bare.
+5. Execute with an explicit output mode, then read structured errors and
+   breadcrumbs before deciding what to do next.
+
+Targeted leaf help is cheap and local; root help returns the full command catalog
+and is not token-cheap. Do not load root help merely to confirm global flags
+already documented by this skill. A subcommand's `inherited_flags` is
+intentionally short; global flags such as `--agent`, `--jq`, `--profile`, and
+`--verbose` still apply where supported.
 
 ## Non-negotiable rules
 
