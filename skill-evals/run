@@ -9,6 +9,8 @@ require "json"
 require "net/http"
 require "uri"
 require "pathname"
+require "open3"
+require "shellwords"
 
 ROOT = Pathname.new(__dir__)
 DEFAULT_SKILL = ROOT.join("..", "skills", "basecamp", "SKILL.md")
@@ -35,16 +37,19 @@ TOOL = {
 def parse_args(argv)
   opts = {
     model: "claude-sonnet-4-20250514", skill: DEFAULT_SKILL.to_s,
+    basecamp_bin: ROOT.join("..", "bin", "basecamp").to_s,
     samples: 1, cases: [], tags: [],
-    json: false, verbose: false, save: nil, compare: nil
+    json: false, verbose: false, self_test: false, save: nil, compare: nil
   }
   while (arg = argv.shift)
     case arg
     when "--model"   then opts[:model] = argv.shift || abort("--model requires a value")
     when "--skill"   then opts[:skill] = argv.shift || abort("--skill requires a path")
+    when "--basecamp-bin" then opts[:basecamp_bin] = argv.shift || abort("--basecamp-bin requires a path")
     when "--tag"     then opts[:tags] << (argv.shift || abort("--tag requires a value"))
     when "--json"    then opts[:json] = true
     when "--verbose" then opts[:verbose] = true
+    when "--self-test" then opts[:self_test] = true
     when "--samples" then opts[:samples] = Integer(argv.shift || abort("--samples requires a value"))
     when "--save"    then opts[:save] = argv.shift || abort("--save requires a name")
     when "--compare" then opts[:compare] = argv.shift || abort("--compare requires a name")
@@ -82,7 +87,60 @@ def load_cases(opts)
   end
 end
 
-def resolve_mock(mocks, args)
+def help_error(message, code = "help_failed")
+  JSON.generate(ok: false, error: message, code: code, retryable: false)
+end
+
+def valid_help_payload(payload)
+  parsed = JSON.parse(payload)
+  return parsed if parsed.is_a?(Hash) && parsed["path"].is_a?(String) && parsed["usage"].is_a?(String)
+
+  nil
+rescue JSON::ParserError
+  nil
+end
+
+def structured_help(args, basecamp_bin)
+  words = Shellwords.split(args)
+  return nil unless words.include?("--help") && (words.include?("--agent") || words.include?("--json"))
+
+  flags = words.select { |word| word.start_with?("-") }
+  command_words = words.reject { |word| word.start_with?("-") }
+  allowed_flags = ["--agent", "--help", "--json"]
+  safe_command = flags.all? { |flag| allowed_flags.include?(flag) } &&
+                 command_words.all? { |word| word.match?(/\A[a-z][a-z0-9-]*\z/) }
+  return help_error("Help evals accept only command names and structured help flags", "unsafe_help") unless safe_command
+
+  unless File.executable?(basecamp_bin)
+    abort "Basecamp binary not found at #{basecamp_bin}; run `make build` or pass --basecamp-bin"
+  end
+
+  # Never execute the model's invocation directly. Route its command words
+  # through Cobra's non-mutating help command and normalize the output mode.
+  env = { "BASECAMP_NONINTERACTIVE" => "1", "BASECAMP_NO_KEYRING" => "1" }
+  stdout, stderr, status = Open3.capture3(env, basecamp_bin, "help", *command_words, "--agent")
+  if status.success?
+    parsed = valid_help_payload(stdout)
+    return JSON.generate(parsed) if parsed
+
+    return help_error("CLI returned invalid structured help")
+  end
+
+  diagnostic = stdout.strip.empty? ? stderr.strip : stdout.strip
+  begin
+    parsed = JSON.parse(diagnostic)
+    return JSON.generate(parsed) if parsed.is_a?(Hash)
+  rescue JSON::ParserError
+    # Wrap plain-text diagnostics below.
+  end
+  help_error(diagnostic.empty? ? "CLI help failed without a diagnostic" : diagnostic)
+rescue ArgumentError => e
+  help_error(e.message, "invalid_arguments")
+end
+
+def resolve_mock(mocks, args, basecamp_bin)
+  help = structured_help(args, basecamp_bin)
+  return help if help
   return GENERIC unless mocks
 
   mock = mocks.find { |m| Regexp.new(m["match"]).match?(args) }
@@ -110,7 +168,7 @@ def api_call(model, system, messages, api_key)
   JSON.parse(res.body)
 end
 
-def run_case(c, model, skill_text, api_key, verbose: false)
+def run_case(c, model, skill_text, api_key, basecamp_bin, verbose: false)
   system = "#{skill_text}\n\nUse the basecamp tool to complete the task. " \
            "Each tool call is one CLI invocation. When done, respond with text."
   context = c["context"] ? "\n\nContext: #{c["context"]}" : ""
@@ -132,7 +190,7 @@ def run_case(c, model, skill_text, api_key, verbose: false)
       args = tu.dig("input", "args") || ""
       trace << args
       warn "  tool: basecamp #{args}" if verbose
-      { "type" => "tool_result", "tool_use_id" => tu["id"], "content" => resolve_mock(c["mocks"], args) }
+      { "type" => "tool_result", "tool_use_id" => tu["id"], "content" => resolve_mock(c["mocks"], args, basecamp_bin) }
     end
     messages << { "role" => "user", "content" => results }
     exhausted = true if turn == MAX_TURNS - 1
@@ -196,6 +254,42 @@ end
 # --- Main ---
 
 opts = parse_args(ARGV.dup)
+
+if opts[:self_test]
+  mock = [{ "match" => ".*", "output" => "mock must not hide help" }]
+  checks = {
+    "root" => ["--agent --help", lambda { |help|
+      names = help.fetch("flags", []).map { |flag| flag["name"] }
+      help["path"] == "basecamp" && ["jq", "profile"].all? { |name| names.include?(name) }
+    }],
+    "group" => ["todos --agent --help", lambda { |help|
+      help.fetch("subcommands", []).any? { |command| command["path"] == "basecamp todos list" }
+    }],
+    "leaf" => ["accounts list --json --help", lambda { |help|
+      help["path"] == "basecamp accounts list"
+    }]
+  }
+
+  checks.each do |name, (args, assertion)|
+    begin
+      help = JSON.parse(resolve_mock(mock, args, opts[:basecamp_bin]))
+    rescue JSON::ParserError => e
+      abort "structured help self-test failed (#{name} returned invalid JSON: #{e.message})"
+    end
+    abort "structured help self-test failed (#{name})" unless assertion.call(help)
+  end
+
+  unsafe = JSON.parse(structured_help("todos complete 123 -- --agent --help", opts[:basecamp_bin]))
+  abort "structured help self-test failed (unsafe invocation was accepted)" unless unsafe["code"] == "unsafe_help"
+
+  failed = JSON.parse(structured_help("not-a-real-command --agent --help", opts[:basecamp_bin]))
+  diagnostic = failed["error"].to_s
+  abort "structured help self-test failed (missing failure diagnostic)" if diagnostic.empty?
+
+  puts "Skill eval structured-help self-test passed"
+  exit 0
+end
+
 api_key = ENV["ANTHROPIC_API_KEY"]
 abort "ANTHROPIC_API_KEY not set" unless api_key && !api_key.empty?
 
@@ -213,7 +307,9 @@ cases.each do |c|
 
   sample_results = opts[:samples].times.map do |i|
     warn "  [#{name}] sample #{i + 1}/#{opts[:samples]}..." if opts[:verbose] && opts[:samples] > 1
-    trace, response, exhausted = run_case(c, opts[:model], skill_text, api_key, verbose: opts[:verbose])
+    trace, response, exhausted = run_case(
+      c, opts[:model], skill_text, api_key, opts[:basecamp_bin], verbose: opts[:verbose]
+    )
     failures = grade(c, trace, response)
     failures << "max_turns: exhausted #{MAX_TURNS} tool rounds without completing" if exhausted
     { trace: trace, response: response, failures: failures, pass: failures.empty? }
