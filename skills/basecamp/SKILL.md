@@ -104,9 +104,11 @@ For each task:
 
 Targeted leaf help is cheap and local; root help returns the full command catalog
 and is not token-cheap. Do not load root help merely to confirm global flags
-already documented by this skill. A subcommand's `inherited_flags` is
-intentionally short; global flags such as `--agent`, `--jq`, `--profile`, and
-`--verbose` still apply where supported.
+already documented by this skill. For obvious Docs & Files requests, route
+straight to `files list`, `files download`, or `files uploads create` before
+trying parent or root help. A subcommand's `inherited_flags` is intentionally
+short; global flags such as `--agent`, `--jq`, `--profile`, and `--verbose` still
+apply where supported.
 
 ## Non-negotiable rules
 
