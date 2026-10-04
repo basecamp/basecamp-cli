@@ -1600,3 +1600,211 @@ func TestFilesVersionsRejectsConflictingPagination(t *testing.T) {
 		})
 	}
 }
+
+// --- files move -------------------------------------------------------------
+
+// mockFilesMoveTransport answers the filing POST with moveStatus/moveBody and
+// the best-effort title lookups that follow a successful move: the folder by
+// its vault ID, and the item as a document (the vault and upload probes 404).
+type mockFilesMoveTransport struct {
+	moveStatus int
+	moveBody   string
+	movePaths  []string
+	moveBodies []string
+	getPaths   []string
+}
+
+func (t *mockFilesMoveTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+	respond := func(code int, body string) (*http.Response, error) {
+		return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+	}
+	path := req.URL.Path
+	if req.Method == http.MethodGet {
+		t.getPaths = append(t.getPaths, path)
+	}
+
+	switch {
+	case req.Method == http.MethodPost && strings.HasSuffix(path, "/filing.json"):
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		t.movePaths = append(t.movePaths, path)
+		t.moveBodies = append(t.moveBodies, string(body))
+		status := t.moveStatus
+		if status == 0 {
+			status = http.StatusNoContent
+		}
+		return respond(status, t.moveBody)
+	case req.Method == http.MethodGet && strings.Contains(path, "/vaults/456"):
+		return respond(200, `{"id":456,"title":"Designs","bucket":{"id":77,"name":"Launch","type":"Project"}}`)
+	case req.Method == http.MethodGet && strings.Contains(path, "/uploads/123"):
+		return respond(200, `{"id":123,"filename":"spec.pdf","bucket":{"id":77,"name":"Launch","type":"Project"}}`)
+	case req.Method == http.MethodGet && strings.Contains(path, "/documents/123"):
+		return respond(200, `{"id":123,"title":"Spec","bucket":{"id":77,"name":"Launch","type":"Project"}}`)
+	case req.Method == http.MethodGet:
+		return respond(404, `{"error":"Not found"}`)
+	default:
+		return nil, fmt.Errorf("unexpected request: %s %s", req.Method, path)
+	}
+}
+
+func runFilesMove(t *testing.T, transport http.RoundTripper, args ...string) (map[string]any, error) {
+	t.Helper()
+	stdout := &bytes.Buffer{}
+	app := showTestAppWithOutput(t, transport, output.FormatJSON, stdout, &bytes.Buffer{})
+	app.Flags.Hints = true // keep breadcrumbs in the envelope
+
+	cmd := NewFilesCmd()
+	err := executeCommand(cmd, app, append([]string{"move"}, args...)...)
+	if err != nil || stdout.Len() == 0 {
+		return nil, err
+	}
+	var envelope map[string]any
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &envelope))
+	return envelope, nil
+}
+
+func TestFilesMovePostsTheFiling(t *testing.T) {
+	transport := &mockFilesMoveTransport{}
+	envelope, err := runFilesMove(t, transport, "123", "--to", "456", "--position", "2")
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"/99999/recordings/123/filing.json"}, transport.movePaths)
+	assert.JSONEq(t, `{"parent_id":456,"position":2}`, transport.moveBodies[0])
+
+	assert.Equal(t, map[string]any{"id": float64(123), "status": "moved", "folder_id": float64(456), "position": float64(2)}, envelope["data"])
+	assert.Equal(t, "Moved Spec into Designs at position 2", envelope["summary"])
+	assertMoveBreadcrumbs(t, envelope, "basecamp files show 123 --in 77", "basecamp files list --vault 456 --in 77")
+}
+
+func assertMoveBreadcrumbs(t *testing.T, envelope map[string]any, want ...string) {
+	t.Helper()
+	crumbs := envelope["breadcrumbs"].([]any)
+	got := make([]string, 0, len(crumbs))
+	for _, b := range crumbs {
+		got = append(got, b.(map[string]any)["cmd"].(string))
+	}
+	assert.Equal(t, want, got)
+}
+
+func TestFilesMoveAcceptsURLsAndOmitsAnUnsetPosition(t *testing.T) {
+	transport := &mockFilesMoveTransport{}
+	envelope, err := runFilesMove(t, transport,
+		"https://3.basecamp.com/99999/buckets/77/uploads/123",
+		"--to", "https://3.basecamp.com/99999/buckets/77/vaults/456")
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"/99999/recordings/123/filing.json"}, transport.movePaths)
+	assert.JSONEq(t, `{"parent_id":456}`, transport.moveBodies[0])
+	assert.Equal(t, map[string]any{"id": float64(123), "status": "moved", "folder_id": float64(456)}, envelope["data"])
+	// The URL says it is an upload, so the title comes from the one upload
+	// lookup, not from probing documents first (the mock has a document 123 too).
+	assert.Equal(t, "Moved spec.pdf into Designs", envelope["summary"])
+	assert.Len(t, transport.getPaths, 2, "one lookup for the item and one for the folder: %v", transport.getPaths)
+}
+
+// An account ID is a number, so a zero-padded spelling of the session's
+// account is the same account, not another one.
+func TestFilesMoveAcceptsAZeroPaddedAccountInAURL(t *testing.T) {
+	transport := &mockFilesMoveTransport{}
+	_, err := runFilesMove(t, transport,
+		"https://3.basecamp.com/099999/buckets/77/uploads/123",
+		"--to", "https://3.basecamp.com/0099999/buckets/77/vaults/456")
+	require.NoError(t, err)
+	require.Equal(t, []string{"/99999/recordings/123/filing.json"}, transport.movePaths)
+}
+
+// The same holds for the project: two spellings of one bucket are one project.
+func TestFilesMoveAcceptsZeroPaddedProjectsInURLs(t *testing.T) {
+	transport := &mockFilesMoveTransport{}
+	_, err := runFilesMove(t, transport,
+		"https://3.basecamp.com/99999/buckets/077/uploads/123",
+		"--to", "https://3.basecamp.com/99999/buckets/77/vaults/456")
+	require.NoError(t, err)
+	require.Equal(t, []string{"/99999/recordings/123/filing.json"}, transport.movePaths)
+}
+
+func TestFilesMoveFallsBackToIDsWhenTitlesAreUnavailable(t *testing.T) {
+	transport := &mockFilesMoveTransport{}
+	envelope, err := runFilesMove(t, transport, "321", "--to", "654")
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"/99999/recordings/321/filing.json"}, transport.movePaths)
+	assert.Equal(t, "Moved #321 into folder #654", envelope["summary"])
+	assertMoveBreadcrumbs(t, envelope, "basecamp files show 321")
+}
+
+// Without --to there is nothing to do, so an interactive run shows help (as
+// cards move does) and posts nothing.
+func TestFilesMoveWithoutDestinationShowsHelp(t *testing.T) {
+	transport := &mockFilesMoveTransport{}
+	_, err := runFilesMove(t, transport, "123")
+	require.NoError(t, err)
+	assert.Empty(t, transport.movePaths)
+}
+
+func TestFilesMoveRefusesBadArgumentsBeforeTheWire(t *testing.T) {
+	cases := map[string][]string{
+		"--folder for --to":         {"123", "--folder", "456"},
+		"--vault beside --to":       {"123", "--to", "456", "--vault", "789"},
+		"zero position":             {"123", "--to", "456", "--position", "0"},
+		"negative position":         {"123", "--to", "456", "--position", "-1"},
+		"non-numeric destination":   {"123", "--to", "Designs"},
+		"non-folder destination":    {"123", "--to", "https://3.basecamp.com/99999/buckets/77/documents/456"},
+		"non-file item URL":         {"https://3.basecamp.com/99999/buckets/77/messages/123", "--to", "456"},
+		"folder listing item URL":   {"https://3.basecamp.com/99999/buckets/77/vaults/456/documents", "--to", "789"},
+		"zero item ID":              {"0", "--to", "456"},
+		"zero folder ID":            {"123", "--to", "0"},
+		"folder listing --to":       {"123", "--to", "https://3.basecamp.com/99999/buckets/77/vaults/456/vaults"},
+		"untrusted item host":       {"https://evil.example/99999/buckets/77/documents/123", "--to", "456"},
+		"untrusted folder host":     {"123", "--to", "https://evil.example/99999/buckets/77/vaults/456"},
+		"item in another account":   {"https://3.basecamp.com/11111/buckets/77/documents/123", "--to", "456"},
+		"folder in another account": {"123", "--to", "https://3.basecamp.com/11111/buckets/77/vaults/456"},
+		"another project":           {"https://3.basecamp.com/99999/buckets/77/documents/123", "--to", "https://3.basecamp.com/99999/buckets/88/vaults/456"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockFilesMoveTransport{}
+			_, err := runFilesMove(t, transport, args...)
+
+			var e *output.Error
+			require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+			assert.Equal(t, output.CodeUsage, e.Code)
+			assert.Empty(t, transport.movePaths, "nothing should be posted")
+		})
+	}
+}
+
+func TestFilesMoveExplainsRefusals(t *testing.T) {
+	cases := []struct {
+		name     string
+		status   int
+		body     string
+		code     string
+		contains string
+		message  string
+	}{
+		{"vault into its own subfolder", 422, `{"error":"Parent must not be self or descendant"}`, output.CodeValidation, "", "Basecamp refused the move: Parent must not be self or descendant"},
+		{"inactive destination or item", 422, ``, output.CodeValidation, "active folder", "Basecamp refused the move"},
+		{"moves restricted", 403, ``, output.CodeForbidden, "permission", ""},
+		{"destination elsewhere", 404, `{"error":"Not found"}`, output.CodeNotFound, "same project", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := &mockFilesMoveTransport{moveStatus: tc.status, moveBody: tc.body}
+			_, err := runFilesMove(t, transport, "123", "--to", "456")
+
+			var e *output.Error
+			require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+			assert.Equal(t, tc.code, e.Code)
+			assert.Equal(t, tc.status, e.HTTPStatus)
+			assert.Contains(t, e.Message+"\n"+e.Hint, tc.contains)
+			if tc.message != "" {
+				assert.Equal(t, tc.message, e.Message)
+			}
+		})
+	}
+}
