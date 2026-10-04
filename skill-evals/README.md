@@ -40,5 +40,5 @@ make -C skill-evals eval-save SKILL=/tmp/basecamp-skill-main.md NAME=main
 make -C skill-evals eval-compare NAME=main
 ```
 
-Use `MODEL=...` or `--samples` on `skill-evals/run` when testing another model or
-reducing variance.
+Pass `MODEL=...` to the `make -C skill-evals eval*` targets when testing another
+model. Pass `--samples` directly to `skill-evals/run` when reducing variance.

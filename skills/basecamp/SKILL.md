@@ -207,8 +207,9 @@ varies by field; leaf help is authoritative.
 Structured failures include `error`, `code`, `retryable`, and often `hint`.
 
 - Retry only when `retryable` is true, with bounded backoff.
-- Treat `retryable: false` as a verdict requiring changed input, scope,
-  permissions, or authentication—not another identical call.
+- `retryable: false` means there is no positive retry signal; it covers both
+  known verdicts and unclassified failures. Inspect `code`, `error`, and `hint`
+  before choosing recovery, and do not blindly repeat the same call.
 - For usage errors, inspect leaf help and supply the named positional argument.
 - For ambiguous names, use an ID or add the missing project/container scope.
 - For auth or connectivity diagnosis, use `basecamp doctor --json` and

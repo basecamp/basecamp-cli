@@ -87,21 +87,55 @@ def load_cases(opts)
   end
 end
 
+def help_error(message, code = "help_failed")
+  JSON.generate(ok: false, error: message, code: code, retryable: false)
+end
+
+def valid_help_payload(payload)
+  parsed = JSON.parse(payload)
+  return parsed if parsed.is_a?(Hash) && parsed["path"].is_a?(String) && parsed["usage"].is_a?(String)
+
+  nil
+rescue JSON::ParserError
+  nil
+end
+
 def structured_help(args, basecamp_bin)
   words = Shellwords.split(args)
-  return nil unless words.include?("--help") && words.include?("--agent")
+  return nil unless words.include?("--help") && (words.include?("--agent") || words.include?("--json"))
+
+  flags = words.select { |word| word.start_with?("-") }
+  command_words = words.reject { |word| word.start_with?("-") }
+  allowed_flags = ["--agent", "--help", "--json"]
+  safe_command = flags.all? { |flag| allowed_flags.include?(flag) } &&
+                 command_words.all? { |word| word.match?(/\A[a-z][a-z0-9-]*\z/) }
+  return help_error("Help evals accept only command names and structured help flags", "unsafe_help") unless safe_command
 
   unless File.executable?(basecamp_bin)
     abort "Basecamp binary not found at #{basecamp_bin}; run `make build` or pass --basecamp-bin"
   end
 
+  # Never execute the model's invocation directly. Route its command words
+  # through Cobra's non-mutating help command and normalize the output mode.
   env = { "BASECAMP_NONINTERACTIVE" => "1", "BASECAMP_NO_KEYRING" => "1" }
-  stdout, stderr, status = Open3.capture3(env, basecamp_bin, *words)
-  return stdout if status.success?
+  stdout, stderr, status = Open3.capture3(env, basecamp_bin, "help", *command_words, "--agent")
+  if status.success?
+    parsed = valid_help_payload(stdout)
+    return JSON.generate(parsed) if parsed
 
-  JSON.generate(ok: false, error: stderr.strip, code: "help_failed", retryable: false)
+    return help_error("CLI returned invalid structured help")
+  end
+
+  diagnostic = stdout.strip.empty? ? stderr.strip : stdout.strip
+  begin
+    parsed = JSON.parse(diagnostic)
+    return JSON.generate(parsed) if parsed.is_a?(Hash)
+  rescue JSON::ParserError
+    # Wrap plain-text diagnostics below.
+  end
+  help_error(diagnostic.empty? ? "CLI help failed without a diagnostic" : diagnostic)
 rescue ArgumentError => e
-  JSON.generate(ok: false, error: e.message, code: "invalid_arguments", retryable: false)
+  help_error(e.message, "invalid_arguments")
 end
 
 def resolve_mock(mocks, args, basecamp_bin)
@@ -222,13 +256,35 @@ end
 opts = parse_args(ARGV.dup)
 
 if opts[:self_test]
-  output = resolve_mock(
-    [{ "match" => ".*", "output" => "mock must not hide help" }],
-    "accounts list --agent --help",
-    opts[:basecamp_bin]
-  )
-  help = JSON.parse(output)
-  abort "structured help self-test failed" unless help["path"] == "basecamp accounts list"
+  mock = [{ "match" => ".*", "output" => "mock must not hide help" }]
+  checks = {
+    "root" => ["--agent --help", lambda { |help|
+      names = help.fetch("flags", []).map { |flag| flag["name"] }
+      help["path"] == "basecamp" && ["jq", "profile"].all? { |name| names.include?(name) }
+    }],
+    "group" => ["todos --agent --help", lambda { |help|
+      help.fetch("subcommands", []).any? { |command| command["path"] == "basecamp todos list" }
+    }],
+    "leaf" => ["accounts list --json --help", lambda { |help|
+      help["path"] == "basecamp accounts list"
+    }]
+  }
+
+  checks.each do |name, (args, assertion)|
+    begin
+      help = JSON.parse(resolve_mock(mock, args, opts[:basecamp_bin]))
+    rescue JSON::ParserError => e
+      abort "structured help self-test failed (#{name} returned invalid JSON: #{e.message})"
+    end
+    abort "structured help self-test failed (#{name})" unless assertion.call(help)
+  end
+
+  unsafe = JSON.parse(structured_help("todos complete 123 -- --agent --help", opts[:basecamp_bin]))
+  abort "structured help self-test failed (unsafe invocation was accepted)" unless unsafe["code"] == "unsafe_help"
+
+  failed = JSON.parse(structured_help("not-a-real-command --agent --help", opts[:basecamp_bin]))
+  diagnostic = failed["error"].to_s
+  abort "structured help self-test failed (missing failure diagnostic)" if diagnostic.empty?
 
   puts "Skill eval structured-help self-test passed"
   exit 0
