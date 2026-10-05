@@ -350,8 +350,19 @@ func legacyInstalledPlugins(entries ...string) []byte {
 	return []byte(`{"version":2,"plugins":{"basecamp@37signals":[` + strings.Join(entries, ",") + `]}}`)
 }
 
+// legacyEntry records an install at scope; project and local entries belong
+// to the current directory.
 func legacyEntry(scope, installPath string) string {
-	return `{"scope":"` + scope + `","version":"0.11.0","installPath":` + strconv.Quote(installPath) + `}`
+	cwd, _ := os.Getwd()
+	return legacyEntryIn(scope, installPath, cwd)
+}
+
+func legacyEntryIn(scope, installPath, projectPath string) string {
+	entry := `{"scope":"` + scope + `","version":"0.11.0","installPath":` + strconv.Quote(installPath)
+	if scope != "user" {
+		entry += `,"projectPath":` + strconv.Quote(projectPath)
+	}
+	return entry + `}`
 }
 
 func TestLegacyCLIPluginEntries_CLIManifest(t *testing.T) {
@@ -400,6 +411,21 @@ func TestLegacyCLIPluginEntries_UntargetableScopeIsLeftAlone(t *testing.T) {
 	assert.Empty(t, legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntry("global", dir))))
 	got := legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntry("global", dir), legacyEntry("local", dir)))
 	assert.Equal(t, []StalePlugin{{Key: "basecamp@37signals", Scopes: []string{"local"}}}, got)
+}
+
+// Claude resolves project and local scopes against the working directory, so
+// an entry recorded for another checkout can't be targeted from here: an
+// uninstall would reach this directory's entry, which may be the connector.
+func TestLegacyCLIPluginEntries_OtherCheckoutIsLeftAlone(t *testing.T) {
+	dir := t.TempDir()
+	writePluginManifest(t, dir, ".claude-plugin", "https://github.com/basecamp/basecamp-cli")
+	other := t.TempDir()
+	assert.Empty(t, legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntryIn("project", dir, other))))
+	assert.Empty(t, legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntryIn("local", dir, ""))))
+
+	t.Chdir(other)
+	got := legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntryIn("project", dir, other)))
+	assert.Equal(t, []StalePlugin{{Key: "basecamp@37signals", Scopes: []string{"project"}}}, got)
 }
 
 func TestCheckClaudePlugin_BothInstalledWarns(t *testing.T) {

@@ -955,8 +955,11 @@ func seedLegacyBasecampPlugin(t *testing.T, home, repo string) {
 	require.NoError(t, os.MkdirAll(filepath.Join(installPath, ".claude-plugin"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(installPath, ".claude-plugin", "plugin.json"),
 		[]byte(`{"name":"basecamp","repository":"`+repo+`"}`), 0o644))
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
 	entry := func(scope string) string {
-		return `{"scope":"` + scope + `","version":"0.11.0","installPath":` + strconv.Quote(installPath) + `}`
+		return `{"scope":"` + scope + `","version":"0.11.0","installPath":` + strconv.Quote(installPath) +
+			`,"projectPath":` + strconv.Quote(cwd) + `}`
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"),
 		[]byte(`{"version":2,"plugins":{"basecamp@37signals":[`+entry("user")+`,`+entry("project")+`]}}`), 0o644))

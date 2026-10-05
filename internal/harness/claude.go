@@ -518,11 +518,16 @@ func appendUnique(ss []string, s string) []string {
 // CLI one in place. So is an entry without a scope `claude plugin uninstall
 // --scope` accepts: setup falls back to an unscoped uninstall for those, and
 // for this shared key that would remove a hosted connector at every scope.
+// A project or local entry counts only when its projectPath is the current
+// directory: Claude resolves those scopes against the working directory, so
+// an uninstall run elsewhere would target another checkout's entry — which
+// may be the hosted connector.
 func legacyCLIPluginEntries(data []byte) []StalePlugin {
 	var envelope struct {
 		Plugins map[string][]struct {
 			Scope       string `json:"scope"`
 			InstallPath string `json:"installPath"`
+			ProjectPath string `json:"projectPath"`
 		} `json:"plugins"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
@@ -535,7 +540,7 @@ func legacyCLIPluginEntries(data []byte) []StalePlugin {
 	found := false
 	var scopes []string
 	for _, entry := range entries {
-		if !targetableScope(entry.Scope) || entry.InstallPath == "" || !isCLIPluginManifest(filepath.Join(entry.InstallPath, ".claude-plugin", "plugin.json")) {
+		if !targetableScope(entry.Scope) || !scopeResolvesHere(entry.Scope, entry.ProjectPath) || entry.InstallPath == "" || !isCLIPluginManifest(filepath.Join(entry.InstallPath, ".claude-plugin", "plugin.json")) {
 			continue
 		}
 		found = true
@@ -551,6 +556,33 @@ func legacyCLIPluginEntries(data []byte) []StalePlugin {
 // --scope` accepts (the same set setup's validPluginScope allows).
 func targetableScope(scope string) bool {
 	return scope == "user" || scope == "project" || scope == "local"
+}
+
+// scopeResolvesHere reports whether `claude plugin uninstall --scope scope`,
+// run from the current directory, reaches the entry recorded for projectPath.
+// User scope is global; project and local scopes belong to one directory.
+func scopeResolvesHere(scope, projectPath string) bool {
+	if scope == "user" {
+		return true
+	}
+	if projectPath == "" {
+		return false
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return false
+	}
+	return samePath(cwd, projectPath)
+}
+
+func samePath(a, b string) bool {
+	resolve := func(p string) string {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return filepath.Clean(p)
+	}
+	return resolve(a) == resolve(b)
 }
 
 // isCLIPluginManifest reports whether the plugin manifest at path is this
