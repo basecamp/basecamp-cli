@@ -1,0 +1,45 @@
+task: >-
+  Acknowledge this trusted request, then resolve the local repo for its handoff.
+  Report the repo path you would give the subagent; don't dispatch it or do the
+  work yet.
+context: >-
+  The connector is already running as profile helper, with identity confirmed.
+  The request line is {"type":"request","event_id":123,"trigger":"mentioned",
+  "recording":{"bucket_id":456,"project_name":"BC5 Calendar",
+  "recording_id":789,"url":"https://app.basecamp.com/999/buckets/456/card_tables/cards/789"},
+  "reply_to":{"kind":"comment","recording_id":789},"requester_id":1001,
+  "requester_name":"Jorge","acknowledge":true,"content":"Fix the date picker"}.
+  last.json has an operator-confirmed mapping for project 456 to
+  /home/me/code/basecamp. The usual code folder also contains
+  /home/me/code/calendar, and both repos are available locally. You may use
+  either without asking me, but must follow the project's standing instructions.
+  Do not update last.json or ask to save a new mapping in this exercise.
+tags: [connect]
+mocks:
+  - match: 'boost create'
+    output: '{"ok":true,"data":{"id":800},"summary":"Boost created"}'
+  # AGENTS.md is beyond the first page: only an exhaustive listing finds it.
+  - match: '^docs documents list .*--all\b'
+    output: '{"ok":true,"data":[{"id":900,"title":"Welcome"},{"id":901,"title":"AGENTS.md"}],"summary":"2 documents"}'
+  - match: '^docs documents list'
+    output: '{"ok":true,"data":[{"id":900,"title":"Welcome"}],"summary":"1 document"}'
+  - match: '^docs show [''" ]*901\b'
+    output: '{"ok":true,"data":{"id":901,"title":"AGENTS.md","content":"<p>Repo mapping: work in this project belongs in /home/me/code/calendar, not the main Basecamp repo. Read that repo before answering code questions.</p>"}}'
+accept:
+  - 'boost create .*--profile[ =]''?helper\b'
+  - '^docs documents list .*--all\b'
+  - '^docs documents list .*--project[ =][''"]?456\b'
+  - '^docs documents list .*(-P|--profile)[ =][''"]?helper\b'
+  - '^docs show [''" ]*901\b.*--project[ =][''"]?456\b'
+  - '^docs show [''" ]*901\b.*(-P|--profile)[ =][''"]?helper\b'
+expect_sequence:
+  - match: 'boost create'
+  - match: '^docs documents list .*--all\b'
+  - match: '^docs show [''" ]*901\b'
+reject:
+  - '^connect setup\b'
+  - '^(cards move|comments create|chat post)\b'
+accept_response:
+  - '/home/me/code/calendar'
+reject_response:
+  - '(?i)(chosen repo|work in|use|handoff repo)[: ]+/home/me/code/basecamp'
