@@ -107,7 +107,8 @@ func TestSetupCodexLegacyRemovalFailureNamesTheManualStep(t *testing.T) {
 
 	require.NotEmpty(t, envelope.Data.Errors)
 	assert.Contains(t, envelope.Data.Errors[0], "pre-rename plugin")
-	assert.Contains(t, envelope.Data.ManualCommands, "codex plugin remove basecamp@37signals")
+	assert.Equal(t, []string{"basecamp setup codex"}, envelope.Data.ManualCommands,
+		"removal of the shared key stays behind setup's manifest check")
 }
 
 func TestSetupCodexLeavesNonLegacyInstallsAlone(t *testing.T) {
