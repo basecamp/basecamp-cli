@@ -363,16 +363,20 @@ request landed.
 
 **Read the project's AGENTS.md before choosing the repo**, even when `last.json`
 already has a mapping. Find a document titled `AGENTS.md` in the project's Docs
-& Files, listing every document so pagination cannot hide it:
+& Files. Use the project's recording index: it includes documents in nested
+folders, unlike a root-vault document listing. Fetch every page:
 
 ```bash
-basecamp docs documents list --all --project <bucket_id> --json -P '<profile>'
+basecamp recordings documents --all --project <bucket_id> --json -P '<profile>'
 basecamp docs show <doc-id> --project <bucket_id> --json -P '<profile>'
 ```
 
 If it declares a repo mapping for this work, that takes precedence over the
 remembered mapping, the request's repo hints, and the project-name heuristic.
-Pass the document and its mapping to the subagent. If no such document exists,
+Pass the document and its mapping to the subagent, or explicitly pass
+"AGENTS.md checked: none found" after a successful search with no match.
+If more than one document has that title, ask which governs rather than choosing
+one arbitrarily. If no such document exists,
 or it declares no applicable mapping, work out the repo from:
 
 1. `repos` in `last.json`, if this project is there.
@@ -406,7 +410,8 @@ to finish without this session:
   doesn't start in that repo by itself: say plainly that it must work there;
 - whether an acknowledgement is still owed (the boost failed), or not owed
   (it landed, or the reply is the acknowledgement);
-- the project's AGENTS.md document, if found, including any repo mapping used;
+- the project's AGENTS.md document and any repo mapping used, or the explicit
+  result "AGENTS.md checked: none found";
 - the subagent instructions below, in full.
 
 Then go straight back to watching. There's no limit on requests in flight.
@@ -443,11 +448,13 @@ basecamp chat messages --project <bucket_id> --room <reply_to.recording_id> --js
 
 **Read the project's AGENTS.md doc, if it has one, and follow it.** It's the
 project's standing instructions for agents: board meanings, how to talk, which
-repo, which workflow. Use the document passed in the handoff; if it wasn't
-passed, find a document titled `AGENTS.md`:
+repo, which workflow. Use the document passed in the handoff. If the handoff
+says "AGENTS.md checked: none found", proceed without repeating the search.
+Only when no discovery result was passed, find a document titled `AGENTS.md`
+using the recording index (including nested folders):
 
 ```bash
-basecamp docs documents list --all --project <bucket_id> --json -P '<profile>'
+basecamp recordings documents --all --project <bucket_id> --json -P '<profile>'
 basecamp docs show <doc-id> --project <bucket_id> --json -P '<profile>'
 ```
 

@@ -1,7 +1,7 @@
 task: >-
   Acknowledge this trusted request, then resolve the local repo for its handoff.
-  Report the repo path you would give the subagent; don't dispatch it or do the
-  work yet.
+  Reply with only the chosen absolute repo path; don't dispatch the subagent or
+  do the work yet.
 context: >-
   The connector is already running as profile helper, with identity confirmed.
   The request line is {"type":"request","event_id":123,"trigger":"mentioned",
@@ -16,30 +16,28 @@ context: >-
   Do not update last.json or ask to save a new mapping in this exercise.
 tags: [connect]
 mocks:
-  - match: 'boost create'
+  - match: '^boost create [''"]?(https://app\.basecamp\.com/999/buckets/456/card_tables/cards/789|789)[''"]?(\s|$)'
     output: '{"ok":true,"data":{"id":800},"summary":"Boost created"}'
-  # AGENTS.md is beyond the first page: only an exhaustive listing finds it.
-  - match: '^docs documents list .*--all\b'
-    output: '{"ok":true,"data":[{"id":900,"title":"Welcome"},{"id":901,"title":"AGENTS.md"}],"summary":"2 documents"}'
-  - match: '^docs documents list'
+  # AGENTS.md is in a nested folder and beyond the first page. Only an
+  # exhaustive project recording index finds it, not a root-vault listing.
+  - match: '^recordings documents(?=.*\s--all(?:\s|$))(?=.*\s--project[ =][''"]?456[''"]?(?:\s|$))(?=.*\s(?:-P|--profile)[ =][''"]?helper[''"]?(?:\s|$))'
+    output: '{"ok":true,"data":[{"id":900,"title":"Welcome"},{"id":901,"title":"AGENTS.md","parent":{"id":902,"type":"Vault"}}],"summary":"2 documents"}'
+  - match: '^(docs documents list|recordings documents)'
     output: '{"ok":true,"data":[{"id":900,"title":"Welcome"}],"summary":"1 document"}'
-  - match: '^docs show [''" ]*901\b'
+  - match: '^docs show [''"]?901[''"]?(?=\s|$)(?=.*\s--project[ =][''"]?456[''"]?(?:\s|$))(?=.*\s(?:-P|--profile)[ =][''"]?helper[''"]?(?:\s|$))'
     output: '{"ok":true,"data":{"id":901,"title":"AGENTS.md","content":"<p>Repo mapping: work in this project belongs in /home/me/code/calendar, not the main Basecamp repo. Read that repo before answering code questions.</p>"}}'
 accept:
-  - 'boost create .*--profile[ =]''?helper\b'
-  - '^docs documents list .*--all\b'
-  - '^docs documents list .*--project[ =][''"]?456\b'
-  - '^docs documents list .*(-P|--profile)[ =][''"]?helper\b'
-  - '^docs show [''" ]*901\b.*--project[ =][''"]?456\b'
-  - '^docs show [''" ]*901\b.*(-P|--profile)[ =][''"]?helper\b'
+  - '^boost create [''"]?(https://app\.basecamp\.com/999/buckets/456/card_tables/cards/789|789)[''"]?(\s|$)(?=.*\s--profile[ =][''"]?helper[''"]?(?:\s|$))'
+  - '^recordings documents(?=.*\s--all(?:\s|$))(?=.*\s--project[ =][''"]?456[''"]?(?:\s|$))(?=.*\s(?:-P|--profile)[ =][''"]?helper[''"]?(?:\s|$))'
+  - '^docs show [''"]?901[''"]?(?=\s|$)(?=.*\s--project[ =][''"]?456[''"]?(?:\s|$))(?=.*\s(?:-P|--profile)[ =][''"]?helper[''"]?(?:\s|$))'
 expect_sequence:
-  - match: 'boost create'
-  - match: '^docs documents list .*--all\b'
-  - match: '^docs show [''" ]*901\b'
+  - match: '^boost create [''"]?(https://app\.basecamp\.com/999/buckets/456/card_tables/cards/789|789)[''"]?(\s|$)'
+  - match: '^recordings documents(?=.*\s--all(?:\s|$))(?=.*\s--project[ =][''"]?456[''"]?(?:\s|$))'
+  - match: '^docs show [''"]?901[''"]?(\s|$)'
 reject:
   - '^connect setup\b'
   - '^(cards move|comments create|chat post)\b'
 accept_response:
-  - '/home/me/code/calendar'
+  - '\A\s*/home/me/code/calendar\s*\z'
 reject_response:
-  - '(?i)(chosen repo|work in|use|handoff repo)[: ]+/home/me/code/basecamp'
+  - '/home/me/code/basecamp'
