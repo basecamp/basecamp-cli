@@ -72,7 +72,7 @@ func NewAgentHookCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.AddCommand(newAgentHookSessionStartCmd(), newAgentHookPreCommitSnapshotCmd(), newAgentHookPostCommitCmd())
+	cmd.AddCommand(newAgentHookSessionStartCmd(), newAgentHookPluginNoticeCmd(), newAgentHookPreCommitSnapshotCmd(), newAgentHookPostCommitCmd())
 	return cmd
 }
 

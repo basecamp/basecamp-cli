@@ -1,6 +1,17 @@
 {
-  "description": "Basecamp agent hooks: commit-reference nudges.",
+  "description": "Basecamp agent hooks: commit-reference nudges, and a one-time notice for installs under the plugin's pre-rename id.",
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "basecamp agent-hook plugin-notice",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",

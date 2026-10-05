@@ -59,7 +59,10 @@ const ClaudeExpectedPluginKey = ClaudePluginName + "@" + ClaudeMarketplaceName
 // The marketplace may later list the hosted Basecamp connector as "basecamp"
 // again. That step has to wait until this key is no longer treated as stale
 // here (isStalePluginKey); otherwise setup would uninstall the connector.
-const ClaudeLegacyPluginKey = "basecamp@" + ClaudeMarketplaceName
+const ClaudeLegacyPluginKey = LegacyPluginName + "@" + ClaudeMarketplaceName
+
+// LegacyPluginName is the plugin's pre-rename name.
+const LegacyPluginName = "basecamp"
 
 // DetectClaude returns true if Claude Code is installed.
 // Checks ~/.claude/ directory first, then falls back to binary on PATH.

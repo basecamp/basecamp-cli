@@ -28,6 +28,7 @@ func TestAgentHookCommandIsHidden(t *testing.T) {
 	assert.True(t, cmd.Hidden)
 	assert.Equal(t, "agent-hook", cmd.Name())
 	assert.NotNil(t, findSubcommand(cmd, "session-start"))
+	assert.NotNil(t, findSubcommand(cmd, "plugin-notice"))
 	assert.NotNil(t, findSubcommand(cmd, "pre-commit-snapshot"))
 	assert.NotNil(t, findSubcommand(cmd, "post-commit"))
 }
@@ -557,4 +558,66 @@ func runGit(t *testing.T, dir string, args ...string) {
 		"GIT_AI_SKIP_ALL_HOOKS=1")
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
+}
+
+func TestAgentHookPluginNoticeOnceForLegacyClaudeInstall(t *testing.T) {
+	data := t.TempDir()
+	t.Setenv("PLUGIN_ROOT", "")
+	t.Setenv("PLUGIN_DATA", "")
+	t.Setenv("CLAUDE_PLUGIN_DATA", data)
+	home, _ := os.UserHomeDir()
+	t.Setenv("CLAUDE_PLUGIN_ROOT", filepath.Join(home, ".claude", "plugins", "cache", "37signals", "basecamp", "0.12.0"))
+
+	var payload struct {
+		SystemMessage string `json:"systemMessage"`
+	}
+	output := runAgentHookPreservingHome(t, "plugin-notice")
+	require.NoError(t, json.Unmarshal([]byte(output), &payload))
+	assert.Contains(t, payload.SystemMessage, "now `basecamp-cli`")
+	assert.Contains(t, payload.SystemMessage, "basecamp setup claude")
+	event, context := hookSpecificOutput(t, output)
+	assert.Equal(t, "SessionStart", event)
+	assert.Contains(t, context, "basecamp setup claude")
+
+	assert.Empty(t, runAgentHookPreservingHome(t, "plugin-notice"), "the notice appears once")
+}
+
+func TestAgentHookPluginNoticeNamesCodexSetup(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_ROOT", "")
+	t.Setenv("CLAUDE_PLUGIN_DATA", "")
+	t.Setenv("PLUGIN_DATA", t.TempDir())
+	home, _ := os.UserHomeDir()
+	t.Setenv("PLUGIN_ROOT", filepath.Join(home, ".codex", "plugins", "cache", "37signals", "basecamp", "0.12.0"))
+
+	assert.Contains(t, runAgentHookPreservingHome(t, "plugin-notice"), "basecamp setup codex")
+}
+
+func TestAgentHookPluginNoticeSilentForRenamedInstall(t *testing.T) {
+	t.Setenv("CLAUDE_PLUGIN_DATA", t.TempDir())
+	t.Setenv("PLUGIN_ROOT", "")
+	for _, root := range []string{
+		"/home/u/.claude/plugins/cache/37signals/basecamp-cli/0.12.0",
+		"/home/u/.claude/plugins/cache/other/basecamp/0.12.0",
+		"",
+	} {
+		t.Setenv("CLAUDE_PLUGIN_ROOT", root)
+		assert.Empty(t, runAgentHookPreservingHome(t, "plugin-notice"), root)
+	}
+}
+
+// runAgentHookPreservingHome runs a hook subcommand with no stdin under the
+// test's current HOME, so plugin roots built from it stay under it.
+func runAgentHookPreservingHome(t *testing.T, subcommand string) string {
+	t.Helper()
+	app := appctx.NewApp(config.Default())
+	t.Cleanup(app.Close)
+	cmd := NewAgentHookCmd()
+	var stdout bytes.Buffer
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{subcommand})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	require.NoError(t, cmd.Execute())
+	return strings.TrimSpace(stdout.String())
 }

@@ -143,7 +143,14 @@ func TestHooksFileCommandsInvokeBasecamp(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(data, &config))
 	require.NotEmpty(t, config.Hooks)
-	assert.NotContains(t, config.Hooks, "SessionStart", "plugins must not inject Basecamp context into every agent session")
+	// Plugins must not inject Basecamp context into every agent session. The
+	// one SessionStart hook allowed is the rename notice, which stays silent
+	// unless the plugin runs under its pre-rename id, and then speaks once.
+	for _, matcher := range config.Hooks["SessionStart"] {
+		for _, hook := range matcher.Hooks {
+			assert.Equal(t, "basecamp agent-hook plugin-notice", hook.Command, "only the rename notice may run at session start")
+		}
+	}
 
 	for event, matchers := range config.Hooks {
 		require.NotEmpty(t, matchers, event)
