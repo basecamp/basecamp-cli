@@ -300,24 +300,20 @@ To pick up a newer plugin version later, refresh the marketplace with
 
 **Plugin name:** in the 37signals marketplace this plugin is `basecamp-cli`
 (`basecamp-cli@37signals`). It was published as `basecamp` until that name
-went to the hosted Basecamp connector plugin, which works through Basecamp's
-own MCP server rather than this CLI. If you installed the plugin under the old
-name, re-run `basecamp setup claude` or `basecamp setup codex`: setup recognizes
-the old CLI install by its manifest, removes it, and installs `basecamp-cli` at
-the same scope. Use setup rather than removing the old key by hand:
-`basecamp@37signals` now also names the hosted connector, and Claude Code can
-hold the old CLI plugin at one scope and the connector at another under that
-one key. Setup checks each installed entry's manifest and uninstalls only the
-CLI's scopes. A manual `claude plugin uninstall basecamp@37signals` or
-`codex plugin remove basecamp@37signals` does no such check. To install the
-renamed plugin by hand:
+was set aside for the hosted Basecamp connector plugin, which works through
+Basecamp's own MCP server rather than this CLI. If you installed the plugin
+under the old name, re-run `basecamp setup claude` or `basecamp setup codex`:
+setup installs `basecamp-cli` and removes `basecamp@37signals` at the scopes it
+was installed in. To migrate by hand:
 
 ```bash
 claude plugin marketplace update 37signals
 claude plugin install basecamp-cli@37signals
+claude plugin uninstall basecamp@37signals
 
 codex plugin marketplace upgrade 37signals
 codex plugin add basecamp-cli@37signals
+codex plugin remove basecamp@37signals
 ```
 
 Skills from the plugin are namespaced by its name, so `basecamp:basecamp`

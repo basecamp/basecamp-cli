@@ -3,8 +3,6 @@ package harness
 import (
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -338,140 +336,42 @@ func TestCheckClaudePluginVersion_NoFile(t *testing.T) {
 	assert.Contains(t, check.Message, "not tracked")
 }
 
-// writePluginManifest writes a .claude-plugin/plugin.json under dir naming repo.
-func writePluginManifest(t *testing.T, dir, manifestDir, repo string) {
+func TestIsStalePluginKey_LegacyName(t *testing.T) {
+	assert.True(t, isStalePluginKey("basecamp@37signals"))
+	assert.False(t, isStalePluginKey("basecamp-cli@37signals"))
+}
+
+// The pre-rename key is removed by key at every scope it was installed in,
+// whatever the file format.
+func TestStalePluginKeys_LegacyName(t *testing.T) {
+	data := []byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user"},{"scope":"project","projectPath":"/x"}],"basecamp-cli@37signals":[{"scope":"user"}]}}`)
+	assert.Equal(t, []StalePlugin{{Key: "basecamp@37signals", Scopes: []string{"user", "project"}}}, stalePluginKeys(data))
+	assert.Equal(t, []StalePlugin{{Key: "basecamp@37signals"}}, stalePluginKeys([]byte(`{"basecamp@37signals":{"version":"0.11.0"}}`)))
+}
+
+func writeInstalledPlugins(t *testing.T, home, data string) {
 	t.Helper()
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, manifestDir), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, manifestDir, "plugin.json"),
-		[]byte(`{"name":"basecamp","repository":"`+repo+`"}`), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "plugins"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"), []byte(data), 0o644))
 }
 
-func legacyInstalledPlugins(entries ...string) []byte {
-	return []byte(`{"version":2,"plugins":{"basecamp@37signals":[` + strings.Join(entries, ",") + `]}}`)
-}
-
-// legacyEntry records an install at scope; project and local entries belong
-// to the current directory.
-func legacyEntry(scope, installPath string) string {
-	cwd, _ := os.Getwd()
-	return legacyEntryIn(scope, installPath, cwd)
-}
-
-func legacyEntryIn(scope, installPath, projectPath string) string {
-	entry := `{"scope":"` + scope + `","version":"0.11.0","installPath":` + strconv.Quote(installPath)
-	if scope != "user" {
-		entry += `,"projectPath":` + strconv.Quote(projectPath)
-	}
-	return entry + `}`
-}
-
-func TestLegacyCLIPluginEntries_CLIManifest(t *testing.T) {
-	dir := t.TempDir()
-	writePluginManifest(t, dir, ".claude-plugin", "https://github.com/basecamp/basecamp-cli")
-
-	got := legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntry("user", dir), legacyEntry("project", dir)))
-	assert.Equal(t, []StalePlugin{{Key: "basecamp@37signals", Scopes: []string{"user", "project"}}}, got)
-}
-
-func TestLegacyCLIPluginEntries_RepositoryVariants(t *testing.T) {
-	for _, repo := range []string{
-		"https://github.com/basecamp/basecamp-cli.git",
-		"https://github.com/basecamp/basecamp-cli/",
-		"git+https://github.com/Basecamp/basecamp-cli.git",
-	} {
-		dir := t.TempDir()
-		writePluginManifest(t, dir, ".claude-plugin", repo)
-		assert.Len(t, legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntry("user", dir))), 1, repo)
-	}
-}
-
-// The hosted-connector plugin now owns basecamp@37signals: it must never be
-// mistaken for a stale CLI install, or setup would uninstall it.
-func TestLegacyCLIPluginEntries_HostedConnectorIsLeftAlone(t *testing.T) {
-	dir := t.TempDir()
-	writePluginManifest(t, dir, ".claude-plugin", "https://github.com/basecamp/basecamp-mcp-server")
-	assert.Empty(t, legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntry("user", dir))))
-}
-
-func TestLegacyCLIPluginEntries_OnlyCLIScopesCount(t *testing.T) {
-	cli, hosted := t.TempDir(), t.TempDir()
-	writePluginManifest(t, cli, ".claude-plugin", "https://github.com/basecamp/basecamp-cli")
-	writePluginManifest(t, hosted, ".claude-plugin", "https://github.com/basecamp/basecamp-mcp-server")
-
-	got := legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntry("user", hosted), legacyEntry("project", cli)))
-	assert.Equal(t, []StalePlugin{{Key: "basecamp@37signals", Scopes: []string{"project"}}}, got)
-}
-
-// An entry without a targetable scope would reach setup's unscoped uninstall,
-// which removes the shared key at every scope — hosted connector included.
-func TestLegacyCLIPluginEntries_UntargetableScopeIsLeftAlone(t *testing.T) {
-	dir := t.TempDir()
-	writePluginManifest(t, dir, ".claude-plugin", "https://github.com/basecamp/basecamp-cli")
-	assert.Empty(t, legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntry("", dir))))
-	assert.Empty(t, legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntry("global", dir))))
-	got := legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntry("global", dir), legacyEntry("local", dir)))
-	assert.Equal(t, []StalePlugin{{Key: "basecamp@37signals", Scopes: []string{"local"}}}, got)
-}
-
-// Claude resolves project and local scopes against the working directory, so
-// an entry recorded for another checkout can't be targeted from here: an
-// uninstall would reach this directory's entry, which may be the connector.
-func TestLegacyCLIPluginEntries_OtherCheckoutIsLeftAlone(t *testing.T) {
-	dir := t.TempDir()
-	writePluginManifest(t, dir, ".claude-plugin", "https://github.com/basecamp/basecamp-cli")
-	other := t.TempDir()
-	assert.Empty(t, legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntryIn("project", dir, other))))
-	assert.Empty(t, legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntryIn("local", dir, ""))))
-
-	t.Chdir(other)
-	got := legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntryIn("project", dir, other)))
-	assert.Equal(t, []StalePlugin{{Key: "basecamp@37signals", Scopes: []string{"project"}}}, got)
-}
-
-func TestCheckClaudePlugin_BothInstalledWarns(t *testing.T) {
+func TestCheckClaudePlugin_LegacyNameOnly(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	installPath := filepath.Join(home, ".claude", "plugins", "cache", "37signals", "basecamp", "0.11.0")
-	writePluginManifest(t, installPath, ".claude-plugin", "https://github.com/basecamp/basecamp-cli")
-	require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"),
-		[]byte(`{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"0.12.0"}],"basecamp@37signals":[`+legacyEntry("user", installPath)+`]}}`), 0o644))
-
-	check := CheckClaudePlugin()
-	assert.Equal(t, "warn", check.Status)
-	assert.Contains(t, check.Message, "old basecamp@37signals copy")
-}
-
-func TestLegacyCLIPluginEntries_UnreadableManifestIsLeftAlone(t *testing.T) {
-	assert.Empty(t, legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntry("user", filepath.Join(t.TempDir(), "gone")))))
-	assert.Empty(t, legacyCLIPluginEntries([]byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user"}]}}`)))
-	assert.Empty(t, legacyCLIPluginEntries([]byte(`{"basecamp@37signals":{"version":"0.11.0"}}`)))
-}
-
-func TestCheckClaudePlugin_LegacyCLIInstall(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	installPath := filepath.Join(home, ".claude", "plugins", "cache", "37signals", "basecamp", "0.11.0")
-	writePluginManifest(t, installPath, ".claude-plugin", "https://github.com/basecamp/basecamp-cli")
-	require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"),
-		legacyInstalledPlugins(legacyEntry("user", installPath)), 0o644))
+	writeInstalledPlugins(t, home, `{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"0.11.0"}]}}`)
 
 	check := CheckClaudePlugin()
 	assert.Equal(t, "fail", check.Status)
 	assert.Contains(t, check.Message, "old name basecamp@37signals")
 	assert.Contains(t, check.Hint, "basecamp setup claude")
-	assert.Equal(t, []StalePlugin{{Key: "basecamp@37signals", Scopes: []string{"user"}}}, StalePluginKeys())
 }
 
-func TestCheckClaudePlugin_HostedConnectorAloneIsNotInstalled(t *testing.T) {
+func TestCheckClaudePlugin_BothInstalledWarns(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	installPath := filepath.Join(home, ".claude", "plugins", "cache", "37signals", "basecamp", "0.1.0")
-	writePluginManifest(t, installPath, ".claude-plugin", "https://github.com/basecamp/basecamp-mcp-server")
-	require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"),
-		legacyInstalledPlugins(legacyEntry("user", installPath)), 0o644))
+	writeInstalledPlugins(t, home, `{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"0.12.0"}],"basecamp@37signals":[{"scope":"user","version":"0.11.0"}]}}`)
 
 	check := CheckClaudePlugin()
-	assert.Equal(t, "fail", check.Status)
-	assert.Equal(t, "Plugin not installed", check.Message)
-	assert.Empty(t, StalePluginKeys())
+	assert.Equal(t, "warn", check.Status)
+	assert.Contains(t, check.Message, "old basecamp@37signals copy")
 }

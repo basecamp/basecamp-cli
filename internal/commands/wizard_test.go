@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -947,22 +946,13 @@ func runClaudeSetupWithStub(t *testing.T, home string) string {
 	return string(calls)
 }
 
-// seedLegacyBasecampPlugin records a basecamp@37signals install at the user
-// and project scopes whose cached manifest names repo.
-func seedLegacyBasecampPlugin(t *testing.T, home, repo string) {
+// seedLegacyBasecampPlugin records the pre-rename basecamp@37signals plugin
+// at the user and project scopes.
+func seedLegacyBasecampPlugin(t *testing.T, home string) {
 	t.Helper()
-	installPath := filepath.Join(home, ".claude", "plugins", "cache", "37signals", "basecamp", "0.11.0")
-	require.NoError(t, os.MkdirAll(filepath.Join(installPath, ".claude-plugin"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(installPath, ".claude-plugin", "plugin.json"),
-		[]byte(`{"name":"basecamp","repository":"`+repo+`"}`), 0o644))
-	cwd, err := os.Getwd()
-	require.NoError(t, err)
-	entry := func(scope string) string {
-		return `{"scope":"` + scope + `","version":"0.11.0","installPath":` + strconv.Quote(installPath) +
-			`,"projectPath":` + strconv.Quote(cwd) + `}`
-	}
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "plugins"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"),
-		[]byte(`{"version":2,"plugins":{"basecamp@37signals":[`+entry("user")+`,`+entry("project")+`]}}`), 0o644))
+		[]byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"0.11.0"},{"scope":"project","version":"0.11.0","projectPath":"/somewhere"}]}}`), 0o644))
 }
 
 // TestSetupClaudeMigratesLegacyCLIPlugin verifies that the CLI plugin still
@@ -972,7 +962,7 @@ func TestSetupClaudeMigratesLegacyCLIPlugin(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	seedLegacyBasecampPlugin(t, home, "https://github.com/basecamp/basecamp-cli")
+	seedLegacyBasecampPlugin(t, home)
 
 	calls := runClaudeSetupWithStub(t, home)
 
@@ -982,20 +972,6 @@ func TestSetupClaudeMigratesLegacyCLIPlugin(t *testing.T) {
 		"plugin marketplace update 37signals",
 		"plugin install basecamp-cli@37signals --scope user")
 	assert.Contains(t, calls, "plugin install basecamp-cli@37signals --scope project")
-}
-
-// TestSetupClaudeLeavesHostedConnectorPluginAlone verifies that a
-// basecamp@37signals install of the hosted connector is never uninstalled.
-func TestSetupClaudeLeavesHostedConnectorPluginAlone(t *testing.T) {
-	t.Setenv("BASECAMP_NO_KEYRING", "1")
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	seedLegacyBasecampPlugin(t, home, "https://github.com/basecamp/basecamp-mcp-server")
-
-	calls := runClaudeSetupWithStub(t, home)
-
-	assert.NotContains(t, calls, "plugin uninstall")
-	assert.Contains(t, calls, "plugin install basecamp-cli@37signals")
 }
 
 // TestSetupClaudeNonInteractiveRefreshesMarketplace verifies the fresh-install

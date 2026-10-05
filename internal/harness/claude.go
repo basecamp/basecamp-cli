@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
@@ -53,15 +52,14 @@ const ClaudeMarketplaceName = "37signals"
 const ClaudeExpectedPluginKey = ClaudePluginName + "@" + ClaudeMarketplaceName
 
 // ClaudeLegacyPluginKey is the key this plugin was installed under before the
-// rename. The 37signals marketplace now publishes the hosted Basecamp
-// connector plugin under that same key, so an entry with it is this CLI's
-// plugin only when its installed manifest says so (see legacyCLIInstall).
+// rename. During the migration window the 37signals marketplace publishes no
+// "basecamp" plugin at all, so an install under this key is always this CLI's
+// pre-rename plugin and setup removes it by key, like any stale entry.
+//
+// The marketplace may later list the hosted Basecamp connector as "basecamp"
+// again. That step has to wait until this key is no longer treated as stale
+// here (isStalePluginKey); otherwise setup would uninstall the connector.
 const ClaudeLegacyPluginKey = "basecamp@" + ClaudeMarketplaceName
-
-// CLIRepository is the repository both plugin manifests in this repo name.
-// An installed plugin whose manifest names it is this CLI's plugin, whatever
-// key it was installed under.
-const CLIRepository = "https://github.com/basecamp/basecamp-cli"
 
 // DetectClaude returns true if Claude Code is installed.
 // Checks ~/.claude/ directory first, then falls back to binary on PATH.
@@ -136,7 +134,7 @@ func CheckClaudePlugin() *StatusCheck {
 	// Try as array of objects with "name" or "package" fields,
 	// or as a map with plugin keys.
 	if pluginInstalled(data) {
-		if len(legacyCLIPluginEntries(data)) > 0 {
+		if hasLegacyPluginKey(data) {
 			return &StatusCheck{
 				Name:    "Claude Code Plugin",
 				Status:  "warn",
@@ -151,7 +149,7 @@ func CheckClaudePlugin() *StatusCheck {
 		}
 	}
 
-	if len(legacyCLIPluginEntries(data)) > 0 {
+	if hasLegacyPluginKey(data) {
 		return &StatusCheck{
 			Name:    "Claude Code Plugin",
 			Status:  "fail",
@@ -402,8 +400,8 @@ type StalePlugin struct {
 }
 
 // StalePluginKeys returns stale plugin entries from installed_plugins.json:
-// entries from old/dead marketplaces, and this CLI's plugin still installed
-// under its pre-rename key. Setup uninstalls each and reinstalls
+// entries from old/dead marketplaces, and this plugin still installed under
+// its pre-rename key. Setup uninstalls each and reinstalls
 // ClaudeExpectedPluginKey at the scopes it removed.
 func StalePluginKeys() []StalePlugin {
 	home, err := os.UserHomeDir()
@@ -414,7 +412,7 @@ func StalePluginKeys() []StalePlugin {
 	if err != nil {
 		return nil
 	}
-	return append(stalePluginKeys(data), legacyCLIPluginEntries(data)...)
+	return stalePluginKeys(data)
 }
 
 // stalePluginKeys extracts known stale plugin entries (e.g. basecamp@basecamp from
@@ -495,9 +493,21 @@ func stalePluginKeys(data []byte) []StalePlugin {
 // claudeStalePluginKey is the known stale key from the basecamp → 37signals marketplace rename.
 const claudeStalePluginKey = "basecamp@basecamp"
 
-// isStalePluginKey returns true only for the known stale marketplace key.
+// isStalePluginKey returns true for the known stale keys: the old marketplace
+// name, and this plugin's pre-rename key (see ClaudeLegacyPluginKey).
 func isStalePluginKey(key string) bool {
-	return key == claudeStalePluginKey
+	return key == claudeStalePluginKey || key == ClaudeLegacyPluginKey
+}
+
+// hasLegacyPluginKey reports whether this plugin is still installed under
+// ClaudeLegacyPluginKey.
+func hasLegacyPluginKey(data []byte) bool {
+	for _, p := range stalePluginKeys(data) {
+		if p.Key == ClaudeLegacyPluginKey {
+			return true
+		}
+	}
+	return false
 }
 
 func appendUnique(ss []string, s string) []string {
@@ -507,110 +517,4 @@ func appendUnique(ss []string, s string) []string {
 		}
 	}
 	return append(ss, s)
-}
-
-// legacyCLIPluginEntries returns this CLI's plugin when it is still installed
-// under ClaudeLegacyPluginKey. That key now also names the hosted-connector
-// plugin, so the key alone proves nothing: only the scopes whose installed
-// manifest names CLIRepository count. An entry whose manifest can't be read —
-// or a file format that records no install path — is left alone, since
-// removing a hosted-connector install would be worse than leaving a legacy
-// CLI one in place. So is an entry without a scope `claude plugin uninstall
-// --scope` accepts: setup falls back to an unscoped uninstall for those, and
-// for this shared key that would remove a hosted connector at every scope.
-// A project or local entry counts only when its projectPath is the current
-// directory: Claude resolves those scopes against the working directory, so
-// an uninstall run elsewhere would target another checkout's entry — which
-// may be the hosted connector.
-func legacyCLIPluginEntries(data []byte) []StalePlugin {
-	var envelope struct {
-		Plugins map[string][]struct {
-			Scope       string `json:"scope"`
-			InstallPath string `json:"installPath"`
-			ProjectPath string `json:"projectPath"`
-		} `json:"plugins"`
-	}
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return nil
-	}
-	entries, ok := envelope.Plugins[ClaudeLegacyPluginKey]
-	if !ok {
-		return nil
-	}
-	found := false
-	var scopes []string
-	for _, entry := range entries {
-		if !targetableScope(entry.Scope) || !scopeResolvesHere(entry.Scope, entry.ProjectPath) || entry.InstallPath == "" || !isCLIPluginManifest(filepath.Join(entry.InstallPath, ".claude-plugin", "plugin.json")) {
-			continue
-		}
-		found = true
-		scopes = appendUnique(scopes, entry.Scope)
-	}
-	if !found {
-		return nil
-	}
-	return []StalePlugin{{Key: ClaudeLegacyPluginKey, Scopes: scopes}}
-}
-
-// targetableScope reports whether scope is one `claude plugin uninstall
-// --scope` accepts (the same set setup's validPluginScope allows).
-func targetableScope(scope string) bool {
-	return scope == "user" || scope == "project" || scope == "local"
-}
-
-// scopeResolvesHere reports whether `claude plugin uninstall --scope scope`,
-// run from the current directory, reaches the entry recorded for projectPath.
-// User scope is global; project and local scopes belong to one directory.
-func scopeResolvesHere(scope, projectPath string) bool {
-	if scope == "user" {
-		return true
-	}
-	if projectPath == "" {
-		return false
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return false
-	}
-	return samePath(cwd, projectPath)
-}
-
-func samePath(a, b string) bool {
-	resolve := func(p string) string {
-		if r, err := filepath.EvalSymlinks(p); err == nil {
-			return r
-		}
-		return filepath.Clean(p)
-	}
-	return resolve(a) == resolve(b)
-}
-
-// isCLIPluginManifest reports whether the plugin manifest at path is this
-// CLI's: its repository is CLIRepository.
-func isCLIPluginManifest(path string) bool {
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path from the agent's own plugin records
-	if err != nil {
-		return false
-	}
-	var manifest struct {
-		Repository any `json:"repository"`
-	}
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return false
-	}
-	var repo string
-	switch r := manifest.Repository.(type) {
-	case string:
-		repo = r
-	case map[string]any:
-		repo, _ = r["url"].(string)
-	}
-	return normalizeRepositoryURL(repo) == CLIRepository
-}
-
-func normalizeRepositoryURL(url string) string {
-	url = strings.TrimSpace(strings.ToLower(url))
-	url = strings.TrimPrefix(url, "git+")
-	url = strings.TrimSuffix(url, "/")
-	return strings.TrimSuffix(url, ".git")
 }

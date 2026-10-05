@@ -204,17 +204,7 @@ func boolJSON(value bool) string {
 
 const codexLegacyInstalledJSON = `{"pluginId":"basecamp@37signals","name":"basecamp","marketplaceName":"37signals","version":"0.11.0","installed":true,"enabled":true}`
 
-// writeCodexCachedManifest puts a cached basecamp@37signals 0.11.0 manifest
-// naming repo under a fresh CODEX_HOME.
-func writeCodexCachedManifest(t *testing.T, repo string) {
-	t.Helper()
-	codexHome := t.TempDir()
-	t.Setenv("CODEX_HOME", codexHome)
-	writePluginManifest(t, filepath.Join(codexHome, "plugins", "cache", "37signals", "basecamp", "0.11.0"), ".codex-plugin", repo)
-}
-
 func TestCheckCodexPluginLegacyCLIInstall(t *testing.T) {
-	writeCodexCachedManifest(t, "https://github.com/basecamp/basecamp-cli")
 	stubCodexList(t, `{"installed":[`+codexLegacyInstalledJSON+`],"available":[{"pluginId":"basecamp-cli@37signals","version":"0.11.0","installed":false,"enabled":false}]}`, nil)
 
 	check := CheckCodexPlugin()
@@ -225,18 +215,14 @@ func TestCheckCodexPluginLegacyCLIInstall(t *testing.T) {
 	assert.True(t, CodexLegacyCLIInstalled(context.Background()))
 }
 
-func TestCheckCodexPluginHostedConnectorIsNotLegacy(t *testing.T) {
-	writeCodexCachedManifest(t, "https://github.com/basecamp/basecamp-mcp-server")
-	stubCodexList(t, `{"installed":[`+codexLegacyInstalledJSON+`],"available":[]}`, nil)
+func TestCheckCodexPluginLegacyAvailableOnlyIsNotInstalled(t *testing.T) {
+	stubCodexList(t, `{"installed":[],"available":[{"pluginId":"basecamp@37signals","version":"0.11.0","installed":false,"enabled":false}]}`, nil)
 
-	check := CheckCodexPlugin()
-
-	assert.Equal(t, "Plugin not installed", check.Message)
+	assert.Equal(t, "Plugin not installed", CheckCodexPlugin().Message)
 	assert.False(t, CodexLegacyCLIInstalled(context.Background()))
 }
 
 func TestCheckCodexPluginBothInstalledWarns(t *testing.T) {
-	writeCodexCachedManifest(t, "https://github.com/basecamp/basecamp-cli")
 	stubCodexList(t, `{"installed":[`+codexLegacyInstalledJSON+`,{"pluginId":"basecamp-cli@37signals","version":"0.11.0","installed":true,"enabled":true}],"available":[]}`, nil)
 
 	check := CheckCodexPlugin()
@@ -245,16 +231,7 @@ func TestCheckCodexPluginBothInstalledWarns(t *testing.T) {
 	assert.Contains(t, check.Message, "old basecamp@37signals copy")
 }
 
-func TestCodexLegacyCLIInstalledRejectsPathVersions(t *testing.T) {
-	writeCodexCachedManifest(t, "https://github.com/basecamp/basecamp-cli")
-	for _, v := range []string{"", ".", "..", "../0.11.0", `..\0.11.0`} {
-		assert.False(t, codexLegacyCLIInstalled(v), v)
-	}
-	assert.True(t, codexLegacyCLIInstalled("0.11.0"))
-}
-
 func TestCheckCodexPluginDisabledMentionsLegacyCopy(t *testing.T) {
-	writeCodexCachedManifest(t, "https://github.com/basecamp/basecamp-cli")
 	stubCodexList(t, `{"installed":[`+codexLegacyInstalledJSON+`,{"pluginId":"basecamp-cli@37signals","version":"0.11.0","installed":true,"enabled":false}],"available":[]}`, nil)
 
 	check := CheckCodexPlugin()

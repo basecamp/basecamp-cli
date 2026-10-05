@@ -107,8 +107,7 @@ func TestSetupCodexLegacyRemovalFailureNamesTheManualStep(t *testing.T) {
 
 	require.NotEmpty(t, envelope.Data.Errors)
 	assert.Contains(t, envelope.Data.Errors[0], "pre-rename plugin")
-	assert.Equal(t, []string{"basecamp setup codex"}, envelope.Data.ManualCommands,
-		"removal of the shared key stays behind setup's manifest check")
+	assert.Equal(t, []string{"codex plugin remove basecamp@37signals"}, envelope.Data.ManualCommands)
 }
 
 func TestSetupCodexLeavesNonLegacyInstallsAlone(t *testing.T) {
@@ -286,15 +285,8 @@ func installCodexStub(t *testing.T, options codexStubOptions) string {
 	// PATH holds only the stub, so it records state with shell builtins
 	// (no rm): the legacy file reads "installed" until `plugin remove`.
 	legacyPath := filepath.Join(home, "legacy")
-	// codexHome prefers $CODEX_HOME; pin it so an ambient value can't hide
-	// the fixture.
-	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	if options.legacyInstalled {
 		require.NoError(t, os.WriteFile(legacyPath, []byte("installed"), 0o644))
-		manifestDir := filepath.Join(home, ".codex", "plugins", "cache", "37signals", "basecamp", "0.11.0", ".codex-plugin")
-		require.NoError(t, os.MkdirAll(manifestDir, 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(manifestDir, "plugin.json"),
-			[]byte(`{"name":"basecamp","repository":"https://github.com/basecamp/basecamp-cli"}`), 0o644))
 	}
 	logPath := filepath.Join(home, "codex-calls.log")
 	boolShell := func(value bool) string {

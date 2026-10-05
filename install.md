@@ -141,7 +141,7 @@ basecamp setup claude
 
 This registers the marketplace and installs the `basecamp-cli@37signals` plugin with skills, hooks, and agent workflow support.
 
-The plugin was named `basecamp` until that marketplace name went to the hosted Basecamp connector plugin. Re-running `basecamp setup claude` (or `basecamp setup codex`) replaces an old CLI install under `basecamp@37signals` with `basecamp-cli@37signals` at the same scope; it leaves a hosted-connector install under that name alone.
+The plugin was named `basecamp` until that name was set aside for the hosted Basecamp connector plugin. Re-running `basecamp setup claude` (or `basecamp setup codex`) replaces an old install under `basecamp@37signals` with `basecamp-cli@37signals` at the same scope.
 
 The hooks call the CLI's `agent-hook` command, so they need a `basecamp` new
 enough to have it. If hook errors appear after installing or refreshing the

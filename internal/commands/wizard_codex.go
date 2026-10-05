@@ -123,9 +123,7 @@ func installCodexPlugin(parent context.Context, stderr io.Writer, progress func(
 		if removeErr != nil {
 			return &agentSetupError{
 				Summary: "removing the pre-rename plugin failed: " + codexCommandFailure(removeStdout, removeStderr, removeErr),
-				// Not `codex plugin remove`: the key is shared with the hosted
-				// connector, so removal must stay behind setup's manifest check.
-				Manual: []string{"basecamp setup codex"},
+				Manual:  []string{"codex plugin remove " + harness.CodexLegacyPluginKey},
 			}
 		}
 	}

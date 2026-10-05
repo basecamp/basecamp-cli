@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/version"
@@ -26,9 +25,9 @@ const (
 	CodexMarketplaceName = "37signals"
 	// CodexExpectedPluginKey is the fully qualified Basecamp plugin ID.
 	CodexExpectedPluginKey = CodexPluginName + "@" + CodexMarketplaceName
-	// CodexLegacyPluginKey is the pre-rename plugin ID. It now also names
-	// the hosted-connector plugin, so an install under it is this CLI's only
-	// when its cached manifest says so (see codexLegacyCLIInstalled).
+	// CodexLegacyPluginKey is the pre-rename plugin ID. The marketplace lists
+	// no "basecamp" plugin during the migration window, so an install under it
+	// is always this CLI's (see ClaudeLegacyPluginKey).
 	CodexLegacyPluginKey = "basecamp@" + CodexMarketplaceName
 
 	// codexQueryTimeout bounds how long the Codex probe may run.
@@ -304,7 +303,7 @@ func queryCodexPlugin(parent context.Context) (codexPluginState, bool, error) {
 	legacy := false
 	if envelope.Installed != nil {
 		for _, plugin := range *envelope.Installed {
-			if plugin.PluginID == CodexLegacyPluginKey && plugin.Installed && codexLegacyCLIInstalled(plugin.Version) {
+			if plugin.PluginID == CodexLegacyPluginKey && plugin.Installed {
 				legacy = true
 			}
 		}
@@ -332,37 +331,6 @@ func queryCodexPlugin(parent context.Context) (codexPluginState, bool, error) {
 func CodexLegacyCLIInstalled(ctx context.Context) bool {
 	state, _, err := queryCodexPlugin(ctx)
 	return err == nil && state.legacyInstalled
-}
-
-// codexLegacyCLIInstalled reports whether the cached copy of the
-// CodexLegacyPluginKey install at version is this CLI's plugin. Codex's
-// plugin list reports the marketplace's current source for an ID, not the
-// source the installed copy came from — after the rename that is the hosted
-// connector's — so the installed manifest is the only reliable witness. A
-// manifest that can't be read is not counted: leaving a legacy CLI install
-// in place beats removing a hosted-connector one.
-func codexLegacyCLIInstalled(version string) bool {
-	if version == "" || strings.ContainsAny(version, `/\`) || version == "." || version == ".." {
-		return false
-	}
-	home := codexHome()
-	if home == "" {
-		return false
-	}
-	name := strings.TrimSuffix(CodexLegacyPluginKey, "@"+CodexMarketplaceName)
-	return isCLIPluginManifest(filepath.Join(home, "plugins", "cache", CodexMarketplaceName, name, version, ".codex-plugin", "plugin.json"))
-}
-
-// codexHome is $CODEX_HOME, or ~/.codex.
-func codexHome() string {
-	if home := os.Getenv("CODEX_HOME"); home != "" {
-		return filepath.Clean(home)
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return ""
-	}
-	return filepath.Join(filepath.Clean(home), ".codex")
 }
 
 func codexQueryFailure(name string, err error) *StatusCheck {
