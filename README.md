@@ -304,22 +304,20 @@ went to the hosted Basecamp connector plugin, which works through Basecamp's
 own MCP server rather than this CLI. If you installed the plugin under the old
 name, re-run `basecamp setup claude` or `basecamp setup codex`: setup recognizes
 the old CLI install by its manifest, removes it, and installs `basecamp-cli` at
-the same scope. Setup is the safe way to migrate: `basecamp@37signals` now
-also names the hosted connector, so uninstalling that key without checking
-which plugin it is can remove the connector. If you migrate by hand, install
-`basecamp-cli` first, and remove `basecamp@37signals` only if its installed
-manifest (`~/.claude/plugins/cache/37signals/basecamp/<version>/.claude-plugin/plugin.json`,
-or `~/.codex/plugins/cache/37signals/basecamp/<version>/.codex-plugin/plugin.json`)
-names `https://github.com/basecamp/basecamp-cli` as its `repository`:
+the same scope. Use setup rather than removing the old key by hand:
+`basecamp@37signals` now also names the hosted connector, and Claude Code can
+hold the old CLI plugin at one scope and the connector at another under that
+one key. Setup checks each installed entry's manifest and uninstalls only the
+CLI's scopes. A manual `claude plugin uninstall basecamp@37signals` or
+`codex plugin remove basecamp@37signals` does no such check. To install the
+renamed plugin by hand:
 
 ```bash
 claude plugin marketplace update 37signals
 claude plugin install basecamp-cli@37signals
-claude plugin uninstall basecamp@37signals   # only after the check above
 
 codex plugin marketplace upgrade 37signals
 codex plugin add basecamp-cli@37signals
-codex plugin remove basecamp@37signals       # only after the check above
 ```
 
 Skills from the plugin are namespaced by its name, so `basecamp:basecamp`
