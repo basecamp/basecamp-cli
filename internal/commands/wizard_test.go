@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -947,12 +948,15 @@ func runClaudeSetupWithStub(t *testing.T, home string) string {
 }
 
 // seedLegacyBasecampPlugin records the pre-rename basecamp@37signals plugin
-// at the user and project scopes.
+// at user scope and at project scope for the directory setup runs from, which
+// is the project a scoped uninstall reaches.
 func seedLegacyBasecampPlugin(t *testing.T, home string) {
 	t.Helper()
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "plugins"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"),
-		[]byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"0.11.0"},{"scope":"project","version":"0.11.0","projectPath":"/somewhere"}]}}`), 0o644))
+		[]byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"0.11.0"},{"scope":"project","version":"0.11.0","projectPath":`+strconv.Quote(cwd)+`}]}}`), 0o644))
 }
 
 // TestSetupClaudeMigratesLegacyCLIPlugin verifies that the CLI plugin still
