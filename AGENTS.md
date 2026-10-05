@@ -44,7 +44,9 @@ Coding-agent integration lives in `internal/harness` (agent registry, detection,
 skill health checks) and `internal/commands/wizard_agents.go` (`basecamp setup
 claude|codex|grok|agents`). Claude Code and Codex each get a native plugin from the
 `basecamp/claude-plugins` marketplace and have registrations of their own (`claude.go`,
-`codex.go`). Grok Build has no plugin: it reads the shared `~/.agents/skills/basecamp` skill
+`codex.go`). The plugin is `basecamp-cli@37signals`; `basecamp@37signals` is the hosted
+Basecamp connector plugin, so an install under that old key counts as this CLI's (and is
+migrated by setup) only when its installed manifest's `repository` is this repo. Grok Build has no plugin: it reads the shared `~/.agents/skills/basecamp` skill
 directly, so it is a row of `harness.SkillAgent` (name, id, home env var, home directory,
 binary) in `skill_agent.go`, and everything in `internal/commands` that touches a shared-skill
 agent — the setup handler, the `BASECAMP_SETUP_AGENT` values, doctor's remediation — loops over

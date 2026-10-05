@@ -20,6 +20,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/harness"
 )
 
 // semverPattern is the strict semver 2.0.0 grammar (semver.org). Go's \d is
@@ -39,10 +41,11 @@ type codexInterface struct {
 }
 
 type pluginManifest struct {
-	Name      string          `json:"name"`
-	Version   string          `json:"version"`
-	Skills    string          `json:"skills"`
-	Interface *codexInterface `json:"interface"`
+	Name       string          `json:"name"`
+	Version    string          `json:"version"`
+	Repository string          `json:"repository"`
+	Skills     string          `json:"skills"`
+	Interface  *codexInterface `json:"interface"`
 }
 
 func TestManifestsParseWithMatchingIdentity(t *testing.T) {
@@ -50,8 +53,12 @@ func TestManifestsParseWithMatchingIdentity(t *testing.T) {
 	claude := readManifest(t, filepath.Join(root, ".claude-plugin", "plugin.json"))
 	codex := readManifest(t, filepath.Join(root, ".codex-plugin", "plugin.json"))
 
-	assert.Equal(t, "basecamp", claude.Name)
-	assert.Equal(t, "basecamp", codex.Name)
+	assert.Equal(t, harness.ClaudePluginName, claude.Name)
+	assert.Equal(t, harness.CodexPluginName, codex.Name)
+	// Setup tells a pre-rename install of this plugin from the hosted
+	// connector that now owns the old name by this field alone.
+	assert.Equal(t, harness.CLIRepository, claude.Repository)
+	assert.Equal(t, harness.CLIRepository, codex.Repository)
 	assert.Regexp(t, semverPattern, claude.Version)
 	assert.Regexp(t, semverPattern, codex.Version)
 	assert.Equal(t, claude.Version, codex.Version, "manifest versions must stay in lockstep")

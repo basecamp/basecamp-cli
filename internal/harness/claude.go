@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
@@ -40,14 +41,27 @@ func claudeChecks() []*StatusCheck {
 // Migrating from basecamp/basecamp-cli → basecamp/claude-plugins.
 const ClaudeMarketplaceSource = "basecamp/claude-plugins"
 
-// ClaudePluginName is the plugin identifier to install.
-const ClaudePluginName = "basecamp"
+// ClaudePluginName is the plugin identifier to install. It was "basecamp"
+// until the 37signals marketplace gave that name to the hosted-connector
+// plugin; see ClaudeLegacyPluginKey.
+const ClaudePluginName = "basecamp-cli"
 
 // ClaudeMarketplaceName is the marketplace name as it appears in plugin keys.
 const ClaudeMarketplaceName = "37signals"
 
 // ClaudeExpectedPluginKey is the fully-qualified key for a correctly installed plugin.
 const ClaudeExpectedPluginKey = ClaudePluginName + "@" + ClaudeMarketplaceName
+
+// ClaudeLegacyPluginKey is the key this plugin was installed under before the
+// rename. The 37signals marketplace now publishes the hosted Basecamp
+// connector plugin under that same key, so an entry with it is this CLI's
+// plugin only when its installed manifest says so (see legacyCLIInstall).
+const ClaudeLegacyPluginKey = "basecamp@" + ClaudeMarketplaceName
+
+// CLIRepository is the repository both plugin manifests in this repo name.
+// An installed plugin whose manifest names it is this CLI's plugin, whatever
+// key it was installed under.
+const CLIRepository = "https://github.com/basecamp/basecamp-cli"
 
 // DetectClaude returns true if Claude Code is installed.
 // Checks ~/.claude/ directory first, then falls back to binary on PATH.
@@ -126,6 +140,15 @@ func CheckClaudePlugin() *StatusCheck {
 			Name:    "Claude Code Plugin",
 			Status:  "pass",
 			Message: "Installed",
+		}
+	}
+
+	if len(legacyCLIPluginEntries(data)) > 0 {
+		return &StatusCheck{
+			Name:    "Claude Code Plugin",
+			Status:  "fail",
+			Message: "Installed under the old name " + ClaudeLegacyPluginKey,
+			Hint:    "Run: basecamp setup claude (reinstalls it as " + ClaudeExpectedPluginKey + ")",
 		}
 	}
 
@@ -336,18 +359,19 @@ func matchesBasecamp(p map[string]any) bool {
 }
 
 // matchesPluginKey returns true if the key identifies a correctly installed
-// basecamp plugin — either bare "basecamp" (legacy) or the expected
-// marketplace-qualified key "basecamp@37signals".
+// plugin — either the bare name or the expected marketplace-qualified key
+// "basecamp-cli@37signals". The pre-rename "basecamp" names deliberately do
+// not match: they now belong to the hosted-connector plugin.
 func matchesPluginKey(key string) bool {
-	return key == "basecamp" || key == ClaudeExpectedPluginKey
+	return key == ClaudePluginName || key == ClaudeExpectedPluginKey
 }
 
 func jsonContainsBasecamp(data []byte) bool {
 	// Fallback: raw string search for the expected plugin key or bare name.
-	// Note: `"basecamp"` (with quotes) won't match `"basecamp@old"` since
-	// the closing quote requires an exact boundary.
+	// Note: `"basecamp-cli"` (with quotes) won't match `"basecamp-cli@old"`
+	// since the closing quote requires an exact boundary.
 	s := string(data)
-	return len(s) > 0 && (contains(s, `"`+ClaudeExpectedPluginKey+`"`) || contains(s, `"basecamp"`))
+	return len(s) > 0 && (contains(s, `"`+ClaudeExpectedPluginKey+`"`) || contains(s, `"`+ClaudePluginName+`"`))
 }
 
 func contains(s, substr string) bool {
@@ -369,8 +393,10 @@ type StalePlugin struct {
 	Scopes []string // empty = unknown, fall back to unscoped uninstall
 }
 
-// StalePluginKeys returns stale plugin entries from installed_plugins.json
-// that belong to old/dead marketplaces.
+// StalePluginKeys returns stale plugin entries from installed_plugins.json:
+// entries from old/dead marketplaces, and this CLI's plugin still installed
+// under its pre-rename key. Setup uninstalls each and reinstalls
+// ClaudeExpectedPluginKey at the scopes it removed.
 func StalePluginKeys() []StalePlugin {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -380,7 +406,7 @@ func StalePluginKeys() []StalePlugin {
 	if err != nil {
 		return nil
 	}
-	return stalePluginKeys(data)
+	return append(stalePluginKeys(data), legacyCLIPluginEntries(data)...)
 }
 
 // stalePluginKeys extracts known stale plugin entries (e.g. basecamp@basecamp from
@@ -459,7 +485,7 @@ func stalePluginKeys(data []byte) []StalePlugin {
 }
 
 // claudeStalePluginKey is the known stale key from the basecamp → 37signals marketplace rename.
-const claudeStalePluginKey = ClaudePluginName + "@" + "basecamp"
+const claudeStalePluginKey = "basecamp@basecamp"
 
 // isStalePluginKey returns true only for the known stale marketplace key.
 func isStalePluginKey(key string) bool {
@@ -473,4 +499,72 @@ func appendUnique(ss []string, s string) []string {
 		}
 	}
 	return append(ss, s)
+}
+
+// legacyCLIPluginEntries returns this CLI's plugin when it is still installed
+// under ClaudeLegacyPluginKey. That key now also names the hosted-connector
+// plugin, so the key alone proves nothing: only the scopes whose installed
+// manifest names CLIRepository count. An entry whose manifest can't be read —
+// or a file format that records no install path — is left alone, since
+// removing a hosted-connector install would be worse than leaving a legacy
+// CLI one in place.
+func legacyCLIPluginEntries(data []byte) []StalePlugin {
+	var envelope struct {
+		Plugins map[string][]struct {
+			Scope       string `json:"scope"`
+			InstallPath string `json:"installPath"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil
+	}
+	entries, ok := envelope.Plugins[ClaudeLegacyPluginKey]
+	if !ok {
+		return nil
+	}
+	found := false
+	var scopes []string
+	for _, entry := range entries {
+		if entry.InstallPath == "" || !isCLIPluginManifest(filepath.Join(entry.InstallPath, ".claude-plugin", "plugin.json")) {
+			continue
+		}
+		found = true
+		if entry.Scope != "" {
+			scopes = appendUnique(scopes, entry.Scope)
+		}
+	}
+	if !found {
+		return nil
+	}
+	return []StalePlugin{{Key: ClaudeLegacyPluginKey, Scopes: scopes}}
+}
+
+// isCLIPluginManifest reports whether the plugin manifest at path is this
+// CLI's: its repository is CLIRepository.
+func isCLIPluginManifest(path string) bool {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path from the agent's own plugin records
+	if err != nil {
+		return false
+	}
+	var manifest struct {
+		Repository any `json:"repository"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return false
+	}
+	var repo string
+	switch r := manifest.Repository.(type) {
+	case string:
+		repo = r
+	case map[string]any:
+		repo, _ = r["url"].(string)
+	}
+	return normalizeRepositoryURL(repo) == CLIRepository
+}
+
+func normalizeRepositoryURL(url string) string {
+	url = strings.TrimSpace(strings.ToLower(url))
+	url = strings.TrimPrefix(url, "git+")
+	url = strings.TrimSuffix(url, "/")
+	return strings.TrimSuffix(url, ".git")
 }

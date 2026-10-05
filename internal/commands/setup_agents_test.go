@@ -377,7 +377,7 @@ func TestSetupAgentsCodexPreservesManualOrder(t *testing.T) {
 	assert.Equal(t, []string{
 		"codex plugin marketplace add basecamp/claude-plugins",
 		"codex plugin marketplace upgrade 37signals",
-		"codex plugin add basecamp@37signals",
+		"codex plugin add basecamp-cli@37signals",
 	}, env.Data.ManualCommands)
 }
 

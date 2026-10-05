@@ -100,11 +100,29 @@ func installCodexPlugin(parent context.Context, stderr io.Writer, progress func(
 		}
 	}
 
-	progress("Installing basecamp plugin…")
+	progress("Installing " + harness.CodexPluginName + " plugin…")
 	stdout, stderrOutput, err = runCodexStep(parent, stderr, codexInstallTimeout, codexPath,
 		"plugin", "add", harness.CodexExpectedPluginKey, "--json")
 	if err != nil && !codexPluginAlreadyInstalled(stdout, stderrOutput) {
 		return codexSetupError("plugin add failed: " + codexCommandFailure(stdout, stderrOutput, err))
+	}
+
+	// The plugin was renamed basecamp → basecamp-cli. Remove a pre-rename
+	// install only once its replacement is in, so a failed install never
+	// leaves the user with neither.
+	legacyCtx, cancelLegacy := context.WithTimeout(parent, codexVerifyTimeout)
+	legacy := harness.CodexLegacyCLIInstalled(legacyCtx)
+	cancelLegacy()
+	if legacy {
+		progress("Removing the pre-rename " + harness.CodexLegacyPluginKey + " plugin…")
+		removeStdout, removeStderr, removeErr := runCodexStep(parent, stderr, codexInstallTimeout, codexPath,
+			"plugin", "remove", harness.CodexLegacyPluginKey, "--json")
+		if removeErr != nil {
+			return &agentSetupError{
+				Summary: "removing the pre-rename plugin failed: " + codexCommandFailure(removeStdout, removeStderr, removeErr),
+				Manual:  []string{"codex plugin remove " + harness.CodexLegacyPluginKey},
+			}
+		}
 	}
 
 	progress("Verifying installation…")

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -732,7 +733,7 @@ func TestSetupClaudeNonInteractiveRepairsSkillLink(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "plugins"), 0o755))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(home, ".claude", "plugins", "installed_plugins.json"),
-		[]byte(`[{"name":"basecamp","version":"1.0.0"}]`), 0o644))
+		[]byte(`[{"name":"basecamp-cli","version":"1.0.0"}]`), 0o644))
 
 	app, appBuf := setupQuickstartTestApp(t, "", "")
 	app.Flags.JSON = true
@@ -773,7 +774,7 @@ func TestRunClaudeSetupRepairsSkillLink(t *testing.T) {
 	pluginDir := filepath.Join(home, ".claude", "plugins")
 	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "installed_plugins.json"),
-		[]byte(`[{"name":"basecamp","version":"1.0.0"}]`), 0o644))
+		[]byte(`[{"name":"basecamp-cli","version":"1.0.0"}]`), 0o644))
 
 	// Install baseline skill files (source for the symlink)
 	_, err := installSkillFiles()
@@ -813,7 +814,7 @@ func TestSetupClaudeNonInteractiveRemovesStalePlugins(t *testing.T) {
 		filepath.Join(pluginDir, "installed_plugins.json"),
 		[]byte(`{"version":2,"plugins":{`+
 			`"basecamp@basecamp":[{"scope":"user","version":"0.1.0"},{"scope":"project","version":"0.1.0"}],`+
-			`"basecamp@37signals":[{"scope":"user","version":"0.1.0"}]}}`),
+			`"basecamp-cli@37signals":[{"scope":"user","version":"0.1.0"}]}}`),
 		0o644))
 
 	// Create stub claude binary that logs invocations.
@@ -911,14 +912,87 @@ func TestSetupClaudeNonInteractiveScopeAwareReinstall(t *testing.T) {
 	// Verify install calls preserve scopes from stale entries
 	calls, readErr := os.ReadFile(logFile)
 	require.NoError(t, readErr)
-	assert.Contains(t, string(calls), "plugin install basecamp@37signals --scope project")
+	assert.Contains(t, string(calls), "plugin install basecamp-cli@37signals --scope project")
 	// The reinstall path must also refresh before installing: add → update →
 	// scoped install, so a stale SSH-shorthand entry is replaced with the current
 	// HTTPS source first (issue #417).
 	assertCallOrder(t, string(calls),
 		"plugin marketplace add basecamp/claude-plugins",
 		"plugin marketplace update 37signals",
-		"plugin install basecamp@37signals --scope user")
+		"plugin install basecamp-cli@37signals --scope user")
+}
+
+// runClaudeSetupWithStub runs non-interactive `setup claude` against a stub
+// claude binary that logs its argv and succeeds, returning the call log.
+func runClaudeSetupWithStub(t *testing.T, home string) string {
+	t.Helper()
+	binDir := filepath.Join(home, "bin")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	logFile := filepath.Join(home, "claude-calls.log")
+	stubScript := "#!/bin/sh\necho \"$*\" >> \"" + logFile + "\"\nexit 0\n"
+	require.NoError(t, os.WriteFile(filepath.Join(binDir, "claude"), []byte(stubScript), 0o755)) //nolint:gosec // G306: test helper
+	t.Setenv("PATH", binDir)
+
+	app, _ := setupQuickstartTestApp(t, "", "")
+	app.Flags.JSON = true
+	cmd := NewSetupCmd()
+	cmd.SetArgs([]string{"claude"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+
+	calls, err := os.ReadFile(logFile)
+	require.NoError(t, err)
+	return string(calls)
+}
+
+// seedLegacyBasecampPlugin records a basecamp@37signals install at the user
+// and project scopes whose cached manifest names repo.
+func seedLegacyBasecampPlugin(t *testing.T, home, repo string) {
+	t.Helper()
+	installPath := filepath.Join(home, ".claude", "plugins", "cache", "37signals", "basecamp", "0.11.0")
+	require.NoError(t, os.MkdirAll(filepath.Join(installPath, ".claude-plugin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(installPath, ".claude-plugin", "plugin.json"),
+		[]byte(`{"name":"basecamp","repository":"`+repo+`"}`), 0o644))
+	entry := func(scope string) string {
+		return `{"scope":"` + scope + `","version":"0.11.0","installPath":` + strconv.Quote(installPath) + `}`
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"),
+		[]byte(`{"version":2,"plugins":{"basecamp@37signals":[`+entry("user")+`,`+entry("project")+`]}}`), 0o644))
+}
+
+// TestSetupClaudeMigratesLegacyCLIPlugin verifies that the CLI plugin still
+// installed as basecamp@37signals is replaced by basecamp-cli@37signals at the
+// same scopes.
+func TestSetupClaudeMigratesLegacyCLIPlugin(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	seedLegacyBasecampPlugin(t, home, "https://github.com/basecamp/basecamp-cli")
+
+	calls := runClaudeSetupWithStub(t, home)
+
+	assert.Contains(t, calls, "plugin uninstall basecamp@37signals --scope user")
+	assert.Contains(t, calls, "plugin uninstall basecamp@37signals --scope project")
+	assertCallOrder(t, calls,
+		"plugin marketplace update 37signals",
+		"plugin install basecamp-cli@37signals --scope user")
+	assert.Contains(t, calls, "plugin install basecamp-cli@37signals --scope project")
+}
+
+// TestSetupClaudeLeavesHostedConnectorPluginAlone verifies that a
+// basecamp@37signals install of the hosted connector is never uninstalled.
+func TestSetupClaudeLeavesHostedConnectorPluginAlone(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	seedLegacyBasecampPlugin(t, home, "https://github.com/basecamp/basecamp-mcp-server")
+
+	calls := runClaudeSetupWithStub(t, home)
+
+	assert.NotContains(t, calls, "plugin uninstall")
+	assert.Contains(t, calls, "plugin install basecamp-cli@37signals")
 }
 
 // TestSetupClaudeNonInteractiveRefreshesMarketplace verifies the fresh-install
@@ -961,7 +1035,7 @@ func TestSetupClaudeNonInteractiveRefreshesMarketplace(t *testing.T) {
 	assertCallOrder(t, string(calls),
 		"plugin marketplace add basecamp/claude-plugins",
 		"plugin marketplace update 37signals",
-		"plugin install basecamp@37signals")
+		"plugin install basecamp-cli@37signals")
 }
 
 // TestRunClaudeSetupInteractiveRefreshOrder covers the interactive install path
@@ -997,7 +1071,7 @@ func TestRunClaudeSetupInteractiveRefreshOrder(t *testing.T) {
 	assertCallOrder(t, string(calls),
 		"plugin marketplace add basecamp/claude-plugins",
 		"plugin marketplace update 37signals",
-		"plugin install basecamp@37signals")
+		"plugin install basecamp-cli@37signals")
 }
 
 // TestJoinNames verifies name joining with commas and "and".

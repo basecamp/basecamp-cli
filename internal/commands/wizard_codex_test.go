@@ -43,7 +43,7 @@ func TestSetupCodexFreshInstallCommandOrder(t *testing.T) {
 	calls := readCodexSetupCalls(t, logPath)
 	assertCallOrder(t, calls,
 		"plugin marketplace add basecamp/claude-plugins --json",
-		"plugin add basecamp@37signals --json",
+		"plugin add basecamp-cli@37signals --json",
 		"plugin list --available --json",
 	)
 }
@@ -58,7 +58,7 @@ func TestSetupCodexAlreadyAddedRefreshesMarketplace(t *testing.T) {
 	assertCallOrder(t, calls,
 		"plugin marketplace add basecamp/claude-plugins --json",
 		"plugin marketplace upgrade 37signals --json",
-		"plugin add basecamp@37signals --json",
+		"plugin add basecamp-cli@37signals --json",
 	)
 }
 
@@ -72,7 +72,7 @@ func TestSetupCodexIdempotentAddRefreshesMarketplace(t *testing.T) {
 	assertCallOrder(t, calls,
 		"plugin marketplace add basecamp/claude-plugins --json",
 		"plugin marketplace upgrade 37signals --json",
-		"plugin add basecamp@37signals --json",
+		"plugin add basecamp-cli@37signals --json",
 	)
 }
 
@@ -83,7 +83,39 @@ func TestSetupCodexAlreadyInstalledIsIdempotent(t *testing.T) {
 
 	assert.True(t, envelope.Data.PluginInstalled)
 	assert.Empty(t, envelope.Data.Errors)
-	assert.Contains(t, readCodexSetupCalls(t, logPath), "plugin add basecamp@37signals --json")
+	assert.Contains(t, readCodexSetupCalls(t, logPath), "plugin add basecamp-cli@37signals --json")
+}
+
+func TestSetupCodexReplacesLegacyCLIPlugin(t *testing.T) {
+	logPath := installCodexStub(t, codexStubOptions{legacyInstalled: true})
+
+	envelope := runSetupCodexJSON(t)
+
+	assert.True(t, envelope.Data.PluginInstalled)
+	assert.Empty(t, envelope.Data.Errors)
+	assertCallOrder(t, readCodexSetupCalls(t, logPath),
+		"plugin add basecamp-cli@37signals --json",
+		"plugin remove basecamp@37signals --json",
+		"plugin list --available --json",
+	)
+}
+
+func TestSetupCodexLegacyRemovalFailureNamesTheManualStep(t *testing.T) {
+	installCodexStub(t, codexStubOptions{legacyInstalled: true, legacyRemoveFailure: true})
+
+	envelope := runSetupCodexJSON(t)
+
+	require.NotEmpty(t, envelope.Data.Errors)
+	assert.Contains(t, envelope.Data.Errors[0], "pre-rename plugin")
+	assert.Contains(t, envelope.Data.ManualCommands, "codex plugin remove basecamp@37signals")
+}
+
+func TestSetupCodexLeavesNonLegacyInstallsAlone(t *testing.T) {
+	logPath := installCodexStub(t, codexStubOptions{})
+
+	runSetupCodexJSON(t)
+
+	assert.NotContains(t, readCodexSetupCalls(t, logPath), "plugin remove")
 }
 
 func TestSetupCodexMissingBinaryReturnsManualCommands(t *testing.T) {
@@ -120,7 +152,7 @@ func TestSetupCodexMarketplaceFailureStopsInstall(t *testing.T) {
 	require.NotEmpty(t, envelope.Data.Errors)
 	assert.Contains(t, envelope.Data.Errors[0], "marketplace add")
 	assert.NotEmpty(t, envelope.Data.ManualCommands)
-	assert.NotContains(t, readCodexSetupCalls(t, logPath), "plugin add basecamp@37signals --json")
+	assert.NotContains(t, readCodexSetupCalls(t, logPath), "plugin add basecamp-cli@37signals --json")
 }
 
 func TestSetupCodexPluginFailureReturnsStructuredError(t *testing.T) {
@@ -155,7 +187,7 @@ func TestRunCodexSetupInteractiveExplainsNextSteps(t *testing.T) {
 	require.NoError(t, runCodexSetup(cmd, styles))
 
 	assert.Contains(t, output.String(), "Registering 37signals marketplace")
-	assert.Contains(t, output.String(), "Installing basecamp plugin")
+	assert.Contains(t, output.String(), "Installing basecamp-cli plugin")
 	// Codex lists untrusted hooks but does not run them until trusted, so
 	// complete hook setup before starting the thread that loads the skills.
 	trustAt := strings.Index(output.String(), "trust the plugin hooks with /hooks")
@@ -178,7 +210,7 @@ func TestRunCodexSetupInteractiveFailureWarnsAndContinues(t *testing.T) {
 
 	assert.Contains(t, output.String(), "Codex plugin setup failed")
 	assert.Contains(t, output.String(), "codex plugin marketplace add basecamp/claude-plugins")
-	assert.Contains(t, output.String(), "codex plugin add basecamp@37signals")
+	assert.Contains(t, output.String(), "codex plugin add basecamp-cli@37signals")
 	assert.Contains(t, output.String(), "basecamp doctor")
 }
 
@@ -193,7 +225,7 @@ func TestInstallCodexPluginReturnsStructuredError(t *testing.T) {
 	assert.Equal(t, []string{
 		"codex plugin marketplace add basecamp/claude-plugins",
 		"codex plugin marketplace upgrade 37signals",
-		"codex plugin add basecamp@37signals",
+		"codex plugin add basecamp-cli@37signals",
 	}, setupErr.Manual)
 }
 
@@ -237,6 +269,8 @@ type codexStubOptions struct {
 	pluginAlreadyInstalled         bool
 	pluginFailure                  bool
 	verificationMissing            bool
+	legacyInstalled                bool
+	legacyRemoveFailure            bool
 }
 
 func installCodexStub(t *testing.T, options codexStubOptions) string {
@@ -247,6 +281,16 @@ func installCodexStub(t *testing.T, options codexStubOptions) string {
 	statePath := filepath.Join(home, "installed")
 	if options.pluginAlreadyInstalled {
 		require.NoError(t, os.WriteFile(statePath, []byte("installed"), 0o644))
+	}
+	// PATH holds only the stub, so it records state with shell builtins
+	// (no rm): the legacy file reads "installed" until `plugin remove`.
+	legacyPath := filepath.Join(home, "legacy")
+	if options.legacyInstalled {
+		require.NoError(t, os.WriteFile(legacyPath, []byte("installed"), 0o644))
+		manifestDir := filepath.Join(home, ".codex", "plugins", "cache", "37signals", "basecamp", "0.11.0", ".codex-plugin")
+		require.NoError(t, os.MkdirAll(manifestDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(manifestDir, "plugin.json"),
+			[]byte(`{"name":"basecamp","repository":"https://github.com/basecamp/basecamp-cli"}`), 0o644))
 	}
 	logPath := filepath.Join(home, "codex-calls.log")
 	boolShell := func(value bool) string {
@@ -264,12 +308,17 @@ func installCodexStub(t *testing.T, options codexStubOptions) string {
 		"    if [ " + boolShell(options.marketplaceAlreadyAddedSuccess) + " = 1 ]; then echo '{\"marketplaceName\":\"37signals\",\"alreadyAdded\":true}'; exit 0; fi\n" +
 		"    echo '{\"name\":\"37signals\"}'; exit 0 ;;\n" +
 		"  \"plugin marketplace upgrade 37signals --json\") echo '{\"name\":\"37signals\"}'; exit 0 ;;\n" +
-		"  \"plugin add basecamp@37signals --json\")\n" +
+		"  \"plugin add basecamp-cli@37signals --json\")\n" +
 		"    if [ " + boolShell(options.pluginFailure) + " = 1 ]; then echo 'plugin failure' >&2; exit 1; fi\n" +
 		"    : > \"" + statePath + "\"; echo '{\"installed\":true}'; exit 0 ;;\n" +
+		"  \"plugin remove basecamp@37signals --json\")\n" +
+		"    if [ " + boolShell(options.legacyRemoveFailure) + " = 1 ]; then echo 'remove failure' >&2; exit 1; fi\n" +
+		"    echo removed > \"" + legacyPath + "\"; echo '{}'; exit 0 ;;\n" +
 		"  \"plugin list --available --json\")\n" +
-		"    if [ " + boolShell(options.verificationMissing) + " = 1 ]; then echo '{\"installed\":[],\"available\":[{\"pluginId\":\"basecamp@37signals\",\"version\":\"0.7.2\",\"installed\":false,\"enabled\":false}]}'; exit 0; fi\n" +
-		"    if [ -f \"" + statePath + "\" ]; then echo '{\"installed\":[{\"pluginId\":\"basecamp@37signals\",\"version\":\"0.7.2\",\"installed\":true,\"enabled\":true}],\"available\":[]}'; else echo '{\"installed\":[],\"available\":[]}'; fi; exit 0 ;;\n" +
+		"    legacy_state=''; [ -f \"" + legacyPath + "\" ] && read -r legacy_state < \"" + legacyPath + "\"\n" +
+		"    if [ \"$legacy_state\" = installed ]; then legacy='{\"pluginId\":\"basecamp@37signals\",\"version\":\"0.11.0\",\"installed\":true,\"enabled\":true},'; else legacy=''; fi\n" +
+		"    if [ " + boolShell(options.verificationMissing) + " = 1 ]; then echo '{\"installed\":[],\"available\":[{\"pluginId\":\"basecamp-cli@37signals\",\"version\":\"0.7.2\",\"installed\":false,\"enabled\":false}]}'; exit 0; fi\n" +
+		"    if [ -f \"" + statePath + "\" ]; then echo \"{\\\"installed\\\":[$legacy{\\\"pluginId\\\":\\\"basecamp-cli@37signals\\\",\\\"version\\\":\\\"0.7.2\\\",\\\"installed\\\":true,\\\"enabled\\\":true}],\\\"available\\\":[]}\"; else echo \"{\\\"installed\\\":[${legacy%,}],\\\"available\\\":[]}\"; fi; exit 0 ;;\n" +
 		"  *) echo 'unexpected command' >&2; exit 1 ;;\n" +
 		"esac\n"
 	require.NoError(t, os.WriteFile(filepath.Join(binDir, "codex"), []byte(script), 0o755)) //nolint:gosec // test executable

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/version"
@@ -17,12 +18,18 @@ import (
 const (
 	// CodexMarketplaceSource is the Git marketplace repository containing Basecamp.
 	CodexMarketplaceSource = "basecamp/claude-plugins"
-	// CodexPluginName is the plugin identifier to install.
-	CodexPluginName = "basecamp"
+	// CodexPluginName is the plugin identifier to install. It was "basecamp"
+	// until the 37signals marketplace gave that name to the hosted-connector
+	// plugin; see CodexLegacyPluginKey.
+	CodexPluginName = "basecamp-cli"
 	// CodexMarketplaceName is the marketplace name published by 37signals.
 	CodexMarketplaceName = "37signals"
 	// CodexExpectedPluginKey is the fully qualified Basecamp plugin ID.
 	CodexExpectedPluginKey = CodexPluginName + "@" + CodexMarketplaceName
+	// CodexLegacyPluginKey is the pre-rename plugin ID. It now also names
+	// the hosted-connector plugin, so an install under it is this CLI's only
+	// when its cached manifest says so (see codexLegacyCLIInstalled).
+	CodexLegacyPluginKey = "basecamp@" + CodexMarketplaceName
 
 	// codexQueryTimeout bounds how long the Codex probe may run.
 	codexQueryTimeout = 5 * time.Second
@@ -106,6 +113,10 @@ type codexPluginState struct {
 	Version     string `json:"version"`
 	Installed   bool   `json:"installed"`
 	Enabled     bool   `json:"enabled"`
+
+	// legacyInstalled is set, on the state queryCodexPlugin returns, when
+	// this CLI's plugin is still installed under CodexLegacyPluginKey.
+	legacyInstalled bool
 }
 
 func init() {
@@ -174,6 +185,14 @@ func codexPluginCheck(state codexPluginState, found bool, err error) *StatusChec
 		return codexQueryFailure("Codex Plugin", err)
 	}
 	if !found || !state.Installed {
+		if state.legacyInstalled {
+			return &StatusCheck{
+				Name:    "Codex Plugin",
+				Status:  "fail",
+				Message: "Installed under the old name " + CodexLegacyPluginKey,
+				Hint:    "Run: basecamp setup codex (reinstalls it as " + CodexExpectedPluginKey + ")",
+			}
+		}
 		return &StatusCheck{
 			Name:    "Codex Plugin",
 			Status:  "fail",
@@ -186,6 +205,14 @@ func codexPluginCheck(state codexPluginState, found bool, err error) *StatusChec
 			Name:    "Codex Plugin",
 			Status:  "fail",
 			Message: "Installed but disabled",
+			Hint:    "Run: basecamp setup codex",
+		}
+	}
+	if state.legacyInstalled {
+		return &StatusCheck{
+			Name:    "Codex Plugin",
+			Status:  "warn",
+			Message: "Installed, but the old " + CodexLegacyPluginKey + " copy is still installed too",
 			Hint:    "Run: basecamp setup codex",
 		}
 	}
@@ -270,9 +297,16 @@ func queryCodexPlugin(parent context.Context) (codexPluginState, bool, error) {
 	if envelope.Installed == nil && envelope.Available == nil {
 		return codexPluginState{}, false, fmt.Errorf("%w: missing installed and available fields", errCodexParse)
 	}
+	legacy := false
 	if envelope.Installed != nil {
 		for _, plugin := range *envelope.Installed {
+			if plugin.PluginID == CodexLegacyPluginKey && plugin.Installed && codexLegacyCLIInstalled(plugin.Version) {
+				legacy = true
+			}
+		}
+		for _, plugin := range *envelope.Installed {
 			if plugin.PluginID == CodexExpectedPluginKey {
+				plugin.legacyInstalled = legacy
 				return plugin, true, nil
 			}
 		}
@@ -280,11 +314,51 @@ func queryCodexPlugin(parent context.Context) (codexPluginState, bool, error) {
 	if envelope.Available != nil {
 		for _, plugin := range *envelope.Available {
 			if plugin.PluginID == CodexExpectedPluginKey {
+				plugin.legacyInstalled = legacy
 				return plugin, true, nil
 			}
 		}
 	}
-	return codexPluginState{}, false, nil
+	return codexPluginState{legacyInstalled: legacy}, false, nil
+}
+
+// CodexLegacyCLIInstalled reports whether this CLI's plugin is still installed
+// in Codex under CodexLegacyPluginKey. It reads the plugin list itself, so
+// callers that already hold a query result should use its state instead.
+func CodexLegacyCLIInstalled(ctx context.Context) bool {
+	state, _, err := queryCodexPlugin(ctx)
+	return err == nil && state.legacyInstalled
+}
+
+// codexLegacyCLIInstalled reports whether the cached copy of the
+// CodexLegacyPluginKey install at version is this CLI's plugin. Codex's
+// plugin list reports the marketplace's current source for an ID, not the
+// source the installed copy came from — after the rename that is the hosted
+// connector's — so the installed manifest is the only reliable witness. A
+// manifest that can't be read is not counted: leaving a legacy CLI install
+// in place beats removing a hosted-connector one.
+func codexLegacyCLIInstalled(version string) bool {
+	if version == "" || strings.ContainsAny(version, `/\`) || version == "." || version == ".." {
+		return false
+	}
+	home := codexHome()
+	if home == "" {
+		return false
+	}
+	name := strings.TrimSuffix(CodexLegacyPluginKey, "@"+CodexMarketplaceName)
+	return isCLIPluginManifest(filepath.Join(home, "plugins", "cache", CodexMarketplaceName, name, version, ".codex-plugin", "plugin.json"))
+}
+
+// codexHome is $CODEX_HOME, or ~/.codex.
+func codexHome() string {
+	if home := os.Getenv("CODEX_HOME"); home != "" {
+		return filepath.Clean(home)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Clean(home), ".codex")
 }
 
 func codexQueryFailure(name string, err error) *StatusCheck {
