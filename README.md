@@ -299,12 +299,15 @@ To pick up a newer plugin version later, refresh the marketplace with
 `codex plugin marketplace upgrade 37signals` (or re-run `basecamp setup codex`).
 
 **Plugin name:** in the 37signals marketplace this plugin is `basecamp-cli`
-(`basecamp-cli@37signals`). It was published as `basecamp` until that name
-was set aside for the hosted Basecamp connector plugin, which works through
-Basecamp's own MCP server rather than this CLI. If you installed the plugin
-under the old name, re-run `basecamp setup claude` or `basecamp setup codex`:
-setup installs `basecamp-cli` and removes `basecamp@37signals` at the scopes it
-was installed in. To migrate by hand:
+(`basecamp-cli@37signals`). It was published as `basecamp`, a name set aside
+for the hosted Basecamp connector plugin, which works through Basecamp's own
+MCP server rather than this CLI. During a deprecation window the marketplace
+keeps `basecamp` as an alias of `basecamp-cli`, so an existing
+`basecamp@37signals` install keeps working and updating; once per agent it
+says the plugin has been renamed. Switch with `basecamp setup claude` or
+`basecamp setup codex` (or `basecamp setup agents`), which installs
+`basecamp-cli` and removes `basecamp@37signals` at the scopes it was
+installed in. To switch by hand:
 
 ```bash
 claude plugin marketplace update 37signals
