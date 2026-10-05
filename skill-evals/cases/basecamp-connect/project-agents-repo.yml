@@ -11,9 +11,8 @@ context: >-
   "requester_name":"Jorge","acknowledge":true,"content":"Fix the date picker"}.
   last.json has an operator-confirmed mapping for project 456 to
   /home/me/code/basecamp. The usual code folder also contains
-  /home/me/code/calendar, and both repos are available locally. You may use
-  either without asking me, but must follow the project's standing instructions.
-  Do not update last.json or ask to save a new mapping in this exercise.
+  /home/me/code/calendar and /home/me/code/waypoint; all three repos are available
+  locally. This task is repo selection only; leave remembered settings unchanged.
 tags: [connect]
 mocks:
   # AGENTS.md is in a nested folder and beyond the first page. Only an
@@ -23,7 +22,7 @@ mocks:
   - match: '^(docs documents list|recordings documents)'
     output: '{"ok":true,"data":[{"id":900,"title":"Welcome"}],"summary":"1 document"}'
   - match: '^docs show [''"]?901[''"]?(?=\s|$)(?=.*\s--project[ =][''"]?456[''"]?(?:\s|$))(?=.*\s(?:-P|--profile)[ =][''"]?helper[''"]?(?:\s|$))'
-    output: '{"ok":true,"data":{"id":901,"title":"AGENTS.md","content":"<p>Repo mapping: work in this project belongs in /home/me/code/calendar, not the main Basecamp repo. Read that repo before answering code questions.</p>"}}'
+    output: '{"ok":true,"data":{"id":901,"title":"AGENTS.md","content":"<p>Repo mapping: work in this project belongs in /home/me/code/waypoint, not the main Basecamp repo or the calendar repo. Read that repo before answering code questions.</p>"}}'
 # This case measures discovery and repo selection, not acknowledgement syntax.
 # Assert the scoped calls in order directly, rather than maintaining separate
 # accept and sequence patterns that can be satisfied by different invocations.
@@ -35,6 +34,6 @@ reject:
   - '^connect setup\b'
   - '^(cards move|comments create|chat post)\b'
 accept_response:
-  - '\A\s*/home/me/code/calendar\s*\z'
+  - '\A\s*/home/me/code/waypoint\s*\z'
 reject_response:
   - '/home/me/code/basecamp'
