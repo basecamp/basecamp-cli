@@ -503,3 +503,103 @@ func TestCheckinsAnswersAccountWideStyledRendersRecordings(t *testing.T) {
 	assert.Contains(t, rendered, "Monday")
 	assert.Contains(t, rendered, "Tuesday")
 }
+
+// BC3 reads a question's time of day from schedule.time_of_day; hour and minute
+// are response-only, and a create that sends them is refused with 422.
+func TestCheckinsQuestionCreateSendsTimeOfDay(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"How are you?"}, "17:00"},
+		{[]string{"How are you?", "--time", "4:30pm"}, "16:30"},
+		{[]string{"How are you?", "--time", "09:05"}, "09:05"},
+	} {
+		transport := runCheckinsQuestionCreate(t, tc.args...)
+		schedule, ok := transport.recordedBody["schedule"].(map[string]any)
+		require.True(t, ok, "expected a schedule object, got %v", transport.recordedBody["schedule"])
+		assert.Equal(t, tc.want, schedule["time_of_day"], "args %v", tc.args)
+		assert.NotContains(t, schedule, "hour")
+		assert.NotContains(t, schedule, "minute")
+	}
+}
+
+func TestQuestionTimeOfDay(t *testing.T) {
+	for in, want := range map[string]string{"5:00pm": "17:00", "5pm": "17:00", "12:00am": "00:00", "12:30pm": "12:30", "17:00": "17:00", " 9:05AM ": "09:05"} {
+		got, err := questionTimeOfDay(in)
+		require.NoError(t, err, in)
+		assert.Equal(t, want, got, in)
+	}
+	for _, in := range []string{"25:00", "17:60", "13pm", "noon", "", "5:00:00"} {
+		_, err := questionTimeOfDay(in)
+		assert.Error(t, err, "expected %q to be rejected", in)
+	}
+}
+
+// mockCheckinsQuestionUpdateTransport serves an every-other-week, Monday/Wednesday,
+// 9:30 question anchored on 2026-09-28 and records the PUT that updates it.
+type mockCheckinsQuestionUpdateTransport struct {
+	recordedBody map[string]any
+	gets         int
+}
+
+func (m *mockCheckinsQuestionUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+	question := `{"id":789,"title":"How are you?","type":"Question","schedule":{"frequency":"every_other_week","days":[1,3],"hour":9,"minute":30,"week_instance":2,"start_date":"2026-09-28"}}`
+
+	switch {
+	case req.Method == "GET" && strings.Contains(req.URL.Path, "/projects.json"):
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`[{"id":123,"name":"Test Project"}]`)), Header: header}, nil
+	case req.Method == "GET" && strings.Contains(req.URL.Path, "/questions/789"):
+		m.gets++
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(question)), Header: header}, nil
+	case req.Method == "PUT" && strings.Contains(req.URL.Path, "/questions/789"):
+		defer req.Body.Close()
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(body, &m.recordedBody); err != nil {
+			return nil, err
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(question)), Header: header}, nil
+	default:
+		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{"error":"Not Found"}`)), Header: header}, nil
+	}
+}
+
+func runCheckinsQuestionUpdate(t *testing.T, args ...string) *mockCheckinsQuestionUpdateTransport {
+	t.Helper()
+	transport := &mockCheckinsQuestionUpdateTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+	app.Config.ProjectID = "123"
+
+	project := ""
+	require.NoError(t, executeCommand(newCheckinsQuestionUpdateCmd(&project), app, args...))
+	require.NotNil(t, transport.recordedBody, "expected the update to be sent")
+	return transport
+}
+
+// BC3 replaces a question's whole schedule on update and refuses one missing its
+// frequency or time, so a flag that changes one part must carry the rest over —
+// the start date too, or an every-other-week question re-anchors on today.
+func TestCheckinsQuestionUpdateSendsTheWholeSchedule(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want map[string]any
+	}{
+		{[]string{"789", "--time", "4:15pm"}, map[string]any{"frequency": "every_other_week", "days": []any{1.0, 3.0}, "time_of_day": "16:15", "week_instance": 2.0, "start_date": "2026-09-28"}},
+		{[]string{"789", "--frequency", "every_day", "--days", "1,2,3,4,5"}, map[string]any{"frequency": "every_day", "days": []any{1.0, 2.0, 3.0, 4.0, 5.0}, "time_of_day": "09:30", "week_instance": 2.0, "start_date": "2026-09-28"}},
+	} {
+		transport := runCheckinsQuestionUpdate(t, tc.args...)
+		assert.Equal(t, tc.want, transport.recordedBody["schedule"], "args %v", tc.args)
+	}
+}
+
+func TestCheckinsQuestionUpdateTitleOnlyLeavesTheScheduleAlone(t *testing.T) {
+	transport := runCheckinsQuestionUpdate(t, "789", "New title")
+	assert.Equal(t, "New title", transport.recordedBody["title"])
+	assert.NotContains(t, transport.recordedBody, "schedule")
+	assert.Zero(t, transport.gets, "a title-only update needs no read")
+}
