@@ -136,6 +136,14 @@ func CheckClaudePlugin() *StatusCheck {
 	// Try as array of objects with "name" or "package" fields,
 	// or as a map with plugin keys.
 	if pluginInstalled(data) {
+		if len(legacyCLIPluginEntries(data)) > 0 {
+			return &StatusCheck{
+				Name:    "Claude Code Plugin",
+				Status:  "warn",
+				Message: "Installed, but the old " + ClaudeLegacyPluginKey + " copy is still installed too",
+				Hint:    "Run: basecamp setup claude",
+			}
+		}
 		return &StatusCheck{
 			Name:    "Claude Code Plugin",
 			Status:  "pass",
@@ -507,7 +515,9 @@ func appendUnique(ss []string, s string) []string {
 // manifest names CLIRepository count. An entry whose manifest can't be read —
 // or a file format that records no install path — is left alone, since
 // removing a hosted-connector install would be worse than leaving a legacy
-// CLI one in place.
+// CLI one in place. So is an entry without a scope `claude plugin uninstall
+// --scope` accepts: setup falls back to an unscoped uninstall for those, and
+// for this shared key that would remove a hosted connector at every scope.
 func legacyCLIPluginEntries(data []byte) []StalePlugin {
 	var envelope struct {
 		Plugins map[string][]struct {
@@ -525,18 +535,22 @@ func legacyCLIPluginEntries(data []byte) []StalePlugin {
 	found := false
 	var scopes []string
 	for _, entry := range entries {
-		if entry.InstallPath == "" || !isCLIPluginManifest(filepath.Join(entry.InstallPath, ".claude-plugin", "plugin.json")) {
+		if !targetableScope(entry.Scope) || entry.InstallPath == "" || !isCLIPluginManifest(filepath.Join(entry.InstallPath, ".claude-plugin", "plugin.json")) {
 			continue
 		}
 		found = true
-		if entry.Scope != "" {
-			scopes = appendUnique(scopes, entry.Scope)
-		}
+		scopes = appendUnique(scopes, entry.Scope)
 	}
 	if !found {
 		return nil
 	}
 	return []StalePlugin{{Key: ClaudeLegacyPluginKey, Scopes: scopes}}
+}
+
+// targetableScope reports whether scope is one `claude plugin uninstall
+// --scope` accepts (the same set setup's validPluginScope allows).
+func targetableScope(scope string) bool {
+	return scope == "user" || scope == "project" || scope == "local"
 }
 
 // isCLIPluginManifest reports whether the plugin manifest at path is this

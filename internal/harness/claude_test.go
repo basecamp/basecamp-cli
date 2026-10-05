@@ -391,6 +391,30 @@ func TestLegacyCLIPluginEntries_OnlyCLIScopesCount(t *testing.T) {
 	assert.Equal(t, []StalePlugin{{Key: "basecamp@37signals", Scopes: []string{"project"}}}, got)
 }
 
+// An entry without a targetable scope would reach setup's unscoped uninstall,
+// which removes the shared key at every scope — hosted connector included.
+func TestLegacyCLIPluginEntries_UntargetableScopeIsLeftAlone(t *testing.T) {
+	dir := t.TempDir()
+	writePluginManifest(t, dir, ".claude-plugin", "https://github.com/basecamp/basecamp-cli")
+	assert.Empty(t, legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntry("", dir))))
+	assert.Empty(t, legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntry("global", dir))))
+	got := legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntry("global", dir), legacyEntry("local", dir)))
+	assert.Equal(t, []StalePlugin{{Key: "basecamp@37signals", Scopes: []string{"local"}}}, got)
+}
+
+func TestCheckClaudePlugin_BothInstalledWarns(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	installPath := filepath.Join(home, ".claude", "plugins", "cache", "37signals", "basecamp", "0.11.0")
+	writePluginManifest(t, installPath, ".claude-plugin", "https://github.com/basecamp/basecamp-cli")
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"),
+		[]byte(`{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"0.12.0"}],"basecamp@37signals":[`+legacyEntry("user", installPath)+`]}}`), 0o644))
+
+	check := CheckClaudePlugin()
+	assert.Equal(t, "warn", check.Status)
+	assert.Contains(t, check.Message, "old basecamp@37signals copy")
+}
+
 func TestLegacyCLIPluginEntries_UnreadableManifestIsLeftAlone(t *testing.T) {
 	assert.Empty(t, legacyCLIPluginEntries(legacyInstalledPlugins(legacyEntry("user", filepath.Join(t.TempDir(), "gone")))))
 	assert.Empty(t, legacyCLIPluginEntries([]byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user"}]}}`)))

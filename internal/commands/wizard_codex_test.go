@@ -285,6 +285,9 @@ func installCodexStub(t *testing.T, options codexStubOptions) string {
 	// PATH holds only the stub, so it records state with shell builtins
 	// (no rm): the legacy file reads "installed" until `plugin remove`.
 	legacyPath := filepath.Join(home, "legacy")
+	// codexHome prefers $CODEX_HOME; pin it so an ambient value can't hide
+	// the fixture.
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	if options.legacyInstalled {
 		require.NoError(t, os.WriteFile(legacyPath, []byte("installed"), 0o644))
 		manifestDir := filepath.Join(home, ".codex", "plugins", "cache", "37signals", "basecamp", "0.11.0", ".codex-plugin")

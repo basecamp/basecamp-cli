@@ -201,10 +201,14 @@ func codexPluginCheck(state codexPluginState, found bool, err error) *StatusChec
 		}
 	}
 	if !state.Enabled {
+		message := "Installed but disabled"
+		if state.legacyInstalled {
+			message += "; the old " + CodexLegacyPluginKey + " copy is still installed too"
+		}
 		return &StatusCheck{
 			Name:    "Codex Plugin",
 			Status:  "fail",
-			Message: "Installed but disabled",
+			Message: message,
 			Hint:    "Run: basecamp setup codex",
 		}
 	}
