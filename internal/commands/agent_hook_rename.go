@@ -14,46 +14,38 @@ import (
 // plugin install, so it appears once rather than every session.
 const pluginRenameNoticeMarker = "plugin-rename-notice-shown"
 
-// newAgentHookPluginNoticeCmd tells someone still running this plugin under
-// its pre-rename id that it is now basecamp-cli. During the deprecation window
-// the marketplace keeps "basecamp" as an alias with the same source, so the
-// plugin keeps working; this nudges toward `basecamp setup`, once.
+// emitPluginRenameNotice tells someone still running this plugin under its
+// pre-rename id that it is now basecamp-cli. During the deprecation window the
+// marketplace keeps "basecamp" as an alias with the same source, so the plugin
+// keeps working; this nudges toward `basecamp setup`, once.
 //
 // The alias and basecamp-cli install the same files, so the manifest can't
 // tell them apart. The plugin root can: agents cache each install under
 // <marketplace>/<plugin id>/<version>. Anything other than an install as
 // basecamp@37signals stays silent, so the hook injects nothing into normal
 // sessions.
-func newAgentHookPluginNoticeCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "plugin-notice",
-		Short: "Tell a pre-rename plugin install to switch to basecamp-cli, once",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			root := agentPluginRoot()
-			if !isLegacyPluginRoot(root) {
-				return nil
-			}
-			dir := agentPluginDataDir()
-			if dir == "" {
-				dir = agentHookStateDir(cmd.Context())
-			}
-			if dir == "" || !claimOnce(filepath.Join(dir, pluginRenameNoticeMarker)) {
-				return nil
-			}
-			message := "The Basecamp plugin is now `" + harness.ClaudePluginName + "`. " +
-				"This copy still runs under its old name `" + harness.ClaudeLegacyPluginKey + "`, which keeps working for now. " +
-				"Run `" + legacyPluginSetupCommand(root) + "` to switch."
-			_ = json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{
-				"systemMessage": message,
-				"hookSpecificOutput": map[string]string{
-					"hookEventName":     "SessionStart",
-					"additionalContext": "Mention this to the user once: " + message,
-				},
-			})
-			return nil
-		},
+func emitPluginRenameNotice(cmd *cobra.Command) {
+	root := agentPluginRoot()
+	if !isLegacyPluginRoot(root) {
+		return
 	}
+	dir := agentPluginDataDir()
+	if dir == "" {
+		dir = agentHookStateDir(cmd.Context())
+	}
+	if dir == "" || !claimOnce(filepath.Join(dir, pluginRenameNoticeMarker)) {
+		return
+	}
+	message := "The Basecamp plugin is now `" + harness.ClaudePluginName + "`. " +
+		"This copy still runs under its old name `" + harness.ClaudeLegacyPluginKey + "`, which keeps working for now. " +
+		"Run `" + legacyPluginSetupCommand(root) + "` to switch."
+	_ = json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{
+		"systemMessage": message,
+		"hookSpecificOutput": map[string]string{
+			"hookEventName":     "SessionStart",
+			"additionalContext": "Mention this to the user once: " + message,
+		},
+	})
 }
 
 // agentPluginRoot is the plugin's install directory as the agent reports it:

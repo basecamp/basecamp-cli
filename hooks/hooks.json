@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "basecamp agent-hook plugin-notice",
+            "command": "basecamp agent-hook pre-commit-snapshot",
             "timeout": 5
           }
         ]

@@ -146,9 +146,12 @@ func TestHooksFileCommandsInvokeBasecamp(t *testing.T) {
 	// Plugins must not inject Basecamp context into every agent session. The
 	// one SessionStart hook allowed is the rename notice, which stays silent
 	// unless the plugin runs under its pre-rename id, and then speaks once.
+	// It goes through pre-commit-snapshot, which every hook-capable CLI has
+	// and which older ones answer silently: a new subcommand would fail
+	// every session start for anyone whose CLI is older than the plugin.
 	for _, matcher := range config.Hooks["SessionStart"] {
 		for _, hook := range matcher.Hooks {
-			assert.Equal(t, "basecamp agent-hook plugin-notice", hook.Command, "only the rename notice may run at session start")
+			assert.Equal(t, "basecamp agent-hook pre-commit-snapshot", hook.Command, "only the rename notice may run at session start")
 		}
 	}
 

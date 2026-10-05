@@ -72,7 +72,7 @@ func NewAgentHookCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.AddCommand(newAgentHookSessionStartCmd(), newAgentHookPluginNoticeCmd(), newAgentHookPreCommitSnapshotCmd(), newAgentHookPostCommitCmd())
+	cmd.AddCommand(newAgentHookSessionStartCmd(), newAgentHookPreCommitSnapshotCmd(), newAgentHookPostCommitCmd())
 	return cmd
 }
 
@@ -165,6 +165,15 @@ func newAgentHookPreCommitSnapshotCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			input, ok := readAgentHookInput(cmd.InOrStdin())
+			// The plugin's SessionStart hook runs this subcommand too, for the
+			// rename notice: CLIs that predate the notice already have this
+			// subcommand and ignore a payload with no tool call, so a plugin
+			// newer than the CLI stays silent instead of failing every
+			// session start with "unknown command".
+			if ok && input.HookEventName == "SessionStart" {
+				emitPluginRenameNotice(cmd)
+				return nil
+			}
 			if !ok || !agentHookHasSnapshotKey(input) ||
 				!strings.Contains(strings.ToLower(agentHookCommand(input.ToolInput)), "commit") {
 				return nil
