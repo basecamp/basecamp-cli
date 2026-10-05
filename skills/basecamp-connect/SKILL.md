@@ -325,8 +325,9 @@ and decided, including what it turned away. Never act on those.
 ## For each request: acknowledge, choose the repo, hand off
 
 **This session is the orchestrator, not a worker.** Its only job per request is
-these steps, in order, and then back to watching. It never reads the thread,
-investigates, runs repo commands, does the work or writes the reply. Every one
+these steps, in order, and then back to watching. Apart from reading the project's
+AGENTS.md to choose the repo, it never reads the thread, investigates, runs repo
+commands, does the work or writes the reply. Every one
 of those delays the next acknowledgement, and an acknowledged request that sits
 silent for half an hour looks exactly like a missed one.
 
@@ -360,13 +361,36 @@ request landed.
 
 ### b. Choose the repo
 
-Work out which local repo the project's work goes in, quickly:
+**Read the project's AGENTS.md before choosing the repo**, even when `last.json`
+already has a mapping. Find a document titled `AGENTS.md` in the project's Docs
+& Files. Use the project's recording index: it includes documents in nested
+folders, unlike a root-vault document listing. Fetch every page:
+
+```bash
+basecamp recordings documents --all --project <bucket_id> --json -P '<profile>'
+basecamp docs show <doc-id> --project <bucket_id> --json -P '<profile>'
+```
+
+If it declares a repo mapping for this work, that takes precedence over the
+remembered mapping, the request's repo hints, and the project-name heuristic.
+Use the document's repo for this request without asking just because it differs
+from `last.json`. Ask only before saving a changed mapping in `last.json`; leave
+the remembered mapping unchanged until the person confirms updating it.
+Pass the document's full content and its mapping to the subagent, or explicitly pass
+"AGENTS.md checked: none found" after a successful search with no match.
+If more than one document has that title, ask which governs rather than choosing
+one arbitrarily. If no such document exists,
+or it declares no applicable mapping, work out the repo from:
 
 1. `repos` in `last.json`, if this project is there.
 2. A repo the request itself names (a pull request, a repo, a path).
 3. The project's name, `recording.project_name`: names usually carry the app
    (a `BC5 …` project is Basecamp's repo). Look for a matching clone under the
    person's usual code folders.
+
+A failed document read isn't an absent document. If the read fails, or its repo
+mapping is ambiguous or can't be found locally, use the holding reply and ask
+the person below rather than silently falling back.
 
 **If you can't map it confidently, ask the person. Don't guess, and don't fall
 back to this folder.** Before asking, post one short holding reply as the agent
@@ -388,6 +412,9 @@ to finish without this session:
   doesn't start in that repo by itself: say plainly that it must work there;
 - whether an acknowledgement is still owed (the boost failed), or not owed
   (it landed, or the reply is the acknowledgement);
+- the full content of the project's AGENTS.md document and any repo mapping used,
+  or the explicit
+  result "AGENTS.md checked: none found";
 - the subagent instructions below, in full.
 
 Then go straight back to watching. There's no limit on requests in flight.
@@ -424,10 +451,14 @@ basecamp chat messages --project <bucket_id> --room <reply_to.recording_id> --js
 
 **Read the project's AGENTS.md doc, if it has one, and follow it.** It's the
 project's standing instructions for agents: board meanings, how to talk, which
-repo, which workflow. Find a document titled `AGENTS.md`:
+repo, which workflow. Read the full document content passed in the handoff,
+not just its repo mapping. If the handoff
+says "AGENTS.md checked: none found", proceed without repeating the search.
+Only when no discovery result was passed, find a document titled `AGENTS.md`
+using the recording index (including nested folders):
 
 ```bash
-basecamp docs documents list --project <bucket_id> --json -P '<profile>'
+basecamp recordings documents --all --project <bucket_id> --json -P '<profile>'
 basecamp docs show <doc-id> --project <bucket_id> --json -P '<profile>'
 ```
 

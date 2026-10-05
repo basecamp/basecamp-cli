@@ -1,0 +1,39 @@
+task: >-
+  Resolve the local repo for this trusted request's handoff. The acknowledgement
+  already landed; do not boost it again. Reply with only the chosen absolute
+  repo path; don't dispatch the subagent or do the work yet.
+context: >-
+  The connector is already running as profile helper, with identity confirmed.
+  The request line is {"type":"request","event_id":123,"trigger":"mentioned",
+  "recording":{"bucket_id":456,"project_name":"BC5 Calendar",
+  "recording_id":789,"url":"https://app.basecamp.com/999/buckets/456/card_tables/cards/789"},
+  "reply_to":{"kind":"comment","recording_id":789},"requester_id":1001,
+  "requester_name":"Jorge","acknowledge":true,"content":"Fix the date picker"}.
+  last.json has an operator-confirmed mapping for project 456 to
+  /home/me/code/basecamp. The usual code folder also contains
+  /home/me/code/calendar and /home/me/code/waypoint; all three repos are available
+  locally. This task is repo selection only; leave remembered settings unchanged.
+tags: [connect]
+mocks:
+  # AGENTS.md is in a nested folder and beyond the first page. Only an
+  # exhaustive project recording index finds it, not a root-vault listing.
+  - match: '^recordings documents(?=.*\s--all(?:\s|$))(?=.*\s--project[ =][''"]?456[''"]?(?:\s|$))(?=.*\s(?:-P|--profile)[ =][''"]?helper[''"]?(?:\s|$))'
+    output: '{"ok":true,"data":[{"id":900,"title":"Welcome"},{"id":901,"title":"AGENTS.md","parent":{"id":902,"type":"Vault"}}],"summary":"2 documents"}'
+  - match: '^(docs documents list|recordings documents)'
+    output: '{"ok":true,"data":[{"id":900,"title":"Welcome"}],"summary":"1 document"}'
+  - match: '^docs show [''"]?901[''"]?(?=\s|$)(?=.*\s--project[ =][''"]?456[''"]?(?:\s|$))(?=.*\s(?:-P|--profile)[ =][''"]?helper[''"]?(?:\s|$))'
+    output: '{"ok":true,"data":{"id":901,"title":"AGENTS.md","content":"<p>Repo mapping: work in this project belongs in /home/me/code/waypoint, not the main Basecamp repo or the calendar repo. Read that repo before answering code questions.</p>"}}'
+# This case measures discovery and repo selection, not acknowledgement syntax.
+# Assert the scoped calls in order directly, rather than maintaining separate
+# accept and sequence patterns that can be satisfied by different invocations.
+expect_sequence:
+  - match: '^recordings documents(?=.*\s--all(?:\s|$))(?=.*\s--project[ =][''"]?456[''"]?(?:\s|$))(?=.*\s(?:-P|--profile)[ =][''"]?helper[''"]?(?:\s|$))'
+  - match: '^docs show [''"]?901[''"]?(?=\s|$)(?=.*\s--project[ =][''"]?456[''"]?(?:\s|$))(?=.*\s(?:-P|--profile)[ =][''"]?helper[''"]?(?:\s|$))'
+reject:
+  - '^boost create\b'
+  - '^connect setup\b'
+  - '^(cards move|comments create|chat post)\b'
+accept_response:
+  - '\A\s*/home/me/code/waypoint\s*\z'
+reject_response:
+  - '/home/me/code/basecamp'
