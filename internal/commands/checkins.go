@@ -849,6 +849,10 @@ You can pass either a question ID or a Basecamp URL:
 					return convertSDKError(err)
 				}
 				completeQuestionSchedule(schedule, current.Schedule)
+				if schedule.Frequency == "" || schedule.TimeOfDay == "" {
+					return output.ErrUsageHint("This question has no schedule to carry over",
+						"Pass the whole schedule: --frequency, --time and --days")
+				}
 				req.Schedule = schedule
 			}
 
@@ -1590,14 +1594,21 @@ func parseTimeOfDay(t string) (int, int, error) {
 
 	// Handle 12-hour format with am/pm
 	isPM := strings.Contains(t, "pm")
+	hasMeridiem := isPM || strings.Contains(t, "am")
 	t = strings.TrimSuffix(t, "am")
 	t = strings.TrimSuffix(t, "pm")
 	t = strings.TrimSpace(t)
 
 	parts := strings.Split(t, ":")
+	if len(parts) > 2 {
+		return 0, 0, fmt.Errorf("invalid time format")
+	}
 	hour, err := strconv.Atoi(parts[0])
 	if err != nil {
 		return 0, 0, err
+	}
+	if hasMeridiem && (hour < 1 || hour > 12) {
+		return 0, 0, fmt.Errorf("invalid time format")
 	}
 
 	minute := 0

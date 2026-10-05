@@ -530,7 +530,7 @@ func TestQuestionTimeOfDay(t *testing.T) {
 		require.NoError(t, err, in)
 		assert.Equal(t, want, got, in)
 	}
-	for _, in := range []string{"25:00", "17:60", "13pm", "noon", "", "5:00:00"} {
+	for _, in := range []string{"25:00", "17:60", "13pm", "13am", "0pm", "0am", "5:00:30pm", "5:60pm", "noon", "", "5:00:00"} {
 		_, err := questionTimeOfDay(in)
 		assert.Error(t, err, "expected %q to be rejected", in)
 	}
@@ -541,12 +541,16 @@ func TestQuestionTimeOfDay(t *testing.T) {
 type mockCheckinsQuestionUpdateTransport struct {
 	recordedBody map[string]any
 	gets         int
+	question     string // overrides the served question when set
 }
 
 func (m *mockCheckinsQuestionUpdateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 	question := `{"id":789,"title":"How are you?","type":"Question","schedule":{"frequency":"every_other_week","days":[1,3],"hour":9,"minute":30,"week_instance":2,"start_date":"2026-09-28"}}`
+	if m.question != "" {
+		question = m.question
+	}
 
 	switch {
 	case req.Method == "GET" && strings.Contains(req.URL.Path, "/projects.json"):
@@ -602,4 +606,19 @@ func TestCheckinsQuestionUpdateTitleOnlyLeavesTheScheduleAlone(t *testing.T) {
 	assert.Equal(t, "New title", transport.recordedBody["title"])
 	assert.NotContains(t, transport.recordedBody, "schedule")
 	assert.Zero(t, transport.gets, "a title-only update needs no read")
+}
+
+// A question Basecamp returns without a schedule leaves nothing to carry over,
+// so an update that changes only part of one is refused here with a usage error
+// naming the flags to pass, rather than sent for Basecamp to refuse.
+func TestCheckinsQuestionUpdateRefusesAScheduleItCannotComplete(t *testing.T) {
+	transport := &mockCheckinsQuestionUpdateTransport{question: `{"id":789,"title":"How are you?","type":"Question"}`}
+	app, _ := newTestAppWithTransport(t, transport)
+	app.Config.ProjectID = "123"
+
+	project := ""
+	err := executeCommand(newCheckinsQuestionUpdateCmd(&project), app, "789", "--time", "4:15pm")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--frequency")
+	assert.Nil(t, transport.recordedBody, "an incomplete schedule must not be sent")
 }
