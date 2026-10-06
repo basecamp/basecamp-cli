@@ -143,4 +143,5 @@ func TestContainerLoginAdvice(t *testing.T) {
 	assert.True(t, strings.Contains(containerLoginAdvice, "BASECAMP_TOKEN"), containerLoginAdvice)
 	assert.True(t, strings.Contains(containerLoginAdvice, "volume"), containerLoginAdvice)
 	assert.True(t, strings.Contains(containerLoginAdvice, "BASECAMP_NO_KEYRING=1"), "a keyring would keep each container's own copy")
+	assert.True(t, strings.Contains(containerLoginAdvice, "On one host"), "a shared volume is only safe where its flock is")
 }
