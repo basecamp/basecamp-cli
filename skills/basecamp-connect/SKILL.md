@@ -199,7 +199,8 @@ agent, name the operator by their own CLI profile with `--operator-profile
 '<profile>'`. For allowlist, or operators beside project trust, look up each
 person's id with `basecamp people list --json`,
 and pass `--allow <id>` for each.
-Each setup run replaces the list, and `--trust project` without `--allow`
+A run that passes `--allow` replaces the list; a run that passes none keeps
+it, except that `--trust operator`, or `--trust project` without `--allow`,
 clears it.
 
 **3. Projects, by name.** List them (`basecamp projects list -P '<profile>'
