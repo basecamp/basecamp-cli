@@ -75,7 +75,7 @@ Each becomes a flag on setup (*First-time setup*, step 4):
 | "me and Jane" | `--allow <jane's person id>` (and everyone else who stays: the list is replaced) |
 | "anyone in the project can ask it things" | `--trust project` (they ask as participants) |
 | "Jane operates it, and anyone in the project can ask" | `--trust project --allow <jane's person id>` |
-| "the people I named can assign it work too" | `--allow-assignments-from-authorized`: it covers the whole allowlist setup leaves (this run's `--allow`, or the list kept), not one person, so say who that is and confirm. A run whose `--allow` names someone new turns it off unless it's passed again |
+| "the people I named can assign it work too" | `--allow-assignments-from-authorized`: it covers the whole allowlist setup leaves (this run's `--allow`, or the list kept), not one person, so say who that is and confirm. With nobody on the allowlist setup refuses it, so name someone first. A run whose `--allow` names someone new turns it off unless it's passed again |
 | "also work in project X" | `--serve <id of X>` |
 | "stop working in X" | `--unserve <id of X>` |
 
@@ -314,7 +314,8 @@ thing to check.
 - **`trigger`**: why it reached you.
   - `mentioned`: someone @mentioned the agent.
   - `assigned`: the operator, or someone they opted in, assigned it a card,
-    to-do or step.
+    to-do or step. Only when the recording's events show this assignment
+    added the agent, and the agent is still assigned.
   - `subscribed`: a new comment on a thread the agent follows, with no mention.
   - `completed`: something completed in a project it watches.
 - **`acknowledge`**: true when a person asked for something. False for
