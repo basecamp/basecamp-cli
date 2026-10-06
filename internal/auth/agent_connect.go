@@ -111,6 +111,16 @@ type AgentConnectResult struct {
 	ClientID  string
 }
 
+// AgentConnectIntake is what a person needs to approve a connection: the
+// link to open, the code to check against the page, and when the code
+// dies. The link is the validated URL the browser would be sent to; the
+// code is stripped of control sequences, as the terminal copy is.
+type AgentConnectIntake struct {
+	VerificationURI string
+	UserCode        string
+	ExpiresAt       time.Time
+}
+
 // AgentConnectOptions configures the connection ceremony.
 type AgentConnectOptions struct {
 	// DeviceName is where this connector runs, self-asserted and shown to
@@ -145,6 +155,14 @@ type AgentConnectOptions struct {
 	// Progress, when it is a terminal, carries the live wait line while
 	// the poll runs, exactly as it does for a device login.
 	Progress io.Writer
+
+	// OnIntake, when set, is told what the operator needs to approve the
+	// connection as soon as the intake has answered, before the browser is
+	// opened and the wait begins: a caller reading the ceremony as data
+	// learns the link and the code without parsing the operator's half.
+	// It is never given the device code, which is the poll's bearer and
+	// stays inside this flow.
+	OnIntake func(AgentConnectIntake)
 
 	// BeforeStore, when set, runs after the poll has handed over the
 	// credential and the mint has proved it, and before anything is
@@ -254,6 +272,14 @@ func (m *Manager) ConnectAgent(ctx context.Context, opts AgentConnectOptions) (*
 	intake, err := m.openAgentConnection(ctx, client, disc, deviceName, softwareName, scope)
 	if err != nil {
 		return nil, err
+	}
+
+	if opts.OnIntake != nil {
+		opts.OnIntake(AgentConnectIntake{
+			VerificationURI: intake.verificationURI,
+			UserCode:        intake.userCode,
+			ExpiresAt:       opts.now().Add(intake.lifetime),
+		})
 	}
 
 	wait := announceAgentConnection(opts.presentation(), intake, opts.now())

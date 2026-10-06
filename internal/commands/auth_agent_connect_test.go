@@ -3,10 +3,12 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 
@@ -37,6 +39,10 @@ type connectAS struct {
 	// connection renders the successful poll; the default approves a
 	// full-scope agent in account 999.
 	connection func() string
+
+	// pollStatus, when non-zero, is the poll's status in place of 200: a
+	// refusal, rendered from connection.
+	pollStatus int
 }
 
 func startConnectAS(t *testing.T) *connectAS {
@@ -58,6 +64,9 @@ func startConnectAS(t *testing.T) *connectAS {
 		as.pollForms = append(as.pollForms, r.PostForm)
 		as.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
+		if as.pollStatus != 0 {
+			w.WriteHeader(as.pollStatus)
+		}
 		fmt.Fprint(w, as.connection())
 	})
 	mux.HandleFunc("/oauth/tokens", func(w http.ResponseWriter, r *http.Request) {
@@ -199,17 +208,141 @@ func TestAuthAgentConnectNeedsAProfile(t *testing.T) {
 	assert.Empty(t, as.mints())
 }
 
-// TestAuthAgentConnectRefusesMachineOutput: the link, the code and the wait
-// line go to stdout, which an envelope also owns.
-func TestAuthAgentConnectRefusesMachineOutput(t *testing.T) {
+// runAgentConnectJSON runs the ceremony under --json with stdout and stderr
+// kept apart, as a program driving it would read them. stdout is a
+// lockedBuffer so the mock server's handlers can read it mid-ceremony.
+func runAgentConnectJSON(t *testing.T, app *appctx.App, stdout *lockedBuffer, args ...string) (string, error) {
+	t.Helper()
+	app.Flags.JSON = true
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: stdout})
+	cmd := NewAuthCmd()
+	cmd.SetArgs(append([]string{"agent", "connect", "--no-browser"}, args...))
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	var stderr bytes.Buffer
+	cmd.SetOut(stdout)
+	cmd.SetErr(&stderr)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	err := cmd.Execute()
+	return stderr.String(), err
+}
+
+// jsonValues reads stdout as a stream of JSON values, the way a program
+// driving the ceremony would: the verification line, then the envelope,
+// however that is laid out.
+func jsonValues(t *testing.T, stdout string) []map[string]any {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(stdout))
+	var values []map[string]any
+	for dec.More() {
+		var v map[string]any
+		require.NoError(t, dec.Decode(&v), "stdout is JSON values and nothing else: %q", stdout)
+		values = append(values, v)
+	}
+	return values
+}
+
+// TestAuthAgentConnectJSONWritesTheVerificationThenTheResult: under --json
+// the ceremony is two lines of data on stdout. The first carries what the
+// operator needs and is written while the ceremony is still waiting on
+// them; the last is the result. The operator's words go to stderr. Neither
+// stream carries the client secret or the device code.
+func TestAuthAgentConnectJSONWritesTheVerificationThenTheResult(t *testing.T) {
 	as := startConnectAS(t)
 	app := connectApp(t, as, &config.Config{ActiveProfile: "agent"})
-	app.Flags.JSON = true
+	stdout := &lockedBuffer{}
 
-	_, err := runAgentConnect(t, app)
+	approve := as.connection
+	var atPoll string
+	as.connection = func() string {
+		atPoll = stdout.String()
+		return approve()
+	}
+
+	stderr, err := runAgentConnectJSON(t, app, stdout, "--device-name", "build-box")
+	require.NoError(t, err, stderr)
+
+	require.NotEmpty(t, atPoll, "the verification line is written before the operator approves, not after")
+	require.True(t, strings.HasSuffix(atPoll, "}\n") && strings.Count(atPoll, "\n") == 1,
+		"the verification is one line, newline-terminated, so a reader can act on it at once: %q", atPoll)
+	verification := jsonValues(t, atPoll)
+	require.Len(t, verification, 1)
+	assert.Equal(t, "verification", verification[0]["type"])
+	assert.Equal(t, as.srv.URL+"/connect?user_code=WDJB-MJHT", verification[0]["verification_uri"])
+	assert.Equal(t, "WDJB-MJHT", verification[0]["user_code"])
+	assert.NotEmpty(t, verification[0]["expires_at"])
+	expiresIn, ok := verification[0]["expires_in"].(float64)
+	require.True(t, ok)
+	assert.InDelta(t, 600, expiresIn, 5)
+
+	lines := jsonValues(t, stdout.String())
+	require.Len(t, lines, 2, "the verification line, then the result")
+	data, ok := lines[1]["data"].(map[string]any)
+	require.True(t, ok, stdout.String())
+	assert.Equal(t, "agent", data["profile"])
+	assert.Equal(t, "999", data["account_id"])
+	assert.Equal(t, "agent", data["oauth_type"])
+	assert.Equal(t, "agent_connection", data["source"])
+	assert.Equal(t, "full", data["scope"])
+	assert.Equal(t, "agent-client", data["client_id"])
+	assert.Equal(t, true, data["profile_created"])
+	assert.Equal(t, true, data["default"])
+	assert.Equal(t, `Connected profile "agent" to a Basecamp agent`, lines[1]["summary"])
+
+	assert.Contains(t, stderr, "WDJB-MJHT", "a person at the terminal still sees the code")
+	assert.NotContains(t, stderr, "Connected profile", "the result is data, not a second copy in prose")
+	for name, stream := range map[string]string{"stdout": stdout.String(), "stderr": stderr} {
+		assert.NotContains(t, stream, fakeConnectSecret, "%s carries the client secret", name)
+		assert.NotContains(t, stream, "dev-code-1", "%s carries the device code, the poll's bearer", name)
+	}
+
+	creds, err := app.Auth.GetStore().Load("profile:agent")
+	require.NoError(t, err)
+	assert.Equal(t, fakeConnectSecret, creds.ClientSecret, "the credential is stored exactly as without --json")
+}
+
+// TestAuthAgentConnectJSONOnADeclineWritesOnlyTheVerification: a declined
+// connection ends with an error, which the CLI renders as the last line,
+// and nothing is stored. The verification line is already out by then.
+func TestAuthAgentConnectJSONOnADeclineWritesOnlyTheVerification(t *testing.T) {
+	as := startConnectAS(t)
+	as.pollStatus = 400
+	as.connection = func() string { return `{"error":"access_denied"}` }
+	app := connectApp(t, as, &config.Config{ActiveProfile: "agent"})
+	stdout := &lockedBuffer{}
+
+	_, err := runAgentConnectJSON(t, app, stdout, "--device-name", "build-box")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "machine output mode")
-	assert.Empty(t, as.mints())
+
+	lines := jsonValues(t, stdout.String())
+	require.Len(t, lines, 1, "no result envelope from the command itself; the error is the CLI's to render")
+	assert.Equal(t, "verification", lines[0]["type"])
+	assert.Empty(t, as.mints(), "a declined connection mints nothing")
+	assertNothingStored(t, app, "agent")
+}
+
+// TestAuthAgentConnectRefusesOutputModesThatCannotCarryIt: --jq filters one
+// envelope and this writes two lines; --quiet, --ids-only and --count would
+// throw the verification line away. Each is refused before the server is
+// asked for anything.
+func TestAuthAgentConnectRefusesOutputModesThatCannotCarryIt(t *testing.T) {
+	for name, set := range map[string]func(*appctx.App){
+		"jq":       func(a *appctx.App) { a.Flags.JQFilter = ".data" },
+		"quiet":    func(a *appctx.App) { a.Flags.Quiet = true },
+		"ids-only": func(a *appctx.App) { a.Flags.IDsOnly = true },
+		"count":    func(a *appctx.App) { a.Flags.Count = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			as := startConnectAS(t)
+			app := connectApp(t, as, &config.Config{ActiveProfile: "agent"})
+			set(app)
+
+			_, err := runAgentConnect(t, app)
+			require.Error(t, err)
+			assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
+			assert.Empty(t, as.mints())
+		})
+	}
 }
 
 // TestAuthAgentConnectRefusesNonInteractive: approving a connection needs a
