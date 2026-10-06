@@ -90,6 +90,9 @@ func TestRefresh_RateLimitIsHeldOnTheLogin(t *testing.T) {
 	assert.Equal(t, 600, RetryAfter(err))
 	assert.Contains(t, cliErr.Message, now.Add(600*time.Second).UTC().Format(time.RFC3339))
 	assert.Equal(t, int32(1), hits.Load())
+	var refusal *basecamp.Error
+	require.ErrorAs(t, err, &refusal, "the SDK's refusal stays in the chain, request id and all")
+	assert.Equal(t, "too_many_requests", refusal.OAuthError)
 
 	creds, loadErr := m.store.Load(key)
 	require.NoError(t, loadErr, "a rate limit says nothing about the login, which is kept")

@@ -203,6 +203,9 @@ func (m *Manager) holdRateLimitedRefresh(origin string, creds *Credentials, err 
 		// caller can say both.
 		e.Cause = errors.Join(e.Cause, namedWaitError(refusal.RetryAfter))
 	}
+	// The SDK's refusal stays in the chain, so its request id and OAuth
+	// error still reach the error envelope.
+	e.Cause = errors.Join(e.Cause, err)
 	return e
 }
 
