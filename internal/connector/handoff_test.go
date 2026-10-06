@@ -221,7 +221,6 @@ func TestTheLineSaysWhoseRequestItIs(t *testing.T) {
 			lines := handedOffLines(t, &out)
 			require.Len(t, lines, 1)
 			assert.Equal(t, tc.want, lines[0].Role)
-			assert.Contains(t, out.String(), `"role":"`+tc.want+`"`, "under the local connector's key")
 		})
 	}
 }

@@ -51,6 +51,11 @@ func TestApplyTrust(t *testing.T) {
 		assert.Equal(t, []int64{3, 9}, out.Trust.AllowlistIDs)
 		_, err = out.Policy(agentID)
 		assert.NoError(t, err, "admission accepts the result")
+
+		// A later run's --allow replaces the operators it kept, never adds.
+		again, err := Apply(out, Changes{Trust: admission.TrustProject, Allow: []int64{5}})
+		require.NoError(t, err)
+		assert.Equal(t, []int64{5}, again.Trust.AllowlistIDs)
 	})
 	t.Run("allowlist with nobody on it is refused", func(t *testing.T) {
 		_, err := Apply(base, Changes{Trust: admission.TrustAllowlist})
