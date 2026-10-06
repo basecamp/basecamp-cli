@@ -45,7 +45,9 @@ const (
 	// RevokeSkippedAgent: an agent self-token is minted on demand from a
 	// client id and secret, so revoking one accomplishes nothing — the
 	// same client mints another on the next command. Ending an agent's
-	// access means rotating the client secret in Basecamp.
+	// access means disconnecting it in Basecamp, which kills the client
+	// secret and every token minted from it. (Basecamp has no separate
+	// "rotate secret": reconnecting is the rotation.)
 	RevokeSkippedAgent = "agent"
 )
 
@@ -194,7 +196,7 @@ func (m *Manager) RevokeStored(ctx context.Context) error {
 				"Forget the credential locally instead: basecamp auth logout")
 		case RevokeSkippedAgent:
 			return output.ErrUsageHint("An agent self-token is not worth revoking: the client that minted it can mint another",
-				"Forget the credential locally instead (basecamp auth logout), and rotate the client secret in Basecamp to end the agent's access")
+				"Forget the credential locally instead (basecamp auth logout), and disconnect the agent in Basecamp to end its access")
 		}
 		if err := m.Revoke(ctx, creds); err != nil {
 			// Keep the failure's taxonomy — a transport failure or a 5xx
