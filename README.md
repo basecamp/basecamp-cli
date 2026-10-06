@@ -261,9 +261,9 @@ For containers, CI and cron, pick one:
   replica as a read-write volume, with `BASECAMP_NO_KEYRING=1`. The CLI locks
   the login while it refreshes, so replicas take turns instead of signing
   each other out. The lock is an `flock` in that directory, which holds
-  between containers on one host. Across hosts it holds only on storage whose
-  `flock` is cluster-wide (Linux NFS is); where it can't, the CLI warns and
-  runs unlocked, so use one of the other two instead.
+  between containers on one host. Across hosts, use one of the other two:
+  the CLI can't tell a shared filesystem whose `flock` is local to each host,
+  and there copies would sign each other out with no warning.
 - **One login per install.** Run `basecamp auth login --device-code` in each
   install, and keep its config directory to itself.
 
