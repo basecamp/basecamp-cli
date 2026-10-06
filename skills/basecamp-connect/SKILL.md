@@ -75,7 +75,7 @@ Each becomes a flag on setup (*First-time setup*, step 4):
 | "me and Jane" | `--allow <jane's person id>` (and everyone else who stays: the list is replaced) |
 | "anyone in the project can ask it things" | `--trust project` (they ask as participants) |
 | "Jane operates it, and anyone in the project can ask" | `--trust project --allow <jane's person id>` |
-| "the people I named can assign it work too" | `--allow-assignments-from-authorized`: it covers everyone `--allow` names, not one of them, so say who that is and confirm |
+| "the people I named can assign it work too" | `--allow-assignments-from-authorized`: it covers the whole allowlist setup leaves (this run's `--allow`, or the list kept), not one person, so say who that is and confirm. A run that names a new list turns it off unless it's passed again |
 | "also work in project X" | `--serve <id of X>` |
 | "stop working in X" | `--unserve <id of X>` |
 
@@ -196,7 +196,7 @@ by mention, by commenting on a thread it follows, and by completing something
 it has a stake in (context, not a request), never by assignment. Assignments
 count only from the operator, in every mode, unless they ask for the people
 named with `--allow` to assign work too: `--allow-assignments-from-authorized`
-(and `=false` to undo it). For a personal agent pass no operator flag: setup
+(and `=false` to undo it), which covers everyone on the allowlist. For a personal agent pass no operator flag: setup
 takes its owner. For any other agent, name the operator by their own CLI
 profile with `--operator-profile '<profile>'`. For allowlist, or operators
 beside project trust, look up each person's id with

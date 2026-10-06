@@ -166,10 +166,33 @@ func TestApplyAssignmentOptIn(t *testing.T) {
 	})
 	optedIn := base
 	optedIn.Trust = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7}, AllowAssignments: true}
-	t.Run("kept when not passed", func(t *testing.T) {
-		out, err := Apply(optedIn, Changes{Allow: []int64{8}})
+	t.Run("kept when neither it nor the list is passed", func(t *testing.T) {
+		out, err := Apply(optedIn, Changes{Serve: []int64{777}})
 		require.NoError(t, err)
 		assert.True(t, out.Trust.AllowAssignments)
+	})
+	// The opt-in was given for the people named then. A run that names
+	// others does not hand them assignments unless it says so again.
+	t.Run("reset when the list is replaced without it", func(t *testing.T) {
+		out, err := Apply(optedIn, Changes{Allow: []int64{8}})
+		require.NoError(t, err)
+		assert.False(t, out.Trust.AllowAssignments)
+
+		out, err = Apply(optedIn, Changes{Allow: []int64{8}, AllowAssignments: &on})
+		require.NoError(t, err)
+		assert.True(t, out.Trust.AllowAssignments, "restated with the new list")
+	})
+	t.Run("set over the list connect.json keeps", func(t *testing.T) {
+		f := base
+		f.Trust = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7}}
+		out, err := Apply(f, Changes{AllowAssignments: &on})
+		require.NoError(t, err)
+		assert.True(t, out.Trust.AllowAssignments)
+		assert.Equal(t, []int64{7}, out.Trust.AllowlistIDs)
+	})
+	t.Run("refused under project trust with nobody named", func(t *testing.T) {
+		_, err := Apply(base, Changes{Trust: admission.TrustProject, AllowAssignments: &on})
+		assert.Error(t, err, "the members are participants, and the opt-in never covers them")
 	})
 	t.Run("turned off", func(t *testing.T) {
 		out, err := Apply(optedIn, Changes{AllowAssignments: &off})

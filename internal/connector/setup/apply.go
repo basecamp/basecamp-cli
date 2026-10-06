@@ -145,11 +145,16 @@ func sortedIDs(ids []int64) []int64 {
 
 // applyAssignmentOptIn sets the opt-in that lets the allowlist's people
 // assign the agent work. It rides with that list: setting it needs someone
-// named, and a run that leaves nobody named takes it away, so the file never
-// carries a widening nobody can use.
+// named, a run that leaves nobody named takes it away, so the file never
+// carries a widening nobody can use, and a run that names a new list without
+// restating it takes it away too, so nobody newly named gains assignments
+// unasked.
 func applyAssignmentOptIn(t *admission.Trust, ch Changes) error {
-	if ch.AllowAssignments != nil {
+	switch {
+	case ch.AllowAssignments != nil:
 		t.AllowAssignments = *ch.AllowAssignments
+	case len(ch.Allow) > 0:
+		t.AllowAssignments = false
 	}
 	if len(t.AllowlistIDs) == 0 {
 		if ch.AllowAssignments != nil && *ch.AllowAssignments {
