@@ -80,6 +80,10 @@ func TestAuthTokenSessionFlagUsage(t *testing.T) {
 		"label without id":  {"token", "--stored", "--session-label", "coworker@box"},
 		"id without stored": {"token", "--session-id", tokenSessionID},
 		"malformed id":      {"token", "--stored", "--session-id", "not-hex"},
+		// An unset variable in "--session-id $ID" must not fall back to the
+		// shared, unattributed token.
+		"empty id":           {"token", "--stored", "--session-id", ""},
+		"empty id and label": {"token", "--stored", "--session-id", "", "--session-label", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			as := startAgentAS(t)

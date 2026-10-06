@@ -564,9 +564,13 @@ Output modes:
 			var token string
 			var err error
 
-			session := sessionID != "" || sessionLabel != ""
+			// Whether a flag was GIVEN decides, not its value: an empty
+			// "--session-id $ID" is a launcher that failed to make one, and
+			// it is refused rather than handed the shared token.
+			idGiven := cmd.Flags().Changed("session-id")
+			session := idGiven || cmd.Flags().Changed("session-label")
 			switch {
-			case session && sessionID == "":
+			case session && !idGiven:
 				return output.ErrUsage("--session-label needs --session-id")
 			case session && !stored:
 				return output.ErrUsage("--session-id needs --stored: a session token is minted from the stored agent credential, never taken from BASECAMP_TOKEN")
