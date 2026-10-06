@@ -164,3 +164,14 @@ func applyAssignmentOptIn(t *admission.Trust, before []int64, ch Changes) error 
 	}
 	return nil
 }
+
+// SetOperator records the operator. When the allowlist then names nobody
+// besides them, the assignment opt-in has nobody left to cover and is
+// dropped: the operator assigns without one, and keeping it would make the
+// file refuse to validate over a change setup itself made.
+func SetOperator(t *admission.Trust, id int64) {
+	t.OperatorID = id
+	if !slices.ContainsFunc(t.AllowlistIDs, func(a int64) bool { return a != id }) {
+		t.AllowAssignments = false
+	}
+}

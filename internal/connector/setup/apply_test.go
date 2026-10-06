@@ -218,3 +218,16 @@ func TestApplyAssignmentOptIn(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+// Making the one person the allowlist names the operator leaves the opt-in
+// nobody to cover. Setup drops it rather than refusing the change.
+func TestSetOperatorDropsAnOptInWithNobodyLeftToCover(t *testing.T) {
+	tr := admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7}, AllowAssignments: true}
+	SetOperator(&tr, 7)
+	assert.Equal(t, int64(7), tr.OperatorID)
+	assert.False(t, tr.AllowAssignments)
+
+	tr = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7, 9}, AllowAssignments: true}
+	SetOperator(&tr, 7)
+	assert.True(t, tr.AllowAssignments, "9 is still covered")
+}
