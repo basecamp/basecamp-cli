@@ -61,13 +61,16 @@ func TestARequestLineAtItsZeroValuesKeepsItsRequiredKeys(t *testing.T) {
 	assert.Equal(t, want, lineKeys(t, raw))
 }
 
+// skillExample finds the request line example in the skill.
+var skillExample = regexp.MustCompile("(?s)### 2\\. The request line\\s*```json\\r?\\n(.*?)```")
+
 // The skill's own example of the line names exactly the keys the line
 // carries, so the session reading the line is taught the names it will see,
 // and a key added to the line is documented where the reader learns it.
 func TestTheSkillDocumentsTheRequestLineItGets(t *testing.T) {
 	skill, err := os.ReadFile(filepath.Join("..", "..", "skills", "basecamp-connect", "SKILL.md"))
 	require.NoError(t, err)
-	example := regexp.MustCompile("(?s)### 2\\. The request line\\s*```json\\n(.*?)```").FindSubmatch(skill)
+	example := skillExample.FindSubmatch(skill)
 	require.NotNil(t, example, "the skill's request line example is where this test looks for it")
 	assert.Equal(t, writtenLineKeys(t), lineKeys(t, example[1]))
 }
@@ -118,7 +121,7 @@ func lineKeys(t *testing.T, raw []byte) []string {
 	var walk func(prefix string, obj map[string]any)
 	walk = func(prefix string, obj map[string]any) {
 		for k, v := range obj {
-			if nested, ok := v.(map[string]any); ok {
+			if nested, ok := v.(map[string]any); ok && len(nested) > 0 {
 				walk(prefix+k+".", nested)
 				continue
 			}
@@ -128,4 +131,11 @@ func lineKeys(t *testing.T, raw []byte) []string {
 	walk("", obj)
 	slices.Sort(keys)
 	return keys
+}
+
+// An empty object is a key like any other, and the skill example is found
+// whatever line endings the checkout gave the file.
+func TestTheContractWalkSeesEmptyObjectsAndCRLF(t *testing.T) {
+	assert.Equal(t, []string{"a.b", "metadata"}, lineKeys(t, []byte(`{"metadata":{},"a":{"b":1}}`)))
+	assert.NotNil(t, skillExample.FindSubmatch([]byte("### 2. The request line\r\n\r\n```json\r\n{}\r\n```")))
 }
