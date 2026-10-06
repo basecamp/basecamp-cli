@@ -40,13 +40,25 @@ var requestLineContract = []string{
 	"type",
 }
 
-// The line the connector writes carries every key the contract names, under
-// that name.
+// optionalKeys are the contract's keys a line may leave out: the ones whose
+// value is not always known.
+var optionalKeys = []string{"recording.project_name", "requester_name"}
+
+// The line the connector writes carries exactly the keys the contract names,
+// under those names: a key dropped or renamed breaks a reader, and a key
+// added is added to the contract on purpose.
 func TestTheRequestLineKeepsItsContract(t *testing.T) {
-	got := writtenLineKeys(t)
-	for _, key := range requestLineContract {
-		assert.Contains(t, got, key, "the request line no longer carries %q, which its readers key on", key)
-	}
+	assert.Equal(t, requestLineContract, writtenLineKeys(t))
+}
+
+// Every key but the optional ones is there at its zero value too. A false
+// acknowledge or an empty title is a real line, and a key that omitempty
+// drops there is gone from the line its readers get.
+func TestARequestLineAtItsZeroValuesKeepsItsRequiredKeys(t *testing.T) {
+	raw, err := json.Marshal(HandoffLine{})
+	require.NoError(t, err)
+	want := slices.DeleteFunc(slices.Clone(requestLineContract), func(k string) bool { return slices.Contains(optionalKeys, k) })
+	assert.Equal(t, want, lineKeys(t, raw))
 }
 
 // The skill's own example of the line names exactly the keys the line
