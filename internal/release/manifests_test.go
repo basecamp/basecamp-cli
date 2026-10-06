@@ -149,11 +149,10 @@ func TestHooksFileCommandsInvokeBasecamp(t *testing.T) {
 	// It goes through pre-commit-snapshot, which every hook-capable CLI has
 	// and which older ones answer silently: a new subcommand would fail
 	// every session start for anyone whose CLI is older than the plugin.
-	for _, matcher := range config.Hooks["SessionStart"] {
-		for _, hook := range matcher.Hooks {
-			assert.Equal(t, "basecamp agent-hook pre-commit-snapshot", hook.Command, "only the rename notice may run at session start")
-		}
-	}
+	sessionStart := config.Hooks["SessionStart"]
+	require.Len(t, sessionStart, 1, "exactly one SessionStart matcher: the rename notice")
+	require.Len(t, sessionStart[0].Hooks, 1, "exactly one SessionStart hook: the rename notice")
+	assert.Equal(t, "basecamp agent-hook pre-commit-snapshot", sessionStart[0].Hooks[0].Command, "only the rename notice may run at session start")
 
 	for event, matchers := range config.Hooks {
 		require.NotEmpty(t, matchers, event)

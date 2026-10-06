@@ -588,7 +588,11 @@ func TestAgentHookPluginNoticeNamesCodexSetup(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	t.Setenv("PLUGIN_ROOT", filepath.Join(home, ".codex", "plugins", "cache", "37signals", "basecamp", "0.12.0"))
 
-	assert.Contains(t, runAgentHookPreservingHome(t, sessionStartPayload), "basecamp setup codex")
+	var payload struct {
+		SystemMessage string `json:"systemMessage"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(runAgentHookPreservingHome(t, sessionStartPayload)), &payload))
+	assert.Contains(t, payload.SystemMessage, "basecamp setup codex")
 }
 
 func TestAgentHookPluginNoticeSilentForRenamedInstall(t *testing.T) {

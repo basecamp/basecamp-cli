@@ -305,9 +305,10 @@ MCP server rather than this CLI. During a deprecation window the marketplace
 keeps `basecamp` as an alias of `basecamp-cli`, so an existing
 `basecamp@37signals` install keeps working and updating; once per agent it
 says the plugin has been renamed. Switch with `basecamp setup claude` or
-`basecamp setup codex` (or `basecamp setup agents`), which installs
-`basecamp-cli` and removes `basecamp@37signals` at the scopes it was
-installed in. To switch by hand:
+`basecamp setup codex` (or `basecamp setup agents`). For Claude Code, setup
+replaces `basecamp@37signals` with `basecamp-cli` at the scopes it was
+installed in. Codex installs have no scopes, so setup adds `basecamp-cli` and
+then removes the old ID. To switch by hand:
 
 ```bash
 claude plugin marketplace update 37signals
