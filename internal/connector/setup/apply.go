@@ -27,6 +27,11 @@ type Changes struct {
 	WatchCompletions map[int64]bool
 	// Remove stops serving projects.
 	Remove []int64
+
+	// Launcher replaces the launcher when non-empty, one argv word per
+	// element. ClearLauncher removes it. Asking for both is refused.
+	Launcher      []string
+	ClearLauncher bool
 }
 
 // Apply returns f with ch applied. f is not modified. Everything that can
@@ -78,6 +83,19 @@ func Apply(f File, ch Changes) (File, error) {
 		}
 		r.WatchCompletions = on
 		out.Projects[id] = r
+	}
+
+	out.Launcher = slices.Clone(f.Launcher)
+	switch {
+	case ch.ClearLauncher && len(ch.Launcher) > 0:
+		return File{}, errors.New("a launcher is both set and cleared in one run")
+	case ch.ClearLauncher:
+		out.Launcher = nil
+	case len(ch.Launcher) > 0:
+		if err := ValidLauncher(ch.Launcher); err != nil {
+			return File{}, fmt.Errorf("launcher: %w", err)
+		}
+		out.Launcher = slices.Clone(ch.Launcher)
 	}
 
 	return out, nil

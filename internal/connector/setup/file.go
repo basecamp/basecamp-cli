@@ -41,7 +41,10 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
@@ -79,6 +82,16 @@ type File struct {
 	// serves, keyed by project id.
 	Trust    admission.Trust             `json:"trust"`
 	Projects map[int64]admission.Project `json:"projects"`
+
+	// Launcher is the command the session handling the requests runs each
+	// one's worker through, as argv words: the worker's own command line
+	// (claude -p ...) follows them. Empty means no launcher, and the session
+	// hands the request to a subagent of its own, as it always has. The
+	// connector itself starts nothing and never reads this; it is here
+	// because connect.json is where the person's choices for this agent
+	// live, written only by setup and read safely by show. See
+	// ValidLauncher.
+	Launcher []string `json:"launcher,omitempty"`
 
 	// The Legacy fields are the settings of a connector that ran its own
 	// workers: which driver and coding agent, how many at once, for how
@@ -224,6 +237,56 @@ func (f File) Validate() error {
 		if project.Class != "" && !ValidClass(project.Class) {
 			return fmt.Errorf("served project %d: class %q must be lowercase letters, digits, - or _, at most 40", bucket, project.Class)
 		}
+	}
+	if f.Launcher != nil {
+		if err := ValidLauncher(f.Launcher); err != nil {
+			return fmt.Errorf("connect.json launcher: %w", err)
+		}
+	}
+	return nil
+}
+
+// MaxLauncherWords and MaxLauncherWordBytes bound a launcher: it is a
+// command prefix, not a script.
+const (
+	MaxLauncherWords     = 16
+	MaxLauncherWordBytes = 1024
+)
+
+// ValidLauncher refuses a launcher the session could not run as written.
+// A launcher is argv words, never a shell string: each word is passed to
+// the program as it is, so there is nothing to quote and nothing a shell
+// would expand. The first word is the program, a bare name looked up on
+// PATH or an absolute path; a relative path is refused, because the session
+// runs the launcher from the repo it chose for the request, and a path
+// relative to that is a program the repo provides. A word may not be empty
+// or carry a control character, which a terminal would act on when the
+// launcher is shown, and which no command name needs.
+func ValidLauncher(argv []string) error {
+	switch {
+	case len(argv) == 0:
+		return errors.New("a launcher needs at least the program to run")
+	case len(argv) > MaxLauncherWords:
+		return fmt.Errorf("a launcher is at most %d words, got %d", MaxLauncherWords, len(argv))
+	}
+	for i, w := range argv {
+		switch {
+		case w == "":
+			return fmt.Errorf("word %d is empty", i+1)
+		case len(w) > MaxLauncherWordBytes:
+			return fmt.Errorf("word %d is longer than %d bytes", i+1, MaxLauncherWordBytes)
+		case !utf8.ValidString(w):
+			return fmt.Errorf("word %d is not valid UTF-8", i+1)
+		case strings.IndexFunc(w, unicode.IsControl) >= 0:
+			return fmt.Errorf("word %d holds a control character", i+1)
+		}
+	}
+	program := argv[0]
+	switch {
+	case strings.HasPrefix(program, "-"):
+		return fmt.Errorf("the program %q starts with -, which reads as an option", program)
+	case strings.Contains(program, "/") && !filepath.IsAbs(program):
+		return fmt.Errorf("the program %q is a relative path; use a name on PATH or an absolute path", program)
 	}
 	return nil
 }

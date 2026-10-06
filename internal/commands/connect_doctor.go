@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -51,6 +53,9 @@ func runConnectDoctor(cmd *cobra.Command, _ []string) error {
 		Message: fmt.Sprintf("Agent person %d in account %s", p.file.Agent.PersonID, p.file.AccountID)}}
 	if !connectSupportedOS(runtime.GOOS) {
 		checks = append(checks, connectUnsupportedOSCheck(runtime.GOOS))
+	}
+	if len(p.file.Launcher) > 0 {
+		checks = append(checks, launcherCheck(p.name, p.file.Launcher))
 	}
 
 	agent, agentErr := verifiedConnectAgent(ctx, p)
@@ -103,6 +108,33 @@ func doctorNotReady(checks []setup.Check) error {
 		}
 	}
 	return &output.Error{Code: codeNotReady, Message: msg[:len(msg)-1], Hint: hint}
+}
+
+// connectLookPath finds a launcher's program. A variable so tests can say
+// what is installed.
+var connectLookPath = exec.LookPath
+
+// launcherCheck says whether the launcher connect.json names can be started
+// here: its program is found, on PATH or at its absolute path. It starts
+// nothing; whether the launcher then runs a worker is the launcher's own
+// doctor's question.
+func launcherCheck(name string, argv []string) setup.Check {
+	c := setup.Check{Name: "Launcher"}
+	words := make([]string, len(argv))
+	for i, w := range argv {
+		words[i] = richtext.ShellQuote(w)
+	}
+	shown := richtext.SanitizeSingleLine(strings.Join(words, " "))
+	path, err := connectLookPath(argv[0])
+	if err != nil {
+		c.Status = setup.StatusFail
+		c.Message = fmt.Sprintf("The launcher %s cannot be started here: %s", shown, setup.ErrorText(err))
+		c.Hint = "Install it, or remove it: basecamp connect setup -P " + richtext.ShellQuote(name) + " --no-launcher"
+		return c
+	}
+	c.Status = setup.StatusPass
+	c.Message = fmt.Sprintf("Workers run through %s (%s)", shown, richtext.SanitizeSingleLine(path))
+	return c
 }
 
 // feedCheck polls one page of the account feed at the present, as the
