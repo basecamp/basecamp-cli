@@ -107,11 +107,10 @@ func TestOperatorsAndParticipants(t *testing.T) {
 		assert.Equal(t, RoleParticipant, v.Role)
 	})
 
-	// Participants reach the agent by mention and by comment on a thread it
-	// follows. A completion can read as acceptance of the agent's work,
-	// which a participant cannot give, and an assignment is the operator's
-	// alone in every mode.
-	t.Run("a member's completion is not theirs to give, and costs no read", func(t *testing.T) {
+	// A member's completion is context, as a followed-thread comment is: it
+	// reaches the agent marked as a participant's, and asks for no
+	// acknowledgement. What it may lead to is the session's policy.
+	t.Run("a member's completion is a participant's context", func(t *testing.T) {
 		f := newFakeReads()
 		todo := summaryWith(recordingID, watchedProj, "Todo", strangerID, "<div>ship it</div>")
 		todo.Assignees = []basecamp.Person{{ID: agentID}}
@@ -119,9 +118,11 @@ func TestOperatorsAndParticipants(t *testing.T) {
 		f.members[watchedProj] = map[int64]bool{memberID: true}
 		v := decide(t, newAdmitter(t, projectWithOperators(), f),
 			Event{ID: eventID, EventType: "todo.completed", BucketID: watchedProj, RecordingID: recordingID, CreatorID: memberID})
-		assert.Equal(t, StateDiscarded, v.State)
-		assert.Equal(t, ReasonOperatorsOnly, v.Reason)
-		assert.Zero(t, f.totalReads())
+		require.Equal(t, StateAdmitted, v.State, "reason %q", v.Reason)
+		assert.Equal(t, TriggerCompleted, v.Trigger)
+		assert.Equal(t, RoleParticipant, v.Role)
+		assert.False(t, v.Acknowledge, "context, not a request")
+		assert.Equal(t, 1, f.memberCalls, "a member only once membership confirms them")
 	})
 
 	t.Run("a named operator's completion is admitted", func(t *testing.T) {

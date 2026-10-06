@@ -75,9 +75,6 @@ func Gate(ev Event, p Policy, m Matrix) GateResult {
 			continue
 		case role == RoleOperator:
 			// Named in the allowlist; Validate keeps one out of operator mode.
-		case p.Trust.Mode == TrustProject && !rule.Participants:
-			drop(ReasonOperatorsOnly)
-			continue
 		case p.Trust.Mode == TrustProject:
 			needsMembership = true
 		default:

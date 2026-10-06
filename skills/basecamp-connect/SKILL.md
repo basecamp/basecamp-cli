@@ -191,8 +191,9 @@ first:
 
 The operator and the people named with `--allow` are **operators**. Project
 members admitted only by `project` are **participants**: they reach the agent
-by mention and by commenting on a thread it follows, never by assignment or
-completion. Assignments count only from the operator, in every mode. For a
+by mention, by commenting on a thread it follows, and by completing something
+it has a stake in (context, not a request), never by assignment. Assignments
+count only from the operator, in every mode. For a
 personal agent pass no operator flag: setup takes its owner. For any other
 agent, name the operator by their own CLI profile with `--operator-profile
 '<profile>'`. For allowlist, or operators beside project trust, look up each

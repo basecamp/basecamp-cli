@@ -41,10 +41,11 @@
 // Trust has two roles. Operators are the operator and the people the
 // allowlist names, in allowlist or project mode; their word authorizes the
 // agent. Participants are the members project mode admits besides them:
-// they reach the agent by mention and by comment on a thread it follows, and
-// nothing else. Every admitted verdict carries its Role, the lesser of the
-// performer's and, for mentioned and subscribed, the author's, so words a
-// participant wrote stay a participant's request whoever brought them in.
+// they reach the agent by mention, by comment on a thread it follows, and by
+// a completion it has a stake in, never by assignment. Every admitted
+// verdict carries its Role, the lesser of the performer's and, for mentioned
+// and subscribed, the author's, so words a participant wrote stay a
+// participant's request whoever brought them in.
 // Admission only labels; what a participant may get the agent to do is the
 // policy of whoever reads the request.
 //

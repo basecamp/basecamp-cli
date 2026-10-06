@@ -309,8 +309,7 @@ the people passed with --allow. project: any non-client member of the event's
 project, as a participant, beside the operator and any people passed with
 --allow in the same run. The operator and the people passed with --allow are
 operators; a project member is a participant. Each request the connector
-prints says which, as its role. Participants reach the agent by mention and
-by commenting on a thread it follows; their completions are not admitted.
+prints says which, as its role.
 Assignments are the operator's alone in every mode.
 
 Projects. connect.json is the local list of Basecamp projects this agent
