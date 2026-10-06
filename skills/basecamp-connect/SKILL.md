@@ -200,7 +200,8 @@ agent, name the operator by their own CLI profile with `--operator-profile
 person's id with `basecamp people list --json`,
 and pass `--allow <id>` for each.
 A run that passes `--allow` replaces the list, a run that passes none keeps
-it, and `--trust operator` clears it.
+it, and `--trust operator` clears it; setup refuses `--trust operator` with
+`--allow`.
 
 **3. Projects, by name.** List them (`basecamp projects list -P '<profile>'
 --json`; if that's refused under an Agent identity, list them with the person's
