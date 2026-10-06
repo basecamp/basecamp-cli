@@ -500,6 +500,13 @@ func invalidGrant(err error) (string, bool) {
 	}
 }
 
+// ErrLoginRefused is the cause of a refresh the token endpoint refused with
+// invalid_grant: Basecamp no longer takes the login's refresh token, because
+// the session expired or was revoked, or, on Launchpad, because the
+// environment names a different OAuth client than the one it was issued to.
+// No retry changes that answer; only signing in again does.
+var ErrLoginRefused = errors.New("the login's refresh token was refused")
+
 // forgetRefusedGrant deletes the stored credential only while it still
 // carries the refresh token the server just refused. Two processes used to
 // be able to enter the refresh window together — the first rotating and
@@ -679,7 +686,9 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 		if desc = strings.TrimSpace(richtext.SanitizeSingleLine(desc)); desc != "" {
 			msg += " (" + desc + ")"
 		}
-		return m.errAuth(msg)
+		refused := m.errAuth(msg)
+		refused.Cause = ErrLoginRefused
+		return refused
 	}
 
 	creds.AccessToken = token.AccessToken
