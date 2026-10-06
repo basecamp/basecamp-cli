@@ -19,6 +19,10 @@ type Rule struct {
 	// whatever the trust mode. Assignments run the agent against a recording
 	// on the assigner's say-so, so no broadened mode extends to them.
 	OperatorOnly bool
+	// Participants opens the rule to participants: project members trusted
+	// only by project mode. They reach the agent by mention and by comment
+	// on a thread it follows; every other rule is operators' only.
+	Participants bool
 	// RequiresServed discards the rule at the gate when connect.json does not
 	// serve the project. Only mentioned and assigned are answered in an
 	// unserved project (blocked(no_route) and a holding reply); every other
@@ -37,8 +41,8 @@ type Rule struct {
 type Matrix map[string][]Rule
 
 var (
-	ruleMentioned  = Rule{Trigger: TriggerMentioned, Acknowledge: true}
-	ruleSubscribed = Rule{Trigger: TriggerSubscribed, RequiresServed: true}
+	ruleMentioned  = Rule{Trigger: TriggerMentioned, Acknowledge: true, Participants: true}
+	ruleSubscribed = Rule{Trigger: TriggerSubscribed, RequiresServed: true, Participants: true}
 	ruleAssigned   = Rule{Trigger: TriggerAssigned, OperatorOnly: true, Acknowledge: true}
 	ruleCompleted  = Rule{Trigger: TriggerCompleted, RequiresServed: true}
 )
@@ -102,6 +106,9 @@ const (
 	// ReasonAssignmentNotOperator: an assignment performed by anyone but the
 	// operator.
 	ReasonAssignmentNotOperator Reason = "assignment_not_operator"
+	// ReasonOperatorsOnly: a participant performed an event whose trigger
+	// only operators give — a completion.
+	ReasonOperatorsOnly Reason = "operators_only"
 	// ReasonUntrustedAuthor: the recording carrying the instruction was
 	// written by someone outside the trust set.
 	ReasonUntrustedAuthor Reason = "untrusted_author"

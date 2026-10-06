@@ -39,8 +39,18 @@ func TestApplyTrust(t *testing.T) {
 		assert.Equal(t, []int64{3, 9}, out.Trust.AllowlistIDs)
 	})
 	t.Run("allow contradicting the mode is refused", func(t *testing.T) {
-		_, err := Apply(base, Changes{Trust: admission.TrustProject, Allow: []int64{9}})
+		_, err := Apply(base, Changes{Trust: admission.TrustOperator, Allow: []int64{9}})
 		assert.Error(t, err)
+	})
+	// Named operators beside the project's members, who participate: one
+	// run can say who operates the agent and open it to the project.
+	t.Run("allow names operators alongside project trust", func(t *testing.T) {
+		out, err := Apply(base, Changes{Trust: admission.TrustProject, Allow: []int64{9, 3}})
+		require.NoError(t, err)
+		assert.Equal(t, admission.TrustProject, out.Trust.Mode)
+		assert.Equal(t, []int64{3, 9}, out.Trust.AllowlistIDs)
+		_, err = out.Policy(agentID)
+		assert.NoError(t, err, "admission accepts the result")
 	})
 	t.Run("allowlist with nobody on it is refused", func(t *testing.T) {
 		_, err := Apply(base, Changes{Trust: admission.TrustAllowlist})

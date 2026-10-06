@@ -19,9 +19,23 @@ const (
 	TrustOperator TrustMode = "operator"
 	// TrustAllowlist trusts the operator and a list of Person ids.
 	TrustAllowlist TrustMode = "allowlist"
-	// TrustProject trusts the operator and any non-client member of the
-	// event's project.
+	// TrustProject trusts the operator, anyone in the allowlist, and any
+	// non-client member of the event's project — the members as
+	// participants.
 	TrustProject TrustMode = "project"
+)
+
+// Role is whose request an admitted event is. Operators are the people whose
+// word authorizes the agent: the operator, and anyone named in the allowlist.
+// Participants are the wider set project trust admits — any non-client
+// member of the project — whose requests reach the agent but carry no
+// authority of their own. Admission says which; what each may get the agent
+// to do is the policy of whoever reads the request.
+type Role string
+
+const (
+	RoleOperator    Role = "operator"
+	RoleParticipant Role = "participant"
 )
 
 // Trust is the trust section of connect.json.
@@ -29,8 +43,28 @@ type Trust struct {
 	Mode TrustMode `json:"mode"`
 	// OperatorID is the Person id of the person who approved the connection.
 	OperatorID int64 `json:"operator_id"`
-	// AllowlistIDs are the Person ids trusted in allowlist mode.
+	// AllowlistIDs are the Person ids trusted as operators besides the
+	// operator, in allowlist or project mode.
 	AllowlistIDs []int64 `json:"allowlist_ids,omitempty"`
+}
+
+// roleOf is the role a trusted person holds, before any membership read: an
+// operator when the policy names them, otherwise a participant, whom only
+// project mode admits and only once membership confirms them.
+func (t Trust) roleOf(person int64) Role {
+	if person == t.OperatorID || slices.Contains(t.AllowlistIDs, person) {
+		return RoleOperator
+	}
+	return RoleParticipant
+}
+
+// least is the lesser of two roles: a request any participant had a hand in
+// carries no operator's word.
+func least(a, b Role) Role {
+	if a == RoleOperator && b == RoleOperator {
+		return RoleOperator
+	}
+	return RoleParticipant
 }
 
 // Project is one served project's entry in connect.json: a project the agent
@@ -274,14 +308,15 @@ func (p Policy) Validate() error {
 		return errors.New("admission: the operator cannot be the agent itself")
 	}
 	switch p.Trust.Mode {
-	case TrustOperator, TrustProject:
+	case TrustOperator:
 		if len(p.Trust.AllowlistIDs) > 0 {
 			return fmt.Errorf("admission: allowlist_ids is set but trust mode is %q", p.Trust.Mode)
 		}
-	case TrustAllowlist:
-		// The agent in its own allowlist is a configuration that reads as
-		// "the agent may drive itself". The gate refuses the agent regardless;
-		// the policy says so here too, where the operator can see it.
+	case TrustAllowlist, TrustProject:
+		// Named operators, alone or beside the project's members. The agent
+		// in its own allowlist is a configuration that reads as "the agent
+		// may drive itself". The gate refuses the agent regardless; the
+		// policy says so here too, where the operator can see it.
 		for _, id := range p.Trust.AllowlistIDs {
 			if id <= 0 {
 				return fmt.Errorf("admission: allowlist id %d is not a Person id", id)

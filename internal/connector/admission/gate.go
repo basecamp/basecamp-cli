@@ -1,7 +1,5 @@
 package admission
 
-import "slices"
-
 // GateResult is the gate's reading of a pointer.
 type GateResult struct {
 	// Rules are the matrix rules still open after the gate, in matrix order.
@@ -11,8 +9,11 @@ type GateResult struct {
 	Reason Reason
 	// ConfirmMembership says the performer is trusted only if a read confirms
 	// they are a non-client member of the project (project trust mode, a
-	// performer other than the operator). The gate cannot see membership.
+	// performer the policy does not name). The gate cannot see membership.
 	ConfirmMembership bool
+	// Role is the performer's: operator when the policy names them,
+	// participant when only membership can trust them.
+	Role Role
 }
 
 // Discarded reports whether the gate ended the event.
@@ -52,6 +53,7 @@ func Gate(ev Event, p Policy, m Matrix) GateResult {
 
 	performer := ev.Performer()
 	isOperator := performer == p.Trust.OperatorID
+	role := p.Trust.roleOf(performer)
 	_, served := p.served(ev.BucketID)
 
 	var (
@@ -71,7 +73,11 @@ func Gate(ev Event, p Policy, m Matrix) GateResult {
 		case rule.OperatorOnly:
 			drop(ReasonAssignmentNotOperator)
 			continue
-		case p.Trust.Mode == TrustAllowlist && slices.Contains(p.Trust.AllowlistIDs, performer):
+		case role == RoleOperator:
+			// Named in the allowlist; Validate keeps one out of operator mode.
+		case p.Trust.Mode == TrustProject && !rule.Participants:
+			drop(ReasonOperatorsOnly)
+			continue
 		case p.Trust.Mode == TrustProject:
 			needsMembership = true
 		default:
@@ -88,5 +94,5 @@ func Gate(ev Event, p Policy, m Matrix) GateResult {
 	if len(open) == 0 {
 		return GateResult{Reason: reason}
 	}
-	return GateResult{Rules: open, ConfirmMembership: membership}
+	return GateResult{Rules: open, ConfirmMembership: membership, Role: role}
 }

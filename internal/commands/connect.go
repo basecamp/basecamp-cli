@@ -184,7 +184,7 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		for i, id := range f.Trust.AllowlistIDs {
 			ids[i] = strconv.FormatInt(id, 10)
 		}
-		trust += ": people " + strings.Join(ids, ", ")
+		trust += ": operators " + strings.Join(ids, ", ")
 	}
 	d := map[string]any{
 		"file":     exact(path),
@@ -305,9 +305,13 @@ the operator connect.json already has; on a first setup of an agent with no
 owner, one of the two is required.
 
 Trust. operator (default): the operator alone. allowlist: the operator and
-the people passed with --allow. project: the operator and any non-client
-member of the event's project. Assignments are the operator's alone in every
-mode.
+the people passed with --allow. project: any non-client member of the event's
+project, as a participant, beside the operator and any people passed with
+--allow in the same run. The operator and the people passed with --allow are
+operators; a project member is a participant. Each request the connector
+prints says which, as its role. Participants reach the agent by mention and
+by commenting on a thread it follows; their completions are not admitted.
+Assignments are the operator's alone in every mode.
 
 Projects. connect.json is the local list of Basecamp projects this agent
 serves: --serve <project-id>, --unserve <project-id>. Nothing in a project it
@@ -348,6 +352,7 @@ Examples:
   basecamp connect setup -P agent --serve 12345         # a personal agent: its owner operates it
   basecamp connect setup -P agent --operator-profile me --serve 12345
   basecamp connect setup -P agent --operator-profile me --trust allowlist --allow 111 --allow 222
+  basecamp connect setup -P agent --operator-profile me --trust project --allow 111
   basecamp connect setup -P bot --operator-profile me --expect-identity 4242 --serve 12345
   basecamp connect setup -P agent --class 12345=internal`,
 		Annotations: map[string]string{AnnotationProfileMayCreate: "true"},
@@ -369,7 +374,7 @@ Examples:
 	fl.StringVar(&f.operator, "operator", "", "Person id of the operator the agent follows")
 	fl.StringVar(&f.operatorProfile, "operator-profile", "", "Profile whose identity is the operator")
 	fl.StringVar(&f.trust, "trust", "", "Who may drive the agent: operator, allowlist or project")
-	fl.StringArrayVar(&f.allow, "allow", nil, "Person id to trust besides the operator (repeatable; implies --trust allowlist)")
+	fl.StringArrayVar(&f.allow, "allow", nil, "Person id to trust as an operator besides the operator (repeatable; implies --trust allowlist unless --trust project is given)")
 	fl.StringArrayVar(&f.serve, "serve", nil, "Serve a Basecamp project: <project-id> (repeatable)")
 	fl.StringArrayVar(&f.unserve, "unserve", nil, "Stop serving a project (repeatable)")
 	fl.StringArrayVar(&f.classes, "class", nil, "Classify a served project: <project-id>=<class>, or <project-id>= to clear it (repeatable)")
