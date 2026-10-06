@@ -75,6 +75,7 @@ Each becomes a flag on setup (*First-time setup*, step 4):
 | "me and Jane" | `--allow <jane's person id>` (and everyone else who stays: the list is replaced) |
 | "anyone in the project can ask it things" | `--trust project` (they ask as participants) |
 | "Jane operates it, and anyone in the project can ask" | `--trust project --allow <jane's person id>` |
+| "Jane can assign it work too" | `--allow-assignments-from-authorized` (with Jane in `--allow`) |
 | "also work in project X" | `--serve <id of X>` |
 | "stop working in X" | `--unserve <id of X>` |
 
@@ -193,12 +194,13 @@ The operator and the people named with `--allow` are **operators**. Project
 members admitted only by `project` are **participants**: they reach the agent
 by mention, by commenting on a thread it follows, and by completing something
 it has a stake in (context, not a request), never by assignment. Assignments
-count only from the operator, in every mode. For a
-personal agent pass no operator flag: setup takes its owner. For any other
-agent, name the operator by their own CLI profile with `--operator-profile
-'<profile>'`. For allowlist, or operators beside project trust, look up each
-person's id with `basecamp people list --json`,
-and pass `--allow <id>` for each.
+count only from the operator, in every mode, unless they ask for the people
+named with `--allow` to assign work too: `--allow-assignments-from-authorized`
+(and `=false` to undo it). For a personal agent pass no operator flag: setup
+takes its owner. For any other agent, name the operator by their own CLI
+profile with `--operator-profile '<profile>'`. For allowlist, or operators
+beside project trust, look up each person's id with
+`basecamp people list --json`, and pass `--allow <id>` for each.
 A run that passes `--allow` replaces the list, a run that passes none keeps
 it, and `--trust operator` clears it; setup refuses `--trust operator` with
 `--allow`.
@@ -309,7 +311,8 @@ thing to check.
 
 - **`trigger`**: why it reached you.
   - `mentioned`: someone @mentioned the agent.
-  - `assigned`: the operator assigned it a card, to-do or step.
+  - `assigned`: the operator, or someone they opted in, assigned it a card,
+    to-do or step.
   - `subscribed`: a new comment on a thread the agent follows, with no mention.
   - `completed`: something completed in a project it watches.
 - **`acknowledge`**: true when a person asked for something. False for

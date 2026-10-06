@@ -1045,6 +1045,29 @@ func TestConnectSetupNamesOperatorsAlongsideProjectTrust(t *testing.T) {
 	assert.Equal(t, []int64{setupOperatorPerson + 1}, f.Trust.AllowlistIDs)
 }
 
+// --allow-assignments-from-authorized opts the named people in to assigning
+// the agent work; =false takes it back, and leaving it out keeps it.
+func TestConnectSetupOptsNamedOperatorsInToAssignments(t *testing.T) {
+	s := startConnectSetupServer(t)
+	connectSetupApp(t, s, "agent")
+	storeConnectProfile(t, s, "me", setupOperatorToken)
+	run := func(args ...string) *setup.File {
+		t.Helper()
+		out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), append([]string{"--operator-profile", "me", serveArg()}, args...)...)
+		require.NoError(t, err, out)
+		f, err := setup.Load(connectSetupPath(t, "agent"))
+		require.NoError(t, err)
+		return &f
+	}
+
+	assert.True(t, run("--allow", fmt.Sprint(setupOperatorPerson+1), "--allow-assignments-from-authorized").Trust.AllowAssignments)
+	assert.True(t, run().Trust.AllowAssignments, "kept when not passed")
+	assert.False(t, run("--allow-assignments-from-authorized=false").Trust.AllowAssignments)
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", "--trust", "operator", "--allow-assignments-from-authorized")
+	require.Error(t, err, out, "an opt-in with nobody named is refused")
+}
+
 // The scope that decides readiness is the one the credential was granted,
 // not the one the profile's configuration names.
 func TestConnectSetupReadsTheGrantedScopeNotTheProfiles(t *testing.T) {

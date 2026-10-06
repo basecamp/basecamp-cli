@@ -16,8 +16,10 @@ const (
 type Rule struct {
 	Trigger Trigger
 	// OperatorOnly restricts the rule to events the operator performed,
-	// whatever the trust mode. Assignments run the agent against a recording
-	// on the assigner's say-so, so no broadened mode extends to them.
+	// whatever the trust mode, and to the people the allowlist names when
+	// Trust.AllowAssignments opts them in. Assignments run the agent against
+	// a recording on the assigner's say-so, so no broadened mode extends to
+	// them by itself.
 	OperatorOnly bool
 	// RequiresServed discards the rule at the gate when connect.json does not
 	// serve the project. Only mentioned and assigned are answered in an
@@ -100,7 +102,7 @@ const (
 	// ReasonUntrustedPerformer: the performer is not in the trust set.
 	ReasonUntrustedPerformer Reason = "untrusted_performer"
 	// ReasonAssignmentNotOperator: an assignment performed by anyone but the
-	// operator.
+	// operator, or a named operator allow_assignments opts in.
 	ReasonAssignmentNotOperator Reason = "assignment_not_operator"
 	// ReasonUntrustedAuthor: the recording carrying the instruction was
 	// written by someone outside the trust set.

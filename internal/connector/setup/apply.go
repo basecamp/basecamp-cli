@@ -19,6 +19,9 @@ type Changes struct {
 	// same run asks for project mode, which admits the project's members as
 	// participants beside them.
 	Allow []int64
+	// AllowAssignments turns the allowlist's assignment opt-in on or off;
+	// nil keeps the file's.
+	AllowAssignments *bool
 
 	// Serve are the project (bucket) ids to serve. A project already served
 	// keeps its class and watch_completions.
@@ -44,6 +47,9 @@ func Apply(f File, ch Changes) (File, error) {
 	out.Trust.AllowlistIDs = slices.Clone(f.Trust.AllowlistIDs)
 
 	if err := applyTrust(&out.Trust, ch); err != nil {
+		return File{}, err
+	}
+	if err := applyAssignmentOptIn(&out.Trust, ch); err != nil {
 		return File{}, err
 	}
 
@@ -135,4 +141,21 @@ func sortedIDs(ids []int64) []int64 {
 	out := slices.Clone(ids)
 	slices.Sort(out)
 	return slices.Compact(out)
+}
+
+// applyAssignmentOptIn sets the opt-in that lets the allowlist's people
+// assign the agent work. It rides with that list: setting it needs someone
+// named, and a run that leaves nobody named takes it away, so the file never
+// carries a widening nobody can use.
+func applyAssignmentOptIn(t *admission.Trust, ch Changes) error {
+	if ch.AllowAssignments != nil {
+		t.AllowAssignments = *ch.AllowAssignments
+	}
+	if len(t.AllowlistIDs) == 0 {
+		if ch.AllowAssignments != nil && *ch.AllowAssignments {
+			return errors.New("--allow-assignments-from-authorized opts in the people --allow names, and nobody is named")
+		}
+		t.AllowAssignments = false
+	}
+	return nil
 }

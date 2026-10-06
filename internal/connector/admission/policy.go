@@ -46,6 +46,9 @@ type Trust struct {
 	// AllowlistIDs are the Person ids trusted as operators besides the
 	// operator, in allowlist or project mode.
 	AllowlistIDs []int64 `json:"allowlist_ids,omitempty"`
+	// AllowAssignments lets the people AllowlistIDs names assign the agent
+	// work, as the operator does. Off, assignments are the operator's alone.
+	AllowAssignments bool `json:"allow_assignments,omitempty"`
 }
 
 // roleOf is the role a trusted person holds, before any membership read: an
@@ -306,6 +309,9 @@ func (p Policy) Validate() error {
 		return errors.New("admission: policy needs the operator's Person id")
 	case p.Trust.OperatorID == p.AgentID:
 		return errors.New("admission: the operator cannot be the agent itself")
+	case p.Trust.AllowAssignments && len(p.Trust.AllowlistIDs) == 0:
+		// An opt-in nobody can use reads as a widening that is not there.
+		return errors.New("admission: allow_assignments is set but the allowlist names nobody")
 	}
 	switch p.Trust.Mode {
 	case TrustOperator:

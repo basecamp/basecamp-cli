@@ -146,3 +146,41 @@ func TestApplyServedProjects(t *testing.T) {
 		assert.Error(t, err, "serving and removing one project in one run")
 	})
 }
+
+// The assignment opt-in rides with the allowlist it opts in: setting it needs
+// someone named, and a run that empties the list takes it away too.
+func TestApplyAssignmentOptIn(t *testing.T) {
+	on, off := true, false
+	base := validFile(t)
+
+	t.Run("set with the people it opts in", func(t *testing.T) {
+		out, err := Apply(base, Changes{Allow: []int64{9}, AllowAssignments: &on})
+		require.NoError(t, err)
+		assert.True(t, out.Trust.AllowAssignments)
+		_, err = out.Policy(agentID)
+		assert.NoError(t, err, "admission accepts the result")
+	})
+	t.Run("refused with nobody named", func(t *testing.T) {
+		_, err := Apply(base, Changes{AllowAssignments: &on})
+		assert.Error(t, err)
+	})
+	optedIn := base
+	optedIn.Trust = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7}, AllowAssignments: true}
+	t.Run("kept when not passed", func(t *testing.T) {
+		out, err := Apply(optedIn, Changes{Allow: []int64{8}})
+		require.NoError(t, err)
+		assert.True(t, out.Trust.AllowAssignments)
+	})
+	t.Run("turned off", func(t *testing.T) {
+		out, err := Apply(optedIn, Changes{AllowAssignments: &off})
+		require.NoError(t, err)
+		assert.False(t, out.Trust.AllowAssignments)
+	})
+	t.Run("dropped with the list", func(t *testing.T) {
+		out, err := Apply(optedIn, Changes{Trust: admission.TrustOperator})
+		require.NoError(t, err)
+		assert.False(t, out.Trust.AllowAssignments)
+		_, err = out.Policy(agentID)
+		assert.NoError(t, err)
+	})
+}
