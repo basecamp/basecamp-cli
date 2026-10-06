@@ -88,16 +88,15 @@ func ValidateSession(id, label string) error {
 	return nil
 }
 
-// labelRune reports whether r may appear in a session label: an assigned
-// character outside the "other" category (control, format, private use,
-// surrogate) and the line and paragraph separators. The label is shown to
-// people, so nothing that reorders, hides or breaks the text around it.
+// labelRune reports whether r may appear in a session label: anything but
+// the "other" category (control, format, private use, surrogate) and the
+// line and paragraph separators — exactly the set bc3 refuses. The label is
+// shown to people, so nothing that reorders, hides or breaks the text around
+// it. Unassigned code points are deliberately allowed: a host's Unicode
+// tables can be newer than this build's or the server's, and a label refused
+// over that skew costs the launch its whole token.
 func labelRune(r rune) bool {
-	if unicode.In(r, unicode.C, unicode.Zl, unicode.Zp) {
-		return false
-	}
-	// Unassigned code points are in no category table at all.
-	return unicode.In(r, unicode.L, unicode.M, unicode.N, unicode.P, unicode.S, unicode.Zs)
+	return !unicode.In(r, unicode.Cc, unicode.Cf, unicode.Co, unicode.Cs, unicode.Zl, unicode.Zp)
 }
 
 // addTo puts the session on a client_credentials form. A nil launch is the

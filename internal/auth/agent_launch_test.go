@@ -183,17 +183,16 @@ func TestSessionTokenNeedsAnAgentProfile(t *testing.T) {
 // server holds a session to are checked before anything goes out.
 func TestSessionTokenValidatesItsIdentityBeforeSending(t *testing.T) {
 	for name, tc := range map[string]struct{ id, label string }{
-		"empty id":             {"", "coworker@box"},
-		"short id":             {"0123456789abcdef", ""},
-		"uppercase id":         {strings.ToUpper(testSessionID), ""},
-		"non-hex id":           {"0123456789abcdef0123456789abcdeg", ""},
-		"label too long":       {testSessionID, strings.Repeat("x", 101)},
-		"blank label":          {testSessionID, "   "},
-		"control in label":     {testSessionID, "coworker\nbox"},
-		"bidi override":        {testSessionID, "coworker\u202ebox"},
-		"line separator":       {testSessionID, "coworker\u2028box"},
-		"invalid utf-8 label":  {testSessionID, "coworker\xffbox"},
-		"unassigned codepoint": {testSessionID, "coworker\U000E0080box"},
+		"empty id":            {"", "coworker@box"},
+		"short id":            {"0123456789abcdef", ""},
+		"uppercase id":        {strings.ToUpper(testSessionID), ""},
+		"non-hex id":          {"0123456789abcdef0123456789abcdeg", ""},
+		"label too long":      {testSessionID, strings.Repeat("x", 101)},
+		"blank label":         {testSessionID, "   "},
+		"control in label":    {testSessionID, "coworker\nbox"},
+		"bidi override":       {testSessionID, "coworker\u202ebox"},
+		"line separator":      {testSessionID, "coworker\u2028box"},
+		"invalid utf-8 label": {testSessionID, "coworker\xffbox"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			as := startDeviceAS(t)
@@ -209,4 +208,9 @@ func TestSessionTokenValidatesItsIdentityBeforeSending(t *testing.T) {
 
 	assert.NoError(t, ValidateSession(testSessionID, strings.Repeat("é", 100)), "100 characters, not bytes")
 	assert.NoError(t, ValidateSession(testSessionID, "claude · coworker"))
+	// A character newer than this build's Unicode tables is accepted, as bc3
+	// accepts it: refusing it would cost the launch its whole token over a
+	// table the two sides need not share.
+	assert.NoError(t, ValidateSession(testSessionID, "coworker \U0001FAE9"))
+	assert.NoError(t, ValidateSession(testSessionID, "coworker\U000E0080box"))
 }
