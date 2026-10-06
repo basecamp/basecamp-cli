@@ -19,8 +19,8 @@ func newAuthAgentCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
 		Short: "Connect this computer to a Basecamp agent",
-		Long: `Connect this computer to a Basecamp agent — an identity your Basecamp
-administrator created — so commands run as that agent.
+		Long: `Connect this computer to a Basecamp agent — your own personal agent, or
+one your Basecamp administrator created — so commands run as that agent.
 
 The connection hands this CLI the agent's own OAuth client, which mints the
 access tokens it spends. Nobody pastes a credential: you approve the
