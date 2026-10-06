@@ -519,6 +519,7 @@ func newAuthRefreshCmd() *cobra.Command {
 
 func newAuthTokenCmd() *cobra.Command {
 	var stored bool
+	var sessionID, sessionLabel string
 
 	cmd := &cobra.Command{
 		Use:   "token",
@@ -539,6 +540,17 @@ Get tokens for different profiles:
 The --stored flag ignores BASECAMP_TOKEN and uses stored OAuth credentials:
   basecamp auth token --stored
 
+An agent profile can mint a token of its own for one session — one launch
+of a sandboxed agent, say — which Basecamp records on the token and logs
+beside the agent, so concurrent sessions can be told apart:
+  basecamp -P agent auth token --stored \
+    --session-id "$(openssl rand -hex 16)" --session-label "coworker@laptop"
+
+A session token is minted fresh on every call and never cached; the caller
+holds it for as long as it means to. A Basecamp that does not record the
+session gets no token from this: the command fails rather than hand out one
+that is not bound to the session.
+
 Output modes:
   basecamp auth token           # Raw token (default, for shell substitution)
   basecamp auth token --json    # JSON envelope with token in data field
@@ -552,7 +564,17 @@ Output modes:
 			var token string
 			var err error
 
-			if stored {
+			session := sessionID != "" || sessionLabel != ""
+			switch {
+			case session && sessionID == "":
+				return output.ErrUsage("--session-label needs --session-id")
+			case session && !stored:
+				return output.ErrUsage("--session-id needs --stored: a session token is minted from the stored agent credential, never taken from BASECAMP_TOKEN")
+			}
+
+			if session {
+				token, err = app.Auth.SessionAccessToken(cmd.Context(), sessionID, sessionLabel)
+			} else if stored {
 				// Use stored OAuth credentials (ignores BASECAMP_TOKEN env)
 				// This also handles auto-refresh for near-expiry tokens
 				token, err = app.Auth.StoredAccessToken(cmd.Context())
@@ -568,7 +590,14 @@ Output modes:
 			// Output raw token by default for backwards compatibility with shell scripts.
 			// Only use JSON envelope when --json/--agent/--jq is explicitly requested.
 			if app.Flags.JSON || app.Flags.Agent || app.Flags.JQFilter != "" {
-				return app.OK(map[string]string{"token": token})
+				data := map[string]string{"token": token}
+				if session {
+					data["session_id"] = sessionID
+					if sessionLabel != "" {
+						data["session_label"] = sessionLabel
+					}
+				}
+				return app.OK(data)
 			}
 
 			// Raw output: print token directly, with optional stats on stderr
@@ -578,6 +607,8 @@ Output modes:
 	}
 
 	cmd.Flags().BoolVar(&stored, "stored", false, "Use stored OAuth token, ignoring BASECAMP_TOKEN env var")
+	cmd.Flags().StringVar(&sessionID, "session-id", "", "Mint a fresh agent token for this session (32 lowercase hex characters); needs --stored")
+	cmd.Flags().StringVar(&sessionLabel, "session-label", "", "Label for the session (at most 100 characters); needs --session-id")
 
 	return cmd
 }
