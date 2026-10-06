@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
 	"github.com/basecamp/cli/pkce"
 
@@ -478,26 +479,23 @@ func (m *Manager) renewLocked(ctx context.Context, origin string, creds *Credent
 	return m.refreshLocked(ctx, origin, creds)
 }
 
-// invalidGrantPrefix is how the SDK's token exchanger renders an RFC 6749
-// token-endpoint error: it returns the response as an untyped error, so the
-// OAuth error code is recoverable only from the message. Coupled to
-// basecamp-sdk oauth.Exchanger; a re-pin that types the error can replace
-// the string match.
-const invalidGrantPrefix = "token error: invalid_grant"
+// localClockLayout is how a wait a person reads at a terminal is stated: the
+// local wall clock, with its zone, so "until 4:40 PM PDT" needs no
+// conversion.
+const localClockLayout = "Jan 2 3:04 PM MST"
 
 // invalidGrant reports whether a refresh was refused with invalid_grant —
 // the refresh token is expired, revoked, or reused — and returns the
-// server's error_description when it sent one.
+// server's error_description when it sent one. Both are read off the SDK's
+// typed refusal (basecamp.Error.OAuthError), never off the wording of its
+// message: whether to delete a stored login is not a decision to hang on
+// how an error happens to be phrased.
 func invalidGrant(err error) (string, bool) {
-	rest, ok := strings.CutPrefix(err.Error(), invalidGrantPrefix)
-	switch {
-	case !ok:
-		return "", false
-	case rest == "":
-		return "", true
-	default:
-		return strings.CutPrefix(rest, " - ")
+	var refusal *basecamp.Error
+	if errors.As(err, &refusal) && refusal.OAuthError == "invalid_grant" {
+		return refusal.OAuthErrorDescription, true
 	}
+	return "", false
 }
 
 // forgetRefusedGrant deletes the stored credential only while it still
@@ -563,6 +561,13 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 func (m *Manager) prepareRefresh(creds *Credentials) (oauth.RefreshRequest, *oauth.Exchanger, error) {
 	if creds.RefreshToken == "" {
 		return oauth.RefreshRequest{}, nil, m.errAuth("No refresh token available")
+	}
+
+	// A rate limit the token endpoint already put on this refresh token is
+	// answered here, before anything is resolved or sent — which is also
+	// what lets a report say the next command will not ask (renewal_hold.go).
+	if err := m.heldRenewal(creds); err != nil {
+		return oauth.RefreshRequest{}, nil, err
 	}
 
 	// Migrate old credentials missing OAuthType
@@ -651,6 +656,9 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 
 	token, err := exchanger.Refresh(ctx, req)
 	if err != nil {
+		if held := m.holdRateLimitedRefresh(origin, creds, err); held != nil {
+			return held
+		}
 		desc, dead := invalidGrant(err)
 		if !dead {
 			return wrapOAuthError("token refresh failed", err)
@@ -703,8 +711,42 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 	// self-token sets its own, and leaving a stale one here would date the
 	// new expiry against the old token's lifetime.
 	creds.RenewAfter = 0
+	// The refresh was answered, so whatever was held against the old
+	// refresh token is over.
+	creds.RenewalHold = nil
 
 	return m.store.Save(origin, creds)
+}
+
+// deviceLoginRefusal is the error a device login refused with a 429 returns:
+// what happened, and until when, on the reader's own clock. Basecamp's abuse
+// block covers device authorization along with every other OAuth endpoint,
+// so the way back in is closed by the same failures that locked the old
+// login out — and "status 429" told a person neither that nor how long.
+// Every other failure is returned as it came.
+func (m *Manager) deviceLoginRefusal(err error) error {
+	var refusal *basecamp.Error
+	if !errors.As(err, &refusal) || refusal.HTTPStatus != http.StatusTooManyRequests {
+		return err
+	}
+	msg := "Basecamp is refusing sign-ins from this address for now"
+	if refusal.RetryAfter > 0 {
+		wait := time.Duration(refusal.RetryAfter) * time.Second
+		until := m.now().Add(wait).Local().Format(localClockLayout)
+		msg += fmt.Sprintf("; try again after %s (in %s)", until, expiresIn(wait))
+	} else {
+		msg += "; try again later"
+	}
+	e := output.ErrRateLimit(refusal.RetryAfter)
+	e.Message = msg
+	e.HTTPStatus = refusal.HTTPStatus
+	e.Hint = "Repeated failed sign-ins from this address cause this, and an old copy of a login causes them: " +
+		"another install, container or scheduled job still using a copied credentials.json. Stop it first, or the block starts again."
+	e.Cause = err
+	if refusal.RetryAfter > 0 {
+		e.Cause = errors.Join(retryAfterError(refusal.RetryAfter), err)
+	}
+	return e
 }
 
 // LoginResult holds the outcome of a successful login — Login()'s, or
@@ -1166,7 +1208,7 @@ func (m *Manager) loginDevice(ctx context.Context, credKey string, oauthCfg *oau
 		return nil, displayErr
 	}
 	if err != nil {
-		return nil, err
+		return nil, m.deviceLoginRefusal(err)
 	}
 
 	// The granted scope is whatever the server says it granted; fall back to

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -106,8 +108,10 @@ const maxRenewalHold = time.Hour
 // that waited a server's word for years would be a hang, not a wait.
 const MaxServerWait = maxAgentConnectLifetime
 
-// RenewalHold is the token endpoint's last refusal of an agent credential's
-// client, remembered so the next mint can answer it without asking again.
+// RenewalHold is the token endpoint's last refusal of a credential's renewal
+// — an agent's mint, or anyone else's refresh — remembered so the next
+// renewal can answer it without asking again. A refresh is only ever held
+// for a rate limit (holdRateLimitedRefresh).
 //
 // Nothing in it came from the server as free text: Detail is the same fixed
 // vocabulary agentMintRefusal renders (see oauthErrorCodes).
@@ -119,11 +123,12 @@ type RenewalHold struct {
 	// "token error: invalid_client", or "the server answered HTTP 401".
 	Detail string `json:"detail"`
 
-	// Client is agentClientFingerprint of the client credentials the
-	// verdict was about. A hold for any others holds nothing.
+	// Client is renewalSubject of the credential the verdict was about:
+	// an agent's client credentials, or a refresh token. A hold for any
+	// others holds nothing.
 	Client string `json:"client"`
 
-	// Until is when the next mint may be sent, in Unix seconds, rounded
+	// Until is when the next renewal may be sent, in Unix seconds, rounded
 	// up. Zero on an invalid_client refusal means never with these client
 	// credentials; any other hold without one is damaged, and holds nothing.
 	Until int64 `json:"until,omitempty"`
@@ -136,6 +141,78 @@ type RenewalHold struct {
 // nothing printed or compared needs the secret in hand.
 func agentClientFingerprint(clientID, clientSecret string) string {
 	sum := sha256.Sum256([]byte("basecamp-cli agent mint hold\x00" + clientID + "\x00" + clientSecret))
+	return hex.EncodeToString(sum[:16])
+}
+
+// renewalSubject is the fingerprint of what renewing creds presents to the
+// token endpoint: an agent's client credentials, or anyone else's refresh
+// token. A hold is about exactly one of these.
+func renewalSubject(creds *Credentials) string {
+	if creds.OAuthType == oauthTypeAgent {
+		return agentClientFingerprint(creds.ClientID, creds.ClientSecret)
+	}
+	return refreshTokenFingerprint(creds.RefreshToken)
+}
+
+// holdRateLimitedRefresh remembers a 429 on a refresh as a hold on the stored
+// login and returns the rate-limit error it is answered with; nil for any
+// other failure.
+//
+// A refresh is renewed by every process that finds the access token near
+// expiry, so a scheduled job resends it on every run. Into one of
+// Basecamp's abuse blocks — which answers every OAuth request from the
+// address for up to a day once enough refreshes have failed — that is a
+// request per run for hours, none of which can succeed. Held, the next run
+// answers locally until the wait is over. The hold is capped at
+// MaxServerWait, as an agent's is: a request inside a block is answered 429
+// without being counted against the address, so the cap costs one request
+// per cap and notices a block lifted early.
+func (m *Manager) holdRateLimitedRefresh(origin string, creds *Credentials, err error) error {
+	var refusal *basecamp.Error
+	if !errors.As(err, &refusal) || refusal.HTTPStatus != http.StatusTooManyRequests {
+		return nil
+	}
+	now := m.now()
+	named := time.Duration(refusal.RetryAfter) * time.Second
+	wait := named
+	if wait <= 0 {
+		wait = defaultAgentRateLimitHold
+	}
+	hold := &RenewalHold{
+		Kind:   renewalHoldRateLimited,
+		Detail: fmt.Sprintf("the server answered HTTP %d", refusal.HTTPStatus),
+		Client: refreshTokenFingerprint(creds.RefreshToken),
+		Until:  ceilUnix(now.Add(min(wait, MaxServerWait))),
+	}
+	m.rememberRenewalHold(origin, hold)
+
+	held := time.Unix(hold.Until, 0).UTC().Format(time.RFC3339)
+	var msg string
+	switch {
+	case named > MaxServerWait:
+		msg = fmt.Sprintf("Basecamp rate-limited refreshing this login until %s; the refresh is held until %s, then tried once to see whether the limit has lifted",
+			now.Add(named).UTC().Format(time.RFC3339), held)
+	case named > 0:
+		msg = fmt.Sprintf("Basecamp rate-limited refreshing this login until %s; the refresh is held until then", held)
+	default:
+		msg = fmt.Sprintf("Basecamp rate-limited refreshing this login; the refresh is held until %s", held)
+	}
+	e := holdRateLimitError(hold, now, msg)
+	if refusal.RetryAfter > holdWait(hold, now) {
+		// Held for the cap; what the server asked for is kept too, so a
+		// caller can say both.
+		e.Cause = errors.Join(e.Cause, namedWaitError(refusal.RetryAfter))
+	}
+	return e
+}
+
+// refreshTokenFingerprint names a refresh token the way
+// agentClientFingerprint names a client: a truncated SHA-256 under a label of
+// its own, so a hold can say which refresh token it is about without
+// carrying it. A hold for any other refresh token — one another process has
+// rotated to, or a fresh login's — holds nothing.
+func refreshTokenFingerprint(refreshToken string) string {
+	sum := sha256.Sum256([]byte("basecamp-cli refresh hold\x00" + refreshToken))
 	return hex.EncodeToString(sum[:16])
 }
 
@@ -220,7 +297,11 @@ func (m *Manager) heldRenewal(creds *Credentials) error {
 
 	switch hold.Kind {
 	case renewalHoldRateLimited:
-		e := holdRateLimitError(hold, now, fmt.Sprintf("Minting an agent token is held until %s: the token endpoint rate-limited the last attempt (%s)", when, hold.Detail))
+		what := "Minting an agent token"
+		if creds.OAuthType != oauthTypeAgent {
+			what = "Refreshing this login"
+		}
+		e := holdRateLimitError(hold, now, fmt.Sprintf("%s is held until %s: the token endpoint rate-limited the last attempt (%s)", what, when, hold.Detail))
 		e.Cause = errors.Join(e.Cause, errRenewalHeld)
 		return e
 	case renewalHoldRefused:
@@ -288,7 +369,12 @@ func (m *Manager) RenewalHoldStatus(creds *Credentials, refusal error) *RenewalH
 // expiring in the future and within maxRenewalHold. Only an
 // invalid_client refusal never expires. Anything else is ignored, and the mint goes out.
 func (hold *RenewalHold) holds(creds *Credentials, now time.Time) bool {
-	if hold == nil || hold.Client != agentClientFingerprint(creds.ClientID, creds.ClientSecret) {
+	if hold == nil || hold.Client != renewalSubject(creds) {
+		return false
+	}
+	// A refresh is only ever held for a rate limit: a refused refresh token
+	// is forgotten outright rather than held (refreshCredential).
+	if creds.OAuthType != oauthTypeAgent && hold.Kind != renewalHoldRateLimited {
 		return false
 	}
 	switch {
@@ -332,7 +418,7 @@ func (m *Manager) rememberRenewalHold(origin string, hold *RenewalHold) {
 		}
 		return
 	}
-	if current.OAuthType != oauthTypeAgent || agentClientFingerprint(current.ClientID, current.ClientSecret) != hold.Client {
+	if renewalSubject(current) != hold.Client {
 		return
 	}
 	current.RenewalHold = hold

@@ -41,11 +41,13 @@ type Credentials struct {
 	// today except a minted agent self-token — means the default.
 	RenewAfter int64 `json:"renew_after,omitempty"`
 
-	// RenewalHold is the token endpoint's last refusal of an agent
-	// credential's client — a refused secret, or a rate limit — kept so
-	// the next mint answers it locally instead of asking again (see
-	// renewal_hold.go). Nil for every other kind of credential, and for an
-	// agent whose last mint succeeded.
+	// RenewalHold is the token endpoint's last refusal of this
+	// credential's renewal, kept so the next renewal answers it locally
+	// instead of asking again (see renewal_hold.go): for an agent, a
+	// refused secret or a rate limit on its mint; for anyone else, a rate
+	// limit on the refresh. Nil once a renewal succeeds. Stored as
+	// "mint_hold", the name it had when only an agent's mint was held, so
+	// every version reads the others'.
 	RenewalHold *RenewalHold `json:"mint_hold,omitempty"`
 
 	// Issuer is the RFC 8414 issuer of the authorization server that minted
