@@ -14,8 +14,11 @@ import (
 )
 
 // agentMentionTransport fakes a project whose people include an agent. The
-// agent is absent from the pingable set, as it is in Basecamp: an agent can
-// never be in a Ping.
+// agent is left out of the pingable set, as Basecamp left agents out before
+// they could be in a Ping, so it is the project-scope fallback that finds it.
+// Basecamp now lists agents a person can reach among the pingable people, and
+// an agent can be in a Ping with a person who can use Pings; the fallback
+// still has to work for an agent the pingable set does not hold.
 type agentMentionTransport struct {
 	mu     sync.Mutex
 	gets   map[string]int
