@@ -248,7 +248,8 @@ An OAuth login refreshes by rotation: each refresh replaces its refresh token,
 and Basecamp signs the whole login out when a replaced token is used again.
 That is how it notices a stolen one. So one login can be **shared** by many
 processes, but never **copied**: two containers that each hold a copy of
-`credentials.json` sign each other out the first time both refresh.
+`credentials.json` sign each other out as soon as both have refreshed more
+than a minute apart, which a retry window forgives but a schedule won't.
 
 For containers, CI and cron, pick one:
 
@@ -265,7 +266,8 @@ For containers, CI and cron, pick one:
   install, and keep its config directory to itself.
 
 Never bake `credentials.json` into an image or copy it between machines. The
-CLI says so once, the first time a login refreshes inside a container.
+CLI says so once, the first time a login refreshes inside a container (again
+later only if it cannot write its marker in the config directory).
 
 If refreshes keep failing, Basecamp blocks sign-ins from that address for a
 while. The CLI then waits out the block instead of retrying on every run

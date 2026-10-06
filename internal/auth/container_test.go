@@ -34,7 +34,7 @@ func pretendContainer(t *testing.T, in bool) {
 // the whole login out as stolen. Saying so is what stops it happening again.
 func TestRefresh_RevokedLoginSaysItWasUsedFromTwoPlaces(t *testing.T) {
 	pretendContainer(t, false)
-	for _, desc := range []string{"Token has been revoked", "Token reuse detected, session terminated"} {
+	for _, desc := range []string{"Token has been revoked", "Token reuse detected, session terminated", "Token has been revoked\n"} {
 		t.Run(desc, func(t *testing.T) {
 			m, key := refreshRefusedBy(t, http.StatusBadRequest, fmt.Sprintf(`{"error":"invalid_grant","error_description":%q}`, desc))
 
@@ -43,7 +43,7 @@ func TestRefresh_RevokedLoginSaysItWasUsedFromTwoPlaces(t *testing.T) {
 			require.ErrorAs(t, err, &cliErr)
 			assert.Equal(t, output.CodeAuth, cliErr.Code)
 			assert.Contains(t, cliErr.Message, "This login was revoked, probably because it was used from more than one place")
-			assert.Contains(t, cliErr.Message, "("+desc+")")
+			assert.Contains(t, cliErr.Message, "("+strings.TrimSpace(desc)+")")
 			assert.Equal(t, "Run: basecamp auth login -P work", cliErr.Hint)
 			_, loadErr := m.store.Load(key)
 			assert.Error(t, loadErr, "the revoked login is still forgotten")
@@ -142,4 +142,5 @@ func TestRefresh_OutsideAContainerSaysNothing(t *testing.T) {
 func TestContainerLoginAdvice(t *testing.T) {
 	assert.True(t, strings.Contains(containerLoginAdvice, "BASECAMP_TOKEN"), containerLoginAdvice)
 	assert.True(t, strings.Contains(containerLoginAdvice, "volume"), containerLoginAdvice)
+	assert.True(t, strings.Contains(containerLoginAdvice, "BASECAMP_NO_KEYRING=1"), "a keyring would keep each container's own copy")
 }

@@ -38,7 +38,7 @@ var inContainer = func() bool {
 
 // containerLoginAdvice is what to do instead of copying a login between
 // containers: share one, or use a credential that does not rotate.
-const containerLoginAdvice = "Give every container the same config directory as a shared volume (they take turns refreshing it), " +
+const containerLoginAdvice = "Give every container the same config directory as a shared volume, with BASECAMP_NO_KEYRING=1 (they take turns refreshing it), " +
 	"or set BASECAMP_TOKEN to a personal access token, which never rotates; never copy credentials.json between containers"
 
 // revokedForReuse reports whether an invalid_grant's description is bc3's
@@ -80,6 +80,6 @@ func (m *Manager) noticeContainerLogin(creds *Credentials) {
 		return
 	}
 	m.warnf("notice: this login refreshes by replacing its token, so if it is copied into other containers, "+
-		"the first two copies to refresh get every copy signed out. %s.", containerLoginAdvice)
+		"every copy is signed out once two of them refresh more than a minute apart. %s.", containerLoginAdvice)
 	_ = os.WriteFile(marker, nil, 0o600)
 }
