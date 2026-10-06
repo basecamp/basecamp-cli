@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -59,33 +61,59 @@ func TestTheSkillDocumentsTheRequestLineItGets(t *testing.T) {
 }
 
 // writtenLineKeys is the keys of a request line as the connector writes one,
-// every optional field set.
+// with every field set, so a key that omitempty would drop is still seen —
+// including one added after this test was written.
 func writtenLineKeys(t *testing.T) []string {
 	t.Helper()
-	raw, err := json.Marshal(HandoffLine{
-		Type:          "request",
-		Recording:     HandoffRecording{ProjectName: "set, so omitempty keeps it"},
-		RequesterName: "set, so omitempty keeps it",
-	})
+	var line HandoffLine
+	fill(t, reflect.ValueOf(&line).Elem())
+	raw, err := json.Marshal(line)
 	require.NoError(t, err)
 	return lineKeys(t, raw)
 }
 
-// lineKeys is a line's keys, nested ones as parent.child, sorted.
+// fill sets every field of v to a value that is not its zero.
+func fill(t *testing.T, v reflect.Value) {
+	t.Helper()
+	if v.Type() == reflect.TypeFor[time.Time]() {
+		v.Set(reflect.ValueOf(time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC)))
+		return
+	}
+	switch v.Kind() {
+	case reflect.Struct:
+		for i := range v.NumField() {
+			if v.Type().Field(i).IsExported() {
+				fill(t, v.Field(i))
+			}
+		}
+	case reflect.String:
+		v.SetString("x")
+	case reflect.Int, reflect.Int64, reflect.Int32:
+		v.SetInt(1)
+	case reflect.Bool:
+		v.SetBool(true)
+	default:
+		t.Fatalf("the request line has a %s field; teach fill to set one", v.Kind())
+	}
+}
+
+// lineKeys is a line's keys, nested ones as their full dotted path, sorted.
 func lineKeys(t *testing.T, raw []byte) []string {
 	t.Helper()
 	var obj map[string]any
 	require.NoError(t, json.Unmarshal(raw, &obj))
 	var keys []string
-	for k, v := range obj {
-		if nested, ok := v.(map[string]any); ok {
-			for nk := range nested {
-				keys = append(keys, k+"."+nk)
+	var walk func(prefix string, obj map[string]any)
+	walk = func(prefix string, obj map[string]any) {
+		for k, v := range obj {
+			if nested, ok := v.(map[string]any); ok {
+				walk(prefix+k+".", nested)
+				continue
 			}
-			continue
+			keys = append(keys, prefix+k)
 		}
-		keys = append(keys, k)
 	}
+	walk("", obj)
 	slices.Sort(keys)
 	return keys
 }
