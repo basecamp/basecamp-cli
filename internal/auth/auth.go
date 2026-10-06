@@ -563,13 +563,6 @@ func (m *Manager) prepareRefresh(creds *Credentials) (oauth.RefreshRequest, *oau
 		return oauth.RefreshRequest{}, nil, m.errAuth("No refresh token available")
 	}
 
-	// A rate limit the token endpoint already put on this refresh token is
-	// answered here, before anything is resolved or sent — which is also
-	// what lets a report say the next command will not ask (renewal_hold.go).
-	if err := m.heldRenewal(creds); err != nil {
-		return oauth.RefreshRequest{}, nil, err
-	}
-
 	// Migrate old credentials missing OAuthType
 	if creds.OAuthType == "" {
 		creds.OAuthType = oauthTypeLaunchpad
@@ -619,6 +612,15 @@ func (m *Manager) prepareRefresh(creds *Credentials) (oauth.RefreshRequest, *oau
 			clientID = launchpadClientID
 			clientSecret = launchpadClientSecret
 		}
+	}
+
+	// A rate limit the token endpoint already put on this refresh token is
+	// answered here, before anything is sent — which is also what lets a
+	// report say the next command will not ask (renewal_hold.go). It comes
+	// after every local check above, as the agent mint's does, so a stored
+	// hold never masks a credential that could not be refreshed anyway.
+	if err := m.heldRenewal(creds); err != nil {
+		return oauth.RefreshRequest{}, nil, err
 	}
 
 	// The refresh lane follows the stored credential's provenance: bc5-typed

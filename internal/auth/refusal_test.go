@@ -243,3 +243,21 @@ func TestLoginDevice_RateLimitWithoutRetryAfter(t *testing.T) {
 	assert.Contains(t, cliErr.Message, "Basecamp is refusing sign-ins from this address")
 	assert.Contains(t, cliErr.Message, "try again later")
 }
+
+// A stored hold never masks a local failure: a login whose token endpoint is
+// missing reports that, not a rate limit it could not have reached anyway.
+func TestRefreshRefusal_LocalFailureIsNotMaskedByAHold(t *testing.T) {
+	m, key, _, _ := rateLimitedRefresh(t, "600")
+	_ = m.Refresh(context.Background())
+
+	creds, err := m.store.Load(key)
+	require.NoError(t, err)
+	require.NotNil(t, creds.RenewalHold)
+	creds.TokenEndpoint = ""
+
+	refusal := m.RefreshRefusal(creds)
+	require.Error(t, refusal)
+	assert.Contains(t, refusal.Error(), "missing their token endpoint")
+	assert.NotErrorIs(t, refusal, errRenewalHeld)
+	assert.Nil(t, m.RenewalHoldStatus(creds, refusal))
+}
