@@ -36,7 +36,7 @@ import (
 // and by every poll of anything automated that runs one. The token
 // endpoint's refusals are therefore remembered with the credential and
 // answered locally until the secret changes, or for as long as the server
-// asked; see mintAgentCredential and agent_hold.go.
+// asked; see mintAgentCredential and renewal_hold.go.
 //
 // The tokens come back bound to the agent with an RFC 8707 resource
 // indicator of the form urn:bc:agent:<id>. Nothing here parses or requires
@@ -113,7 +113,7 @@ func (m *Manager) resolveAgentMint(creds *Credentials) (*agentMint, error) {
 	// A verdict the token endpoint already gave on these client
 	// credentials is answered here, before anything is resolved or sent —
 	// which is also what lets a report say the next command will not ask.
-	if err := m.heldMint(creds); err != nil {
+	if err := m.heldRenewal(creds); err != nil {
 		return nil, err
 	}
 
@@ -155,7 +155,7 @@ func (m *Manager) resolveAgentMint(creds *Credentials) (*agentMint, error) {
 // reason), which the same secret may get past later.
 //
 // But a refusal is not forgotten either. The token endpoint's verdict is
-// remembered on the stored credential (MintHold, agent_hold.go), and the
+// remembered on the stored credential (RenewalHold, renewal_hold.go), and the
 // next mint answers it locally, before any network I/O:
 //
 //   - invalid_client refuses the secret, and no later state of the server
@@ -183,7 +183,7 @@ func (m *Manager) resolveAgentMint(creds *Credentials) (*agentMint, error) {
 //
 // The caller holds m.mu and the credential key's cross-process lock, which
 // is what makes the hold's write safe against a concurrent login (see
-// rememberMintHold).
+// rememberRenewalHold).
 func (m *Manager) mintAgentCredential(ctx context.Context, origin string, creds *Credentials) error {
 	mint, err := m.prepareAgentMint(creds)
 	if err != nil {
@@ -192,7 +192,7 @@ func (m *Manager) mintAgentCredential(ctx context.Context, origin string, creds 
 	token, hold, err := m.mintAgentToken(ctx, mint)
 	if err != nil {
 		if hold != nil {
-			m.rememberMintHold(origin, hold)
+			m.rememberRenewalHold(origin, hold)
 		}
 		return err
 	}
@@ -211,7 +211,7 @@ func applyAgentToken(creds *Credentials, token *oauth.Token) {
 	creds.AccessToken = token.AccessToken
 	creds.RefreshToken = ""
 	// The client was just accepted, so whatever was held against it is over.
-	creds.MintHold = nil
+	creds.RenewalHold = nil
 	if token.Resource != "" {
 		creds.Resource = token.Resource
 	}
@@ -310,7 +310,7 @@ func agentTokenExpiry(token *oauth.Token) time.Time {
 // body carries a client secret: a bounded response read, a refusal to treat
 // a redirect as a hop, and RFC 6749 §5.2 error rendering in the shape the
 // rest of this package already matches on ("token error: <code> - <text>").
-func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.Token, *MintHold, error) {
+func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.Token, *RenewalHold, error) {
 	form := url.Values{
 		"grant_type":    {"client_credentials"},
 		"client_id":     {mint.clientID},
@@ -460,7 +460,7 @@ var oauthErrorCodes = map[string]bool{
 // It also returns the hold the refusal leaves, if it leaves one — the
 // verdict the next mint will answer locally rather than ask for again (see
 // mintHoldFor, and mintAgentCredential for what is held and for how long).
-func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agentMint) (*MintHold, error) {
+func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agentMint) (*RenewalHold, error) {
 	detail := fmt.Sprintf("the server answered HTTP %d", resp.StatusCode)
 	var errResp struct {
 		Error string `json:"error"`
@@ -485,7 +485,7 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 		}
 		now := m.now()
 		hold := mintHoldFor(mint, resp, detail, code, false, now)
-		if hold != nil && hold.Kind == mintHoldRateLimited {
+		if hold != nil && hold.Kind == renewalHoldRateLimited {
 			e := holdRateLimitError(hold, now, "minting an agent token: "+detail)
 			if named := retryAfterSeconds(resp.Header.Get("Retry-After"), now); named > holdWait(hold, now) {
 				// Held for the cap; what the server asked for is kept too,
@@ -512,7 +512,7 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 	if clientRefusalCodes[code] || bareUnauthorized {
 		refused := output.ErrAuth("Minting an agent token was refused (" + detail + ")")
 		refused.Cause = ErrAgentCredentialRefused
-		var hold *MintHold
+		var hold *RenewalHold
 		// Held only when the refusal named a known code or named nothing
 		// at all: a code this version does not know may mean something a
 		// held hour would get wrong, so it is asked again.

@@ -104,7 +104,7 @@ type Manager struct {
 	Warnf func(format string, args ...any)
 
 	// clock is the time a remembered mint verdict is read and written
-	// against (agent_hold.go). Test seam; nil means time.Now.
+	// against (renewal_hold.go). Test seam; nil means time.Now.
 	clock func() time.Time
 
 	mu sync.Mutex

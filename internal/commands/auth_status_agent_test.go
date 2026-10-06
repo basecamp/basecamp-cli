@@ -89,10 +89,10 @@ func TestAuthStatusOnABrokenAgentOffersTheAgentLogin(t *testing.T) {
 type agentStatusReport struct {
 	Notice string `json:"notice"`
 	Data   struct {
-		Authenticated  bool                 `json:"authenticated"`
-		Refreshable    bool                 `json:"refreshable"`
-		Expired        bool                 `json:"expired"`
-		RenewalRefused *auth.MintHoldStatus `json:"renewal_refused"`
+		Authenticated  bool                    `json:"authenticated"`
+		Refreshable    bool                    `json:"refreshable"`
+		Expired        bool                    `json:"expired"`
+		RenewalRefused *auth.RenewalHoldStatus `json:"renewal_refused"`
 	} `json:"data"`
 	raw string
 }
@@ -210,7 +210,7 @@ func TestAuthStatusNamesAPermanentHoldWhileTheTokenIsLive(t *testing.T) {
 	// A token that is good for another hour, beside the stored refusal.
 	creds, err := store.Load("profile:clawdito")
 	require.NoError(t, err)
-	require.NotNil(t, creds.MintHold)
+	require.NotNil(t, creds.RenewalHold)
 	creds.AccessToken = "still-good"
 	creds.ExpiresAt = time.Now().Add(time.Hour).Unix()
 	require.NoError(t, store.Save("profile:clawdito", creds))
