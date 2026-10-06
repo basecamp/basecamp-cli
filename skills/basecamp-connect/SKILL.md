@@ -200,7 +200,8 @@ named with `--allow` to assign work too: `--allow-assignments-from-authorized`
 takes its owner. For any other agent, name the operator by their own CLI
 profile with `--operator-profile '<profile>'`. For allowlist, or operators
 beside project trust, look up each person's id with
-`basecamp people list --json`, and pass `--allow <id>` for each.
+`basecamp people list --json`,
+and pass `--allow <id>` for each.
 A run that passes `--allow` replaces the list, a run that passes none keeps
 it, and `--trust operator` clears it; setup refuses `--trust operator` with
 `--allow`.

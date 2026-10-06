@@ -37,6 +37,23 @@ func TestNamedOperatorsMayAssignWhenOptedIn(t *testing.T) {
 		assert.Equal(t, 1, f.assignCalls, "and only once the events show this assignment added the agent")
 	})
 
+	t.Run("so is one named beside project trust, and the members still are not", func(t *testing.T) {
+		p := optedIn()
+		p.Trust.Mode = TrustProject
+		f := newFakeReads()
+		card(f)
+		f.members[servedProj] = map[int64]bool{memberID: true}
+		v := decide(t, newAdmitter(t, p, f), assignment(allowedID))
+		require.Equal(t, StateAdmitted, v.State, "reason %q", v.Reason)
+		assert.Equal(t, RoleOperator, v.Role)
+
+		f = newFakeReads()
+		card(f)
+		f.members[servedProj] = map[int64]bool{memberID: true}
+		v = decide(t, newAdmitter(t, p, f), assignment(memberID))
+		assert.Equal(t, ReasonAssignmentNotOperator, v.Reason)
+	})
+
 	t.Run("anyone else is still refused at the gate", func(t *testing.T) {
 		for _, performer := range []int64{strangerID, memberID} {
 			f := newFakeReads()
