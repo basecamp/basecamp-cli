@@ -385,7 +385,7 @@ Examples:
 	fl.StringVar(&f.operatorProfile, "operator-profile", "", "Profile whose identity is the operator")
 	fl.StringVar(&f.trust, "trust", "", "Who may drive the agent: operator, allowlist or project")
 	fl.StringArrayVar(&f.allow, "allow", nil, "Person id to trust as an operator besides the operator (repeatable; with no --trust it implies allowlist; works with --trust allowlist or project, not operator)")
-	fl.Var(&f.allowAssignments, "allow-assignments-from-authorized", "Let the people --allow names assign the agent work too (default: the operator's alone; =false to turn off)")
+	fl.Var(&f.allowAssignments, "allow-assignments-from-authorized", "Let the people the allowlist names, this run's --allow or the list kept, assign the agent work too (default: the operator's alone; =false to turn off)")
 	fl.Lookup("allow-assignments-from-authorized").NoOptDefVal = "true"
 	fl.StringArrayVar(&f.serve, "serve", nil, "Serve a Basecamp project: <project-id> (repeatable)")
 	fl.StringArrayVar(&f.unserve, "unserve", nil, "Stop serving a project (repeatable)")
