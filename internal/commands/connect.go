@@ -602,7 +602,9 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if kind == setup.KindBotUser {
 		next.Agent.IdentityID = expect
 	}
-	setup.SetOperator(&next.Trust, trust.Operator.ID)
+	if err := setup.SetOperator(&next.Trust, trust.Operator.ID, f.allowAssignments.set && f.allowAssignments.value); err != nil {
+		return output.ErrUsage("connect.json was not written: " + err.Error())
+	}
 	if err := next.Validate(); err != nil {
 		return output.ErrUsage("connect.json was not written: " + err.Error())
 	}

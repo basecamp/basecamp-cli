@@ -158,7 +158,7 @@ func applyAssignmentOptIn(t *admission.Trust, before []int64, ch Changes) error 
 	}
 	if len(t.AllowlistIDs) == 0 {
 		if ch.AllowAssignments != nil && *ch.AllowAssignments {
-			return errors.New("--allow-assignments-from-authorized opts in the people --allow names, and nobody is named")
+			return errors.New("--allow-assignments-from-authorized opts in the people the allowlist names, and after this run it names nobody")
 		}
 		t.AllowAssignments = false
 	}
@@ -166,12 +166,19 @@ func applyAssignmentOptIn(t *admission.Trust, before []int64, ch Changes) error 
 }
 
 // SetOperator records the operator. When the allowlist then names nobody
-// besides them, the assignment opt-in has nobody left to cover and is
-// dropped: the operator assigns without one, and keeping it would make the
-// file refuse to validate over a change setup itself made.
-func SetOperator(t *admission.Trust, id int64) {
+// besides them, the assignment opt-in has nobody left to cover. Kept from an
+// earlier run, it is dropped: the operator assigns without one, and keeping
+// it would make the file refuse to validate over a change setup itself made.
+// Asked for in this run (requested), it is refused, so the person learns it
+// does nothing rather than finding it quietly off.
+func SetOperator(t *admission.Trust, id int64, requested bool) error {
 	t.OperatorID = id
-	if !slices.ContainsFunc(t.AllowlistIDs, func(a int64) bool { return a != id }) {
-		t.AllowAssignments = false
+	if !t.AllowAssignments || slices.ContainsFunc(t.AllowlistIDs, func(a int64) bool { return a != id }) {
+		return nil
 	}
+	if requested {
+		return errors.New("--allow-assignments-from-authorized covers the people the allowlist names besides the operator, and it names nobody else")
+	}
+	t.AllowAssignments = false
+	return nil
 }
