@@ -1029,6 +1029,7 @@ func TestConnectSetupNamesOperatorsAlongsideProjectTrust(t *testing.T) {
 
 			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", "--trust", "project", "--allow", fmt.Sprint(id), serveArg())
 			require.Error(t, err, out)
+			assert.Contains(t, err.Error(), fmt.Sprintf("Allowlist %d", id))
 			assertNotWritten(t, "agent")
 		})
 	}

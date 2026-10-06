@@ -218,7 +218,10 @@ func TestTheLineSaysWhoseRequestItIs(t *testing.T) {
 
 			require.NoError(t, handOffReady(context.Background(), handoffOptions(ledger, &out)))
 
-			assert.Contains(t, out.String(), `"role":"`+tc.want+`"`)
+			lines := handedOffLines(t, &out)
+			require.Len(t, lines, 1)
+			assert.Equal(t, tc.want, lines[0].Role)
+			assert.Contains(t, out.String(), `"role":"`+tc.want+`"`, "under the local connector's key")
 		})
 	}
 }
