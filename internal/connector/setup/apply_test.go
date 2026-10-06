@@ -182,6 +182,17 @@ func TestApplyAssignmentOptIn(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, out.Trust.AllowAssignments, "restated with the new list")
 	})
+	// Only someone newly named would gain assignments unasked: the same
+	// list again, or a shorter one, keeps the opt-in.
+	t.Run("kept when the list names nobody new", func(t *testing.T) {
+		f := base
+		f.Trust = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7, 9}, AllowAssignments: true}
+		for _, allow := range [][]int64{{9, 7}, {7}} {
+			out, err := Apply(f, Changes{Allow: allow})
+			require.NoError(t, err)
+			assert.True(t, out.Trust.AllowAssignments, "allow %v names nobody new", allow)
+		}
+	})
 	t.Run("set over the list connect.json keeps", func(t *testing.T) {
 		f := base
 		f.Trust = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7}}

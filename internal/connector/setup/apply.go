@@ -49,7 +49,7 @@ func Apply(f File, ch Changes) (File, error) {
 	if err := applyTrust(&out.Trust, ch); err != nil {
 		return File{}, err
 	}
-	if err := applyAssignmentOptIn(&out.Trust, ch); err != nil {
+	if err := applyAssignmentOptIn(&out.Trust, f.Trust.AllowlistIDs, ch); err != nil {
 		return File{}, err
 	}
 
@@ -147,13 +147,13 @@ func sortedIDs(ids []int64) []int64 {
 // assign the agent work. It rides with that list: setting it needs someone
 // named, a run that leaves nobody named takes it away, so the file never
 // carries a widening nobody can use, and a run that names a new list without
-// restating it takes it away too, so nobody newly named gains assignments
-// unasked.
-func applyAssignmentOptIn(t *admission.Trust, ch Changes) error {
+// restating it takes it away too when it names someone the list before did
+// not, so nobody newly named gains assignments unasked.
+func applyAssignmentOptIn(t *admission.Trust, before []int64, ch Changes) error {
 	switch {
 	case ch.AllowAssignments != nil:
 		t.AllowAssignments = *ch.AllowAssignments
-	case len(ch.Allow) > 0:
+	case slices.ContainsFunc(ch.Allow, func(id int64) bool { return !slices.Contains(before, id) }):
 		t.AllowAssignments = false
 	}
 	if len(t.AllowlistIDs) == 0 {
