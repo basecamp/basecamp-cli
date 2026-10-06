@@ -1066,6 +1066,10 @@ func TestConnectSetupOptsNamedOperatorsInToAssignments(t *testing.T) {
 
 	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", "--trust", "operator", "--allow-assignments-from-authorized")
 	require.Error(t, err, out, "an opt-in with nobody named is refused")
+	f, err := setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.False(t, f.Trust.AllowAssignments, "and nothing was written")
+	assert.Equal(t, []int64{setupOperatorPerson + 1}, f.Trust.AllowlistIDs)
 }
 
 // The scope that decides readiness is the one the credential was granted,

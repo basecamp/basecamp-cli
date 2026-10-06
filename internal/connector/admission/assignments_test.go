@@ -79,4 +79,10 @@ func TestNamedOperatorsMayAssignWhenOptedIn(t *testing.T) {
 		p.Trust.AllowAssignments = true
 		assert.Error(t, p.Validate())
 	})
+
+	t.Run("and so is one that names only the operator, who needs none", func(t *testing.T) {
+		p := optedIn()
+		p.Trust.AllowlistIDs = []int64{operatorID}
+		assert.Error(t, p.Validate())
+	})
 }

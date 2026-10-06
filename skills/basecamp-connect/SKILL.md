@@ -75,7 +75,7 @@ Each becomes a flag on setup (*First-time setup*, step 4):
 | "me and Jane" | `--allow <jane's person id>` (and everyone else who stays: the list is replaced) |
 | "anyone in the project can ask it things" | `--trust project` (they ask as participants) |
 | "Jane operates it, and anyone in the project can ask" | `--trust project --allow <jane's person id>` |
-| "Jane can assign it work too" | `--allow-assignments-from-authorized` (with Jane in `--allow`) |
+| "the people I named can assign it work too" | `--allow-assignments-from-authorized`: it covers everyone `--allow` names, not one of them, so say who that is and confirm |
 | "also work in project X" | `--serve <id of X>` |
 | "stop working in X" | `--unserve <id of X>` |
 
