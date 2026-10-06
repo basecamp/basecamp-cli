@@ -614,15 +614,6 @@ func (m *Manager) prepareRefresh(creds *Credentials) (oauth.RefreshRequest, *oau
 		}
 	}
 
-	// A rate limit the token endpoint already put on this refresh token is
-	// answered here, before anything is sent — which is also what lets a
-	// report say the next command will not ask (renewal_hold.go). It comes
-	// after every local check above, as the agent mint's does, so a stored
-	// hold never masks a credential that could not be refreshed anyway.
-	if err := m.heldRenewal(creds); err != nil {
-		return oauth.RefreshRequest{}, nil, err
-	}
-
 	// The refresh lane follows the stored credential's provenance: bc5-typed
 	// credentials refresh against a BC5-discovered endpoint, everything else
 	// is Launchpad. OAuthType and TokenEndpoint are persisted independently —
@@ -633,6 +624,16 @@ func (m *Manager) prepareRefresh(creds *Credentials) (oauth.RefreshRequest, *oau
 	}
 	if laneErr != nil {
 		return oauth.RefreshRequest{}, nil, laneErr
+	}
+
+	// A rate limit the token endpoint already put on this refresh token is
+	// answered last, once everything local has resolved and only the
+	// request is left — which is also what lets a report say the next
+	// command will not ask (renewal_hold.go). Nothing local can fail after
+	// it, so a stored hold never masks a credential that could not be
+	// refreshed anyway.
+	if err := m.heldRenewal(creds); err != nil {
+		return oauth.RefreshRequest{}, nil, err
 	}
 	exchanger := oauth.NewExchanger(laneClient)
 

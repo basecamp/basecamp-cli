@@ -261,3 +261,23 @@ func TestRefreshRefusal_LocalFailureIsNotMaskedByAHold(t *testing.T) {
 	assert.NotErrorIs(t, refusal, errRenewalHeld)
 	assert.Nil(t, m.RenewalHoldStatus(creds, refusal))
 }
+
+// Nor does it mask a lane that cannot be built: a credential whose
+// configured base URL is unusable reports that, not a rate limit.
+func TestRefreshRefusal_BadLaneIsNotMaskedByAHold(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	cfg := config.Default()
+	cfg.BaseURL = "http://exa mple.com"
+	m := &Manager{cfg: cfg, store: newTestStore(t, t.TempDir())}
+	m.SetClock(func() time.Time { return now })
+	creds := &Credentials{
+		AccessToken: "old-tok", RefreshToken: "old-ref", OAuthType: "bc5",
+		TokenEndpoint: "https://issuer.example/oauth/tokens", ExpiresAt: now.Add(-time.Hour).Unix(),
+		RenewalHold: &RenewalHold{Kind: renewalHoldRateLimited, Detail: "the server answered HTTP 429",
+			Client: refreshTokenFingerprint("old-ref"), Until: now.Add(10 * time.Minute).Unix()},
+	}
+
+	refusal := m.RefreshRefusal(creds)
+	require.Error(t, refusal)
+	assert.NotErrorIs(t, refusal, errRenewalHeld, "the lane's own failure is the answer: %v", refusal)
+}
