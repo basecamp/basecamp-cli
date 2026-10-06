@@ -16,7 +16,8 @@ type Changes struct {
 	Trust admission.TrustMode
 	// Allow replaces the allowlist when non-empty: the people trusted as
 	// operators besides the operator. It implies allowlist mode unless the
-	// same run asks for project mode, whose members it joins as operators.
+	// same run asks for project mode, which admits the project's members as
+	// participants beside them.
 	Allow []int64
 
 	// Serve are the project (bucket) ids to serve. A project already served
