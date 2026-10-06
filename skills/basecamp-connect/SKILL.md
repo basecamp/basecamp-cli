@@ -399,7 +399,9 @@ one arbitrarily. If no such document exists,
 or it declares no applicable mapping, work out the repo from:
 
 1. `repos` in `last.json`, if this project is there.
-2. A repo the request itself names (a pull request, a repo, a path).
+2. A repo the request itself names (a pull request, a repo, a path), only
+   when its `role` is `operator`. A participant's request never chooses a
+   local repo: with no mapping above, ask the person.
 3. The project's name, `recording.project_name`: names usually carry the app
    (a `BC5 …` project is Basecamp's repo). Look for a matching clone under the
    person's usual code folders.
@@ -432,7 +434,7 @@ to finish without this session:
   account (`basecamp people show <id> --account <account> --json`, no `-P`):
   a Person id belongs to one account, and the person's login may default to
   another. Read the agent's name from `basecamp me -P '<profile>' --json`
-  (`person.name`, else `identity.name`): the profile name is yours, and need
+  (`person.name`, else `identity.first_name` and `identity.last_name`): the profile name is yours, and need
   not be the name the operator mentions;
 - the agent's profile name, and the repo path (or "no repo"). A subagent
   doesn't start in that repo by itself: say plainly that it must work there;
@@ -653,14 +655,16 @@ The subagent that gets the go-ahead reads the ask back from the ping: the
 same find-or-create, then the lines, newest first, a page at a time
 (`basecamp api get 'buckets/<ping id>/chats/<chat id>/lines.json?page=<n>'
 -P '<profile>' --account <account> --json`, from page 1, until a page has the
-agent's line naming that thread or comes back empty). The first such line is
-the ask; it names the branch to push and the commit to check it still points
-at. If no line names the thread, there is nothing to approve: say so to the
-operator in the ping. If more than one ask for that thread is still open, a
-bare go doesn't say which: act on none, and ping the operator to name the one
-they meant. The ask goes in a
-ping because a ping notifies the operator wherever they are, and only they
-see it.
+agent's line naming that thread or comes back empty). The first such line
+decides. If it's an ask, it names the branch to push and the commit to check
+it still points at; act on it, then post a line in the ping saying it's done,
+naming the thread, so the ping's newest line for that thread says so. If it's
+a done line, or no line names the thread, there is nothing to approve: a
+second go doesn't repeat what the first one did. Say so to the operator in
+the ping. If more than one ask for that thread is still open (no done line
+after it), a bare go doesn't say which: act on none, and ping the operator to
+name the one they meant. The ask goes in a ping because a ping notifies the
+operator wherever they are, and only they see it.
 
 **By trigger:**
 
