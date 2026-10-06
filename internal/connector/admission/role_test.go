@@ -91,9 +91,15 @@ func TestOperatorsAndParticipants(t *testing.T) {
 		f := newFakeReads()
 		mention(t, f, "Todo", memberID)
 		f.members[servedProj] = map[int64]bool{memberID: true}
+		f.summaries[recordingID].Creator.Name = "The member"
 		v := decide(t, newAdmitter(t, projectWithOperators(), f), event("todo.created", operatorID))
 		require.Equal(t, StateAdmitted, v.State, "reason %q", v.Reason)
 		assert.Equal(t, RoleParticipant, v.Role)
+		// The requester is who the role was settled on: a failure reply
+		// mentions the member who wrote the words, never the operator, in
+		// the participant's thread.
+		assert.Equal(t, memberID, v.RequesterID)
+		assert.Equal(t, "The member", v.Snapshot.RequesterName)
 	})
 
 	// And the other way round: a member re-filing the operator's words is
@@ -105,6 +111,7 @@ func TestOperatorsAndParticipants(t *testing.T) {
 		v := decide(t, newAdmitter(t, projectWithOperators(), f), event("todo.created", memberID))
 		require.Equal(t, StateAdmitted, v.State, "reason %q", v.Reason)
 		assert.Equal(t, RoleParticipant, v.Role)
+		assert.Equal(t, memberID, v.RequesterID, "the member, whose act settled the role")
 	})
 
 	// A member's completion is context, as a followed-thread comment is: it

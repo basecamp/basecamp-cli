@@ -72,7 +72,9 @@ type Verdict struct {
 	// RetryAt is set on a blocked(throttled) verdict: the server's deadline,
 	// before which the record is not decided again.
 	RetryAt time.Time
-	// RequesterID is the performer whose trust admitted the event.
+	// RequesterID is who asked: the performer, or, when a participant wrote
+	// the words the performer brought in, that participant, the person the
+	// role was settled on.
 	RequesterID int64
 	// Role is whose request an admitted event is, settled on everyone whose
 	// trust admitted it: the performer and, for the triggers whose
@@ -366,6 +368,12 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	v.Role = gate.Role
 	if author != "" {
 		v.Role = least(v.Role, author)
+		if author == RoleParticipant {
+			// The requester is who the role was settled on: a member's
+			// words stay the member's request, so a reply that names the
+			// requester names them, never the operator who moved them in.
+			v.RequesterID = summary.Creator.ID
+		}
 	}
 	v.address(summary)
 

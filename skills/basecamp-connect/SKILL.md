@@ -424,11 +424,13 @@ Use the Agent tool with `run_in_background: true`. Give it everything it needs
 to finish without this session:
 
 - the whole request line;
-- the operator's Person id and name, for a participant's request (below). Read
-  the operator id and the account once per run from `basecamp connect show -P
-  '<profile>' --json`, and the name with the person's own login in that account
-  (`basecamp people show <id> --account <account> --json`, no `-P`): a Person
-  id belongs to one account, and the person's login may default to another;
+- the account, and the operator's Person id and name, on every request:
+  a participant's needs them to ask the operator, and an operator's go-ahead
+  needs them to read that ask back (below). Read the operator id and the
+  account once per run from `basecamp connect show -P '<profile>' --json`, and
+  the name with the person's own login in that account (`basecamp people show
+  <id> --account <account> --json`, no `-P`): a Person id belongs to one
+  account, and the person's login may default to another;
 - the agent's profile name, and the repo path (or "no repo"). A subagent
   doesn't start in that repo by itself: say plainly that it must work there;
 - whether an acknowledgement is still owed (the boost failed), or not owed
