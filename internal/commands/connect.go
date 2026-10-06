@@ -317,9 +317,10 @@ project, as a participant, beside the operator and any people passed with
 --allow are operators; a project member is a participant. Each request the
 connector prints names its role. Assignments are the operator's alone in every
 mode, unless --allow-assignments-from-authorized opts in the people the
-allowlist names (this run's --allow, or the list connect.json keeps): the
-assigner is the account feed's performer, which Basecamp writes, so naming
-someone trusts that person and nothing that claims to be them.
+allowlist names: the assigner is the account feed's performer, which
+Basecamp writes, so naming someone trusts that person and nothing that claims
+to be them. It rides with --allow: a run that passes --allow turns it off
+unless it passes the flag again, and a run that passes neither keeps both.
 --allow-assignments-from-authorized=false takes it back.
 
 Projects. connect.json is the local list of Basecamp projects this agent

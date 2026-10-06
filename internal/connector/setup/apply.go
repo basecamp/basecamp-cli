@@ -19,8 +19,10 @@ type Changes struct {
 	// same run asks for project mode, which admits the project's members as
 	// participants beside them.
 	Allow []int64
-	// AllowAssignments turns the allowlist's assignment opt-in on or off;
-	// nil keeps the file's.
+	// AllowAssignments turns the allowlist's assignment opt-in on or off.
+	// Nil keeps the file's, except in a run that passes Allow, which
+	// restates the opt-in with the list it covers: off unless set here.
+	// SetOperator drops a kept one that is left covering nobody.
 	AllowAssignments *bool
 
 	// Serve are the project (bucket) ids to serve. A project already served
@@ -49,7 +51,7 @@ func Apply(f File, ch Changes) (File, error) {
 	if err := applyTrust(&out.Trust, ch); err != nil {
 		return File{}, err
 	}
-	if err := applyAssignmentOptIn(&out.Trust, f.Trust.AllowlistIDs, ch); err != nil {
+	if err := applyAssignmentOptIn(&out.Trust, ch); err != nil {
 		return File{}, err
 	}
 
@@ -144,16 +146,15 @@ func sortedIDs(ids []int64) []int64 {
 }
 
 // applyAssignmentOptIn sets the opt-in that lets the allowlist's people
-// assign the agent work. It rides with that list: setting it needs someone
-// named, a run that leaves nobody named takes it away, so the file never
-// carries a widening nobody can use, and a run that names a new list without
-// restating it takes it away too when it names someone the list before did
-// not, so nobody newly named gains assignments unasked.
-func applyAssignmentOptIn(t *admission.Trust, before []int64, ch Changes) error {
+// assign the agent work. It rides with the --allow that names them: a run
+// that passes --allow restates it, off unless this run sets it, so whoever a
+// new list names gains assignments only when asked, with no comparison to
+// what the file held before. Setting it needs someone named.
+func applyAssignmentOptIn(t *admission.Trust, ch Changes) error {
 	switch {
 	case ch.AllowAssignments != nil:
 		t.AllowAssignments = *ch.AllowAssignments
-	case slices.ContainsFunc(ch.Allow, func(id int64) bool { return !slices.Contains(before, id) }):
+	case len(ch.Allow) > 0:
 		t.AllowAssignments = false
 	}
 	if len(t.AllowlistIDs) == 0 {
