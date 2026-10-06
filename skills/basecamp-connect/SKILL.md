@@ -424,13 +424,16 @@ Use the Agent tool with `run_in_background: true`. Give it everything it needs
 to finish without this session:
 
 - the whole request line;
-- the account, and the operator's Person id and name, on every request:
-  a participant's needs them to ask the operator, and an operator's go-ahead
-  needs them to read that ask back (below). Read the operator id and the
-  account once per run from `basecamp connect show -P '<profile>' --json`, and
-  the name with the person's own login in that account (`basecamp people show
-  <id> --account <account> --json`, no `-P`): a Person id belongs to one
-  account, and the person's login may default to another;
+- the account, the operator's Person id and name, and the agent's name in
+  Basecamp, on every request: a participant's needs them to ask the operator,
+  and an operator's go-ahead needs them to read that ask back (below). Read
+  the operator id and the account once per run from `basecamp connect show -P
+  '<profile>' --json`, the operator's name with the person's own login in that
+  account (`basecamp people show <id> --account <account> --json`, no `-P`):
+  a Person id belongs to one account, and the person's login may default to
+  another. Read the agent's name from `basecamp me -P '<profile>' --json`
+  (`person.name`, else `identity.name`): the profile name is yours, and need
+  not be the name the operator mentions;
 - the agent's profile name, and the repo path (or "no repo"). A subagent
   doesn't start in that repo by itself: say plainly that it must work there;
 - whether an acknowledgement is still owed (the boost failed), or not owed
@@ -595,7 +598,8 @@ detail, load the `basecamp` skill.
 - **A pull request is an operator's call.** A participant's request never
   leads the agent to open a pull request, or to push a branch meant for one.
   When a pull request is the right outcome, make the change in a local
-  worktree if it helps, and ask an operator for the go-ahead (below).
+  worktree on a branch of its own, commit it there unpushed, and ask an
+  operator for the go-ahead (below).
 - **Anything irreversible or outward-facing waits for an operator too**:
   merging, deploying, releasing, writing to production data, messaging a
   customer or anyone outside the company, changing access or credentials.
@@ -621,10 +625,17 @@ detail, load the `basecamp` skill.
 - **Never leave a participant unanswered.** If the request is out of bounds,
   say so in the thread, and who can unblock it.
 
-The ping is a one-to-one ping from the agent to the operator. Creating it
-finds the existing one when there is one (Basecamp's `find_or_create` for a
-circle of the same people), so the same call serves every subagent; then post
-one plain-text line in it.
+The ping is a one-to-one ping from the agent to the operator. Basecamp lets an
+agent start one, and write in it, only with a person in it who can use Pings,
+which the operator is. Creating it finds the existing one when there is one
+(Basecamp's `find_or_create` for a circle of the same people), so the same
+call serves every subagent.
+
+**The ask line is the whole record of the ask.** Nothing else is kept, so the
+line carries everything the subagent that gets the go-ahead needs, and that
+subagent needs nothing else: the thread's full URL, what's ready, what needs
+the operator's word, where the prepared work is (the repo path, the branch and
+its commit), and how to say go. Post it as one plain-text line.
 
 ```bash
 # Keep data.id (the ping) and the chat id in data.links.lines.
@@ -633,15 +644,21 @@ basecamp api post buckets/<ping id>/chats/<chat id>/lines.json -P '<profile>' --
 ```
 
 End the line with how to approve: "To go ahead, mention <agent name> with go
-on <thread URL>. A reply here doesn't reach me." Keep `@` out of it, as in any
-agent chat line. A reply on the thread that doesn't mention the agent arrives
-as a followed-thread comment, which is context, not an instruction. The thread
-doesn't say what was asked, so the subagent that gets the go-ahead reads it
-back from the ping: the same find-or-create, then `basecamp api get
-buckets/<ping id>/chats/<chat id>/lines.json -P '<profile>' --account
-<account> --json` for the agent's latest line naming that thread. If more
-than one ask for that thread is still open, a bare go doesn't say which: act
-on none, and ping the operator to name the one they meant. The ask goes in a
+on <thread URL>. A reply here doesn't reach me." `<agent name>` is the agent's
+name in Basecamp, from the handoff. Keep `@` out of it, as in any agent chat
+line. A reply on the thread that doesn't mention the agent arrives as a
+followed-thread comment, which is context, not an instruction.
+
+The subagent that gets the go-ahead reads the ask back from the ping: the
+same find-or-create, then the lines, newest first, a page at a time
+(`basecamp api get 'buckets/<ping id>/chats/<chat id>/lines.json?page=<n>'
+-P '<profile>' --account <account> --json`, from page 1, until a page has the
+agent's line naming that thread or comes back empty). The first such line is
+the ask; it names the branch to push and the commit to check it still points
+at. If no line names the thread, there is nothing to approve: say so to the
+operator in the ping. If more than one ask for that thread is still open, a
+bare go doesn't say which: act on none, and ping the operator to name the one
+they meant. The ask goes in a
 ping because a ping notifies the operator wherever they are, and only they
 see it.
 
