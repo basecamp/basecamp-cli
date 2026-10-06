@@ -101,8 +101,9 @@ const (
 	ReasonOutOfScope Reason = "out_of_scope"
 	// ReasonUntrustedPerformer: the performer is not in the trust set.
 	ReasonUntrustedPerformer Reason = "untrusted_performer"
-	// ReasonAssignmentNotOperator: an assignment performed by anyone but the
-	// operator, or a named operator allow_assignments opts in.
+	// ReasonAssignmentNotOperator: an assignment performed by anyone other
+	// than the operator or a person the allowlist names whom
+	// allow_assignments opts in.
 	ReasonAssignmentNotOperator Reason = "assignment_not_operator"
 	// ReasonUntrustedAuthor: the recording carrying the instruction was
 	// written by someone outside the trust set.

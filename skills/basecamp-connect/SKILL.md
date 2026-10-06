@@ -218,8 +218,9 @@ each project by name. Then:
 basecamp connect setup -P '<profile>' --serve <project-id> --serve <project-id> --json
 ```
 
-adding `--trust`, `--allow` or `--operator-profile` as chosen, and on the
-bot-user path `--expect-identity <bot-identity-id>`.
+adding `--trust`, `--allow`, `--allow-assignments-from-authorized` or
+`--operator-profile` as chosen, and on the bot-user path
+`--expect-identity <bot-identity-id>`.
 
 ### Reading setup's result
 
