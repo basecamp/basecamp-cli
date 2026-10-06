@@ -106,10 +106,12 @@ func applyTrust(t *admission.Trust, ch Changes) error {
 		// can see.
 		t.AllowlistIDs = nil
 	case admission.TrustProject:
-		// The list is what this run names, and nothing kept from before:
-		// moving to project trust opens the agent to the project's members,
-		// and naming who operates it beside them is said in the same run.
-		t.AllowlistIDs = sortedIDs(ch.Allow)
+		// Operators named beside the members, optionally: a run that names
+		// none keeps the ones named before, as setup keeps whatever a run
+		// does not pass.
+		if len(ch.Allow) > 0 {
+			t.AllowlistIDs = sortedIDs(ch.Allow)
+		}
 	case admission.TrustAllowlist:
 		if len(ch.Allow) > 0 {
 			t.AllowlistIDs = sortedIDs(ch.Allow)

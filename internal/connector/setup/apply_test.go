@@ -56,15 +56,29 @@ func TestApplyTrust(t *testing.T) {
 		_, err := Apply(base, Changes{Trust: admission.TrustAllowlist})
 		assert.Error(t, err)
 	})
-	t.Run("leaving allowlist drops the list", func(t *testing.T) {
+	// What a run does not pass is kept: the operators named before stay
+	// operators under project trust, and only --trust operator, which has
+	// no one to name, clears them.
+	t.Run("moving to project trust keeps the named operators", func(t *testing.T) {
 		f := base
 		f.Trust = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7}}
 		out, err := Apply(f, Changes{Trust: admission.TrustProject})
 		require.NoError(t, err)
 		assert.Equal(t, admission.TrustProject, out.Trust.Mode)
-		assert.Empty(t, out.Trust.AllowlistIDs)
+		assert.Equal(t, []int64{7}, out.Trust.AllowlistIDs)
 		_, err = out.Policy(agentID)
 		assert.NoError(t, err, "admission accepts the result")
+
+		again, err := Apply(out, Changes{Trust: admission.TrustProject, Serve: []int64{777}})
+		require.NoError(t, err)
+		assert.Equal(t, []int64{7}, again.Trust.AllowlistIDs, "a re-run to serve a project keeps them")
+	})
+	t.Run("operator trust clears the named operators", func(t *testing.T) {
+		f := base
+		f.Trust = admission.Trust{Mode: admission.TrustProject, OperatorID: operatorID, AllowlistIDs: []int64{7}}
+		out, err := Apply(f, Changes{Trust: admission.TrustOperator})
+		require.NoError(t, err)
+		assert.Empty(t, out.Trust.AllowlistIDs)
 	})
 	t.Run("the operator is untouched", func(t *testing.T) {
 		out, err := Apply(base, Changes{Trust: admission.TrustProject})

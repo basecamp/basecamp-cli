@@ -307,8 +307,8 @@ owner, one of the two is required.
 Trust. operator (default): the operator alone. allowlist: the operator and
 the people passed with --allow. project: any non-client member of the event's
 project, as a participant, beside the operator and any people passed with
---allow in the same run. The operator and the people passed with --allow are
-operators; a project member is a participant. Each request the connector
+--allow, now or in an earlier run. The operator and the people passed with
+--allow are operators; a project member is a participant. Each request the connector
 prints says which, as its role.
 Assignments are the operator's alone in every mode.
 
