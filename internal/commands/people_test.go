@@ -1402,3 +1402,96 @@ func TestMeOnAnAgentProfileReadsTheAgentsPerson(t *testing.T) {
 	assert.JSONEq(t, `{"id":777,"name":"Triage Bot","email":"bot@example.com"}`, string(envelope.Data["person"]))
 	assert.JSONEq(t, `[{"id":555,"name":"","href":"","app_href":"","current":true}]`, string(envelope.Data["accounts"]))
 }
+
+// runMeOnAgentProfile runs `me --json` on a stored agent credential against
+// a server whose /555/my/profile.json answers profile, and returns the
+// envelope's summary and data.
+func runMeOnAgentProfile(t *testing.T, profile map[string]any) (string, map[string]json.RawMessage) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/555/my/profile.json" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		json.NewEncoder(w).Encode(profile)
+	}))
+	t.Cleanup(server.Close)
+
+	t.Setenv("BASECAMP_TOKEN", "")
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := &config.Config{AccountID: "555", BaseURL: server.URL, CacheDir: t.TempDir()}
+	authMgr := auth.NewManager(cfg, nil)
+	authMgr.SetStore(auth.NewStore(filepath.Join(tmpDir, "basecamp")))
+	require.NoError(t, authMgr.GetStore().Save(config.NormalizeBaseURL(server.URL), &auth.Credentials{
+		AccessToken:   "bc_at_agent",
+		OAuthType:     "agent",
+		ClientID:      "agent-client",
+		ClientSecret:  "agent-secret",
+		TokenEndpoint: server.URL + "/oauth/tokens",
+		ExpiresAt:     9999999999,
+	}))
+
+	buf := &bytes.Buffer{}
+	sdkClient := basecamp.NewClient(&basecamp.Config{BaseURL: server.URL}, &peopleTestTokenProvider{}, basecamp.WithMaxRetries(1))
+	app := &appctx.App{
+		Config: cfg,
+		Auth:   authMgr,
+		SDK:    sdkClient,
+		Names:  names.NewResolver(sdkClient, authMgr, cfg.AccountID),
+		Output: output.New(output.Options{Format: output.FormatJSON, Writer: buf}),
+	}
+	require.NoError(t, executePeopleCommand(NewMeCmd(), app))
+
+	var envelope struct {
+		Summary string                     `json:"summary"`
+		Data    map[string]json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	return envelope.Summary, envelope.Data
+}
+
+// TestMeOnAPersonalAgentNamesItsBoss: a personal agent's profile names the
+// person it works for, and `me` reports it with the personable type, so a
+// caller can check "this profile is an agent, and it is mine" from one
+// command instead of a second lookup.
+func TestMeOnAPersonalAgentNamesItsBoss(t *testing.T) {
+	summary, data := runMeOnAgentProfile(t, map[string]any{
+		"id": 777, "name": "Jane Doe (agent)", "email_address": "",
+		"personable_type": "Agent",
+		"boss":            map[string]any{"id": 42, "name": "Jane Doe", "email_address": "jane@example.com"},
+	})
+	assert.Equal(t, "Jane Doe (agent) - agent in Basecamp account 555, working for Jane Doe", summary)
+	assert.JSONEq(t,
+		`{"id":777,"name":"Jane Doe (agent)","email":"","personable_type":"Agent","boss":{"id":42,"name":"Jane Doe"}}`,
+		string(data["person"]))
+}
+
+// TestMeOnAnAgentWithNoBossReportsNone: a shared agent works for no one in
+// particular, and a boss Basecamp names without an id is not one anyone can
+// check against; neither is reported, and neither is invented as person 0.
+func TestMeOnAnAgentWithNoBossReportsNone(t *testing.T) {
+	for name, profile := range map[string]map[string]any{
+		"no boss":     {"id": 777, "name": "Triage Bot", "personable_type": "Agent"},
+		"null boss":   {"id": 777, "name": "Triage Bot", "personable_type": "Agent", "boss": nil},
+		"boss, no id": {"id": 777, "name": "Triage Bot", "personable_type": "Agent", "boss": map[string]any{"name": "Someone"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			summary, data := runMeOnAgentProfile(t, profile)
+			assert.Equal(t, "Triage Bot - agent in Basecamp account 555", summary)
+			assert.JSONEq(t, `{"id":777,"name":"Triage Bot","email":"","personable_type":"Agent"}`, string(data["person"]))
+		})
+	}
+}
+
+// TestMeOnAnAgentWhoseBossHasNoNameSaysWhichPerson: the summary names the
+// boss by id rather than trailing off when the name is blank.
+func TestMeOnAnAgentWhoseBossHasNoNameSaysWhichPerson(t *testing.T) {
+	summary, _ := runMeOnAgentProfile(t, map[string]any{
+		"id": 777, "name": "Jane Doe (agent)", "personable_type": "Agent", "boss": map[string]any{"id": 42, "name": " "},
+	})
+	assert.Equal(t, "Jane Doe (agent) - agent in Basecamp account 555, working for person 42", summary)
+}

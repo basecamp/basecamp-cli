@@ -40,6 +40,20 @@ type MePerson struct {
 	ID    int64  `json:"id"`
 	Name  string `json:"name"`
 	Email string `json:"email"`
+
+	// PersonableType and Boss are reported for an agent profile only.
+	// PersonableType is what Basecamp says the person is ("Agent" for a
+	// connected agent); Boss is the person a personal agent works for, as
+	// Basecamp names them. Together they let a caller check that a profile
+	// is an agent, and whose, without a second lookup.
+	PersonableType string  `json:"personable_type,omitempty"`
+	Boss           *MeBoss `json:"boss,omitempty"`
+}
+
+// MeBoss is who a personal agent works for.
+type MeBoss struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 // AccountInfo represents an account in the me command output
@@ -55,8 +69,12 @@ func NewMeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "me",
 		Short: "Show current user profile",
-		Long:  "Display information about the currently authenticated user.",
-		RunE:  runMe,
+		Long: `Display information about the currently authenticated user.
+
+On an agent profile there is no identity: me shows the agent's person in the
+account it is bound to, its personable_type, and, for a personal agent, its
+boss, the person it works for.`,
+		RunE: runMe,
 	}
 	return cmd
 }
@@ -190,31 +208,63 @@ func agentProfile(app *appctx.App) bool {
 	return os.Getenv("BASECAMP_TOKEN") == "" && app.Auth.GetOAuthType() == "agent"
 }
 
+// agentProfileDocument is the part of an agent's /my/profile.json that `me`
+// reports. The SDK's Person has no boss, so the document is read through the
+// account client's plain GET — the one `basecamp api get` makes — in the one
+// request `me` already spends.
+type agentProfileDocument struct {
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	EmailAddress   string `json:"email_address"`
+	PersonableType string `json:"personable_type"`
+	Boss           *struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	} `json:"boss"`
+}
+
 // runMeAgent shows the agent an agent profile authenticates as: its person
 // record in the account its credential is bound to, which is the only
-// account it can reach.
+// account it can reach, and whom it works for when Basecamp says.
 func runMeAgent(cmd *cobra.Command, app *appctx.App) error {
 	if err := app.RequireAccount(); err != nil {
 		return err
 	}
-	p, err := app.Account().People().Me(cmd.Context())
+	resp, err := app.Account().Get(cmd.Context(), "/my/profile.json")
 	if err != nil {
 		return convertSDKError(err)
+	}
+	var p agentProfileDocument
+	if err := resp.UnmarshalData(&p); err != nil {
+		return fmt.Errorf("reading the agent's profile: %w", err)
 	}
 	accountID, err := strconv.ParseInt(app.Config.AccountID, 10, 64)
 	if err != nil {
 		return output.ErrUsage(fmt.Sprintf("Invalid account ID %q", app.Config.AccountID))
 	}
 
+	person := &MePerson{ID: p.ID, Name: p.Name, Email: p.EmailAddress, PersonableType: p.PersonableType}
+	// A boss without an id is not one anybody can check against, so it is
+	// left out rather than reported as person 0.
+	if p.Boss != nil && p.Boss.ID > 0 {
+		person.Boss = &MeBoss{ID: p.Boss.ID, Name: p.Boss.Name}
+	}
 	result := MeOutput{
 		Accounts: []AccountInfo{{ID: accountID, Current: true}},
-		Person:   &MePerson{ID: p.ID, Name: p.Name, Email: p.EmailAddress},
+		Person:   person,
 	}
 	label := meLabel(0, p.Name, p.EmailAddress)
 	if p.Name == "" && p.EmailAddress == "" {
 		label = fmt.Sprintf("person %d", p.ID)
 	}
 	summary := fmt.Sprintf("%s - agent in Basecamp account %d", label, accountID)
+	if person.Boss != nil {
+		boss := person.Boss.Name
+		if strings.TrimSpace(boss) == "" {
+			boss = fmt.Sprintf("person %d", person.Boss.ID)
+		}
+		summary += ", working for " + boss
+	}
 
 	return app.OK(result,
 		output.WithSummary(summary),
