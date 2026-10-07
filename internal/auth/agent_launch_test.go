@@ -48,10 +48,14 @@ func TestSessionTokenMintsFreshAndLeavesTheSharedTokenAlone(t *testing.T) {
 
 	calls := as.tokenCalls()
 	require.Len(t, calls, 2)
-	assert.Equal(t, "client_credentials", calls[0].Get("grant_type"))
-	assert.Equal(t, testSessionID, calls[0].Get("launch_id"))
-	assert.Equal(t, "coworker@box", calls[0].Get("launch_label"))
-	assert.Equal(t, AgentResourceURNPrefix+"42", calls[0].Get("resource"))
+	// Every mint carries the session, not just the first: the mock echoes
+	// the id back whatever was sent, so only the request shows it.
+	for i, call := range calls {
+		assert.Equal(t, "client_credentials", call.Get("grant_type"), "mint %d", i+1)
+		assert.Equal(t, testSessionID, call.Get("launch_id"), "mint %d", i+1)
+		assert.Equal(t, "coworker@box", call.Get("launch_label"), "mint %d", i+1)
+		assert.Equal(t, AgentResourceURNPrefix+"42", call.Get("resource"), "mint %d", i+1)
+	}
 
 	after, err := m.store.Load(key)
 	require.NoError(t, err)
