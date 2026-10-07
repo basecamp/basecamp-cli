@@ -36,6 +36,7 @@ const (
 	setupProject        int64 = 48699913
 	setupProject2       int64 = 48699914
 	setupClientPerson   int64 = 1003
+	setupPeerAgent      int64 = 1006
 
 	// Tokens the mock server tells apart. None is shaped like a real one.
 	setupAgentToken    = "minted"
@@ -179,6 +180,9 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 	})
 	mux.HandleFunc(fmt.Sprintf("/999/people/%d", setupAgentPerson), func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"id": setupAgentPerson, "name": "Marie Chef", "personable_type": "Agent"})
+	})
+	mux.HandleFunc(fmt.Sprintf("/999/people/%d", setupPeerAgent), func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{"id": setupPeerAgent, "name": "Peer (agent)", "personable_type": "Agent"})
 	})
 	mux.HandleFunc(fmt.Sprintf("/999/people/%d", setupClientPerson), func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"id": setupClientPerson, "name": "Client", "personable_type": "User", "client": true})
@@ -1533,4 +1537,66 @@ func TestConnectShowShowsTheFilePathLiterally(t *testing.T) {
 func TestMarkdownCodeKeepsBackticksInside(t *testing.T) {
 	assert.Equal(t, "` /a/b `", markdownCode("/a/b"))
 	assert.Equal(t, "``` /a``b ```", markdownCode("/a``b"))
+}
+
+// --allow-agent names another agent whose mentions wake this one; the list
+// is kept across runs, --disallow-agent removes one, and the caps keep what
+// connect.json has unless passed. show tells a person all of it.
+func TestConnectSetupAllowsAgentsToMention(t *testing.T) {
+	s := startConnectSetupServer(t)
+	firstSetup(t, s)
+	run := func(args ...string) (setup.File, error) {
+		t.Helper()
+		out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), args...)
+		if err != nil {
+			return setup.File{}, fmt.Errorf("%w: %s", err, out)
+		}
+		f, err := setup.Load(connectSetupPath(t, "agent"))
+		require.NoError(t, err)
+		return f, nil
+	}
+
+	f, err := run("--allow-agent", fmt.Sprint(setupPeerAgent), "--agent-thread-cap", "5")
+	require.NoError(t, err)
+	assert.Equal(t, []int64{setupPeerAgent}, f.Trust.AgentIDs)
+	assert.Equal(t, 5, f.Trust.AgentThreadCap)
+	assert.Zero(t, f.Trust.AgentDailyCap, "the default stays implicit")
+	assert.Equal(t, admission.TrustOperator, f.Trust.Mode, "allowing an agent trusts no person")
+
+	app := newConnectSetupApp(t, s, "agent")
+	var buf bytes.Buffer
+	app.Output = output.New(output.Options{Format: output.FormatStyled, Writer: &buf})
+	out, err := runConnectShowCmd(t, app)
+	require.NoError(t, err, out)
+	assert.Contains(t, buf.String(), fmt.Sprintf("%d may mention; caps 5 per thread, %d per agent, per 24h", setupPeerAgent, admission.DefaultAgentDailyCap))
+
+	f, err = run("--agent-daily-cap", "7")
+	require.NoError(t, err)
+	assert.Equal(t, []int64{setupPeerAgent}, f.Trust.AgentIDs, "kept when not passed")
+	assert.Equal(t, 5, f.Trust.AgentThreadCap)
+	assert.Equal(t, 7, f.Trust.AgentDailyCap)
+
+	_, err = run("--allow-agent", fmt.Sprint(setupOperatorPerson))
+	require.Error(t, err, "a person is not an agent")
+	_, err = run("--allow-agent", fmt.Sprint(setupAgentPerson))
+	require.Error(t, err, "the agent never wakes itself")
+	_, err = run("--agent-thread-cap", "0x5")
+	require.Error(t, err)
+	_, err = run("--agent-thread-cap", "101")
+	require.Error(t, err)
+	f, err = setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Equal(t, []int64{setupPeerAgent}, f.Trust.AgentIDs, "a refused run wrote nothing")
+
+	f, err = run("--disallow-agent", fmt.Sprint(setupPeerAgent))
+	require.NoError(t, err)
+	assert.Nil(t, f.Trust.AgentIDs, "back to the default: no agent")
+}
+
+// The feed asks for agents' events only when connect.json allows an agent.
+func TestConnectFeedAsksForAgentsOnlyWhenOneIsAllowed(t *testing.T) {
+	p := admission.Policy{Trust: admission.Trust{Mode: admission.TrustOperator, OperatorID: setupOperatorPerson}}
+	assert.Equal(t, []string{"person"}, connectActorTypes(p), "the default, exactly as before")
+	p.Trust.AgentIDs = []int64{setupPeerAgent}
+	assert.Equal(t, []string{"agent", "person"}, connectActorTypes(p))
 }

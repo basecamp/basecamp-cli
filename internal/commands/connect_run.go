@@ -260,7 +260,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	intakeOpts := connector.LiveOptions(live)
 	intakeOpts.AccountID = account
 	intakeOpts.ConsumerNamespace = connectConsumerNamespace(agentID, f.shadow)
-	intakeOpts.Filters = eventfeed.Filters{Buckets: buckets, ExcludePerformers: []int64{agentID}, ActorTypes: []string{"person"}}
+	intakeOpts.Filters = eventfeed.Filters{Buckets: buckets, ExcludePerformers: []int64{agentID}, ActorTypes: connectActorTypes(policy)}
 	intakeOpts.SinceEventID = since
 	intakeOpts.Ledger = ledger
 	intakeOpts.Queue = queue
@@ -666,4 +666,16 @@ func connectRunningAttrs(profile, account string, agentID int64, shadow bool, se
 		attrs = append(attrs, "only_projects", only)
 	}
 	return append(attrs, "state", richtext.SanitizeSingleLine(stateDir))
+}
+
+// connectActorTypes is the feed's actor filter. People only, as always,
+// unless connect.json allows other agents to mention this one: then agents'
+// events are asked for too, and admission's gate discards every one but an
+// allowed agent's mention. A change of filter re-enters the feed under a new
+// lineage, resuming after the last event served, so nothing is replayed.
+func connectActorTypes(policy admission.Policy) []string {
+	if len(policy.Trust.AgentIDs) > 0 {
+		return []string{"agent", "person"}
+	}
+	return []string{"person"}
 }

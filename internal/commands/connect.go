@@ -189,12 +189,22 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 	if f.Trust.AllowAssignments {
 		trust += "; they may assign"
 	}
+	agents := "none"
+	if len(f.Trust.AgentIDs) > 0 {
+		ids := make([]string, len(f.Trust.AgentIDs))
+		for i, id := range f.Trust.AgentIDs {
+			ids[i] = strconv.FormatInt(id, 10)
+		}
+		agents = fmt.Sprintf("%s may mention; caps %d per thread, %d per agent, per 24h",
+			strings.Join(ids, ", "), f.Trust.ThreadCap(), f.Trust.DailyCap())
+	}
 	d := map[string]any{
 		"file":     exact(path),
 		"account":  f.AccountID,
 		"agent":    agent,
 		"operator": fmt.Sprintf("person %d", f.Trust.OperatorID),
 		"trust":    trust,
+		"agents":   agents,
 		"projects": strconv.Itoa(len(f.Projects)) + " served",
 	}
 	for id, r := range f.Projects {
@@ -267,6 +277,13 @@ type connectSetupFlags struct {
 	// not passed so setup keeps what connect.json has.
 	allowAssignments optionalBool
 
+	// allowAgents and disallowAgents add and remove agents allowed to wake
+	// this one by mention; the caps are unset when not passed.
+	allowAgents    []string
+	disallowAgents []string
+	threadCap      optionalInt
+	dailyCap       optionalInt
+
 	serve   []string
 	classes []string
 	watch   []string
@@ -323,6 +340,18 @@ to be them. It rides with --allow: a run that passes --allow turns it off
 unless it passes the flag again, and a run that passes neither keeps both.
 --allow-assignments-from-authorized=false takes it back.
 
+Other agents. No agent can give this one work by default. --allow-agent
+<person-id> names another agent (an Agent person) whose @mentions of this
+agent are handed off, as a participant's request; --disallow-agent removes
+one. An allowed agent reaches the agent by mention only, never by assignment,
+by a comment on a thread it follows, or by a completion, and in any trust
+mode. Two agents that allow each other could answer each other forever, so
+the mentions are capped over a rolling 24 hours: --agent-thread-cap per
+thread or Campfire (default 3, across all allowed agents) and
+--agent-daily-cap per agent across all threads (default 20). A mention over
+a cap is discarded as agent_thread_cap or agent_daily_cap. Restart the
+connector after changing who is allowed.
+
 Projects. connect.json is the local list of Basecamp projects this agent
 serves: --serve <project-id>, --unserve <project-id>. Nothing in a project it
 does not serve is handed off, and nobody is told. --watch-completions <project-id>
@@ -364,7 +393,9 @@ Examples:
   basecamp connect setup -P agent --operator-profile me --trust allowlist --allow 111 --allow 222
   basecamp connect setup -P agent --operator-profile me --trust project --allow 111
   basecamp connect setup -P bot --operator-profile me --expect-identity 4242 --serve 12345
-  basecamp connect setup -P agent --class 12345=internal`,
+  basecamp connect setup -P agent --class 12345=internal
+  basecamp connect setup -P agent --allow-agent 333
+  basecamp connect setup -P agent --agent-thread-cap 5 --agent-daily-cap 30`,
 		Annotations: map[string]string{AnnotationProfileMayCreate: "true"},
 		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -387,6 +418,10 @@ Examples:
 	fl.StringArrayVar(&f.allow, "allow", nil, "Person id to trust as an operator besides the operator (repeatable; with no --trust it implies allowlist; works with --trust allowlist or project, not operator)")
 	fl.Var(&f.allowAssignments, "allow-assignments-from-authorized", "Let the people the allowlist names, this run's --allow or the list kept, assign the agent work too (default: the operator's alone; =false to turn off)")
 	fl.Lookup("allow-assignments-from-authorized").NoOptDefVal = "true"
+	fl.StringArrayVar(&f.allowAgents, "allow-agent", nil, "Agent person id allowed to wake this agent by @mentioning it, as a participant (repeatable; default: no agent)")
+	fl.StringArrayVar(&f.disallowAgents, "disallow-agent", nil, "Stop allowing an agent to wake this one by mention (repeatable)")
+	fl.Var(&f.threadCap, "agent-thread-cap", fmt.Sprintf("Allowed agents' mentions handed off per thread or Campfire in 24 hours (default %d; 0 restores it; at most %d)", admission.DefaultAgentThreadCap, admission.MaxAgentCap))
+	fl.Var(&f.dailyCap, "agent-daily-cap", fmt.Sprintf("One allowed agent's mentions handed off across all threads in 24 hours (default %d; 0 restores it; at most %d)", admission.DefaultAgentDailyCap, admission.MaxAgentCap))
 	fl.StringArrayVar(&f.serve, "serve", nil, "Serve a Basecamp project: <project-id> (repeatable)")
 	fl.StringArrayVar(&f.unserve, "unserve", nil, "Stop serving a project (repeatable)")
 	fl.StringArrayVar(&f.classes, "class", nil, "Classify a served project: <project-id>=<class>, or <project-id>= to clear it (repeatable)")
@@ -560,6 +595,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	// Basecamp refuses person reads to an Agent identity today.
 	trust := setup.Trust{
 		Allowlist:       next.Trust.AllowlistIDs,
+		Agents:          next.Trust.AgentIDs,
 		OperatorProfile: f.operatorProfile,
 	}
 	if exists {
@@ -821,6 +857,31 @@ func (f *connectSetupFlags) changes() (setup.Changes, error) {
 			}
 			ch.Allow = append(ch.Allow, id)
 		}
+	}
+
+	for _, list := range []struct {
+		flag string
+		raw  []string
+		out  *[]int64
+	}{
+		{"--allow-agent", f.allowAgents, &ch.AllowAgents},
+		{"--disallow-agent", f.disallowAgents, &ch.DisallowAgents},
+	} {
+		for _, raw := range list.raw {
+			for part := range strings.SplitSeq(raw, ",") {
+				id, err := parsePositiveID(list.flag, strings.TrimSpace(part))
+				if err != nil || id == 0 {
+					return ch, output.ErrUsage(fmt.Sprintf("Invalid %s %q: expected an agent's Person id", list.flag, raw))
+				}
+				*list.out = append(*list.out, id)
+			}
+		}
+	}
+	if f.threadCap.set {
+		ch.AgentThreadCap = &f.threadCap.value
+	}
+	if f.dailyCap.set {
+		ch.AgentDailyCap = &f.dailyCap.value
 	}
 
 	for _, raw := range f.serve {
@@ -1301,5 +1362,24 @@ func (b *optionalBool) Set(s string) error {
 		return err
 	}
 	b.set, b.value = true, v
+	return nil
+}
+
+// optionalInt is an int flag that remembers whether it was passed, so setup
+// keeps what connect.json has when it was not.
+type optionalInt struct {
+	set   bool
+	value int
+}
+
+func (n *optionalInt) String() string { return strconv.Itoa(n.value) }
+func (n *optionalInt) Type() string   { return "int" }
+
+func (n *optionalInt) Set(s string) error {
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return err
+	}
+	n.set, n.value = true, v
 	return nil
 }

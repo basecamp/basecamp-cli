@@ -35,6 +35,14 @@ type Ledger interface {
 	Commit(ctx context.Context, v Verdict) (State, error)
 }
 
+// AgentRequests is the ledger's count of the allowed agents' mentions it
+// has admitted: those whose requester is one of agents, decided within the
+// last window by the ledger's own clock, in conversationKey when it is not
+// empty and in every conversation when it is. Intake's ledger implements it.
+type AgentRequests interface {
+	CountAgentRequests(ctx context.Context, conversationKey string, agents []int64, window time.Duration) (int, error)
+}
+
 // Committer serializes commits per conversation key, so the verdicts for one
 // conversation reach the ledger one at a time, in the order they finished.
 // Which state is written is the ledger's decision, taken in its own
@@ -62,6 +70,12 @@ func (c *Committer) Commit(ctx context.Context, v Verdict) (Verdict, error) {
 	if err := ctx.Err(); err != nil {
 		return v, err
 	}
+	if v.State == StateAdmitted && v.agentCaps != nil {
+		var err error
+		if v, err = c.capAgent(ctx, v); err != nil {
+			return v, err
+		}
+	}
 	written, err := c.ledger.Commit(ctx, v)
 	if err != nil {
 		return v, err
@@ -74,6 +88,45 @@ func (c *Committer) Commit(ctx context.Context, v Verdict) (Verdict, error) {
 		return v, fmt.Errorf("admission: ledger wrote %s for a %s verdict on event %d", written, v.State, v.EventID)
 	}
 	return v, nil
+}
+
+// capAgent holds an allowed agent's mention to the loop caps, and discards it
+// once either is reached. It runs under the conversation's lock, so the
+// thread cap is exact: no two mentions in one conversation are counted and
+// written at once. The daily cap spans conversations, which this lock does
+// not, so mentions decided at the same moment in different threads can pass
+// it together, at most one per admission worker; a loop is sequential, so
+// that cannot sustain one.
+func (c *Committer) capAgent(ctx context.Context, v Verdict) (Verdict, error) {
+	caps := v.agentCaps
+	counter, ok := c.ledger.(AgentRequests)
+	if !ok {
+		return v, fmt.Errorf("admission: event %d is an agent's mention, and the ledger cannot count agent mentions to cap it", v.EventID)
+	}
+	inThread, err := counter.CountAgentRequests(ctx, v.ConversationKey, caps.agents, caps.window)
+	if err != nil {
+		return v, err
+	}
+	if inThread >= caps.thread {
+		return v.capped(ReasonAgentThreadCap), nil
+	}
+	byAgent, err := counter.CountAgentRequests(ctx, "", []int64{caps.agentID}, caps.window)
+	if err != nil {
+		return v, err
+	}
+	if byAgent >= caps.daily {
+		return v.capped(ReasonAgentDailyCap), nil
+	}
+	return v, nil
+}
+
+// capped discards an admitted verdict over a cap. It drops everything only an
+// admitted verdict carries, the trigger included, so the discard is not
+// itself counted as an admitted mention.
+func (v Verdict) capped(reason Reason) Verdict {
+	v = v.end(StateDiscarded, reason)
+	v.Trigger, v.Acknowledge, v.Reply, v.Snapshot = "", false, nil, nil
+	return v
 }
 
 // keyedMutex is a set of mutexes created on demand and dropped when nobody

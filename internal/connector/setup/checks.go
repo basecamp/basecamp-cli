@@ -218,6 +218,9 @@ type Trust struct {
 	OperatorIsOwner bool
 	// Allowlist is every allowlisted Person id the file will hold.
 	Allowlist []int64
+	// Agents is every agent the file will allow to mention this one. Each
+	// must read back as an Agent person: the reverse of the allowlist.
+	Agents []int64
 	// Recorded is the trust connect.json already holds for this same agent
 	// and account. It is taken as the owner's own record — the file is
 	// private to them, and setup verified it if setup wrote it — so a person
@@ -261,7 +264,46 @@ func VerifyTrust(ctx context.Context, people Reader, t Trust, agentID int64) []C
 		name := fmt.Sprintf("Allowlist %d", id)
 		checks = append(checks, verifyPerson(ctx, people, name, Person{ID: id}, agentID, "", slices.Contains(t.Recorded.AllowlistIDs, id)))
 	}
+	for _, id := range t.Agents {
+		checks = append(checks, verifyAgent(ctx, people, id, agentID, slices.Contains(t.Recorded.AgentIDs, id)))
+	}
 	return checks
+}
+
+// verifyAgent checks one agent allowed to mention this one: a Person id, not
+// the agent itself, and read back as an Agent person. A person is refused
+// here — people are trusted with --allow, which carries an operator's
+// authority, where an allowed agent carries a participant's.
+func verifyAgent(ctx context.Context, r Reader, id, agentID int64, recorded bool) Check {
+	c := Check{Name: fmt.Sprintf("Allowed agent %d", id)}
+	switch {
+	case id <= 0:
+		c.Status, c.Message = StatusFail, fmt.Sprintf("%d is not a Person id", id)
+		return c
+	case id == agentID:
+		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is the agent itself; an agent never wakes itself", id)
+		return c
+	}
+	read, err := r.Person(ctx, id)
+	switch {
+	case err != nil && recorded:
+		c.Status = StatusWarn
+		c.Message = fmt.Sprintf("Agent %d, already allowed in connect.json, could not be re-read: %s", id, ErrorText(err))
+		return c
+	case err != nil:
+		c.Status = StatusFail
+		c.Message = fmt.Sprintf("Person %d could not be read (%s), so it cannot be verified as an agent", id, ErrorText(err))
+		return c
+	case read.ID != id:
+		c.Status, c.Message = StatusFail, fmt.Sprintf("Reading person %d answered with person %d", id, read.ID)
+	case read.PersonableType != PersonableAgent:
+		c.Status = StatusFail
+		c.Message = fmt.Sprintf("Person %d is not an Agent; --allow-agent names agents, and people are trusted with --allow", id)
+	default:
+		c.Status = StatusPass
+		c.Message = fmt.Sprintf("Agent %d, %s, may wake this agent by mention", id, richtext.SanitizeSingleLine(read.Name))
+	}
+	return c
 }
 
 // verifyPerson checks one trusted person. proof, when set, says what already

@@ -269,6 +269,7 @@ func TestTheScheduleRunsExactlySixReasons(t *testing.T) {
 		ReasonInvalidPointer, ReasonNotInMatrix, ReasonAgentAuthored, ReasonDelegated,
 		ReasonOutOfScope, ReasonUntrustedPerformer, ReasonAssignmentNotOperator,
 		ReasonUntrustedAuthor, ReasonStale, ReasonNotAddressed,
+		ReasonAgentNotAllowed, ReasonAgentThreadCap, ReasonAgentDailyCap,
 		ReasonReadFailed, ReasonReadUnresolved, ReasonThrottled, ReasonTrustUnverified,
 		ReasonDeltaUnverified, ReasonBucketMismatch, ReasonUnroutable, ReasonNoRoute,
 		ReasonConfigUnreadable,

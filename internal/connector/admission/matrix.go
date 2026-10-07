@@ -112,6 +112,15 @@ const (
 	ReasonStale Reason = "stale"
 	// ReasonNotAddressed: nothing about the recording targets the agent.
 	ReasonNotAddressed Reason = "not_addressed"
+	// ReasonAgentNotAllowed: another agent's event, when the policy allows
+	// agents to mention this one and does not name that agent.
+	ReasonAgentNotAllowed Reason = "agent_not_allowed"
+	// ReasonAgentThreadCap: an allowed agent's mention past the per-thread
+	// cap (Trust.AgentThreadCap within AgentCapWindow).
+	ReasonAgentThreadCap Reason = "agent_thread_cap"
+	// ReasonAgentDailyCap: an allowed agent's mention past that agent's cap
+	// across every thread (Trust.AgentDailyCap within AgentCapWindow).
+	ReasonAgentDailyCap Reason = "agent_daily_cap"
 )
 
 // Blocked reasons. A blocked record is retained and recovered; it is never a
