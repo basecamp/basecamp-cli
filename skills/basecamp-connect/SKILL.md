@@ -131,7 +131,9 @@ mappings and ask before starting. Never start silently from the store.
 **Identity.** Never set up a profile whose identity the person hasn't
 confirmed. Before the first setup, run `basecamp me -P '<profile>' --json` and
 say who it is: `identity` (name, email) and, when present, `person.name` and
-`person.id`. Go on only when they say that is the agent. If it names someone
+`person.id`. An agent credential has no `identity`; its `person` carries
+`personable_type` and, for a personal agent, `boss`, the person it works for.
+Go on only when they say that is the agent. If it names someone
 else, stop: don't run setup and don't reconnect.
 
 **Writing to Basecamp.** Everything this skill and its subagents post (boosts,
