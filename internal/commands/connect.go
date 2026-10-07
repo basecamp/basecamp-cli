@@ -195,9 +195,9 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		for i, id := range f.Trust.AgentIDs {
 			ids[i] = strconv.FormatInt(id, 10)
 		}
-		agents = fmt.Sprintf("%s may mention; caps %d per thread, %d per agent, per 24h",
-			strings.Join(ids, ", "), f.Trust.ThreadCap(), f.Trust.DailyCap())
+		agents = strings.Join(ids, ", ") + " may mention"
 	}
+	agents += fmt.Sprintf("; caps %d per thread, %d per agent, per 24h", f.Trust.ThreadCap(), f.Trust.DailyCap())
 	d := map[string]any{
 		"file":     exact(path),
 		"account":  f.AccountID,
@@ -350,7 +350,7 @@ the mentions are capped over a rolling 24 hours: --agent-thread-cap per
 thread or Campfire (default 3, across all allowed agents) and
 --agent-daily-cap per agent across all threads (default 20). A mention over
 a cap is discarded as agent_thread_cap or agent_daily_cap. Restart the
-connector after changing who is allowed.
+connector after changing who is allowed or either cap.
 
 Projects. connect.json is the local list of Basecamp projects this agent
 serves: --serve <project-id>, --unserve <project-id>. Nothing in a project it

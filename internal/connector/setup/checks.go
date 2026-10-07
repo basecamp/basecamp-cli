@@ -293,6 +293,7 @@ func verifyAgent(ctx context.Context, r Reader, id, agentID int64, recorded bool
 	case err != nil:
 		c.Status = StatusFail
 		c.Message = fmt.Sprintf("Person %d could not be read (%s), so it cannot be verified as an agent", id, ErrorText(err))
+		c.Hint = "Pass --operator-profile <profile>: people are read through the operator's own credential, which Basecamp does not refuse."
 		return c
 	case read.ID != id:
 		c.Status, c.Message = StatusFail, fmt.Sprintf("Reading person %d answered with person %d", id, read.ID)

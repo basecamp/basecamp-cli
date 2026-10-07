@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -71,10 +72,14 @@ func (c *Committer) Commit(ctx context.Context, v Verdict) (Verdict, error) {
 		return v, err
 	}
 	if v.State == StateAdmitted && v.agentCaps != nil {
-		var err error
-		if v, err = c.capAgent(ctx, v); err != nil {
+		var (
+			unlock func()
+			err    error
+		)
+		if v, unlock, err = c.capAgent(ctx, v); err != nil {
 			return v, err
 		}
+		defer unlock()
 	}
 	written, err := c.ledger.Commit(ctx, v)
 	if err != nil {
@@ -91,13 +96,28 @@ func (c *Committer) Commit(ctx context.Context, v Verdict) (Verdict, error) {
 }
 
 // capAgent holds an allowed agent's mention to the loop caps, and discards it
-// once either is reached. It runs under the conversation's lock, so the
-// thread cap is exact: no two mentions in one conversation are counted and
-// written at once. The daily cap spans conversations, which this lock does
-// not, so mentions decided at the same moment in different threads can pass
-// it together, at most one per admission worker; a loop is sequential, so
-// that cannot sustain one.
-func (c *Committer) capAgent(ctx context.Context, v Verdict) (Verdict, error) {
+// once either is reached. The count and the write must not interleave with
+// another mention's, or two could both read the count below a cap and both
+// be written. The caller holds the conversation's lock, which serializes the
+// thread cap; the daily cap spans conversations, so the returned unlock
+// releases a second lock, on the agent, held until the verdict is written.
+// The agent lock is always taken after a conversation lock and never the
+// other way round, so the two cannot deadlock.
+func (c *Committer) capAgent(ctx context.Context, v Verdict) (Verdict, func(), error) {
+	caps := v.agentCaps
+	unlock, err := c.locks.lock(ctx, "agent:"+strconv.FormatInt(caps.agentID, 10))
+	if err != nil {
+		return v, nil, err
+	}
+	v, err = c.countAgent(ctx, v)
+	if err != nil {
+		unlock()
+		return v, nil, err
+	}
+	return v, unlock, nil
+}
+
+func (c *Committer) countAgent(ctx context.Context, v Verdict) (Verdict, error) {
 	caps := v.agentCaps
 	counter, ok := c.ledger.(AgentRequests)
 	if !ok {

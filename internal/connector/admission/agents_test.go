@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -161,7 +162,7 @@ func TestAnAllowedAgentsMentionCountsOnlyInWordsItWrote(t *testing.T) {
 	assert.Equal(t, ReasonDelegated, v.Reason)
 }
 
-func TestAnAllowedAgentGetsNoHoldingReplyInAnUnservedProject(t *testing.T) {
+func TestAnAllowedAgentsMentionInAnUnservedProjectIsDroppedUnread(t *testing.T) {
 	f := newFakeReads()
 	s := agentSummary(t, peerAgent, "<div>hi "+mentionOf(t, agentID)+"</div>")
 	s.Bucket = &basecamp.Bucket{ID: unservedProj}
@@ -169,8 +170,10 @@ func TestAnAllowedAgentGetsNoHoldingReplyInAnUnservedProject(t *testing.T) {
 	ev := agentComment(peerAgent, ActorTypeAgent)
 	ev.BucketID = unservedProj
 	v := decide(t, newAdmitter(t, agentPolicy(), f), ev)
-	assert.Equal(t, StateDiscarded, v.State, "blocked would post a holding reply the other agent could answer")
+	assert.Equal(t, StateDiscarded, v.State, "not blocked: nothing waits on another agent's mention there")
 	assert.Equal(t, ReasonNoRoute, v.Reason)
+	assert.Zero(t, f.totalReads(), "decided at the gate, before any read")
+	assert.Empty(t, v.Trigger, "so it can never be counted against the caps")
 }
 
 func TestAgentPolicyValidation(t *testing.T) {
@@ -201,8 +204,12 @@ func TestAgentPolicyValidation(t *testing.T) {
 // over a window measured on its own clock.
 type capLedger struct {
 	*fakeLedger
-	now      int // hours since the start
-	admitted []struct {
+	mu sync.Mutex
+	// countDelay widens the window between a count and its write, so a
+	// committer that does not serialize them is caught admitting twice.
+	countDelay time.Duration
+	now        int // hours since the start
+	admitted   []struct {
 		key   string
 		agent int64
 		at    int
@@ -211,6 +218,8 @@ type capLedger struct {
 
 func (l *capLedger) Commit(ctx context.Context, v Verdict) (State, error) {
 	state, err := l.fakeLedger.Commit(ctx, v)
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if err == nil && v.State == StateAdmitted {
 		l.admitted = append(l.admitted, struct {
 			key   string
@@ -222,9 +231,14 @@ func (l *capLedger) Commit(ctx context.Context, v Verdict) (State, error) {
 }
 
 func (l *capLedger) CountAgentRequests(_ context.Context, key string, agents []int64, window time.Duration) (int, error) {
+	// The delay runs after the lock is released: it stands for the time a
+	// real count and write take, not for a lock of the fake's own.
+	defer time.Sleep(l.countDelay)
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	n := 0
 	for _, a := range l.admitted {
-		if (key == "" || a.key == key) && containsID(agents, a.agent) && l.now-a.at < int(window.Hours()) {
+		if (key == "" || a.key == key) && containsID(agents, a.agent) && l.now-a.at <= int(window.Hours()) {
 			n++
 		}
 	}
@@ -271,10 +285,10 @@ func TestTheThreadCapTripsAtNPlusOneAndResetsAfterTheWindow(t *testing.T) {
 	assert.Empty(t, v.Trigger, "nor a trigger, so it is not counted as admitted")
 	assert.Nil(t, v.Reply, "and nobody is answered")
 
-	ledger.now = 23
-	assert.Equal(t, ReasonAgentThreadCap, commit(4).Reason, "still inside 24 hours")
-
 	ledger.now = 24
+	assert.Equal(t, ReasonAgentThreadCap, commit(4).Reason, "the window includes its edge, as the ledger's does")
+
+	ledger.now = 25
 	v = commit(5)
 	assert.NotEqual(t, StateDiscarded, v.State, "the window has passed")
 }
@@ -315,4 +329,51 @@ func TestAnAgentsMentionIsRefusedByALedgerThatCannotCount(t *testing.T) {
 	v := decide(t, newAdmitter(t, agentPolicy(), f), agentComment(peerAgent, ActorTypeAgent))
 	_, err := c.Commit(context.Background(), v)
 	require.ErrorContains(t, err, "cannot count agent mentions")
+}
+
+// Mentions in different threads, committed at once, each under its own
+// conversation lock: the daily cap still admits exactly as many as it allows.
+func TestTheDailyCapHoldsUnderConcurrentCommits(t *testing.T) {
+	ledger := &capLedger{fakeLedger: newFakeLedger(), countDelay: 20 * time.Millisecond}
+	c := NewCommitter(ledger)
+	f := newFakeReads()
+	p := agentPolicy()
+	p.Trust.AgentDailyCap = 1
+	a := newAdmitter(t, p, f)
+
+	verdicts := make([]Verdict, 4)
+	for i := range verdicts {
+		rec := recordingID + int64(i) + 1
+		s := agentSummary(t, peerAgent, "<div>"+mentionOf(t, agentID)+"</div>")
+		s.ID, s.Parent = rec, &basecamp.Parent{ID: parentID + 100*int64(i+1)}
+		f.summaries[rec] = s
+		ev := agentComment(peerAgent, ActorTypeAgent)
+		ev.ID, ev.RecordingID = int64(i)+1, rec
+		verdicts[i] = decide(t, a, ev)
+		require.Equal(t, StateAdmitted, verdicts[i].State)
+	}
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		results []Verdict
+	)
+	for _, v := range verdicts {
+		wg.Go(func() {
+			out, err := c.Commit(context.Background(), v)
+			assert.NoError(t, err)
+			mu.Lock()
+			results = append(results, out)
+			mu.Unlock()
+		})
+	}
+	wg.Wait()
+	admitted := 0
+	for _, v := range results {
+		if v.State == StateAdmitted {
+			admitted++
+			continue
+		}
+		assert.Equal(t, ReasonAgentDailyCap, v.Reason)
+	}
+	assert.Equal(t, 1, admitted, "one mention a day means one, however they arrive")
 }

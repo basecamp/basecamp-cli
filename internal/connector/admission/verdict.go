@@ -400,12 +400,6 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		}
 	}
 
-	if !v.Served && gate.Agent {
-		// No holding reply to another agent: it could answer the reply, and
-		// a blocked record is not counted against the agent caps, so the
-		// exchange would be unbounded.
-		return v.end(StateDiscarded, ReasonNoRoute), nil
-	}
 	if !v.Served {
 		// Mentioned and assigned are answered in an unserved project rather
 		// than dropped: the record keeps its trigger and reply destination

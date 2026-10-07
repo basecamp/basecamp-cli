@@ -120,6 +120,14 @@ func gateAgent(ev Event, p Policy, rules []Rule) GateResult {
 	if !p.inScope(ev.BucketID) {
 		return GateResult{Reason: ReasonOutOfScope}
 	}
+	if _, served := p.served(ev.BucketID); !served {
+		// Discarded here, before any read, rather than blocked no_route as a
+		// person's mention is: nothing waits on another agent's mention in a
+		// project this one does not serve, and a blocked record would be
+		// retried and spend reads for it. A gate discard carries no trigger,
+		// so it is never counted against the agent caps.
+		return GateResult{Reason: ReasonNoRoute}
+	}
 	var open []Rule
 	reason := ReasonNotAddressed
 	for _, rule := range rules {
