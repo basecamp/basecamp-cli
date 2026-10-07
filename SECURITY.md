@@ -28,6 +28,11 @@ export BASECAMP_NO_KEYRING=1
 
 Credentials will be stored in `~/.config/basecamp/credentials.json` with `0600` permissions.
 
+Don't copy that file between machines or containers. A login refreshes by
+replacing its token, and Basecamp signs out every copy once two of them
+refresh more than a minute apart. See "Containers, CI and scheduled jobs" in the README for what to do
+instead.
+
 ## Supported Versions
 
 | Version | Supported |

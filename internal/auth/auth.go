@@ -683,12 +683,20 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 			// reload, so this refresh has succeeded by proxy.
 			return nil
 		}
+		desc = strings.TrimSpace(richtext.SanitizeSingleLine(desc))
+		reused := creds.OAuthType == oauthTypeBC5 && revokedForReuse(desc)
 		msg := "Your session has expired or was revoked"
+		if reused {
+			msg = revokedLoginMessage
+		}
 		if creds.OAuthType != oauthTypeBC5 {
 			msg = "The refresh token was refused: the session has expired or was revoked, or BASECAMP_OAUTH_CLIENT_ID/SECRET name a different OAuth client than the one it was issued to"
 		}
-		if desc = strings.TrimSpace(richtext.SanitizeSingleLine(desc)); desc != "" {
+		if desc != "" {
 			msg += " (" + desc + ")"
+		}
+		if reused && inContainer() {
+			msg += ". " + containerLoginAdvice
 		}
 		return m.errAuth(msg)
 	}
@@ -718,7 +726,11 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 	// refresh token is over.
 	creds.RenewalHold = nil
 
-	return m.store.Save(origin, creds)
+	if err := m.store.Save(origin, creds); err != nil {
+		return err
+	}
+	m.noticeContainerLogin(creds)
+	return nil
 }
 
 // deviceLoginRefusal is the error a device login refused with a 429 returns:

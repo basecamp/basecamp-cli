@@ -242,6 +242,41 @@ yet. `basecamp auth logout` forgets the credential; there is no useful
 revocation, since the same client would mint another — rotate the client
 secret in Basecamp to end an agent's access.
 
+### Containers, CI and scheduled jobs
+
+An OAuth login refreshes by rotation: each refresh replaces its refresh token,
+and Basecamp signs the whole login out when a replaced token is used again.
+That is how it notices a stolen one. So one login can be **shared** by many
+processes, but never **copied**: two containers that each hold a copy of
+`credentials.json` sign each other out as soon as both have refreshed more
+than a minute apart, which a retry window forgives but a schedule won't.
+
+For containers, CI and cron, pick one:
+
+- **A token that never rotates.** Set `BASECAMP_TOKEN` to a
+  [personal access token](#personal-access-tokens), where your account offers
+  them, injected as a secret. Nothing refreshes, so every replica can hold the
+  same one, and revoking it ends access everywhere.
+- **One shared login, on one host.** Mount one config directory into every
+  replica as a read-write volume, with `BASECAMP_NO_KEYRING=1`. The CLI locks
+  the login while it refreshes, so replicas take turns instead of signing
+  each other out. The lock is an `flock` in that directory, which holds
+  between containers on one host. Across hosts, use one of the other two:
+  the CLI can't tell a shared filesystem whose `flock` is local to each host,
+  and there copies would sign each other out with no warning.
+- **One login per install.** Run `basecamp auth login --device-code` in each
+  install, and keep its config directory to itself.
+
+Never bake `credentials.json` into an image or copy it between machines. The
+CLI says so once, the first time a login refreshes inside a container (again
+later only if it cannot write its marker in the config directory).
+
+If refreshes keep failing, Basecamp blocks sign-ins from that address for a
+while. The CLI then waits out the block instead of retrying on every run
+(`basecamp auth status` shows the wait), and forgets a revoked login after
+its first refusal; sign in again once whatever was using the old copy has
+stopped.
+
 ### Multiple Identities
 
 Use named profiles when the same machine or agent gateway needs more than one Basecamp identity. Each profile has its own stored OAuth credentials and can be selected per command:
