@@ -84,7 +84,8 @@ Then:
    list profiles (`basecamp profile list --json`) and ask.
 2. **Set up, if needed.** `basecamp connect show -P '<profile>' --json`. A
    `not_found` or `unknown profile` error means it isn't set up: follow
-   *First-time setup*. If they asked for a change, run setup with it.
+   *First-time setup*. If they asked for a change, run setup with it. Note
+   its `launcher`, if it has one (*Dispatch one background subagent*).
 3. **Start the connector** (*Running the connector*) and watch it.
 4. **Handle each request** (*For each request*), until they ask you to stop.
 
@@ -416,6 +417,27 @@ to finish without this session:
   or the explicit
   result "AGENTS.md checked: none found";
 - the subagent instructions below, in full.
+
+**With a launcher.** If `basecamp connect show -P '<profile>' --json` has a
+`launcher` (a list of words, set with `basecamp connect setup --launcher`),
+the person wants each worker run through it, usually a sandbox. Don't use the
+Agent tool then. Write everything above into a prompt file with the Write tool
+(in a temporary directory of your own, never the repo), and start the worker
+with the Bash tool (`run_in_background: true`) from the repo you chose (your
+own working directory for "no repo"):
+
+```bash
+cd '<repo>' && '<launcher word 1>' '<launcher word 2>' claude -p < '<prompt file>'
+```
+
+Every launcher word, single-quoted, in order, then `claude -p`, and nothing
+else: the launcher decides how the worker runs, its permission mode included.
+Never drop the launcher, edit its words, or fall back to the Agent tool
+because it failed. If it can't start (the command is missing, it refuses),
+tell the person, show what it said, and post the failure as the agent; the
+fix is theirs (`basecamp connect doctor -P '<profile>'` checks it). The
+background task's notification is the worker finishing: read its output only
+for a failure to report.
 
 Then go straight back to watching. There's no limit on requests in flight.
 

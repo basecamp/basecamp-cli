@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -194,6 +195,15 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		"trust":    trust,
 		"projects": strconv.Itoa(len(f.Projects)) + " served",
 	}
+	if len(f.Launcher) > 0 {
+		// Each word as it is passed, so a word with a space in it reads as
+		// one word and not two.
+		words := make([]string, len(f.Launcher))
+		for i, w := range f.Launcher {
+			words[i] = exact(w)
+		}
+		d["launcher"] = strings.Join(words, " ")
+	}
 	for id, r := range f.Projects {
 		settings := "served"
 		if r.Class != "" {
@@ -267,6 +277,9 @@ type connectSetupFlags struct {
 	unwatch []string
 	unserve []string
 
+	launcher   []string
+	noLauncher bool
+
 	// guided is the guided setup running this one: a setup that passes says
 	// so in a line, since the guided summary names the agent, its owner and
 	// its projects. A failure still lists every check. It only ever makes a
@@ -318,6 +331,18 @@ assigned.
 No directory is associated with a project here: the session handling the
 requests chooses the repo for each one.
 
+Launcher. The connector starts nothing: the session handling the requests
+hands each one to a worker. By default that worker is a subagent of the
+session itself. With a launcher, the session runs each worker as its own
+process through it instead, from the repo it chose: the launcher's words,
+then the worker's command (claude -p, with the instructions on stdin). Use it
+to run workers inside a sandbox, for instance --launcher sandbox, which makes
+each worker "sandbox claude -p". Give one --launcher per word, in order; the
+words are passed as they are, never through a shell. The first is a program
+on PATH or an absolute path. --no-launcher removes it. The launcher decides
+how the worker runs, its permission mode included; the session adds nothing
+to its command line but the worker's own.
+
 connect.json is written owner-only and refused when anyone else could have
 changed it or a directory above it. Where this CLI cannot verify that
 (Windows), or where the filesystem holding the configuration directory
@@ -349,7 +374,9 @@ Examples:
   basecamp connect setup -P agent --operator-profile me --serve 12345
   basecamp connect setup -P agent --operator-profile me --trust allowlist --allow 111 --allow 222
   basecamp connect setup -P bot --operator-profile me --expect-identity 4242 --serve 12345
-  basecamp connect setup -P agent --class 12345=internal`,
+  basecamp connect setup -P agent --class 12345=internal
+  basecamp connect setup -P agent --launcher sandbox
+  basecamp connect setup -P agent --no-launcher`,
 		Annotations: map[string]string{AnnotationProfileMayCreate: "true"},
 		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -375,7 +402,10 @@ Examples:
 	fl.StringArrayVar(&f.classes, "class", nil, "Classify a served project: <project-id>=<class>, or <project-id>= to clear it (repeatable)")
 	fl.StringArrayVar(&f.watch, "watch-completions", nil, "Admit every trusted completion in a served project (repeatable)")
 	fl.StringArrayVar(&f.unwatch, "no-watch-completions", nil, "Stop watching a project's completions (repeatable)")
+	fl.StringArrayVar(&f.launcher, "launcher", nil, "Run each worker through this command: one argv word per flag, in order (repeatable; replaces the launcher)")
+	fl.BoolVar(&f.noLauncher, "no-launcher", false, "Remove the launcher: workers are the session's own subagents again")
 	cmd.MarkFlagsMutuallyExclusive("operator", "operator-profile")
+	cmd.MarkFlagsMutuallyExclusive("launcher", "no-launcher")
 
 	return cmd
 }
@@ -838,6 +868,14 @@ func (f *connectSetupFlags) changes() (setup.Changes, error) {
 		}
 		ch.Remove = append(ch.Remove, id)
 	}
+
+	if len(f.launcher) > 0 {
+		if err := setup.ValidLauncher(f.launcher); err != nil {
+			return ch, output.ErrUsage("Invalid --launcher: " + err.Error())
+		}
+		ch.Launcher = slices.Clone(f.launcher)
+	}
+	ch.ClearLauncher = f.noLauncher
 
 	return ch, nil
 }

@@ -33,3 +33,4 @@ CMD basecamp connect shadow promote
 CMD basecamp connect show
 CMD basecamp connect status
 FLAG basecamp --unserve
+FLAG basecamp --launcher
