@@ -212,14 +212,14 @@ func TestCheckCodexPluginLegacyCLIInstall(t *testing.T) {
 	assert.Equal(t, "fail", check.Status)
 	assert.Contains(t, check.Message, "old name basecamp@37signals")
 	assert.Contains(t, check.Hint, "basecamp setup codex")
-	assert.True(t, CodexLegacyCLIInstalled(context.Background()))
+	assert.False(t, CodexLegacyReplaced(context.Background()), "no replacement installed yet")
 }
 
 func TestCheckCodexPluginLegacyAvailableOnlyIsNotInstalled(t *testing.T) {
 	stubCodexList(t, `{"installed":[],"available":[{"pluginId":"basecamp@37signals","version":"0.11.0","installed":false,"enabled":false}]}`, nil)
 
 	assert.Equal(t, "Plugin not installed", CheckCodexPlugin().Message)
-	assert.False(t, CodexLegacyCLIInstalled(context.Background()))
+	assert.False(t, CodexLegacyReplaced(context.Background()))
 }
 
 func TestCheckCodexPluginBothInstalledWarns(t *testing.T) {
@@ -229,6 +229,7 @@ func TestCheckCodexPluginBothInstalledWarns(t *testing.T) {
 
 	assert.Equal(t, "warn", check.Status)
 	assert.Contains(t, check.Message, "old basecamp@37signals copy")
+	assert.True(t, CodexLegacyReplaced(context.Background()))
 }
 
 func TestCheckCodexPluginDisabledMentionsLegacyCopy(t *testing.T) {
@@ -238,5 +239,6 @@ func TestCheckCodexPluginDisabledMentionsLegacyCopy(t *testing.T) {
 
 	assert.Equal(t, "fail", check.Status)
 	assert.Contains(t, check.Message, "disabled")
+	assert.False(t, CodexLegacyReplaced(context.Background()), "a disabled replacement doesn't replace the old ID")
 	assert.Contains(t, check.Message, "old basecamp@37signals copy")
 }

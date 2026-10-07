@@ -111,10 +111,10 @@ func installCodexPlugin(parent context.Context, stderr io.Writer, progress func(
 	}
 
 	// The plugin was renamed basecamp → basecamp-cli. Remove a pre-rename
-	// install only once its replacement is in, so a failed install never
-	// leaves the user with neither.
+	// install only once its replacement is installed and enabled, so a failed
+	// or disabled install never leaves the user without a working plugin.
 	legacyCtx, cancelLegacy := context.WithTimeout(parent, codexVerifyTimeout)
-	legacy := harness.CodexLegacyCLIInstalled(legacyCtx)
+	legacy := harness.CodexLegacyReplaced(legacyCtx)
 	cancelLegacy()
 	if legacy {
 		progress("Removing the pre-rename " + harness.CodexLegacyPluginKey + " plugin…")

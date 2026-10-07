@@ -41,8 +41,8 @@ func claudeChecks() []*StatusCheck {
 const ClaudeMarketplaceSource = "basecamp/claude-plugins"
 
 // ClaudePluginName is the plugin identifier to install. It was "basecamp"
-// until the 37signals marketplace gave that name to the hosted-connector
-// plugin; see ClaudeLegacyPluginKey.
+// until that name was set aside for the hosted-connector plugin; see
+// ClaudeLegacyPluginKey.
 const ClaudePluginName = "basecamp-cli"
 
 // ClaudeMarketplaceName is the marketplace name as it appears in plugin keys.
@@ -52,9 +52,10 @@ const ClaudeMarketplaceName = "37signals"
 const ClaudeExpectedPluginKey = ClaudePluginName + "@" + ClaudeMarketplaceName
 
 // ClaudeLegacyPluginKey is the key this plugin was installed under before the
-// rename. During the migration window the 37signals marketplace publishes no
-// "basecamp" plugin at all, so an install under this key is always this CLI's
-// pre-rename plugin and setup removes it by key, like any stale entry.
+// rename. During the migration window the 37signals marketplace lists
+// "basecamp" only as a deprecated alias of basecamp-cli with the same source,
+// so an install under this key is always this CLI's pre-rename plugin and
+// setup removes it by key, like any stale entry.
 //
 // The marketplace may later list the hosted Basecamp connector as "basecamp"
 // again. That step has to wait until this key is no longer treated as stale

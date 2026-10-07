@@ -18,16 +18,17 @@ const (
 	// CodexMarketplaceSource is the Git marketplace repository containing Basecamp.
 	CodexMarketplaceSource = "basecamp/claude-plugins"
 	// CodexPluginName is the plugin identifier to install. It was "basecamp"
-	// until the 37signals marketplace gave that name to the hosted-connector
-	// plugin; see CodexLegacyPluginKey.
+	// until that name was set aside for the hosted-connector plugin; see
+	// CodexLegacyPluginKey.
 	CodexPluginName = "basecamp-cli"
 	// CodexMarketplaceName is the marketplace name published by 37signals.
 	CodexMarketplaceName = "37signals"
 	// CodexExpectedPluginKey is the fully qualified Basecamp plugin ID.
 	CodexExpectedPluginKey = CodexPluginName + "@" + CodexMarketplaceName
-	// CodexLegacyPluginKey is the pre-rename plugin ID. The marketplace lists
-	// no "basecamp" plugin during the migration window, so an install under it
-	// is always this CLI's (see ClaudeLegacyPluginKey).
+	// CodexLegacyPluginKey is the pre-rename plugin ID. During the migration
+	// window the marketplace lists "basecamp" only as an alias of basecamp-cli,
+	// with the same source, so an install under it is always this CLI's (see
+	// ClaudeLegacyPluginKey).
 	CodexLegacyPluginKey = "basecamp@" + CodexMarketplaceName
 
 	// codexQueryTimeout bounds how long the Codex probe may run.
@@ -325,12 +326,13 @@ func queryCodexPlugin(parent context.Context) (codexPluginState, bool, error) {
 	return codexPluginState{legacyInstalled: legacy}, false, nil
 }
 
-// CodexLegacyCLIInstalled reports whether this CLI's plugin is still installed
-// in Codex under CodexLegacyPluginKey. It reads the plugin list itself, so
-// callers that already hold a query result should use its state instead.
-func CodexLegacyCLIInstalled(ctx context.Context) bool {
-	state, _, err := queryCodexPlugin(ctx)
-	return err == nil && state.legacyInstalled
+// CodexLegacyReplaced reports whether this CLI's plugin is still installed in
+// Codex under CodexLegacyPluginKey while CodexExpectedPluginKey is installed
+// and enabled, so removing the old ID leaves a working plugin behind. A
+// disabled replacement (Codex keeps those installed) doesn't count.
+func CodexLegacyReplaced(ctx context.Context) bool {
+	state, found, err := queryCodexPlugin(ctx)
+	return err == nil && found && state.Installed && state.Enabled && state.legacyInstalled
 }
 
 func codexQueryFailure(name string, err error) *StatusCheck {

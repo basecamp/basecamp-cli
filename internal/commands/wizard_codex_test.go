@@ -100,6 +100,19 @@ func TestSetupCodexReplacesLegacyCLIPlugin(t *testing.T) {
 	)
 }
 
+// TestSetupCodexKeepsLegacyWhenReplacementDisabled covers a basecamp-cli
+// install Codex keeps but has disabled: the working old ID stays until the
+// replacement is enabled, and verification reports the disabled plugin.
+func TestSetupCodexKeepsLegacyWhenReplacementDisabled(t *testing.T) {
+	logPath := installCodexStub(t, codexStubOptions{legacyInstalled: true, pluginAlreadyInstalled: true, pluginDisabled: true})
+
+	envelope := runSetupCodexJSON(t)
+
+	assert.NotContains(t, readCodexSetupCalls(t, logPath), "plugin remove")
+	require.NotEmpty(t, envelope.Data.Errors)
+	assert.Contains(t, envelope.Data.Errors[0], "disabled")
+}
+
 func TestSetupCodexLegacyRemovalFailureNamesTheManualStep(t *testing.T) {
 	installCodexStub(t, codexStubOptions{legacyInstalled: true, legacyRemoveFailure: true})
 
@@ -271,6 +284,7 @@ type codexStubOptions struct {
 	verificationMissing            bool
 	legacyInstalled                bool
 	legacyRemoveFailure            bool
+	pluginDisabled                 bool
 }
 
 func installCodexStub(t *testing.T, options codexStubOptions) string {
@@ -311,10 +325,11 @@ func installCodexStub(t *testing.T, options codexStubOptions) string {
 		"    if [ " + boolShell(options.legacyRemoveFailure) + " = 1 ]; then echo 'remove failure' >&2; exit 1; fi\n" +
 		"    echo removed > \"" + legacyPath + "\"; echo '{}'; exit 0 ;;\n" +
 		"  \"plugin list --available --json\")\n" +
+		"    enabled=true; if [ " + boolShell(options.pluginDisabled) + " = 1 ]; then enabled=false; fi\n" +
 		"    legacy_state=''; [ -f \"" + legacyPath + "\" ] && read -r legacy_state < \"" + legacyPath + "\"\n" +
 		"    if [ \"$legacy_state\" = installed ]; then legacy='{\"pluginId\":\"basecamp@37signals\",\"version\":\"0.11.0\",\"installed\":true,\"enabled\":true},'; else legacy=''; fi\n" +
 		"    if [ " + boolShell(options.verificationMissing) + " = 1 ]; then echo '{\"installed\":[],\"available\":[{\"pluginId\":\"basecamp-cli@37signals\",\"version\":\"0.7.2\",\"installed\":false,\"enabled\":false}]}'; exit 0; fi\n" +
-		"    if [ -f \"" + statePath + "\" ]; then echo \"{\\\"installed\\\":[$legacy{\\\"pluginId\\\":\\\"basecamp-cli@37signals\\\",\\\"version\\\":\\\"0.7.2\\\",\\\"installed\\\":true,\\\"enabled\\\":true}],\\\"available\\\":[]}\"; else echo \"{\\\"installed\\\":[${legacy%,}],\\\"available\\\":[]}\"; fi; exit 0 ;;\n" +
+		"    if [ -f \"" + statePath + "\" ]; then echo \"{\\\"installed\\\":[$legacy{\\\"pluginId\\\":\\\"basecamp-cli@37signals\\\",\\\"version\\\":\\\"0.7.2\\\",\\\"installed\\\":true,\\\"enabled\\\":$enabled}],\\\"available\\\":[]}\"; else echo \"{\\\"installed\\\":[${legacy%,}],\\\"available\\\":[]}\"; fi; exit 0 ;;\n" +
 		"  *) echo 'unexpected command' >&2; exit 1 ;;\n" +
 		"esac\n"
 	require.NoError(t, os.WriteFile(filepath.Join(binDir, "codex"), []byte(script), 0o755)) //nolint:gosec // test executable
