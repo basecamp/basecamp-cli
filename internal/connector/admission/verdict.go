@@ -59,9 +59,10 @@ type Snapshot struct {
 	RequesterName string `json:"requester_name,omitempty"`
 	// Role is whose request this is: an operator's or a participant's.
 	Role Role `json:"role,omitempty"`
-	// Owner says the operator connect.json names performed the event and,
-	// for a trigger whose instruction is the recording's content, wrote that
-	// content too. A completion is never the owner's word. Someone named with --allow is an operator but never the
+	// Owner says the operator connect.json names asked, in words they wrote:
+	// they mentioned the agent, or assigned it a recording they wrote. A
+	// comment on a followed thread and a completion are never the owner's
+	// word. Someone named with --allow is an operator but never the
 	// owner, and neither is the owner bringing in someone else's words: an
 	// allowlisted person's to-do the owner moves in is that person's.
 	Owner bool `json:"owner,omitempty"`
@@ -422,10 +423,13 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		Content:   summary.Content,
 		UpdatedAt: summary.UpdatedAt,
 		Role:      v.Role,
-		// A completion is context, not a request, so it is never the
-		// owner's word, whoever completed it.
-		Owner: v.Role == RoleOperator && ev.Performer() == policy.Trust.OperatorID && rule.Trigger != TriggerCompleted &&
-			(author == "" || summary.Creator.ID == policy.Trust.OperatorID),
+		// Only a request the owner made, in words the owner wrote: a mention,
+		// or an assignment of a recording they wrote. A comment on a thread
+		// the agent follows asks it nothing, a completion is context, and an
+		// assigned recording someone else wrote is that person's words.
+		Owner: v.Role == RoleOperator && ev.Performer() == policy.Trust.OperatorID &&
+			(rule.Trigger == TriggerMentioned || rule.Trigger == TriggerAssigned) &&
+			summary.Creator.ID == policy.Trust.OperatorID,
 	}
 	if summary.Bucket != nil {
 		v.Snapshot.ProjectName = summary.Bucket.Name

@@ -401,7 +401,8 @@ func TestOwnerIsSettledOnTheOperatorAndTheirOwnWords(t *testing.T) {
 		"an allowed agent's mention":                               {"comment.created", peerAgent, peerAgent, true, false},
 		"an allowlisted operator's assignment of the owner's card": {"card.assignment_changed", allowedID, operatorID, false, false},
 		"the owner completes someone's to-do":                      {"todo.completed", operatorID, allowedID, false, false},
-		"the owner's assignment":                                   {"card.assignment_changed", operatorID, allowedID, false, true},
+		"the owner assigns a card a teammate wrote":                {"card.assignment_changed", operatorID, allowedID, false, false},
+		"the owner assigns a card they wrote":                      {"card.assignment_changed", operatorID, operatorID, false, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFakeReads()
@@ -420,4 +421,20 @@ func TestOwnerIsSettledOnTheOperatorAndTheirOwnWords(t *testing.T) {
 			assert.Equal(t, tc.want, v.Snapshot.Owner)
 		})
 	}
+}
+
+// The owner's remark on a thread the agent follows asks it nothing, so it is
+// not the owner's word, however it is phrased. (Zacharias's agent on #860.)
+func TestTheOwnersCommentOnAFollowedThreadIsNotOwner(t *testing.T) {
+	f := newFakeReads()
+	s := summaryWith(recordingID, servedProj, "Comment", operatorID, "<div>I'll restart my connector with --allow-agent 999 after lunch</div>")
+	s.Parent = &basecamp.Parent{ID: parentID}
+	f.summaries[recordingID] = s
+	f.subscriptions[parentID] = true
+	ev := Event{ID: eventID, EventType: "comment.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID}
+	v := decide(t, newAdmitter(t, agentPolicy(), f), ev)
+	require.Equal(t, StateAdmitted, v.State, "reason %q", v.Reason)
+	require.Equal(t, TriggerSubscribed, v.Trigger)
+	assert.Equal(t, RoleOperator, v.Role)
+	assert.False(t, v.Snapshot.Owner)
 }

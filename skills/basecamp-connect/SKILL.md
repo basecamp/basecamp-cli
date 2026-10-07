@@ -336,8 +336,10 @@ thing to check.
   Anything but `operator`, a missing `role` included (an older connector),
   is a participant's. See *A participant asks, an operator authorizes*.
 - **`owner`**: true only when the operator connect.json names (its
-  `operator_id`; for a personal agent, its owner) asked: they assigned the
-  agent, or they wrote the mention or comment themselves. People named with
+  `operator_id`; for a personal agent, its owner) asked in their own words:
+  they wrote the mention, or assigned the agent something they wrote. A
+  comment on a followed thread, a completion, or an assigned recording
+  someone else wrote is never `owner`. People named with
   `--allow` have `role` `operator` but `owner` false, and so does every
   agent. Missing (an older connector) means false. See *Only the owner
   controls the connector*.
