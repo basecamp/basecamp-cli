@@ -2,26 +2,18 @@ package resolve
 
 import (
 	"os"
-	"runtime"
 	"testing"
+
+	"github.com/basecamp/basecamp-cli/internal/testutil"
 )
 
-// openPTY returns the master side of a new pseudo-terminal, which is what
+// openPTY returns the slave side of a new pseudo-terminal, which is what
 // term.IsTerminal actually accepts. /dev/null will not do: it is a character
 // device but not a terminal, and treating it as one is the bug this file
 // guards.
 func openPTY(t *testing.T) *os.File {
 	t.Helper()
-
-	if runtime.GOOS == "windows" {
-		t.Skip("no /dev/ptmx on Windows")
-	}
-	f, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
-	if err != nil {
-		t.Skipf("open /dev/ptmx: %v", err)
-	}
-	t.Cleanup(func() { _ = f.Close() })
-	return f
+	return testutil.OpenPTY(t)
 }
 
 // TestIsInteractiveRequiresTerminalStdio proves pickers are gated off unless

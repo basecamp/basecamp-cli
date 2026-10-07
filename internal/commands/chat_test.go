@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +26,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/names"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
+	"github.com/basecamp/basecamp-cli/internal/testutil"
 )
 
 // chatTestTokenProvider is a mock token provider for tests.
@@ -2281,18 +2281,11 @@ func executeChatWithin(t *testing.T, cmd *cobra.Command, app *appctx.App, timeou
 func promptableStdio(t *testing.T) {
 	t.Helper()
 
-	if runtime.GOOS == "windows" {
-		t.Skip("no /dev/ptmx on Windows")
-	}
-	pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
-	if err != nil {
-		t.Skipf("open /dev/ptmx: %v", err)
-	}
+	pty := testutil.OpenPTY(t)
 	origIn, origErr := os.Stdin, os.Stderr
 	os.Stdin, os.Stderr = pty, pty
 	t.Cleanup(func() {
 		os.Stdin, os.Stderr = origIn, origErr
-		pty.Close()
 	})
 }
 

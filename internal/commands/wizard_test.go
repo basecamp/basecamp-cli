@@ -21,6 +21,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/testutil"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/skills"
 )
@@ -800,6 +801,44 @@ func TestRunClaudeSetupRepairsSkillLink(t *testing.T) {
 	assert.NoError(t, statErr, "skill link should exist after setup repairs it")
 }
 
+func TestClaudeSetupRejectsRelativeConfigBeforeSideEffects(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		run  func(*cobra.Command) error
+	}{
+		{
+			name: "interactive",
+			run: func(cmd *cobra.Command) error {
+				styles := tui.NewStylesWithTheme(tui.ResolveTheme(false))
+				return runClaudeSetup(cmd, styles)
+			},
+		},
+		{name: "non-interactive", run: runClaudeSetupNonInteractive},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("CLAUDE_CONFIG_DIR", "relative/claude")
+			binDir := filepath.Join(home, "bin")
+			require.NoError(t, os.MkdirAll(binDir, 0o755))
+			logFile := filepath.Join(home, "claude-calls.log")
+			script := "#!/bin/sh\necho \"$*\" >> \"" + logFile + "\"\n"
+			require.NoError(t, os.WriteFile(filepath.Join(binDir, "claude"), []byte(script), 0o755)) //nolint:gosec // test helper
+			t.Setenv("PATH", binDir)
+
+			cmd := &cobra.Command{}
+			cmd.SetContext(context.Background())
+			cmd.SetOut(&bytes.Buffer{})
+			cmd.SetErr(&bytes.Buffer{})
+			err := test.run(cmd)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "CLAUDE_CONFIG_DIR must be an absolute path")
+			_, statErr := os.Stat(logFile)
+			assert.True(t, os.IsNotExist(statErr), "Claude must not run before config validation")
+		})
+	}
+}
+
 // TestSetupClaudeNonInteractiveRemovesStalePlugins verifies that non-interactive
 // setup detects and removes stale plugin entries from old marketplaces.
 func TestSetupClaudeNonInteractiveRemovesStalePlugins(t *testing.T) {
@@ -1211,18 +1250,11 @@ func TestSetupRefusesUnderNonInteractiveEnv(t *testing.T) {
 // IsMachineOutput(). An explicit --styled/--md override restores human output,
 // so that pairing can run setup like any human invocation.
 func TestSetupRefusesMachineOutputOnATerminal(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("no /dev/ptmx on Windows")
-	}
-	pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
-	if err != nil {
-		t.Skipf("open /dev/ptmx: %v", err)
-	}
+	pty := testutil.OpenPTY(t)
 	origOut, origIn, origErr := os.Stdout, os.Stdin, os.Stderr
 	os.Stdout, os.Stdin, os.Stderr = pty, pty, pty
 	t.Cleanup(func() {
 		os.Stdout, os.Stdin, os.Stderr = origOut, origIn, origErr
-		pty.Close()
 	})
 
 	for _, tc := range []struct {
@@ -1385,18 +1417,11 @@ func TestExplicitSetupStillRefuses(t *testing.T) {
 func terminalStdio(t *testing.T) {
 	t.Helper()
 
-	if runtime.GOOS == "windows" {
-		t.Skip("no /dev/ptmx on Windows")
-	}
-	pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
-	if err != nil {
-		t.Skipf("open /dev/ptmx: %v", err)
-	}
+	pty := testutil.OpenPTY(t)
 	origIn, origOut, origErr := os.Stdin, os.Stdout, os.Stderr
 	os.Stdin, os.Stdout, os.Stderr = pty, pty, pty
 	t.Cleanup(func() {
 		os.Stdin, os.Stdout, os.Stderr = origIn, origOut, origErr
-		pty.Close()
 	})
 }
 

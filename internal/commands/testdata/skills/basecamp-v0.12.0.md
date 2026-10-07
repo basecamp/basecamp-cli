@@ -243,18 +243,3 @@ Before changing Basecamp:
 
 For destructive or broad operations, preview when the command offers a dry-run
 and do not expand the user's requested scope.
-
-## Coding agent setup and removal
-
-```bash
-basecamp setup agents                             # Install skill + connect detected agent(s)
-basecamp setup agents --json                      # Structured result envelope
-basecamp setup agents --remove                    # Remove CLI-managed agent integrations only
-```
-`setup agents` installs the baseline skill and connects coding agents without
-prompting. Selection is driven by `BASECAMP_SETUP_AGENT` (`claude`, `codex`, `grok`,
-`all`, or `none`); unset auto-detects — one detected agent is connected, several
-leave the skill only and surface the per-agent `basecamp setup <id>` commands.
-`--remove` removes Basecamp-managed skills and Claude/Codex plugins without
-removing authentication, configuration, or Basecamp data. Unmanaged skill
-directories and additional user files are preserved.

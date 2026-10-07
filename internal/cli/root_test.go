@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"os"
-	"runtime"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -15,6 +14,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/stdinarg"
+	"github.com/basecamp/basecamp-cli/internal/testutil"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
@@ -371,18 +371,11 @@ func TestRootDashGuardWithTerminalStdout(t *testing.T) {
 // how `cmd < /dev/null` ended up launching prompts that wait on /dev/tty.
 func stubTerminalStdio(t *testing.T) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("no /dev/ptmx on Windows")
-	}
-	pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
-	if err != nil {
-		t.Skipf("open /dev/ptmx: %v", err)
-	}
+	pty := testutil.OpenPTY(t)
 	origStdout, origStdin := os.Stdout, os.Stdin
 	os.Stdout, os.Stdin = pty, pty
 	t.Cleanup(func() {
 		os.Stdout, os.Stdin = origStdout, origStdin
-		pty.Close()
 	})
 }
 

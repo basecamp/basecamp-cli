@@ -2,12 +2,13 @@ package stdinarg
 
 import (
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/testutil"
 )
 
 func TestParseAllowExactArg(t *testing.T) {
@@ -67,22 +68,13 @@ func TestIsPipedRegularFile(t *testing.T) {
 	assert.True(t, IsPiped(f))
 }
 
-// openPTY returns the master side of a new pseudo-terminal — the only thing
+// openPTY returns the slave side of a new pseudo-terminal — the only thing
 // term.IsTerminal accepts. /dev/null will not stand in: it is a character
 // device but not a terminal, and that gap is what these predicates exist to
 // close.
 func openPTY(t *testing.T) *os.File {
 	t.Helper()
-
-	if runtime.GOOS == "windows" {
-		t.Skip("no /dev/ptmx on Windows")
-	}
-	f, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
-	if err != nil {
-		t.Skipf("open /dev/ptmx: %v", err)
-	}
-	t.Cleanup(func() { _ = f.Close() })
-	return f
+	return testutil.OpenPTY(t)
 }
 
 // stdioMatrix exercises a predicate over each of its two endpoints. The
