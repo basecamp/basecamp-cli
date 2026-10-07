@@ -149,10 +149,22 @@ anything you post.
   first (`basecamp projects list -P '<profile>' --json`), and pass the id. The
   project called `Launch $(date)` is served as `--serve 222`, never by name.
 
-**Interactive logins.** `basecamp auth agent connect`, `basecamp auth login` and
-`basecamp profile create` print a link and wait for a person. Run them without
-`--json` or `--quiet`, in the background, and read their output as it arrives,
-so you can show the link and code while they wait.
+**Interactive logins.** `basecamp auth agent connect` waits for a person to
+approve it. Run it with `--json`, in the background, and read its stdout as it
+arrives. The first line comes as soon as Basecamp answers, while it waits:
+
+    {"type":"verification","verification_uri":"…","user_code":"WDJB-MJHT","expires_at":"…","expires_in":600}
+
+Relay `verification_uri`, `user_code` and when it expires to the person right
+away. They are already stripped of control characters, so pass them on as they
+are. Don't scrape the terminal text. It goes to stderr and is the CLI's copy
+for a person at that terminal. The second value is the result envelope: `ok`,
+with `data.profile`, `data.account_id` and `data.scope`, or the error and its
+hint.
+
+`basecamp auth login` and `basecamp profile create` refuse `--json`. Run them
+plainly, in the background, and read their output as it arrives, so you can
+show the link and code while they wait.
 
 ## First-time setup
 
@@ -163,9 +175,10 @@ Ask only what you can't find out.
 '<profile>' --json`.
 
 - `unknown profile`: it doesn't exist. Connect the agent with
-  `basecamp auth agent connect -P '<profile>'` (add `--no-browser` if the person
-  is on another device). Show the link and code. They open the link, check the
-  code, choose the agent (or create one) and approve.
+  `basecamp auth agent connect -P '<profile>' --json` (add `--no-browser` if
+  the person is on another device). Show them the link and code from its
+  verification line. They open the link, check the code, choose the agent (or
+  create one) and approve.
 - `oauth_type` `agent`: already connected. Don't connect again: that rotates
   the agent's secret and disconnects any other computer using it.
 - Anything else: a person's login is stored. Ask; never connect an agent over

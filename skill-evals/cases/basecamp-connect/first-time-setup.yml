@@ -5,8 +5,8 @@ context: >-
   Everything you need is here, so don't stop to ask: the agent's profile should
   be called helper, and the agent is called Helper: if the credential turns
   out to be Helper, I confirm that is the agent. My own profile is jorge.
-  Only I should be able to drive the agent. When a connection link and code
-  are printed I open the link and approve the connection.
+  Only I should be able to drive the agent. When you show me a connection link
+  and code I open the link and approve the connection.
 tags: [connect]
 mocks:
   - match: 'auth status.*jorge'
@@ -19,8 +19,13 @@ mocks:
     output: '{"ok":false,"code":"api_error","error":"unknown profile \"helper\" (available: jorge)"}'
   - match: 'profile list'
     output: '{"ok":true,"data":[{"name":"jorge","account_id":"999","authenticated":true,"base_url":"https://3.basecampapi.com","default":true}],"summary":"1 profile"}'
+  # Under --json, stdout is two JSON values: the verification line, then the
+  # result envelope. The person's prose goes to stderr, which the skill does
+  # not read.
   - match: 'auth agent connect'
-    output: "Open this link and enter the code ABCD-EFGH to approve the connection.\nWaiting for approval...\n\nConnected profile \"helper\" to a Basecamp agent\nProfile: helper · Account: 999 · Access: full · Token: minted on demand, no refresh token\nCreated profile \"helper\" for account 999\nCheck it any time: basecamp auth status -P helper"
+    output: |-
+      {"type":"verification","verification_uri":"https://3.basecamp.com/connect?user_code=ABCD-EFGH","user_code":"ABCD-EFGH","expires_at":"2026-10-07T12:10:00Z","expires_in":600}
+      {"ok":true,"data":{"profile":"helper","account_id":"999","base_url":"https://3.basecampapi.com","source":"agent_connection","oauth_type":"agent","scope":"full","client_id":"agent-client","profile_created":true},"summary":"Connected profile \"helper\" to a Basecamp agent"}
   - match: '^me\b'
     output: '{"ok":true,"data":{"identity":{"id":7001,"first_name":"Helper","last_name":"","email_address":""},"accounts":[{"id":999,"name":"Acme","current":true}],"person":{"id":4001,"name":"Helper"}}}'
   - match: 'projects list'
@@ -34,6 +39,9 @@ expect_sequence:
   - match: '^me .*(-P|--profile)[ =]''?helper\b'
   - match: 'connect setup'
 accept:
+  # The connection is read as data: the skill relays the verification line's
+  # fields rather than scraping the terminal copy.
+  - 'auth agent connect\b.*\s(--json|-j)(\s|$)'
   - 'connect setup .*(-P|--profile)[ =]''?helper\b'
   - 'connect setup .*--operator-profile[ =]''?jorge\b'
   - 'connect setup .*--serve[ =](''222''|"222"|222)(\s|$)'
@@ -88,8 +96,10 @@ reject:
   - 'connect setup .*--unserve\b'
   - '--with-token'
   - '--with-client-credentials'
-  # Every machine-output mode the interactive connection refuses.
-  - 'auth agent connect.*(--json|--agent|--quiet|--ids-only|--count|--jq|-j\b|-q\b)'
+  # The output modes the agent connection refuses: none can carry its
+  # verification line. --json is required above; --agent is not listed,
+  # because the CLI takes it, and these rules reject only what it refuses.
+  - 'auth agent connect.*(--quiet|--ids-only|--count|--jq|-q\b)'
   - 'connect setup .*--operator[ =]'
   - 'connect setup .*--(trust[ =]''?(allowlist|project)|allow[ =])'
   - '--expect-identity'
