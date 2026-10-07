@@ -121,6 +121,19 @@ func bc5LogoutCredentials(s *revocationServer) *auth.Credentials {
 	}
 }
 
+// agentLogoutCredentials is a connected agent's stored credential: its own
+// client id and secret, and a self-token minted from them.
+func agentLogoutCredentials(s *revocationServer) *auth.Credentials {
+	return &auth.Credentials{
+		AccessToken:   "agent-at",
+		OAuthType:     "agent",
+		ClientID:      "bc-agent-1",
+		ClientSecret:  "agent-secret",
+		TokenEndpoint: s.srv.URL + "/oauth/tokens",
+		Scope:         "full",
+	}
+}
+
 func decodeLogoutJSON(t *testing.T, buf *bytes.Buffer) map[string]any {
 	t.Helper()
 	var envelope struct {
@@ -178,6 +191,16 @@ func TestAuthLogoutHumanCopy(t *testing.T) {
 		require.NoError(t, runLogout(t, app))
 		assert.Contains(t, buf.String(), "Logged out (forgot the imported token; it stays valid until revoked in Basecamp)")
 		assert.Empty(t, s.revoked(), "an imported token is the operator's, not the CLI's, to revoke")
+		assert.False(t, app.Auth.IsAuthenticated())
+	})
+
+	t.Run("agent", func(t *testing.T) {
+		s := startRevocationServer(t)
+		app, buf := newLogoutTestApp(t, s, output.FormatStyled, agentLogoutCredentials(s))
+		require.NoError(t, runLogout(t, app))
+		assert.Contains(t, buf.String(), "Logged out (forgot the agent credential; it stays connected until you disconnect the agent in Basecamp)")
+		assert.NotContains(t, buf.String(), "rotate", "Basecamp has no rotate-secret control to send anyone to")
+		assert.Empty(t, s.revoked(), "an agent self-token is minted on demand; revoking one ends nothing")
 		assert.False(t, app.Auth.IsAuthenticated())
 	})
 

@@ -421,7 +421,7 @@ func TestAgentRevokeIsRefusedAndKeepsTheCredential(t *testing.T) {
 	err := m.RevokeStored(context.Background())
 	require.Error(t, err)
 	assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
-	assert.Contains(t, err.Error(), "rotate the client secret")
+	assert.Contains(t, err.Error(), "disconnect the agent in Basecamp")
 	assert.Empty(t, as.revokeCalls(), "a revocation was sent for an agent self-token")
 
 	creds, loadErr := m.store.Load(key)
