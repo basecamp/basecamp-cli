@@ -20,6 +20,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/testutil"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/skills"
 )
@@ -1192,18 +1193,11 @@ func TestSetupRefusesUnderNonInteractiveEnv(t *testing.T) {
 // IsMachineOutput(). An explicit --styled/--md override restores human output,
 // so that pairing can run setup like any human invocation.
 func TestSetupRefusesMachineOutputOnATerminal(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("no /dev/ptmx on Windows")
-	}
-	pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
-	if err != nil {
-		t.Skipf("open /dev/ptmx: %v", err)
-	}
+	pty := testutil.OpenPTY(t)
 	origOut, origIn, origErr := os.Stdout, os.Stdin, os.Stderr
 	os.Stdout, os.Stdin, os.Stderr = pty, pty, pty
 	t.Cleanup(func() {
 		os.Stdout, os.Stdin, os.Stderr = origOut, origIn, origErr
-		pty.Close()
 	})
 
 	for _, tc := range []struct {
@@ -1366,18 +1360,11 @@ func TestExplicitSetupStillRefuses(t *testing.T) {
 func terminalStdio(t *testing.T) {
 	t.Helper()
 
-	if runtime.GOOS == "windows" {
-		t.Skip("no /dev/ptmx on Windows")
-	}
-	pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
-	if err != nil {
-		t.Skipf("open /dev/ptmx: %v", err)
-	}
+	pty := testutil.OpenPTY(t)
 	origIn, origOut, origErr := os.Stdin, os.Stdout, os.Stderr
 	os.Stdin, os.Stdout, os.Stderr = pty, pty, pty
 	t.Cleanup(func() {
 		os.Stdin, os.Stdout, os.Stderr = origIn, origOut, origErr
-		pty.Close()
 	})
 }
 

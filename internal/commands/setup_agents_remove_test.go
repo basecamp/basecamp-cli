@@ -938,6 +938,7 @@ func TestLegacyManagedSkillHashAllowlistDoesNotShrink(t *testing.T) {
 		"a5e60a1c55ec381dab3265625d97461b7c32edd49837a03642abba347852421d",
 		"e1394abe6ff5affa3d94e8ea9b6460ebfd7ac06374070d7d5e10731004178bb3",
 		"dad3d2ed690e52fd22c28941665433814776fdb21a3adc5d3cd1b802d3ee9da7",
+		"fce231012727330989044032054f6cf250f6d7ca5700c99e0a7236125c956d64",
 	}
 	for _, hash := range want {
 		_, ok := legacyManagedSkillHashes[hash]
@@ -1200,4 +1201,29 @@ func TestSetupAgentsRemoveRetainsBaselineWhenAliasedAgentCleanupPrecedesClaudeFa
 	_, err = runSetupAgentsRemove(t)
 	require.Error(t, err)
 	assert.FileExists(t, baseline, "the baseline must remain available for a retry")
+}
+
+// The fixture is the unmodified skills/basecamp/SKILL.md shipped in v0.12.0.
+func TestRemoveOwnedOrLegacySkillRecognizesV012Payload(t *testing.T) {
+	payload, err := os.ReadFile("testdata/skills/basecamp-v0.12.0.md")
+	require.NoError(t, err)
+	sum := sha256.Sum256(payload)
+	require.Equal(t, "fce231012727330989044032054f6cf250f6d7ca5700c99e0a7236125c956d64", fmt.Sprintf("%x", sum))
+
+	dir := filepath.Join(t.TempDir(), "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, skillFilename), payload, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("keep"), 0o644))
+
+	removed, err := removeOwnedOrLegacySkill(dir)
+	require.NoError(t, err)
+	assert.True(t, removed)
+	assert.NoFileExists(t, filepath.Join(dir, skillFilename))
+	notes, err := os.ReadFile(filepath.Join(dir, "notes.txt"))
+	require.NoError(t, err)
+	assert.Equal(t, "keep", string(notes))
+
+	removed, err = removeOwnedOrLegacySkill(dir)
+	require.NoError(t, err)
+	assert.False(t, removed)
 }

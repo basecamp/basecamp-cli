@@ -556,13 +556,11 @@ func removeExistingClaudeSkillLink(path, expectedTarget, expectedDestination str
 		}
 		return nil
 	}
-	if !info.IsDir() || !ownedSkillDir(path) {
-		return &unmanagedSkillDirError{dir: path}
-	}
 	// A directory is the copy fallback from an earlier install. Leave its
 	// managed files in place until copySkillFiles has a replacement ready;
 	// this also preserves any additional user files in the directory.
-	return nil
+	// The same ownership gate also accepts a flat, verified pre-marker install.
+	return claimSkillDir(path)
 }
 
 // installedSkillVersion reads the .installed-version file from the baseline

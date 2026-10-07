@@ -174,7 +174,9 @@ func TestRunProbeEndsTheLaunchersChildrenWhenItTimesOut(t *testing.T) {
 	launcher := filepath.Join(dir, "claude")
 	require.NoError(t, os.WriteFile(launcher, []byte("#!/bin/sh\nsleep 60 &\necho $! > "+pidFile+"\nwait\n"), 0o700))
 
-	r := RunProbe(context.Background(), Command{Path: launcher, Dir: dir}, 300*time.Millisecond)
+	// Allow the shell time to start before timing out the waiting launcher.
+	// macOS process startup can itself exceed 300 ms under the full test suite.
+	r := RunProbe(context.Background(), Command{Path: launcher, Dir: dir}, 5*time.Second)
 	require.True(t, r.TimedOut)
 	raw, err := os.ReadFile(pidFile)
 	require.NoError(t, err)

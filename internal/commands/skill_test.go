@@ -1374,3 +1374,31 @@ func TestSkillWizardPropagatesRealPromptErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestLinkSkillToClaudeMigratesMarkerlessV012Directory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	_, err := installSkillFiles()
+	require.NoError(t, err)
+
+	payload, err := os.ReadFile("testdata/skills/basecamp-v0.12.0.md")
+	require.NoError(t, err)
+	dir := filepath.Join(home, ".claude", "skills", "basecamp")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, skillFilename), payload, 0o644))
+
+	path, _, err := linkSkillToClaude()
+	require.NoError(t, err)
+	assert.Equal(t, dir, path)
+	embedded, err := skills.FS.ReadFile("basecamp/SKILL.md")
+	require.NoError(t, err)
+	got, err := os.ReadFile(filepath.Join(dir, skillFilename))
+	require.NoError(t, err)
+	assert.Equal(t, embedded, got)
+	assert.FileExists(t, filepath.Join(dir, ownershipMarkerFile))
+	assert.FileExists(t, filepath.Join(dir, installedVersionFile))
+
+	_, _, err = linkSkillToClaude()
+	require.NoError(t, err)
+}

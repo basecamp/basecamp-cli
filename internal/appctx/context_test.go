@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"runtime"
 	"testing"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/testutil"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
@@ -177,18 +177,11 @@ func TestIsInteractiveWithNonInteractiveEnv(t *testing.T) {
 	// the short-circuit were removed. /dev/null will not stand in for a terminal
 	// here: it is a character device but not a terminal, which is precisely the
 	// distinction IsInteractive() now draws.
-	if runtime.GOOS == "windows" {
-		t.Skip("no /dev/ptmx on Windows")
-	}
-	pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
-	if err != nil {
-		t.Skipf("open /dev/ptmx: %v", err)
-	}
+	pty := testutil.OpenPTY(t)
 	origStdout, origStdin := os.Stdout, os.Stdin
 	os.Stdout, os.Stdin = pty, pty
 	t.Cleanup(func() {
 		os.Stdout, os.Stdin = origStdout, origStdin
-		pty.Close()
 	})
 
 	cfg := &config.Config{}
