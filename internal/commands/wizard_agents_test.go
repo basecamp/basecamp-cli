@@ -77,6 +77,54 @@ func readClaudeCalls(t *testing.T, claudePath string) string {
 	return string(data)
 }
 
+func stubClaudeMigration(t *testing.T, failedInstallScope string) string {
+	t.Helper()
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "calls.log")
+	script := "#!/bin/sh\n" +
+		"echo \"$*\" >> \"" + logFile + "\"\n" +
+		"if [ \"$1 $2\" = \"plugin install\" ] && [ \"$5\" = \"" + failedInstallScope + "\" ]; then exit 1; fi\n" +
+		"exit 0\n"
+	path := filepath.Join(dir, "claude")
+	require.NoError(t, os.WriteFile(path, []byte(script), 0o755)) //nolint:gosec // G306: test helper
+	return path
+}
+
+func TestRenamedClaudePluginIsInstalledBeforeLegacyCopyIsRemoved(t *testing.T) {
+	claude := stubClaudeMigration(t, "")
+	plugins := []harness.StalePlugin{{Key: harness.ClaudeLegacyPluginKey, Scopes: []string{"user", "project"}}}
+
+	removable, installed := preinstallRenamedClaudePlugin(context.Background(), claude, plugins, nil, nil)
+	removed, reinstall := removeStaleClaudePlugins(context.Background(), claude, removable)
+
+	calls := readClaudeCalls(t, claude)
+	assertCallOrder(t, calls,
+		"plugin install basecamp-cli@37signals --scope user",
+		"plugin uninstall basecamp@37signals --scope user")
+	assertCallOrder(t, calls,
+		"plugin install basecamp-cli@37signals --scope project",
+		"plugin uninstall basecamp@37signals --scope project")
+	assert.Equal(t, map[string]bool{"user": true, "project": true}, installed)
+	assert.Equal(t, []string{harness.ClaudeLegacyPluginKey}, removed)
+	assert.ElementsMatch(t, []string{"user", "project"}, reinstall)
+}
+
+func TestRenamedClaudePluginKeepsLegacyCopyWhenInstallFails(t *testing.T) {
+	claude := stubClaudeMigration(t, "project")
+	plugins := []harness.StalePlugin{{Key: harness.ClaudeLegacyPluginKey, Scopes: []string{"user", "project"}}}
+
+	removable, installed := preinstallRenamedClaudePlugin(context.Background(), claude, plugins, nil, nil)
+	_, _ = removeStaleClaudePlugins(context.Background(), claude, removable)
+
+	calls := readClaudeCalls(t, claude)
+	assert.Contains(t, calls, "plugin install basecamp-cli@37signals --scope project")
+	assert.NotContains(t, calls, "plugin uninstall basecamp@37signals --scope project",
+		"a failed replacement must leave the working legacy scope installed")
+	assert.Contains(t, calls, "plugin uninstall basecamp@37signals --scope user",
+		"a successfully replaced scope can be removed")
+	assert.Equal(t, map[string]bool{"user": true}, installed)
+}
+
 // TestRemoveStaleClaudePluginsAllScopesInvalid verifies the YL7 fix: when every
 // recorded scope fails validPluginScope (no scoped uninstall is attempted), we
 // fall back to an unscoped removal so the plugin isn't silently left installed.
