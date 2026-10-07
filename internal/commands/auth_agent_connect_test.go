@@ -35,6 +35,7 @@ type connectAS struct {
 	srv *httptest.Server
 
 	mu         sync.Mutex
+	intakes    int
 	pollForms  []url.Values
 	tokenForms []url.Values
 
@@ -60,6 +61,9 @@ func startConnectAS(t *testing.T) *connectAS {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/oauth/agent_connections", func(w http.ResponseWriter, _ *http.Request) {
+		as.mu.Lock()
+		as.intakes++
+		as.mu.Unlock()
 		path := "/connect?user_code=WDJB-MJHT"
 		if as.verificationPath != "" {
 			path = as.verificationPath
@@ -412,6 +416,10 @@ func TestAuthAgentConnectRefusesOutputModesThatCannotCarryIt(t *testing.T) {
 			_, err := runAgentConnect(t, app)
 			require.Error(t, err)
 			assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
+			as.mu.Lock()
+			intakes := as.intakes
+			as.mu.Unlock()
+			assert.Zero(t, intakes, "refused before the intake is asked for a code")
 			assert.Empty(t, as.mints())
 		})
 	}
