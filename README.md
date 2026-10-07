@@ -239,8 +239,9 @@ op read "op://Vault/Item/credential" | basecamp auth login --with-client-credent
 The login mints once, which is what proves the client id and secret: a refused
 mint stores nothing. `--account` is required when the profile does not exist
 yet. `basecamp auth logout` forgets the credential; there is no useful
-revocation, since the same client would mint another — rotate the client
-secret in Basecamp to end an agent's access.
+revocation, since the same client would mint another — disconnect the agent in
+Basecamp to end its access, which kills its client secret and every token
+minted from it.
 
 ### Containers, CI and scheduled jobs
 
