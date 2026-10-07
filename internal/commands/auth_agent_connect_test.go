@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -43,6 +45,10 @@ type connectAS struct {
 	// pollStatus, when non-zero, is the poll's status in place of 200: a
 	// refusal, rendered from connection.
 	pollStatus int
+
+	// verificationPath, when set, is the path and query of the link the
+	// intake hands out, in place of the plain approval page.
+	verificationPath string
 }
 
 func startConnectAS(t *testing.T) *connectAS {
@@ -54,9 +60,13 @@ func startConnectAS(t *testing.T) *connectAS {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/oauth/agent_connections", func(w http.ResponseWriter, _ *http.Request) {
+		path := "/connect?user_code=WDJB-MJHT"
+		if as.verificationPath != "" {
+			path = as.verificationPath
+		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"device_code":"dev-code-1","user_code":"WDJB-MJHT","verification_uri_complete":%q,"token_uri":%q,"expires_in":600,"interval":1}`,
-			as.srv.URL+"/connect?user_code=WDJB-MJHT", as.srv.URL+"/oauth/agent_connection_tokens")
+			as.srv.URL+path, as.srv.URL+"/oauth/agent_connection_tokens")
 	})
 	mux.HandleFunc("/oauth/agent_connection_tokens", func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, r.ParseForm())
@@ -232,14 +242,20 @@ func runAgentConnectJSON(t *testing.T, app *appctx.App, stdout *lockedBuffer, ar
 // however that is laid out.
 func jsonValues(t *testing.T, stdout string) []map[string]any {
 	t.Helper()
+	// Decode to io.EOF rather than while More(): More is for the elements
+	// of an array or object, and at the top level it stops quietly at a
+	// stray closing delimiter that a reader of the stream would choke on.
 	dec := json.NewDecoder(strings.NewReader(stdout))
 	var values []map[string]any
-	for dec.More() {
+	for {
 		var v map[string]any
-		require.NoError(t, dec.Decode(&v), "stdout is JSON values and nothing else: %q", stdout)
+		err := dec.Decode(&v)
+		if errors.Is(err, io.EOF) {
+			return values
+		}
+		require.NoError(t, err, "stdout is JSON values and nothing else: %q", stdout)
 		values = append(values, v)
 	}
-	return values
 }
 
 // TestAuthAgentConnectJSONWritesTheVerificationThenTheResult: under --json
@@ -299,6 +315,27 @@ func TestAuthAgentConnectJSONWritesTheVerificationThenTheResult(t *testing.T) {
 	creds, err := app.Auth.GetStore().Load("profile:agent")
 	require.NoError(t, err)
 	assert.Equal(t, fakeConnectSecret, creds.ClientSecret, "the credential is stored exactly as without --json")
+}
+
+// TestAuthAgentConnectJSONVerificationCarriesNoControls: the link is what
+// the reader shows the person, and the JSON encoder escapes C0 controls but
+// passes UTF-8-encoded C1 controls through raw. A link the server laced
+// with one (url.Parse accepts it) reaches the line stripped, as the
+// terminal copy is, never as the bytes a terminal would act on.
+func TestAuthAgentConnectJSONVerificationCarriesNoControls(t *testing.T) {
+	as := startConnectAS(t)
+	as.verificationPath = "/connect\u009b31m?user_code=WDJB-MJHT"
+	app := connectApp(t, as, &config.Config{ActiveProfile: "agent"})
+	stdout := &lockedBuffer{}
+
+	stderr, err := runAgentConnectJSON(t, app, stdout, "--device-name", "build-box")
+	require.NoError(t, err, stderr)
+
+	assert.NotContains(t, stdout.String(), "\u009b", "a C1 control must not reach stdout raw")
+	lines := jsonValues(t, stdout.String())
+	require.Len(t, lines, 2)
+	assert.Equal(t, as.srv.URL+"/connect31m?user_code=WDJB-MJHT", lines[0]["verification_uri"],
+		"the link is the copy the terminal shows")
 }
 
 // TestAuthAgentConnectJSONOnADeclineWritesOnlyTheVerification: a declined
