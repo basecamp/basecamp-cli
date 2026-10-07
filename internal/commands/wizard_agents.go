@@ -207,11 +207,27 @@ func runClaudeSetup(cmd *cobra.Command, styles *tui.Styles) error {
 	w := cmd.OutOrStdout()
 
 	// Clean up stale plugin entries from old marketplaces before checking status.
+	// The pre-rename basecamp@37signals copy is different: install its replacement
+	// first, per scope, so a failed marketplace fetch never removes the working copy.
 	var reinstallScopes []string
 	if stalePlugins := harness.StalePluginKeys(); len(stalePlugins) > 0 {
 		if claudePath := harness.FindClaudeBinary(); claudePath != "" {
-			removed, scopes := removeStaleClaudePlugins(cmd.Context(), claudePath, stalePlugins)
-			reinstallScopes = scopes
+			ctx := cmd.Context()
+			preinstalled := map[string]bool{}
+			if hasStaleClaudePlugin(stalePlugins, harness.ClaudeLegacyPluginKey) {
+				mktCmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "add", harness.ClaudeMarketplaceSource) //nolint:gosec // G204: claudePath from FindClaudeBinary
+				mktCmd.Stdout = w
+				mktCmd.Stderr = cmd.ErrOrStderr()
+				_ = mktCmd.Run()
+				refreshClaudeMarketplace(ctx, claudePath, w, cmd.ErrOrStderr())
+				stalePlugins, preinstalled = preinstallRenamedClaudePlugin(ctx, claudePath, stalePlugins, w, cmd.ErrOrStderr())
+			}
+			removed, scopes := removeStaleClaudePlugins(ctx, claudePath, stalePlugins)
+			for _, scope := range scopes {
+				if !preinstalled[scope] {
+					reinstallScopes = append(reinstallScopes, scope)
+				}
+			}
 			for _, key := range removed {
 				fmt.Fprintln(w, styles.RenderStatus(true, fmt.Sprintf("Removed stale plugin %s", key)))
 			}
@@ -448,10 +464,27 @@ func runClaudeSetupNonInteractive(cmd *cobra.Command) error {
 	var errs []string
 
 	// Clean up stale plugin entries from old marketplaces before checking status.
+	// Install the replacement for the pre-rename key before removing that key,
+	// so a failed install leaves the existing plugin working.
 	var reinstallScopes []string
 	if stalePlugins := harness.StalePluginKeys(); len(stalePlugins) > 0 {
 		if claudePath := harness.FindClaudeBinary(); claudePath != "" {
-			_, reinstallScopes = removeStaleClaudePlugins(cmd.Context(), claudePath, stalePlugins)
+			ctx := cmd.Context()
+			preinstalled := map[string]bool{}
+			if hasStaleClaudePlugin(stalePlugins, harness.ClaudeLegacyPluginKey) {
+				w := cmd.ErrOrStderr()
+				mktCmd := exec.CommandContext(ctx, claudePath, "plugin", "marketplace", "add", harness.ClaudeMarketplaceSource) //nolint:gosec // G204: claudePath from FindClaudeBinary
+				mktCmd.Stderr = w
+				_ = mktCmd.Run()
+				refreshClaudeMarketplace(ctx, claudePath, nil, w)
+				stalePlugins, preinstalled = preinstallRenamedClaudePlugin(ctx, claudePath, stalePlugins, nil, w)
+			}
+			_, scopes := removeStaleClaudePlugins(ctx, claudePath, stalePlugins)
+			for _, scope := range scopes {
+				if !preinstalled[scope] {
+					reinstallScopes = append(reinstallScopes, scope)
+				}
+			}
 		}
 	}
 
@@ -511,10 +544,58 @@ func runClaudeSetupNonInteractive(cmd *cobra.Command) error {
 	return nil
 }
 
+func hasStaleClaudePlugin(plugins []harness.StalePlugin, key string) bool {
+	for _, plugin := range plugins {
+		if plugin.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// preinstallRenamedClaudePlugin installs basecamp-cli at each known valid scope
+// occupied by basecamp@37signals. It returns only entries and scopes that are
+// now safe to remove. A failed install, an unknown scope, or an old file format
+// with no scope leaves the working legacy copy untouched.
+func preinstallRenamedClaudePlugin(ctx context.Context, claudePath string, plugins []harness.StalePlugin, stdout, stderr io.Writer) ([]harness.StalePlugin, map[string]bool) {
+	removable := make([]harness.StalePlugin, 0, len(plugins))
+	installed := map[string]bool{}
+
+	for _, plugin := range plugins {
+		if plugin.Key != harness.ClaudeLegacyPluginKey {
+			removable = append(removable, plugin)
+			continue
+		}
+
+		var scopes []string
+		for _, scope := range plugin.Scopes {
+			if !validPluginScope(scope) || installed[scope] {
+				continue
+			}
+			args := []string{"plugin", "install", harness.ClaudeExpectedPluginKey, "--scope", scope}
+			installCmd := exec.CommandContext(ctx, claudePath, args...) //nolint:gosec // G204: claudePath from FindClaudeBinary
+			installCmd.Stdout = stdout
+			installCmd.Stderr = stderr
+			if err := installCmd.Run(); err != nil {
+				continue
+			}
+			installed[scope] = true
+			scopes = append(scopes, scope)
+		}
+		if len(scopes) > 0 {
+			removable = append(removable, harness.StalePlugin{Key: plugin.Key, Scopes: scopes})
+		}
+	}
+
+	return removable, installed
+}
+
 // removeStaleClaudePlugins uninstalls plugin entries from old/dead marketplaces.
 // When scope information is available, each scope is uninstalled explicitly.
 // Otherwise, we retry uninstall until it fails (entry gone) or a safety cap of
-// 10 iterations is reached.
+// 10 iterations is reached. The pre-rename basecamp@37signals entry reaches
+// here only for scopes where preinstallRenamedClaudePlugin installed its
+// replacement successfully.
 func removeStaleClaudePlugins(ctx context.Context, claudePath string, plugins []harness.StalePlugin) ([]string, []string) {
 	var removed []string
 	scopeSeen := map[string]bool{}
