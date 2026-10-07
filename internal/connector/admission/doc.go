@@ -33,7 +33,9 @@
 // actor type, and an event performed on someone's behalf by any agent are all
 // discarded before anything else is considered, so an agent mentioning an
 // agent stops at zero hops. Assignments are operator-only in every trust
-// mode. For the triggers that carry an instruction in content (mentioned,
+// mode, unless allow_assignments opts in the people the allowlist names; the
+// assigner is the feed's performer, which Basecamp writes, so naming someone
+// trusts that person and not a payload that claims to be them. For the triggers that carry an instruction in content (mentioned,
 // subscribed) the recording's author must be trusted too, because the
 // performer of a *.created event is not always the person who wrote it — a
 // to-do moved in from another project is created by the mover.
@@ -62,7 +64,8 @@
 //     write (a completion). Allowlisting an agent is an operator error that
 //     Validate cannot detect; the feed's actor_types=person filter excludes
 //     agents at source.
-//  2. An assignment is admitted only when the operator performed it, the
+//  2. An assignment is admitted only when the operator performed it (or a
+//     person the allowlist names, under allow_assignments), the
 //     recording's events show this event added the agent, and the agent is
 //     still assigned. Missing, unfound or partial assignment data blocks as
 //     delta_unverified; it never admits and never discards.

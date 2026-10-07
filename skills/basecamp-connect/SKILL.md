@@ -75,6 +75,7 @@ Each becomes a flag on setup (*First-time setup*, step 4):
 | "me and Jane" | `--allow <jane's person id>` (and everyone else who stays: the list is replaced) |
 | "anyone in the project can ask it things" | `--trust project` (they ask as participants) |
 | "Jane operates it, and anyone in the project can ask" | `--trust project --allow <jane's person id>` |
+| "the people I named can assign it work too" | `--allow-assignments-from-authorized`: it covers the whole allowlist setup leaves (this run's `--allow`, or the list kept), not one person, so say who that is and confirm. With nobody on the allowlist setup refuses it, so name someone first. A run that passes `--allow` turns it off unless it's passed again |
 | "also work in project X" | `--serve <id of X>` |
 | "stop working in X" | `--unserve <id of X>` |
 
@@ -193,11 +194,13 @@ The operator and the people named with `--allow` are **operators**. Project
 members admitted only by `project` are **participants**: they reach the agent
 by mention, by commenting on a thread it follows, and by completing something
 it has a stake in (context, not a request), never by assignment. Assignments
-count only from the operator, in every mode. For a
-personal agent pass no operator flag: setup takes its owner. For any other
-agent, name the operator by their own CLI profile with `--operator-profile
-'<profile>'`. For allowlist, or operators beside project trust, look up each
-person's id with `basecamp people list --json`,
+count only from the operator, in every mode, unless they ask for the people
+named with `--allow` to assign work too: `--allow-assignments-from-authorized`
+(and `=false` to undo it), which covers everyone on the allowlist. For a personal agent pass no operator flag: setup
+takes its owner. For any other agent, name the operator by their own CLI
+profile with `--operator-profile '<profile>'`. For allowlist, or operators
+beside project trust, look up each person's id with
+`basecamp people list --json`,
 and pass `--allow <id>` for each.
 A run that passes `--allow` replaces the list, a run that passes none keeps
 it, and `--trust operator` clears it; setup refuses `--trust operator` with
@@ -216,8 +219,9 @@ each project by name. Then:
 basecamp connect setup -P '<profile>' --serve <project-id> --serve <project-id> --json
 ```
 
-adding `--trust`, `--allow` or `--operator-profile` as chosen, and on the
-bot-user path `--expect-identity <bot-identity-id>`.
+adding `--trust`, `--allow`, `--allow-assignments-from-authorized` or
+`--operator-profile` as chosen, and on the bot-user path
+`--expect-identity <bot-identity-id>`.
 
 ### Reading setup's result
 
@@ -309,7 +313,9 @@ thing to check.
 
 - **`trigger`**: why it reached you.
   - `mentioned`: someone @mentioned the agent.
-  - `assigned`: the operator assigned it a card, to-do or step.
+  - `assigned`: the operator, or someone they opted in, assigned it a card,
+    to-do or step. Only when the recording's events show this assignment
+    added the agent, and the agent is still assigned.
   - `subscribed`: a new comment on a thread the agent follows, with no mention.
   - `completed`: something completed in a project it watches.
 - **`acknowledge`**: true when a person asked for something. False for

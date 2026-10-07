@@ -70,6 +70,9 @@ func Gate(ev Event, p Policy, m Matrix) GateResult {
 		needsMembership := false
 		switch {
 		case isOperator:
+		case rule.OperatorOnly && p.Trust.AllowAssignments && role == RoleOperator:
+			// A named operator the operator opted in to assigning. The
+			// performer is the feed's, written by Basecamp, never a payload's.
 		case rule.OperatorOnly:
 			drop(ReasonAssignmentNotOperator)
 			continue

@@ -19,6 +19,11 @@ type Changes struct {
 	// same run asks for project mode, which admits the project's members as
 	// participants beside them.
 	Allow []int64
+	// AllowAssignments turns the allowlist's assignment opt-in on or off.
+	// Nil keeps the file's, except in a run that passes Allow, which
+	// restates the opt-in with the list it covers: off unless set here.
+	// SetOperator drops a kept one that is left covering nobody.
+	AllowAssignments *bool
 
 	// Serve are the project (bucket) ids to serve. A project already served
 	// keeps its class and watch_completions.
@@ -44,6 +49,9 @@ func Apply(f File, ch Changes) (File, error) {
 	out.Trust.AllowlistIDs = slices.Clone(f.Trust.AllowlistIDs)
 
 	if err := applyTrust(&out.Trust, ch); err != nil {
+		return File{}, err
+	}
+	if err := applyAssignmentOptIn(&out.Trust, ch); err != nil {
 		return File{}, err
 	}
 
@@ -135,4 +143,43 @@ func sortedIDs(ids []int64) []int64 {
 	out := slices.Clone(ids)
 	slices.Sort(out)
 	return slices.Compact(out)
+}
+
+// applyAssignmentOptIn sets the opt-in that lets the allowlist's people
+// assign the agent work. It rides with the --allow that names them: a run
+// that passes --allow restates it, off unless this run sets it, so whoever a
+// new list names gains assignments only when asked, with no comparison to
+// what the file held before. Setting it needs someone named.
+func applyAssignmentOptIn(t *admission.Trust, ch Changes) error {
+	switch {
+	case ch.AllowAssignments != nil:
+		t.AllowAssignments = *ch.AllowAssignments
+	case len(ch.Allow) > 0:
+		t.AllowAssignments = false
+	}
+	if len(t.AllowlistIDs) == 0 {
+		if ch.AllowAssignments != nil && *ch.AllowAssignments {
+			return errors.New("--allow-assignments-from-authorized opts in the people the allowlist names, and after this run it names nobody")
+		}
+		t.AllowAssignments = false
+	}
+	return nil
+}
+
+// SetOperator records the operator. When the allowlist then names nobody
+// besides them, the assignment opt-in has nobody left to cover. Kept from an
+// earlier run, it is dropped: the operator assigns without one, and keeping
+// it would make the file refuse to validate over a change setup itself made.
+// Asked for in this run (requested), it is refused, so the person learns it
+// does nothing rather than finding it quietly off.
+func SetOperator(t *admission.Trust, id int64, requested bool) error {
+	t.OperatorID = id
+	if !t.AllowAssignments || slices.ContainsFunc(t.AllowlistIDs, func(a int64) bool { return a != id }) {
+		return nil
+	}
+	if requested {
+		return errors.New("--allow-assignments-from-authorized covers the people the allowlist names besides the operator, and it names nobody else")
+	}
+	t.AllowAssignments = false
+	return nil
 }
