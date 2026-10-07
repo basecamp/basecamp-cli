@@ -8,6 +8,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -49,6 +50,57 @@ type Trust struct {
 	// AllowAssignments lets the people AllowlistIDs names assign the agent
 	// work, as the operator does. Off, assignments are the operator's alone.
 	AllowAssignments bool `json:"allow_assignments,omitempty"`
+
+	// AgentIDs are other agents (Agent persons) allowed to wake this one by
+	// @mentioning it. Empty, the default, admits no agent at all. An allowed
+	// agent reaches the agent by mention only, never by assignment, by a
+	// comment on a thread it follows or by a completion, and its request is a
+	// participant's, never an operator's. Any trust mode may name them.
+	AgentIDs []int64 `json:"agent_ids,omitempty"`
+	// AgentThreadCap is how many allowed agents' mentions one conversation
+	// (a thread, or a Campfire) admits within AgentCapWindow, across every
+	// allowed agent. Zero means DefaultAgentThreadCap.
+	AgentThreadCap int `json:"agent_thread_cap,omitempty"`
+	// AgentDailyCap is how many of one allowed agent's mentions are admitted
+	// within AgentCapWindow across every conversation, so an agent opening a
+	// new thread for each reply is bounded too. Zero means
+	// DefaultAgentDailyCap.
+	AgentDailyCap int `json:"agent_daily_cap,omitempty"`
+}
+
+// Agent-to-agent loop bounds. Two agents that allow each other can answer
+// each other's mentions indefinitely; these caps are what stops that. They
+// count admitted agent requests in the ledger over a rolling window.
+const (
+	DefaultAgentThreadCap = 3
+	DefaultAgentDailyCap  = 20
+	// MaxAgentCap bounds either cap, so a cap is never a way to switch the
+	// protection off.
+	MaxAgentCap    = 100
+	AgentCapWindow = 24 * time.Hour
+)
+
+// allowsAgent reports whether id is an agent the policy lets mention this one.
+func (t Trust) allowsAgent(id int64) bool {
+	return id > 0 && slices.Contains(t.AgentIDs, id)
+}
+
+// ThreadCap is the per-conversation cap in force: AgentThreadCap, or the
+// default when unset.
+func (t Trust) ThreadCap() int {
+	if t.AgentThreadCap > 0 {
+		return t.AgentThreadCap
+	}
+	return DefaultAgentThreadCap
+}
+
+// DailyCap is the per-agent cap in force: AgentDailyCap, or the default when
+// unset.
+func (t Trust) DailyCap() int {
+	if t.AgentDailyCap > 0 {
+		return t.AgentDailyCap
+	}
+	return DefaultAgentDailyCap
 }
 
 // roleOf is the role a trusted person holds, before any membership read: an
@@ -335,9 +387,34 @@ func (p Policy) Validate() error {
 	default:
 		return fmt.Errorf("admission: unknown trust mode %q", p.Trust.Mode)
 	}
+	if err := p.validateAgents(); err != nil {
+		return err
+	}
 	for bucket := range p.Projects {
 		if bucket <= 0 {
 			return fmt.Errorf("admission: served project %d: not a bucket id", bucket)
+		}
+	}
+	return nil
+}
+
+// validateAgents refuses an agent list that could be misread: an id that is
+// not a Person id, the agent itself, or someone already trusted as a person,
+// who would then hold two roles at once. The caps must be within bounds.
+func (p Policy) validateAgents() error {
+	for _, id := range p.Trust.AgentIDs {
+		switch {
+		case id <= 0:
+			return fmt.Errorf("admission: agent id %d is not a Person id", id)
+		case id == p.AgentID:
+			return errors.New("admission: the agent's own Person id is in agent_ids; an agent never wakes itself")
+		case id == p.Trust.OperatorID || slices.Contains(p.Trust.AllowlistIDs, id):
+			return fmt.Errorf("admission: person %d is both a trusted person and an allowed agent", id)
+		}
+	}
+	for name, cap := range map[string]int{"agent_thread_cap": p.Trust.AgentThreadCap, "agent_daily_cap": p.Trust.AgentDailyCap} {
+		if cap < 0 || cap > MaxAgentCap {
+			return fmt.Errorf("admission: %s %d is outside 1 to %d", name, cap, MaxAgentCap)
 		}
 	}
 	return nil

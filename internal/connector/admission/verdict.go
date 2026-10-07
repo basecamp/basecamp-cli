@@ -59,6 +59,13 @@ type Snapshot struct {
 	RequesterName string `json:"requester_name,omitempty"`
 	// Role is whose request this is: an operator's or a participant's.
 	Role Role `json:"role,omitempty"`
+	// Owner says the operator connect.json names asked, in words they wrote:
+	// they mentioned the agent, or assigned it a recording they wrote. A
+	// comment on a followed thread and a completion are never the owner's
+	// word. Someone named with --allow is an operator but never the
+	// owner, and neither is the owner bringing in someone else's words: an
+	// allowlisted person's to-do the owner moves in is that person's.
+	Owner bool `json:"owner,omitempty"`
 }
 
 // Verdict is admission's decision about one event.
@@ -103,6 +110,20 @@ type Verdict struct {
 	RecordingURL string
 	// Snapshot is set on an admitted verdict only.
 	Snapshot *Snapshot
+
+	// agentCaps is set on a verdict admitting an allowed agent's mention:
+	// the committer counts it against the caps before writing it.
+	agentCaps *agentCaps
+}
+
+// agentCaps is what the committer needs to hold an agent's mention to the
+// loop caps.
+type agentCaps struct {
+	agentID int64
+	agents  []int64
+	thread  int
+	daily   int
+	window  time.Duration
 }
 
 // Admitter makes verdicts. It is safe for concurrent use: the reads carry
@@ -353,7 +374,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		v.Served, v.Class = true, project.Class
 	}
 
-	rule, author, state, reason, err := d.match(ctx, ev, policy, gate.Rules, summary)
+	rule, author, state, reason, err := d.match(ctx, ev, policy, gate, summary)
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -376,6 +397,15 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		}
 	}
 	v.address(summary)
+	if gate.Agent {
+		v.agentCaps = &agentCaps{
+			agentID: ev.Performer(),
+			agents:  slices.Clone(policy.Trust.AgentIDs),
+			thread:  policy.Trust.ThreadCap(),
+			daily:   policy.Trust.DailyCap(),
+			window:  AgentCapWindow,
+		}
+	}
 
 	if !v.Served {
 		// Mentioned and assigned are answered in an unserved project rather
@@ -393,6 +423,13 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		Content:   summary.Content,
 		UpdatedAt: summary.UpdatedAt,
 		Role:      v.Role,
+		// Only a request the owner made, in words the owner wrote: a mention,
+		// or an assignment of a recording they wrote. A comment on a thread
+		// the agent follows asks it nothing, a completion is context, and an
+		// assigned recording someone else wrote is that person's words.
+		Owner: v.Role == RoleOperator && ev.Performer() == policy.Trust.OperatorID &&
+			(rule.Trigger == TriggerMentioned || rule.Trigger == TriggerAssigned) &&
+			summary.Creator.ID == policy.Trust.OperatorID,
 	}
 	if summary.Bucket != nil {
 		v.Snapshot.ProjectName = summary.Bucket.Name
@@ -407,7 +444,8 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 // that admits, or the state and reason that end the event. For a rule whose
 // instruction is the recording's content it also returns the author's role;
 // for any other it returns none.
-func (a *decision) match(ctx context.Context, ev Event, policy Policy, rules []Rule, summary *basecamp.RecordingSummary) (Rule, Role, State, Reason, error) {
+func (a *decision) match(ctx context.Context, ev Event, policy Policy, gate GateResult, summary *basecamp.RecordingSummary) (Rule, Role, State, Reason, error) {
+	rules := gate.Rules
 	agent := a.policy.AgentID
 	mentioned := slices.Contains(summary.MentionedPersonIDs, agent)
 	endState, endReason := StateDiscarded, ReasonNotAddressed
@@ -418,7 +456,7 @@ func (a *decision) match(ctx context.Context, ev Event, policy Policy, rules []R
 			if !mentioned {
 				continue
 			}
-			author, state, reason, err := a.authorTrusted(ctx, ev, summary)
+			author, state, reason, err := a.authorTrusted(ctx, ev, summary, gate.Agent)
 			if err != nil || state != "" {
 				return Rule{}, "", state, reason, err
 			}
@@ -446,7 +484,7 @@ func (a *decision) match(ctx context.Context, ev Event, policy Policy, rules []R
 			if !subscribed {
 				continue
 			}
-			author, state, reason, err := a.authorTrusted(ctx, ev, summary)
+			author, state, reason, err := a.authorTrusted(ctx, ev, summary, false)
 			if err != nil || state != "" {
 				return Rule{}, "", state, reason, err
 			}
@@ -512,10 +550,20 @@ func assigned(summary *basecamp.RecordingSummary, personID int64) bool {
 // whose instruction is that recording's content, and returns their role. The
 // performer was trusted at the gate; the author is usually the same person,
 // but not always.
-func (a *decision) authorTrusted(ctx context.Context, ev Event, summary *basecamp.RecordingSummary) (Role, State, Reason, error) {
+//
+// agent says the gate admitted the performer as an allowed agent. Its words
+// count only when that agent wrote them itself, and only as a participant's.
+func (a *decision) authorTrusted(ctx context.Context, ev Event, summary *basecamp.RecordingSummary, agent bool) (Role, State, Reason, error) {
 	author := summary.Creator.ID
 	switch {
-	case author == a.policy.AgentID, summary.Creator.PersonableType == personableAgent:
+	case author == a.policy.AgentID:
+		return "", StateDiscarded, ReasonAgentAuthored, nil
+	case agent:
+		if author == ev.Performer() && summary.Creator.PersonableType == personableAgent && a.policy.Trust.allowsAgent(author) {
+			return RoleParticipant, "", "", nil
+		}
+		return "", StateDiscarded, ReasonUntrustedAuthor, nil
+	case summary.Creator.PersonableType == personableAgent:
 		// The agent itself, or any Agent principal. The poll lane carries no
 		// actor type, so this read is where another agent's content shows.
 		return "", StateDiscarded, ReasonAgentAuthored, nil
@@ -694,6 +742,7 @@ func classifySummaryError(ctx context.Context, err error) (State, Reason, error)
 // the recording again when it is re-run, and a discarded one never needs it.
 func (v Verdict) end(state State, reason Reason) Verdict {
 	v.State, v.Reason = state, reason
+	v.agentCaps = nil
 	return v
 }
 

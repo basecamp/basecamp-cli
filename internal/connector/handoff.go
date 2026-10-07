@@ -43,6 +43,14 @@ type HandoffLine struct {
 	// operator's word or only a participant's. The key and its values are
 	// the local agent connector's, so one session can read either.
 	Role string `json:"role"`
+	// Owner says the operator connect.json names — for a personal agent, its
+	// owner — asked, and wrote the words when the request is words: not
+	// merely someone with an operator's role. Controlling the agent's own
+	// connector (start, stop, restart, setup, which build it runs) is the
+	// owner's alone, so a reader gates that on this one field rather than
+	// comparing ids itself. Admission settles it (Snapshot.Owner); a record
+	// admitted before it did says false.
+	Owner bool `json:"owner"`
 	// Acknowledge says a person asked for something. A comment on a thread
 	// the agent follows, or a completion, is context and is not acknowledged.
 	Acknowledge bool `json:"acknowledge"`
@@ -202,6 +210,7 @@ func handoffLine(record Record, agentID int64) (HandoffLine, error) {
 		ProjectName   string    `json:"project_name"`
 		RequesterName string    `json:"requester_name"`
 		Role          string    `json:"role"`
+		Owner         bool      `json:"owner"`
 	}
 	if record.ContentDropped || len(record.Decision.Snapshot) == 0 {
 		return HandoffLine{}, errors.New("the record has no content")
@@ -226,6 +235,7 @@ func handoffLine(record Record, agentID int64) (HandoffLine, error) {
 		RequesterID:   record.Decision.RequesterID,
 		RequesterName: richtext.SanitizeTerminal(snapshot.RequesterName),
 		Role:          handoffRole(snapshot.Role),
+		Owner:         snapshot.Owner && handoffRole(snapshot.Role) == string(admission.RoleOperator),
 		Acknowledge:   record.Decision.Acknowledge,
 		// The line is read in a terminal as often as by a program: no
 		// control sequences from Basecamp's text reach it.

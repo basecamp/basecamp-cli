@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
@@ -207,6 +208,52 @@ func (a Admission) commit(ctx context.Context, v admission.Verdict, state Record
 		return "", fmt.Errorf("connector: commit verdict on %d: %w", v.EventID, err)
 	}
 	return state, nil
+}
+
+var _ admission.AgentRequests = Admission{}
+
+// CountAgentRequests counts the agent mentions admission has admitted: rows
+// whose requester is one of agents, decided under the mentioned trigger
+// within the last window. A mention discarded over a cap carries no trigger,
+// and a record still blocked was never admitted, so neither counts. A row
+// that moved on after admission (dispatched, completed, handed off) keeps
+// its trigger, requester and decided_at, and still counts.
+//
+// A mention admitted but never handed off is not counted either: one made
+// before this run started (before_this_run), which a restart catches up on
+// and closes unread, or one with nothing to hand off (unreadable). Nobody
+// answered it, so it is no round of a loop.
+//
+// Other discarded rows have to stay in the count: in handoff mode every admitted
+// request ends discarded(handed_off), so leaving them out would count nothing
+// and switch both caps off. A discard that must not count carries no trigger
+// instead (a gate discard, or one over a cap). DropContent clears the trigger
+// and requester; it has no caller today, and one with a retention shorter
+// than AgentCapWindow would reset the caps.
+func (a Admission) CountAgentRequests(ctx context.Context, conversationKey string, agents []int64, window time.Duration) (int, error) {
+	if len(agents) == 0 {
+		return 0, nil
+	}
+	query := `SELECT COUNT(*) FROM events
+WHERE trigger_name = ? AND state <> ? AND decided_at >= ?
+  AND NOT (state = ? AND reason IN (?, ?))
+  AND requester_id IN (?` + strings.Repeat(", ?", len(agents)-1) + `)`
+	args := []any{
+		string(admission.TriggerMentioned), string(StateBlocked), stamp(a.ledger.now().Add(-window)),
+		string(StateDiscarded), ReasonBeforeThisRun, ReasonUnreadable,
+	}
+	for _, id := range agents {
+		args = append(args, id)
+	}
+	if conversationKey != "" {
+		query += ` AND conversation_key = ?`
+		args = append(args, conversationKey)
+	}
+	var n int
+	if err := a.ledger.db.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("connector: count agent mentions: %w", err)
+	}
+	return n, nil
 }
 
 // liveConversation asks whether a conversation has a task running or a record

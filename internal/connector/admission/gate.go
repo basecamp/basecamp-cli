@@ -14,6 +14,10 @@ type GateResult struct {
 	// Role is the performer's: operator when the policy names them,
 	// participant when only membership can trust them.
 	Role Role
+	// Agent says the performer is an agent the policy allows to mention this
+	// one (Trust.AgentIDs). Only the mentioned rule is open to it, its role
+	// is participant, and the committer holds it to the agent caps.
+	Agent bool
 }
 
 // Discarded reports whether the gate ended the event.
@@ -38,12 +42,23 @@ func Gate(ev Event, p Policy, m Matrix) GateResult {
 	// trust so that no trust mode, however broad, and no allowlist, however
 	// written, can reach an event the agent had a hand in.
 	switch {
-	case ev.CreatorID == p.AgentID, ev.Performer() == p.AgentID, ev.ActorType == ActorTypeAgent:
+	case ev.CreatorID == p.AgentID, ev.Performer() == p.AgentID:
+		return GateResult{Reason: ReasonAgentAuthored}
+	case ev.PerformedByID == nil && p.Trust.allowsAgent(ev.CreatorID):
+		// An agent the operator named with --allow-agent, acting as itself.
+		// Checked by id rather than by actor type, which only the push lane
+		// carries: setup verified the id reads back as an Agent person.
+		return gateAgent(ev, p, rules)
+	case ev.ActorType == ActorTypeAgent:
+		if len(p.Trust.AgentIDs) > 0 {
+			// Agents are allowed, and this one was not named.
+			return GateResult{Reason: ReasonAgentNotAllowed}
+		}
 		return GateResult{Reason: ReasonAgentAuthored}
 	case ev.PerformedByID != nil:
-		// Performed by an agent on someone's behalf. Until agent-to-agent is
-		// designed, an agent's action never wakes an agent, whoever it acted
-		// for.
+		// Performed by an agent on someone's behalf. An agent's delegated
+		// action never wakes an agent, whoever it acted for: only an allowed
+		// agent's own mention does.
 		return GateResult{Reason: ReasonDelegated}
 	}
 
@@ -95,4 +110,36 @@ func Gate(ev Event, p Policy, m Matrix) GateResult {
 		return GateResult{Reason: reason}
 	}
 	return GateResult{Rules: open, ConfirmMembership: membership, Role: role}
+}
+
+// gateAgent opens an allowed agent's event to the mentioned rule alone. An
+// agent reaches this one only by @mentioning it: never by assignment, by a
+// comment on a thread it follows, or by a completion. Whether the content
+// really mentions this agent, and that the agent wrote it, is for the read.
+func gateAgent(ev Event, p Policy, rules []Rule) GateResult {
+	if !p.inScope(ev.BucketID) {
+		return GateResult{Reason: ReasonOutOfScope}
+	}
+	if _, served := p.served(ev.BucketID); !served {
+		// Discarded here, before any read, rather than blocked no_route as a
+		// person's mention is: nothing waits on another agent's mention in a
+		// project this one does not serve, and a blocked record would be
+		// retried and spend reads for it. A gate discard carries no trigger,
+		// so it is never counted against the agent caps.
+		return GateResult{Reason: ReasonNoRoute}
+	}
+	var open []Rule
+	reason := ReasonNotAddressed
+	for _, rule := range rules {
+		switch {
+		case rule.Trigger == TriggerMentioned:
+			open = append(open, rule)
+		case rule.OperatorOnly:
+			reason = ReasonAssignmentNotOperator
+		}
+	}
+	if len(open) == 0 {
+		return GateResult{Reason: reason}
+	}
+	return GateResult{Rules: open, Role: RoleParticipant, Agent: true}
 }

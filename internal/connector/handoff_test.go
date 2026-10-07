@@ -224,3 +224,37 @@ func TestTheLineSaysWhoseRequestItIs(t *testing.T) {
 		})
 	}
 }
+
+// owner is what admission settled (Snapshot.Owner), and only with an
+// operator's role: a snapshot that says owner with any other role, or a record
+// admitted before admission settled owner, is not the owner's. The session
+// gates controlling the connector itself on this one field.
+func TestTheLineSaysWhetherTheOwnerAsked(t *testing.T) {
+	for name, tc := range map[string]struct {
+		owner bool
+		role  admission.Role
+		want  bool
+	}{
+		"the owner":                     {true, admission.RoleOperator, true},
+		"an operator who is not owner":  {false, admission.RoleOperator, false},
+		"owner with a participant role": {true, admission.RoleParticipant, false},
+		"one admitted before owner":     {false, "", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ledger := newTestLedger(t)
+			seenRecord(t, ledger, 1)
+			v := admittedVerdict(1, 0, "recording:1")
+			v.Snapshot.Owner, v.Snapshot.Role = tc.owner, tc.role
+			_, err := ledger.Admission().Commit(context.Background(), v)
+			require.NoError(t, err)
+			var out bytes.Buffer
+
+			require.NoError(t, handOffReady(context.Background(), handoffOptions(ledger, &out)))
+
+			lines := handedOffLines(t, &out)
+			require.Len(t, lines, 1)
+			assert.Equal(t, tc.want, lines[0].Owner)
+			assert.Contains(t, out.String(), `"owner":`, "false is written, not left out")
+		})
+	}
+}

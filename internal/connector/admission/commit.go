@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -35,6 +36,14 @@ type Ledger interface {
 	Commit(ctx context.Context, v Verdict) (State, error)
 }
 
+// AgentRequests is the ledger's count of the allowed agents' mentions it
+// has admitted: those whose requester is one of agents, decided within the
+// last window by the ledger's own clock, in conversationKey when it is not
+// empty and in every conversation when it is. Intake's ledger implements it.
+type AgentRequests interface {
+	CountAgentRequests(ctx context.Context, conversationKey string, agents []int64, window time.Duration) (int, error)
+}
+
 // Committer serializes commits per conversation key, so the verdicts for one
 // conversation reach the ledger one at a time, in the order they finished.
 // Which state is written is the ledger's decision, taken in its own
@@ -62,6 +71,16 @@ func (c *Committer) Commit(ctx context.Context, v Verdict) (Verdict, error) {
 	if err := ctx.Err(); err != nil {
 		return v, err
 	}
+	if v.State == StateAdmitted && v.agentCaps != nil {
+		var (
+			unlock func()
+			err    error
+		)
+		if v, unlock, err = c.capAgent(ctx, v); err != nil {
+			return v, err
+		}
+		defer unlock()
+	}
 	written, err := c.ledger.Commit(ctx, v)
 	if err != nil {
 		return v, err
@@ -74,6 +93,60 @@ func (c *Committer) Commit(ctx context.Context, v Verdict) (Verdict, error) {
 		return v, fmt.Errorf("admission: ledger wrote %s for a %s verdict on event %d", written, v.State, v.EventID)
 	}
 	return v, nil
+}
+
+// capAgent holds an allowed agent's mention to the loop caps, and discards it
+// once either is reached. The count and the write must not interleave with
+// another mention's, or two could both read the count below a cap and both
+// be written. The caller holds the conversation's lock, which serializes the
+// thread cap; the daily cap spans conversations, so the returned unlock
+// releases a second lock, on the agent, held until the verdict is written.
+// The agent lock is always taken after a conversation lock and never the
+// other way round, so the two cannot deadlock.
+func (c *Committer) capAgent(ctx context.Context, v Verdict) (Verdict, func(), error) {
+	caps := v.agentCaps
+	unlock, err := c.locks.lock(ctx, "agent:"+strconv.FormatInt(caps.agentID, 10))
+	if err != nil {
+		return v, nil, err
+	}
+	v, err = c.countAgent(ctx, v)
+	if err != nil {
+		unlock()
+		return v, nil, err
+	}
+	return v, unlock, nil
+}
+
+func (c *Committer) countAgent(ctx context.Context, v Verdict) (Verdict, error) {
+	caps := v.agentCaps
+	counter, ok := c.ledger.(AgentRequests)
+	if !ok {
+		return v, fmt.Errorf("admission: event %d is an agent's mention, and the ledger cannot count agent mentions to cap it", v.EventID)
+	}
+	inThread, err := counter.CountAgentRequests(ctx, v.ConversationKey, caps.agents, caps.window)
+	if err != nil {
+		return v, err
+	}
+	if inThread >= caps.thread {
+		return v.capped(ReasonAgentThreadCap), nil
+	}
+	byAgent, err := counter.CountAgentRequests(ctx, "", []int64{caps.agentID}, caps.window)
+	if err != nil {
+		return v, err
+	}
+	if byAgent >= caps.daily {
+		return v.capped(ReasonAgentDailyCap), nil
+	}
+	return v, nil
+}
+
+// capped discards an admitted verdict over a cap. It drops everything only an
+// admitted verdict carries, the trigger included, so the discard is not
+// itself counted as an admitted mention.
+func (v Verdict) capped(reason Reason) Verdict {
+	v = v.end(StateDiscarded, reason)
+	v.Trigger, v.Acknowledge, v.Reply, v.Snapshot = "", false, nil, nil
+	return v
 }
 
 // keyedMutex is a set of mutexes created on demand and dropped when nobody

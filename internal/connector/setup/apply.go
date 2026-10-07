@@ -25,6 +25,16 @@ type Changes struct {
 	// SetOperator drops a kept one that is left covering nobody.
 	AllowAssignments *bool
 
+	// AllowAgents adds agents allowed to wake this one by @mentioning it;
+	// DisallowAgents removes them. The list is kept across runs, like the
+	// served projects.
+	AllowAgents    []int64
+	DisallowAgents []int64
+	// AgentThreadCap and AgentDailyCap set the agent loop caps; nil keeps
+	// the file's. Zero restores the default.
+	AgentThreadCap *int
+	AgentDailyCap  *int
+
 	// Serve are the project (bucket) ids to serve. A project already served
 	// keeps its class and watch_completions.
 	Serve []int64
@@ -52,6 +62,9 @@ func Apply(f File, ch Changes) (File, error) {
 		return File{}, err
 	}
 	if err := applyAssignmentOptIn(&out.Trust, ch); err != nil {
+		return File{}, err
+	}
+	if err := applyAgents(&out.Trust, ch); err != nil {
 		return File{}, err
 	}
 
@@ -162,6 +175,41 @@ func applyAssignmentOptIn(t *admission.Trust, ch Changes) error {
 			return errors.New("--allow-assignments-from-authorized opts in the people the allowlist names, and after this run it names nobody")
 		}
 		t.AllowAssignments = false
+	}
+	return nil
+}
+
+// applyAgents adds and removes allowed agents and sets the loop caps. A cap
+// is held to 0 (the default) through admission.MaxAgentCap: there is no
+// setting that turns the loop protection off.
+func applyAgents(t *admission.Trust, ch Changes) error {
+	ids := slices.Clone(t.AgentIDs)
+	for _, id := range ch.AllowAgents {
+		if id <= 0 {
+			return fmt.Errorf("--allow-agent: %d is not a Person id", id)
+		}
+		if slices.Contains(ch.DisallowAgents, id) {
+			return fmt.Errorf("agent %d is both allowed and disallowed in one run", id)
+		}
+		ids = append(ids, id)
+	}
+	ids = slices.DeleteFunc(ids, func(id int64) bool { return slices.Contains(ch.DisallowAgents, id) })
+	t.AgentIDs = sortedIDs(ids)
+	for _, c := range []struct {
+		flag  string
+		value *int
+		field *int
+	}{
+		{"--agent-thread-cap", ch.AgentThreadCap, &t.AgentThreadCap},
+		{"--agent-daily-cap", ch.AgentDailyCap, &t.AgentDailyCap},
+	} {
+		if c.value == nil {
+			continue
+		}
+		if *c.value < 0 || *c.value > admission.MaxAgentCap {
+			return fmt.Errorf("%s %d: use 1 to %d, or 0 for the default", c.flag, *c.value, admission.MaxAgentCap)
+		}
+		*c.field = *c.value
 	}
 	return nil
 }

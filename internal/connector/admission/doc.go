@@ -32,7 +32,12 @@
 // the agent created, an event the agent performed, an event carrying an agent
 // actor type, and an event performed on someone's behalf by any agent are all
 // discarded before anything else is considered, so an agent mentioning an
-// agent stops at zero hops. Assignments are operator-only in every trust
+// agent stops at zero hops — unless the operator names that agent in
+// agent_ids (--allow-agent). An allowed agent is let through by one rule
+// only, mentioned, as a participant, when it wrote the content itself; and
+// the committer caps those mentions per conversation and per agent over a
+// rolling window (agent_thread_cap, agent_daily_cap), which is what bounds
+// two agents that allow each other. Assignments are operator-only in every trust
 // mode, unless allow_assignments opts in the people the allowlist names; the
 // assigner is the feed's performer, which Basecamp writes, so naming someone
 // trusts that person and not a payload that claims to be them. For the triggers that carry an instruction in content (mentioned,
@@ -62,8 +67,11 @@
 //     the pointer cannot show: on the poll lane, an Agent person the operator
 //     put in the allowlist, performing an event whose content it did not
 //     write (a completion). Allowlisting an agent is an operator error that
-//     Validate cannot detect; the feed's actor_types=person filter excludes
-//     agents at source.
+//     Validate cannot detect, and setup refuses. The one exception is an
+//     agent named in agent_ids: its own mention, admitted as a participant's
+//     request and never an operator's, and held to the agent caps. With no
+//     agent named, the feed's actor_types=person filter excludes agents at
+//     source, as before.
 //  2. An assignment is admitted only when the operator performed it (or a
 //     person the allowlist names, under allow_assignments), the
 //     recording's events show this event added the agent, and the agent is
