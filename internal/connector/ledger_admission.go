@@ -219,7 +219,12 @@ var _ admission.AgentRequests = Admission{}
 // that moved on after admission (dispatched, completed, handed off) keeps
 // its trigger, requester and decided_at, and still counts.
 //
-// Discarded rows have to stay in the count: in handoff mode every admitted
+// A mention admitted but never handed off is not counted either: one made
+// before this run started (before_this_run), which a restart catches up on
+// and closes unread, or one with nothing to hand off (unreadable). Nobody
+// answered it, so it is no round of a loop.
+//
+// Other discarded rows have to stay in the count: in handoff mode every admitted
 // request ends discarded(handed_off), so leaving them out would count nothing
 // and switch both caps off. A discard that must not count carries no trigger
 // instead (a gate discard, or one over a cap). DropContent clears the trigger
@@ -231,8 +236,12 @@ func (a Admission) CountAgentRequests(ctx context.Context, conversationKey strin
 	}
 	query := `SELECT COUNT(*) FROM events
 WHERE trigger_name = ? AND state <> ? AND decided_at >= ?
+  AND NOT (state = ? AND reason IN (?, ?))
   AND requester_id IN (?` + strings.Repeat(", ?", len(agents)-1) + `)`
-	args := []any{string(admission.TriggerMentioned), string(StateBlocked), stamp(a.ledger.now().Add(-window))}
+	args := []any{
+		string(admission.TriggerMentioned), string(StateBlocked), stamp(a.ledger.now().Add(-window)),
+		string(StateDiscarded), ReasonBeforeThisRun, ReasonUnreadable,
+	}
 	for _, id := range agents {
 		args = append(args, id)
 	}

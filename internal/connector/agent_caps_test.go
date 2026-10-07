@@ -151,3 +151,21 @@ func TestCountAgentRequestsCountsOnlyAdmittedAgentMentions(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, n)
 }
+
+// Mentions a restart caught up on and closed unread were never answered, so
+// they are no round of a loop and leave the caps alone.
+func TestMentionsClosedUnreadDoNotCount(t *testing.T) {
+	f := newCapsFixture(t, 2, 0)
+	const thread int64 = 7100
+	for id := int64(1); id <= 2; id++ {
+		require.NotEqual(t, admission.StateDiscarded, f.mention(t, id, thread).State)
+	}
+	ctx := context.Background()
+	require.NoError(t, f.ledger.SetState(ctx, 1, StateDiscarded, ReasonBeforeThisRun))
+	require.NoError(t, f.ledger.SetState(ctx, 2, StateDiscarded, ReasonUnreadable))
+	v := f.mention(t, 3, thread)
+	assert.NotEqual(t, admission.StateDiscarded, v.State, "neither closed-unread mention counts")
+	require.NoError(t, f.ledger.SetState(ctx, 3, StateDiscarded, ReasonHandedOff))
+	assert.NotEqual(t, admission.StateDiscarded, f.mention(t, 4, thread).State)
+	assert.Equal(t, admission.ReasonAgentThreadCap, f.mention(t, 5, thread).Reason, "handed off ones still do")
+}
