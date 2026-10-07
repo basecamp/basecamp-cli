@@ -169,8 +169,10 @@ type agentConnectVerification struct {
 
 // writeAgentConnectVerification writes the verification line, one JSON
 // object terminated by a newline, so a reader can act on it while the
-// ceremony is still waiting.
-func writeAgentConnectVerification(w io.Writer, intake auth.AgentConnectIntake) {
+// ceremony is still waiting. A write that fails ends the ceremony: under
+// --json this line is how the link and the code reach whoever shows them
+// to the person, so nothing should wait on an approval they never saw.
+func writeAgentConnectVerification(w io.Writer, intake auth.AgentConnectIntake) error {
 	line := agentConnectVerification{
 		Type:            "verification",
 		VerificationURI: intake.VerificationURI,
@@ -178,10 +180,10 @@ func writeAgentConnectVerification(w io.Writer, intake auth.AgentConnectIntake) 
 		ExpiresAt:       intake.ExpiresAt.UTC().Format(time.RFC3339),
 		ExpiresIn:       max(0, int(time.Until(intake.ExpiresAt).Round(time.Second).Seconds())),
 	}
-	// Encode cannot fail on a struct of strings and ints, and a write
-	// that fails is a stdout that is gone, which the result line will
-	// meet too.
-	_ = json.NewEncoder(w).Encode(line)
+	if err := json.NewEncoder(w).Encode(line); err != nil {
+		return fmt.Errorf("could not write the verification line, so the connection was stopped: %w", err)
+	}
+	return nil
 }
 
 // connectAgentProfile runs the agent-connection handshake for the active
@@ -197,10 +199,10 @@ func connectAgentProfile(cmd *cobra.Command, app *appctx.App, f agentConnectFlag
 	// Under --json stdout is the data, so the operator's half of the
 	// ceremony — the link, the code, the wait line — goes to stderr.
 	human := w
-	var onIntake func(auth.AgentConnectIntake)
+	var onIntake func(auth.AgentConnectIntake) error
 	if f.machine {
 		human = cmd.ErrOrStderr()
-		onIntake = func(intake auth.AgentConnectIntake) { writeAgentConnectVerification(w, intake) }
+		onIntake = func(intake auth.AgentConnectIntake) error { return writeAgentConnectVerification(w, intake) }
 	}
 	r := output.NewRendererWithTheme(human, false, tui.ResolveTheme(tui.DetectDark()))
 
