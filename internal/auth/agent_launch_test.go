@@ -90,14 +90,25 @@ func TestSessionTokenWithoutLabelSendsNoLabel(t *testing.T) {
 
 // TestSessionTokenFromAServerThatIgnoresTheSessionFailsClosed: a Basecamp
 // that predates session attribution answers with an ordinary token. That
-// token is not bound to the session, so it is discarded, not printed.
+// token is not bound to the session, so it is discarded, not printed. The
+// message says which way the echo missed: a server that echoed the id
+// does record sessions, so it is not told it predates them.
 func TestSessionTokenFromAServerThatIgnoresTheSessionFailsClosed(t *testing.T) {
-	for name, body := range map[string]string{
-		"no echo":         `{"access_token":"unbound","token_type":"Bearer","expires_in":3600}`,
-		"other id":        `{"access_token":"unbound","token_type":"Bearer","expires_in":3600,"launch_id":"ffffffffffffffffffffffffffffffff","launch_label":"coworker@box"}`,
-		"other label":     `{"access_token":"unbound","token_type":"Bearer","expires_in":3600,"launch_id":"` + testSessionID + `","launch_label":"someone-else"}`,
-		"label not given": `{"access_token":"unbound","token_type":"Bearer","expires_in":3600,"launch_id":"` + testSessionID + `"}`,
+	for name, tc := range map[string]struct{ body, says, never string }{
+		"no echo": {
+			`{"access_token":"unbound","token_type":"Bearer","expires_in":3600}`,
+			"predates agent session attribution", "different"},
+		"other id": {
+			`{"access_token":"unbound","token_type":"Bearer","expires_in":3600,"launch_id":"ffffffffffffffffffffffffffffffff","launch_label":"coworker@box"}`,
+			"answered for a different session", "predates"},
+		"other label": {
+			`{"access_token":"unbound","token_type":"Bearer","expires_in":3600,"launch_id":"` + testSessionID + `","launch_label":"someone-else"}`,
+			"recorded a different label", "predates"},
+		"label not given": {
+			`{"access_token":"unbound","token_type":"Bearer","expires_in":3600,"launch_id":"` + testSessionID + `"}`,
+			"did not record the label", "predates"},
 	} {
+		body := tc.body
 		t.Run(name, func(t *testing.T) {
 			as := startDeviceAS(t)
 			as.token = func(int) (int, string) { return http.StatusOK, body }
@@ -109,7 +120,8 @@ func TestSessionTokenFromAServerThatIgnoresTheSessionFailsClosed(t *testing.T) {
 			assert.Empty(t, token)
 			assert.NotContains(t, err.Error(), "unbound", "the unbound token must not leak into the error")
 			assert.Contains(t, err.Error(), testSessionID)
-			assert.Contains(t, err.Error(), "predates agent session attribution")
+			assert.Contains(t, err.Error(), tc.says)
+			assert.NotContains(t, err.Error(), tc.never)
 
 			stored, loadErr := m.store.Load(key)
 			require.NoError(t, loadErr)

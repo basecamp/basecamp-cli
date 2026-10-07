@@ -135,14 +135,26 @@ func (l *agentLaunch) requireEcho(status int, body []byte) error {
 		return nil
 	}
 
+	// Say which way the echo missed. Only a server that echoed no id at
+	// all is one that predates sessions; one that echoed this id records
+	// them, and what it got wrong is the label.
 	msg := fmt.Sprintf("Basecamp minted a token but did not bind it to session %s, so it was discarded", l.id)
-	if echoed.ID == nil {
+	hint := "A session token needs a Basecamp that records agent sessions; without one, leave out --session-id and --session-label"
+	switch {
+	case echoed.ID == nil:
 		msg += ": this Basecamp predates agent session attribution"
-	} else {
-		msg += ": this Basecamp predates agent session attribution, or answered for a different session"
+	case !idMatches:
+		msg += ": Basecamp answered for a different session"
+		hint = "Run it again; if it keeps answering for another session, report it"
+	case echoed.Label == nil:
+		msg += ": Basecamp recorded the session but did not record the label"
+		hint = "Leave out --session-label to mint for the session alone"
+	default:
+		msg += ": Basecamp recorded a different label for the session"
+		hint = "Leave out --session-label to mint for the session alone"
 	}
 	e := output.ErrAPI(status, msg)
-	e.Hint = "A session token needs a Basecamp that records agent sessions; without one, leave out --session-id and --session-label"
+	e.Hint = hint
 	e.Cause = errLaunchNotRecorded
 	return e
 }
