@@ -59,6 +59,12 @@ type Snapshot struct {
 	RequesterName string `json:"requester_name,omitempty"`
 	// Role is whose request this is: an operator's or a participant's.
 	Role Role `json:"role,omitempty"`
+	// Owner says the operator connect.json names performed the event and,
+	// for a trigger whose instruction is the recording's content, wrote that
+	// content too. Someone named with --allow is an operator but never the
+	// owner, and neither is the owner bringing in someone else's words: an
+	// allowlisted person's to-do the owner moves in is that person's.
+	Owner bool `json:"owner,omitempty"`
 }
 
 // Verdict is admission's decision about one event.
@@ -416,6 +422,8 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		Content:   summary.Content,
 		UpdatedAt: summary.UpdatedAt,
 		Role:      v.Role,
+		Owner: v.Role == RoleOperator && ev.Performer() == policy.Trust.OperatorID &&
+			(author == "" || summary.Creator.ID == policy.Trust.OperatorID),
 	}
 	if summary.Bucket != nil {
 		v.Snapshot.ProjectName = summary.Bucket.Name

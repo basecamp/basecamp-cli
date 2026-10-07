@@ -218,6 +218,13 @@ var _ admission.AgentRequests = Admission{}
 // and a record still blocked was never admitted, so neither counts. A row
 // that moved on after admission (dispatched, completed, handed off) keeps
 // its trigger, requester and decided_at, and still counts.
+//
+// Discarded rows have to stay in the count: in handoff mode every admitted
+// request ends discarded(handed_off), so leaving them out would count nothing
+// and switch both caps off. A discard that must not count carries no trigger
+// instead (a gate discard, or one over a cap). DropContent clears the trigger
+// and requester; it has no caller today, and one with a retention shorter
+// than AgentCapWindow would reset the caps.
 func (a Admission) CountAgentRequests(ctx context.Context, conversationKey string, agents []int64, window time.Duration) (int, error) {
 	if len(agents) == 0 {
 		return 0, nil

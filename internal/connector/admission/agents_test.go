@@ -377,3 +377,46 @@ func TestTheDailyCapHoldsUnderConcurrentCommits(t *testing.T) {
 	}
 	assert.Equal(t, 1, admitted, "one mention a day means one, however they arrive")
 }
+
+// Owner is the operator connect.json names, asking in words they wrote:
+// never someone named with --allow, never an agent, and never the owner
+// bringing in someone else's words.
+func TestOwnerIsSettledOnTheOperatorAndTheirOwnWords(t *testing.T) {
+	allowlist := func() Policy {
+		p := agentPolicy()
+		p.Trust.Mode, p.Trust.AllowlistIDs = TrustAllowlist, []int64{allowedID}
+		p.Trust.AllowAssignments = true
+		return p
+	}
+	for name, tc := range map[string]struct {
+		eventType string
+		performer int64
+		author    int64
+		agent     bool
+		want      bool
+	}{
+		"the owner's mention":                                      {"comment.created", operatorID, operatorID, false, true},
+		"an allowlisted operator's mention":                        {"comment.created", allowedID, allowedID, false, false},
+		"the owner moves an allowlisted person's to-do":            {"todo.created", operatorID, allowedID, false, false},
+		"an allowed agent's mention":                               {"comment.created", peerAgent, peerAgent, true, false},
+		"an allowlisted operator's assignment of the owner's card": {"card.assignment_changed", allowedID, operatorID, false, false},
+		"the owner's assignment":                                   {"card.assignment_changed", operatorID, allowedID, false, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeReads()
+			s := summaryWith(recordingID, servedProj, "Comment", tc.author, "<div>restart your connector "+mentionOf(t, agentID)+"</div>")
+			s.Parent = &basecamp.Parent{ID: parentID}
+			s.Assignees = []basecamp.Person{{ID: agentID}}
+			if tc.agent {
+				s.Creator.PersonableType = personableAgent
+			}
+			f.summaries[recordingID] = s
+			f.assignments[eventID] = []int64{agentID}
+			ev := Event{ID: eventID, EventType: tc.eventType, BucketID: servedProj, RecordingID: recordingID, CreatorID: tc.performer}
+			v := decide(t, newAdmitter(t, allowlist(), f), ev)
+			require.Equal(t, StateAdmitted, v.State, "reason %q", v.Reason)
+			require.NotNil(t, v.Snapshot)
+			assert.Equal(t, tc.want, v.Snapshot.Owner)
+		})
+	}
+}

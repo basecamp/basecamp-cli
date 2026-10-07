@@ -43,12 +43,13 @@ type HandoffLine struct {
 	// operator's word or only a participant's. The key and its values are
 	// the local agent connector's, so one session can read either.
 	Role string `json:"role"`
-	// Owner says the requester is the operator connect.json names — for a
-	// personal agent, its owner — and not merely someone with an operator's
-	// role. Controlling the agent's own connector (start, stop, restart,
-	// setup, which build it runs) is the owner's alone, so a reader gates
-	// that on this one field rather than comparing ids itself. False when the
-	// handoff was not told the operator.
+	// Owner says the operator connect.json names — for a personal agent, its
+	// owner — asked, and wrote the words when the request is words: not
+	// merely someone with an operator's role. Controlling the agent's own
+	// connector (start, stop, restart, setup, which build it runs) is the
+	// owner's alone, so a reader gates that on this one field rather than
+	// comparing ids itself. Admission settles it (Snapshot.Owner); a record
+	// admitted before it did says false.
 	Owner bool `json:"owner"`
 	// Acknowledge says a person asked for something. A comment on a thread
 	// the agent follows, or a completion, is context and is not acknowledged.
@@ -94,11 +95,8 @@ type HandoffOptions struct {
 	Buckets []int64
 	// AgentID is the agent's Person id, whose mentions are stripped.
 	AgentID int64
-	// OperatorID is connect.json's operator, whose requests are marked
-	// owner. Zero marks none.
-	OperatorID int64
-	Lines      *ndjson.Writer
-	Logger     *slog.Logger
+	Lines   *ndjson.Writer
+	Logger  *slog.Logger
 	// Started is when the run started. Zero means now.
 	Started time.Time
 	// Interval is how often admitted records are looked for. Zero means
@@ -187,7 +185,7 @@ func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 		opts.log().Info("connector: a request from before this run started is not handed off", "event_id", record.ID, "created_at", record.CreatedAt)
 		return opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonBeforeThisRun)
 	}
-	line, err := handoffLine(record, opts.AgentID, opts.OperatorID)
+	line, err := handoffLine(record, opts.AgentID)
 	if err != nil {
 		// Closed under its own reason, not handed_off: nothing was written.
 		// Returning the error instead would stop the connector on every
@@ -202,7 +200,7 @@ func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 }
 
 // handoffLine is a record as the reader gets it.
-func handoffLine(record Record, agentID, operatorID int64) (HandoffLine, error) {
+func handoffLine(record Record, agentID int64) (HandoffLine, error) {
 	var snapshot struct {
 		Type          string    `json:"type"`
 		Title         string    `json:"title"`
@@ -212,6 +210,7 @@ func handoffLine(record Record, agentID, operatorID int64) (HandoffLine, error) 
 		ProjectName   string    `json:"project_name"`
 		RequesterName string    `json:"requester_name"`
 		Role          string    `json:"role"`
+		Owner         bool      `json:"owner"`
 	}
 	if record.ContentDropped || len(record.Decision.Snapshot) == 0 {
 		return HandoffLine{}, errors.New("the record has no content")
@@ -236,10 +235,8 @@ func handoffLine(record Record, agentID, operatorID int64) (HandoffLine, error) 
 		RequesterID:   record.Decision.RequesterID,
 		RequesterName: richtext.SanitizeTerminal(snapshot.RequesterName),
 		Role:          handoffRole(snapshot.Role),
-		// The requester is who the role was settled on, so words a
-		// participant wrote and the operator brought in are not the owner's.
-		Owner:       operatorID > 0 && record.Decision.RequesterID == operatorID && handoffRole(snapshot.Role) == string(admission.RoleOperator),
-		Acknowledge: record.Decision.Acknowledge,
+		Owner:         snapshot.Owner && handoffRole(snapshot.Role) == string(admission.RoleOperator),
+		Acknowledge:   record.Decision.Acknowledge,
 		// The line is read in a terminal as often as by a program: no
 		// control sequences from Basecamp's text reach it.
 		Content:          richtext.SanitizeTerminal(StripMentionsOf(snapshot.Content, agentID)),
