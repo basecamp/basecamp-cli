@@ -224,3 +224,42 @@ func TestTheLineSaysWhoseRequestItIs(t *testing.T) {
 		})
 	}
 }
+
+// owner is true only for the operator connect.json names, with an operator's
+// role: someone named with --allow, an allowed agent, words a participant
+// wrote, or a handoff told no operator, are never the owner. The session
+// gates controlling the connector itself on this one field.
+func TestTheLineSaysWhetherTheOwnerAsked(t *testing.T) {
+	const allowlisted, peerAgent int64 = 1001, 53309518
+	for name, tc := range map[string]struct {
+		requester int64
+		role      admission.Role
+		operator  int64
+		want      bool
+	}{
+		"the operator":                         {adapterOperatorID, admission.RoleOperator, adapterOperatorID, true},
+		"someone named with --allow":           {allowlisted, admission.RoleOperator, adapterOperatorID, false},
+		"an allowed agent":                     {peerAgent, admission.RoleParticipant, adapterOperatorID, false},
+		"the operator, as a participant's":     {adapterOperatorID, admission.RoleParticipant, adapterOperatorID, false},
+		"the operator, with no operator given": {adapterOperatorID, admission.RoleOperator, 0, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ledger := newTestLedger(t)
+			seenRecord(t, ledger, 1)
+			v := admittedVerdict(1, 0, "recording:1")
+			v.RequesterID, v.Snapshot.Role = tc.requester, tc.role
+			_, err := ledger.Admission().Commit(context.Background(), v)
+			require.NoError(t, err)
+			var out bytes.Buffer
+			opts := handoffOptions(ledger, &out)
+			opts.OperatorID = tc.operator
+
+			require.NoError(t, handOffReady(context.Background(), opts))
+
+			lines := handedOffLines(t, &out)
+			require.Len(t, lines, 1)
+			assert.Equal(t, tc.want, lines[0].Owner)
+			assert.Contains(t, out.String(), `"owner":`, "false is written, not left out")
+		})
+	}
+}

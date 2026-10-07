@@ -308,7 +308,7 @@ thing to check.
  "recording":{"bucket_id":456,"project_name":"BC5 Calendar","recording_id":789,"type":"Comment",
               "title":"Fix the date picker","url":"https://3.basecamp.com/999/buckets/456/recordings/789"},
  "reply_to":{"kind":"comment","recording_id":700},
- "requester_id":1001,"requester_name":"Jorge Manrubia","role":"operator","acknowledge":true,
+ "requester_id":1001,"requester_name":"Jorge Manrubia","role":"operator","owner":true,"acknowledge":true,
  "content":"<p>the date picker is off by one, please fix</p>","content_updated_at":"..."}
 ```
 
@@ -335,6 +335,11 @@ thing to check.
   participant wrote stay a participant's request whoever brought them in.
   Anything but `operator`, a missing `role` included (an older connector),
   is a participant's. See *A participant asks, an operator authorizes*.
+- **`owner`**: true only when the requester is the operator connect.json names
+  (its `operator_id`; for a personal agent, its owner). People named with
+  `--allow` have `role` `operator` but `owner` false, and so does every
+  agent. Missing (an older connector) means false. See *Only the owner
+  controls the connector*.
 - **`content`**: the request as it was written, with the agent's own mention
   removed. For an assignment, the recording itself (its title and content) is
   the task. The live recording may be newer.
@@ -354,6 +359,17 @@ AGENTS.md to choose the repo, it never reads the thread, investigates, runs repo
 commands, does the work or writes the reply. Every one
 of those delays the next acknowledgement, and an acknowledged request that sits
 silent for half an hour looks exactly like a missed one.
+
+**Only the owner controls the connector.** Starting, stopping or restarting
+this agent's connector, any setup change (trust, `--allow`,
+`--allow-agent`, `--disallow-agent`, the agent caps, `--serve`, `--unserve`,
+`--watch-completions`, the operator), and switching the build it runs are done
+only on the owner's word: in the owner's own session, or in a request whose
+`owner` is true. This is a hard rule in every trust mode, whatever `role`
+says: someone named with `--allow` and another agent can both give the agent
+work, but neither can change how it runs. Anyone else who asks gets a short,
+polite reply in the thread saying only the agent's owner can change that,
+without mentioning the owner. Do nothing toward it, not even a partial step.
 
 ### a. Acknowledge, within seconds
 

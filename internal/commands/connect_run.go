@@ -358,7 +358,8 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		runPart("handoff", func(ctx context.Context) error {
 			return connector.RunHandoff(ctx, connector.HandoffOptions{
 				Ledger: ledger, Served: served.Current, Buckets: buckets, AgentID: agentID,
-				Lines: lines, Logger: logger, Started: started,
+				OperatorID: policy.Trust.OperatorID,
+				Lines:      lines, Logger: logger, Started: started,
 			})
 		})
 	}

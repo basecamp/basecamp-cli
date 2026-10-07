@@ -25,6 +25,7 @@ var requestLineContract = []string{
 	"content_updated_at",
 	"event_id",
 	"event_type",
+	"owner",
 	"recording.bucket_id",
 	"recording.project_name",
 	"recording.recording_id",
