@@ -192,7 +192,7 @@ func (m *Manager) SessionAccessToken(ctx context.Context, id, label string) (str
 	if err != nil {
 		if hold != nil {
 			lockErr := m.store.withKeyLock(ctx, credKey, func() error {
-				m.rememberMintHold(credKey, hold)
+				m.rememberRenewalHold(credKey, hold)
 				return nil
 			})
 			if lockErr != nil {

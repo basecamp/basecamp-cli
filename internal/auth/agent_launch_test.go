@@ -114,7 +114,7 @@ func TestSessionTokenFromAServerThatIgnoresTheSessionFailsClosed(t *testing.T) {
 			stored, loadErr := m.store.Load(key)
 			require.NoError(t, loadErr)
 			assert.Equal(t, "shared-cached", stored.AccessToken)
-			assert.Nil(t, stored.MintHold, "an unattributing server is no verdict on the credential")
+			assert.Nil(t, stored.RenewalHold, "an unattributing server is no verdict on the credential")
 		})
 	}
 }
@@ -137,7 +137,7 @@ func TestSessionTokenRefusedForItsSessionNamesItAndHoldsNothing(t *testing.T) {
 
 	stored, loadErr := m.store.Load(key)
 	require.NoError(t, loadErr)
-	assert.Nil(t, stored.MintHold)
+	assert.Nil(t, stored.RenewalHold)
 	assert.Equal(t, "shared-cached", stored.AccessToken)
 }
 
@@ -159,12 +159,12 @@ func TestSessionTokenRefusalOfTheCredentialIsHeld(t *testing.T) {
 
 	stored, loadErr := m.store.Load(key)
 	require.NoError(t, loadErr)
-	require.NotNil(t, stored.MintHold)
-	assert.Equal(t, mintHoldRefused, stored.MintHold.Kind)
+	require.NotNil(t, stored.RenewalHold)
+	assert.Equal(t, renewalHoldRefused, stored.RenewalHold.Kind)
 
 	_, err = m.SessionAccessToken(context.Background(), testSessionID, "coworker@box")
 	require.Error(t, err)
-	assert.ErrorIs(t, err, errMintHeld)
+	assert.ErrorIs(t, err, errRenewalHeld)
 	assert.Len(t, as.tokenCalls(), 1, "a held credential was presented again")
 }
 
