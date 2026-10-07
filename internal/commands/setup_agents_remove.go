@@ -709,7 +709,7 @@ func pluginKeyFromEntry(entry map[string]any) string {
 }
 
 func basecampClaudePluginKey(key string) bool {
-	return key == harness.ClaudePluginName || key == harness.ClaudeExpectedPluginKey || key == "basecamp@basecamp"
+	return key == harness.ClaudePluginName || key == harness.ClaudeExpectedPluginKey || key == harness.ClaudeLegacyPluginKey || key == "basecamp@basecamp"
 }
 
 // removeClaudeSkill removes only the canonical symlink written by Basecamp or

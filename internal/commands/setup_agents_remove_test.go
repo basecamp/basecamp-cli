@@ -992,7 +992,7 @@ func TestSetupAgentsRemoveUsesOfficialCodexCommandWithAliasedHome(t *testing.T) 
 	stubAgentRemoveCommand(t, func(_ context.Context, path, dir string, args ...string) ([]byte, error) {
 		assert.Equal(t, codex, path)
 		assert.Empty(t, dir)
-		assert.Equal(t, []string{"plugin", "remove", "basecamp@37signals", "--json"}, args)
+		assert.Equal(t, []string{"plugin", "remove", "basecamp-cli@37signals", "--json"}, args)
 		return []byte(`{"removed":true}`), nil
 	})
 
