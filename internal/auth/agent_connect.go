@@ -113,8 +113,10 @@ type AgentConnectResult struct {
 
 // AgentConnectIntake is what a person needs to approve a connection: the
 // link to open, the code to check against the page, and when the code
-// dies. The link is the validated URL the browser would be sent to; the
-// code is stripped of control sequences, as the terminal copy is.
+// dies. Both are the copies the terminal shows, stripped of control
+// sequences: whoever reads them shows them to a person, and a JSON encoder
+// passes UTF-8-encoded C1 controls through raw. The browser is still sent
+// to the validated URL itself.
 type AgentConnectIntake struct {
 	VerificationURI string
 	UserCode        string
@@ -276,7 +278,7 @@ func (m *Manager) ConnectAgent(ctx context.Context, opts AgentConnectOptions) (*
 
 	if opts.OnIntake != nil {
 		opts.OnIntake(AgentConnectIntake{
-			VerificationURI: intake.verificationURI,
+			VerificationURI: intake.shownURI,
 			UserCode:        intake.userCode,
 			ExpiresAt:       opts.now().Add(intake.lifetime),
 		})
