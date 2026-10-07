@@ -111,6 +111,18 @@ type AgentConnectResult struct {
 	ClientID  string
 }
 
+// AgentConnectIntake is what a person needs to approve a connection: the
+// link to open, the code to check against the page, and when the code
+// dies. Both are the copies the terminal shows, stripped of control
+// sequences: whoever reads them shows them to a person, and a JSON encoder
+// passes UTF-8-encoded C1 controls through raw. The browser is still sent
+// to the validated URL itself.
+type AgentConnectIntake struct {
+	VerificationURI string
+	UserCode        string
+	ExpiresAt       time.Time
+}
+
 // AgentConnectOptions configures the connection ceremony.
 type AgentConnectOptions struct {
 	// DeviceName is where this connector runs, self-asserted and shown to
@@ -145,6 +157,16 @@ type AgentConnectOptions struct {
 	// Progress, when it is a terminal, carries the live wait line while
 	// the poll runs, exactly as it does for a device login.
 	Progress io.Writer
+
+	// OnIntake, when set, is told what the operator needs to approve the
+	// connection as soon as the intake has answered, before the browser is
+	// opened and the wait begins: a caller reading the ceremony as data
+	// learns the link and the code without parsing the operator's half.
+	// It is never given the device code, which is the poll's bearer and
+	// stays inside this flow. A non-nil error ends the ceremony before
+	// the browser is opened or anything waits: the link has not reached
+	// whoever was to show it, and nothing is stored.
+	OnIntake func(AgentConnectIntake) error
 
 	// BeforeStore, when set, runs after the poll has handed over the
 	// credential and the mint has proved it, and before anything is
@@ -254,6 +276,24 @@ func (m *Manager) ConnectAgent(ctx context.Context, opts AgentConnectOptions) (*
 	intake, err := m.openAgentConnection(ctx, client, disc, deviceName, softwareName, scope)
 	if err != nil {
 		return nil, err
+	}
+
+	// One deadline for the whole ceremony, fixed when the intake answers:
+	// what OnIntake publishes, what the operator is told and where the
+	// poll stops are the same instant, however long the caller takes.
+	intake.expiresAt = opts.now().Add(intake.lifetime)
+	if opts.OnIntake != nil {
+		if err := opts.OnIntake(AgentConnectIntake{
+			VerificationURI: intake.shownURI,
+			UserCode:        intake.userCode,
+			ExpiresAt:       intake.expiresAt,
+		}); err != nil {
+			return nil, err
+		}
+		if !opts.now().Before(intake.expiresAt) {
+			// Nothing left to announce, open or poll.
+			return nil, agentConnectExpired()
+		}
 	}
 
 	wait := announceAgentConnection(opts.presentation(), intake, opts.now())
@@ -380,6 +420,10 @@ type agentIntake struct {
 	tokenURI string
 	lifetime time.Duration
 	interval time.Duration
+
+	// expiresAt is when the code dies, fixed once by ConnectAgent as the
+	// intake answers; everything after it counts down to this instant.
+	expiresAt time.Time
 }
 
 // openAgentConnection makes the anonymous intake request and validates
@@ -463,7 +507,7 @@ func announceAgentConnection(view *LoginOptions, intake *agentIntake, now time.T
 	view.log("\nConnect this computer to a Basecamp agent\n")
 	view.log("  1. Open this link on any device")
 	view.log("     " + intake.shownURI)
-	view.log("  2. Check that the code shown there matches (expires in " + expiresIn(intake.lifetime) + ")")
+	view.log("  2. Check that the code shown there matches (expires in " + expiresIn(intake.expiresAt.Sub(now)) + ")")
 	view.log("     " + intake.userCode)
 	view.log("  3. Pick the agent this computer acts as, and approve it")
 	view.log("")
@@ -472,10 +516,10 @@ func announceAgentConnection(view *LoginOptions, intake *agentIntake, now time.T
 	view.log("")
 	view.announceBrowser(intake.verificationURI)
 
-	if wait := startApprovalWait(view.Progress, now.Add(intake.lifetime)); wait != nil {
+	if wait := startApprovalWait(view.Progress, intake.expiresAt); wait != nil {
 		return wait
 	}
-	view.log("Waiting for approval… (the code expires in " + expiresIn(intake.lifetime) + ")")
+	view.log("Waiting for approval… (the code expires in " + expiresIn(intake.expiresAt.Sub(now)) + ")")
 	return nil
 }
 
@@ -487,7 +531,7 @@ func announceAgentConnection(view *LoginOptions, intake *agentIntake, now time.T
 // the backstop for a server that answers authorization_pending forever —
 // the code it issued is dead by then whatever it says.
 func (m *Manager) awaitAgentConnection(ctx context.Context, opts *AgentConnectOptions, client *http.Client, intake *agentIntake) (*AgentConnection, error) {
-	deadline := opts.now().Add(intake.lifetime)
+	deadline := intake.expiresAt
 	interval := intake.interval
 	for {
 		// Never wait past the code's own life: an interval longer than

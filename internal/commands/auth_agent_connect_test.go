@@ -3,10 +3,14 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 
@@ -31,12 +35,21 @@ type connectAS struct {
 	srv *httptest.Server
 
 	mu         sync.Mutex
+	intakes    int
 	pollForms  []url.Values
 	tokenForms []url.Values
 
 	// connection renders the successful poll; the default approves a
 	// full-scope agent in account 999.
 	connection func() string
+
+	// pollStatus, when non-zero, is the poll's status in place of 200: a
+	// refusal, rendered from connection.
+	pollStatus int
+
+	// verificationPath, when set, is the path and query of the link the
+	// intake hands out, in place of the plain approval page.
+	verificationPath string
 }
 
 func startConnectAS(t *testing.T) *connectAS {
@@ -48,9 +61,16 @@ func startConnectAS(t *testing.T) *connectAS {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/oauth/agent_connections", func(w http.ResponseWriter, _ *http.Request) {
+		as.mu.Lock()
+		as.intakes++
+		as.mu.Unlock()
+		path := "/connect?user_code=WDJB-MJHT"
+		if as.verificationPath != "" {
+			path = as.verificationPath
+		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"device_code":"dev-code-1","user_code":"WDJB-MJHT","verification_uri_complete":%q,"token_uri":%q,"expires_in":600,"interval":1}`,
-			as.srv.URL+"/connect?user_code=WDJB-MJHT", as.srv.URL+"/oauth/agent_connection_tokens")
+			as.srv.URL+path, as.srv.URL+"/oauth/agent_connection_tokens")
 	})
 	mux.HandleFunc("/oauth/agent_connection_tokens", func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, r.ParseForm())
@@ -58,6 +78,9 @@ func startConnectAS(t *testing.T) *connectAS {
 		as.pollForms = append(as.pollForms, r.PostForm)
 		as.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
+		if as.pollStatus != 0 {
+			w.WriteHeader(as.pollStatus)
+		}
 		fmt.Fprint(w, as.connection())
 	})
 	mux.HandleFunc("/oauth/tokens", func(w http.ResponseWriter, r *http.Request) {
@@ -199,17 +222,207 @@ func TestAuthAgentConnectNeedsAProfile(t *testing.T) {
 	assert.Empty(t, as.mints())
 }
 
-// TestAuthAgentConnectRefusesMachineOutput: the link, the code and the wait
-// line go to stdout, which an envelope also owns.
-func TestAuthAgentConnectRefusesMachineOutput(t *testing.T) {
+// runAgentConnectJSON runs the ceremony under --json with stdout and stderr
+// kept apart, as a program driving it would read them. stdout is a
+// lockedBuffer so the mock server's handlers can read it mid-ceremony.
+func runAgentConnectJSON(t *testing.T, app *appctx.App, stdout io.Writer, args ...string) (string, error) {
+	t.Helper()
+	app.Flags.JSON = true
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: stdout})
+	cmd := NewAuthCmd()
+	cmd.SetArgs(append([]string{"agent", "connect", "--no-browser"}, args...))
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	var stderr bytes.Buffer
+	cmd.SetOut(stdout)
+	cmd.SetErr(&stderr)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	err := cmd.Execute()
+	return stderr.String(), err
+}
+
+// jsonValues reads stdout as a stream of JSON values, the way a program
+// driving the ceremony would: the verification line, then the envelope,
+// however that is laid out.
+func jsonValues(t *testing.T, stdout string) []map[string]any {
+	t.Helper()
+	// Decode to io.EOF rather than while More(): More is for the elements
+	// of an array or object, and at the top level it stops quietly at a
+	// stray closing delimiter that a reader of the stream would choke on.
+	dec := json.NewDecoder(strings.NewReader(stdout))
+	var values []map[string]any
+	for {
+		var v map[string]any
+		err := dec.Decode(&v)
+		if errors.Is(err, io.EOF) {
+			return values
+		}
+		require.NoError(t, err, "stdout is JSON values and nothing else: %q", stdout)
+		values = append(values, v)
+	}
+}
+
+// TestAuthAgentConnectJSONWritesTheVerificationThenTheResult: under --json
+// the ceremony is two lines of data on stdout. The first carries what the
+// operator needs and is written while the ceremony is still waiting on
+// them; the last is the result. The operator's words go to stderr. Neither
+// stream carries the client secret or the device code.
+func TestAuthAgentConnectJSONWritesTheVerificationThenTheResult(t *testing.T) {
 	as := startConnectAS(t)
 	app := connectApp(t, as, &config.Config{ActiveProfile: "agent"})
-	app.Flags.JSON = true
+	stdout := &lockedBuffer{}
 
-	_, err := runAgentConnect(t, app)
+	// The poll handler runs on the server's goroutine, so what it saw is
+	// handed over under a lock.
+	approve := as.connection
+	var (
+		atPollMu sync.Mutex
+		atPoll   string
+	)
+	as.connection = func() string {
+		atPollMu.Lock()
+		atPoll = stdout.String()
+		atPollMu.Unlock()
+		return approve()
+	}
+
+	stderr, err := runAgentConnectJSON(t, app, stdout, "--device-name", "build-box")
+	require.NoError(t, err, stderr)
+
+	atPollMu.Lock()
+	defer atPollMu.Unlock()
+	require.NotEmpty(t, atPoll, "the verification line is written before the operator approves, not after")
+	require.True(t, strings.HasSuffix(atPoll, "}\n") && strings.Count(atPoll, "\n") == 1,
+		"the verification is one line, newline-terminated, so a reader can act on it at once: %q", atPoll)
+	verification := jsonValues(t, atPoll)
+	require.Len(t, verification, 1)
+	assert.Equal(t, "verification", verification[0]["type"])
+	assert.Equal(t, as.srv.URL+"/connect?user_code=WDJB-MJHT", verification[0]["verification_uri"])
+	assert.Equal(t, "WDJB-MJHT", verification[0]["user_code"])
+	assert.NotEmpty(t, verification[0]["expires_at"])
+	expiresIn, ok := verification[0]["expires_in"].(float64)
+	require.True(t, ok)
+	assert.InDelta(t, 600, expiresIn, 5)
+
+	lines := jsonValues(t, stdout.String())
+	require.Len(t, lines, 2, "the verification line, then the result")
+	data, ok := lines[1]["data"].(map[string]any)
+	require.True(t, ok, stdout.String())
+	assert.Equal(t, "agent", data["profile"])
+	assert.Equal(t, "999", data["account_id"])
+	assert.Equal(t, "agent", data["oauth_type"])
+	assert.Equal(t, "agent_connection", data["source"])
+	assert.Equal(t, "full", data["scope"])
+	assert.Equal(t, "agent-client", data["client_id"])
+	assert.Equal(t, true, data["profile_created"])
+	assert.Equal(t, true, data["default"])
+	assert.Equal(t, `Connected profile "agent" to a Basecamp agent`, lines[1]["summary"])
+
+	assert.Contains(t, stderr, "WDJB-MJHT", "a person at the terminal still sees the code")
+	assert.NotContains(t, stderr, "Connected profile", "the result is data, not a second copy in prose")
+	for name, stream := range map[string]string{"stdout": stdout.String(), "stderr": stderr} {
+		assert.NotContains(t, stream, fakeConnectSecret, "%s carries the client secret", name)
+		assert.NotContains(t, stream, "dev-code-1", "%s carries the device code, the poll's bearer", name)
+	}
+
+	creds, err := app.Auth.GetStore().Load("profile:agent")
+	require.NoError(t, err)
+	assert.Equal(t, fakeConnectSecret, creds.ClientSecret, "the credential is stored exactly as without --json")
+}
+
+// TestAuthAgentConnectJSONVerificationCarriesNoControls: the link is what
+// the reader shows the person, and the JSON encoder escapes C0 controls but
+// passes UTF-8-encoded C1 controls through raw. A link the server laced
+// with one (url.Parse accepts it) reaches the line stripped, as the
+// terminal copy is, never as the bytes a terminal would act on.
+func TestAuthAgentConnectJSONVerificationCarriesNoControls(t *testing.T) {
+	as := startConnectAS(t)
+	as.verificationPath = "/connect\u009b31m?user_code=WDJB-MJHT"
+	app := connectApp(t, as, &config.Config{ActiveProfile: "agent"})
+	stdout := &lockedBuffer{}
+
+	stderr, err := runAgentConnectJSON(t, app, stdout, "--device-name", "build-box")
+	require.NoError(t, err, stderr)
+
+	assert.NotContains(t, stdout.String(), "\u009b", "a C1 control must not reach stdout raw")
+	lines := jsonValues(t, stdout.String())
+	require.Len(t, lines, 2)
+	assert.Equal(t, as.srv.URL+"/connect31m?user_code=WDJB-MJHT", lines[0]["verification_uri"],
+		"the link is the copy the terminal shows")
+}
+
+// failingWriter is a stdout that refuses every write: a full disk behind a
+// redirect, or an embedding whose sink has failed.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("no space left on device") }
+
+// TestAuthAgentConnectJSONStopsWhenTheVerificationCannotBeWritten: under
+// --json the verification line is how the link and the code reach whoever
+// shows them to the person, so a stdout that refuses it ends the ceremony
+// there: no wait, no poll, nothing stored.
+func TestAuthAgentConnectJSONStopsWhenTheVerificationCannotBeWritten(t *testing.T) {
+	as := startConnectAS(t)
+	app := connectApp(t, as, &config.Config{ActiveProfile: "agent"})
+
+	_, err := runAgentConnectJSON(t, app, failingWriter{}, "--device-name", "build-box")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "machine output mode")
+	assert.Contains(t, err.Error(), "no space left on device")
+
+	as.mu.Lock()
+	polls := len(as.pollForms)
+	as.mu.Unlock()
+	assert.Zero(t, polls, "nothing waits on an approval whose link never reached anyone")
 	assert.Empty(t, as.mints())
+	assertNothingStored(t, app, "agent")
+}
+
+// TestAuthAgentConnectJSONOnADeclineWritesOnlyTheVerification: a declined
+// connection ends with an error, which the CLI renders as the last line,
+// and nothing is stored. The verification line is already out by then.
+func TestAuthAgentConnectJSONOnADeclineWritesOnlyTheVerification(t *testing.T) {
+	as := startConnectAS(t)
+	as.pollStatus = 400
+	as.connection = func() string { return `{"error":"access_denied"}` }
+	app := connectApp(t, as, &config.Config{ActiveProfile: "agent"})
+	stdout := &lockedBuffer{}
+
+	_, err := runAgentConnectJSON(t, app, stdout, "--device-name", "build-box")
+	require.Error(t, err)
+
+	lines := jsonValues(t, stdout.String())
+	require.Len(t, lines, 1, "no result envelope from the command itself; the error is the CLI's to render")
+	assert.Equal(t, "verification", lines[0]["type"])
+	assert.Empty(t, as.mints(), "a declined connection mints nothing")
+	assertNothingStored(t, app, "agent")
+}
+
+// TestAuthAgentConnectRefusesOutputModesThatCannotCarryIt: --jq filters one
+// envelope and this writes two lines; --quiet, --ids-only and --count would
+// throw the verification line away. Each is refused before the server is
+// asked for anything.
+func TestAuthAgentConnectRefusesOutputModesThatCannotCarryIt(t *testing.T) {
+	for name, set := range map[string]func(*appctx.App){
+		"jq":       func(a *appctx.App) { a.Flags.JQFilter = ".data" },
+		"quiet":    func(a *appctx.App) { a.Flags.Quiet = true },
+		"ids-only": func(a *appctx.App) { a.Flags.IDsOnly = true },
+		"count":    func(a *appctx.App) { a.Flags.Count = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			as := startConnectAS(t)
+			app := connectApp(t, as, &config.Config{ActiveProfile: "agent"})
+			set(app)
+
+			_, err := runAgentConnect(t, app)
+			require.Error(t, err)
+			assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
+			as.mu.Lock()
+			intakes := as.intakes
+			as.mu.Unlock()
+			assert.Zero(t, intakes, "refused before the intake is asked for a code")
+			assert.Empty(t, as.mints())
+		})
+	}
 }
 
 // TestAuthAgentConnectRefusesNonInteractive: approving a connection needs a

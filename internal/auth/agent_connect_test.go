@@ -591,6 +591,37 @@ func TestConnectAgentStopsWhenTheCodeLifetimeRunsOut(t *testing.T) {
 	assertNoAgentCredential(t, m)
 }
 
+// TestConnectAgentKeepsTheDeadlineItPublished: the code dies when the
+// intake said it would, however long the caller took over OnIntake. A
+// callback that outlived the code leaves nothing to announce, open or
+// poll: the deadline it was given is the one the ceremony keeps.
+func TestConnectAgentKeepsTheDeadlineItPublished(t *testing.T) {
+	as := startConnectAS(t)
+	m := connectManager(t, as)
+	clock := newTestClock()
+
+	opts := connectOptions(&collectLogger{}, clock)
+	opts.NoBrowser = false
+	opts.Local = true
+	opts.BrowserLauncher = func(string) error {
+		t.Fatal("opened the browser on a code that had already expired")
+		return nil
+	}
+	var published time.Time
+	opts.OnIntake = func(intake AgentConnectIntake) error {
+		published = intake.ExpiresAt
+		// The caller takes the code's whole life and a second more.
+		return clock.sleep(context.Background(), intake.ExpiresAt.Sub(clock.Now())+time.Second)
+	}
+
+	_, err := m.ConnectAgent(context.Background(), opts)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expired")
+	assert.False(t, published.IsZero())
+	assert.Empty(t, as.calls(&as.pollForms), "nothing polls a code past the deadline it was published with")
+	assertNoAgentCredential(t, m)
+}
+
 // TestConnectAgentReportsAnAgentThatIsNoLongerActive: an account canceled
 // or frozen between approval and the poll answers invalid_grant, and the
 // remedy is a new connection, not a retry.
