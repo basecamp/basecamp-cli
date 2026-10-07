@@ -78,7 +78,10 @@ fi
 
 # --- Run pre-flight checks ---
 info "Running release checks"
-make release-check
+# DRY_RUN is this script's (true/false); the skill-sync tests read a DRY_RUN
+# of their own (unset, local or remote) and refuse "false". Keep it out of the
+# checks' environment.
+env -u DRY_RUN make release-check
 
 # --- Update stable release metadata ---
 if [[ "${PRERELEASE}" == "true" ]]; then
