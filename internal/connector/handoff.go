@@ -23,6 +23,11 @@ import (
 // HandoffLine is one trusted request, as the reader gets it. It is the
 // instruction a worker used to pull, written out: the agent's own mention
 // stripped, nothing more than the record carries.
+//
+// Its keys are a contract with whoever reads the lines, the basecamp-connect
+// skill first: renaming or dropping one breaks a reader nothing here runs.
+// requestLineContract holds the names, and the skill's example is held to
+// the line exactly, so a key added here is documented where readers learn it.
 type HandoffLine struct {
 	Type      string `json:"type"` // "request"
 	EventID   int64  `json:"event_id"`
