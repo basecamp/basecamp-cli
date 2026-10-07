@@ -36,6 +36,9 @@ type deviceAS struct {
 	metadata func() string
 	// deviceAuth renders the device-authorization response.
 	deviceAuth func() (status int, body string)
+	// deviceRetryAfter, when set, is the device-authorization response's
+	// Retry-After header.
+	deviceRetryAfter string
 	// token renders the nth (0-based) token poll response.
 	token func(call int) (status int, body string)
 	// revoke renders the nth (0-based) RFC 7009 revocation response.
@@ -58,6 +61,9 @@ func startDeviceAS(t *testing.T) *deviceAS {
 		as.mu.Unlock()
 		status, body := as.deviceAuth()
 		w.Header().Set("Content-Type", "application/json")
+		if as.deviceRetryAfter != "" {
+			w.Header().Set("Retry-After", as.deviceRetryAfter)
+		}
 		w.WriteHeader(status)
 		fmt.Fprint(w, body)
 	}
