@@ -74,8 +74,9 @@ answers the request:
 
   {"type":"verification","verification_uri":"…","user_code":"WDJB-MJHT","expires_at":"…","expires_in":600}
 
-The second is the result envelope every command prints: the profile, its
-account, the access approved and the agent's client id — or the error, if
+The second is the result: the envelope every command prints under --json,
+or its data alone under --agent — the profile, its account, the access
+approved and the agent's client id — or the error, if
 the operator declined, the code expired, or nothing could be stored. The words meant
 for a person go to stderr, and the browser opens as it would without
 --json. Neither line ever carries the client secret or the device code.
