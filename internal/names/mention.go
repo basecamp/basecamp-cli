@@ -25,8 +25,9 @@ func (e *ScopeError) Unwrap() error { return e.Err }
 // ResolveMentionByName resolves a fuzzy @Name mention.
 //
 // People resolve against the pingable set, exactly as ResolvePersonByName
-// does. Agents cannot be pinged by design, so they are never in that set;
-// when scope names a project, the agents on that project are candidates too.
+// does. That set holds only the agents the caller can reach, not every agent
+// on a project; when scope names a project, the agents on that project are
+// candidates too.
 // Only agents are drawn from the project: a person who is not pingable stays
 // unmentionable.
 //
@@ -112,8 +113,8 @@ func (r *Resolver) scopedAgents(ctx context.Context, scope ProjectScope) ([]Pers
 
 // ResolveMentionByID resolves a [@Name](person:ID) mention. A pingable person
 // resolves from the cached pingable set. Any other ID is looked up directly
-// and accepted only if it is an agent, which is the one kind of principal the
-// pingable set leaves out by design.
+// and accepted only if it is an agent, the one kind of principal the pingable
+// set may leave out: it holds only the agents the caller can reach.
 func (r *Resolver) ResolveMentionByID(ctx context.Context, id int64) (*Person, error) {
 	person, err := r.ResolvePersonByID(ctx, id)
 	var cliErr *output.Error
