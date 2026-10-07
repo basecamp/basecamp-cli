@@ -400,6 +400,7 @@ func TestOwnerIsSettledOnTheOperatorAndTheirOwnWords(t *testing.T) {
 		"the owner moves an allowlisted person's to-do":            {"todo.created", operatorID, allowedID, false, false},
 		"an allowed agent's mention":                               {"comment.created", peerAgent, peerAgent, true, false},
 		"an allowlisted operator's assignment of the owner's card": {"card.assignment_changed", allowedID, operatorID, false, false},
+		"the owner completes someone's to-do":                      {"todo.completed", operatorID, allowedID, false, false},
 		"the owner's assignment":                                   {"card.assignment_changed", operatorID, allowedID, false, true},
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -61,7 +61,7 @@ type Snapshot struct {
 	Role Role `json:"role,omitempty"`
 	// Owner says the operator connect.json names performed the event and,
 	// for a trigger whose instruction is the recording's content, wrote that
-	// content too. Someone named with --allow is an operator but never the
+	// content too. A completion is never the owner's word. Someone named with --allow is an operator but never the
 	// owner, and neither is the owner bringing in someone else's words: an
 	// allowlisted person's to-do the owner moves in is that person's.
 	Owner bool `json:"owner,omitempty"`
@@ -422,7 +422,9 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		Content:   summary.Content,
 		UpdatedAt: summary.UpdatedAt,
 		Role:      v.Role,
-		Owner: v.Role == RoleOperator && ev.Performer() == policy.Trust.OperatorID &&
+		// A completion is context, not a request, so it is never the
+		// owner's word, whoever completed it.
+		Owner: v.Role == RoleOperator && ev.Performer() == policy.Trust.OperatorID && rule.Trigger != TriggerCompleted &&
 			(author == "" || summary.Creator.ID == policy.Trust.OperatorID),
 	}
 	if summary.Bucket != nil {
