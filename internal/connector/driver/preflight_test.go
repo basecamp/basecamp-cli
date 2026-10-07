@@ -168,16 +168,25 @@ func sprintfIf(format, arg string) string {
 // A probe that times out ends its whole process tree: a launcher that started
 // the real worker as a child and waited must not leave that child running
 // (Codex on #794).
-func TestRunProbeEndsTheLaunchersChildrenWhenItTimesOut(t *testing.T) {
+func TestRunProbeEndsTheLaunchersChildrenWhenCancelled(t *testing.T) {
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "child.pid")
 	launcher := filepath.Join(dir, "claude")
 	require.NoError(t, os.WriteFile(launcher, []byte("#!/bin/sh\nsleep 60 &\necho $! > "+pidFile+"\nwait\n"), 0o700))
 
-	// Allow the shell time to start before timing out the waiting launcher.
-	// macOS process startup can itself exceed 300 ms under the full test suite.
-	r := RunProbe(context.Background(), Command{Path: launcher, Dir: dir}, 5*time.Second)
-	require.True(t, r.TimedOut)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan ProbeResult, 1)
+	go func() { done <- RunProbe(ctx, Command{Path: launcher, Dir: dir}, 10*time.Second) }()
+	// Startup has its own bounded budget; cancellation only begins once the
+	// launcher has created the child whose cleanup this test exercises.
+	require.Eventually(t, func() bool { _, err := os.Stat(pidFile); return err == nil }, 5*time.Second, 10*time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("probe did not return promptly after cancellation")
+	}
 	raw, err := os.ReadFile(pidFile)
 	require.NoError(t, err)
 	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))

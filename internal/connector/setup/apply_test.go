@@ -39,22 +39,51 @@ func TestApplyTrust(t *testing.T) {
 		assert.Equal(t, []int64{3, 9}, out.Trust.AllowlistIDs)
 	})
 	t.Run("allow contradicting the mode is refused", func(t *testing.T) {
-		_, err := Apply(base, Changes{Trust: admission.TrustProject, Allow: []int64{9}})
+		_, err := Apply(base, Changes{Trust: admission.TrustOperator, Allow: []int64{9}})
 		assert.Error(t, err)
+	})
+	// Named operators beside the project's members, who participate: one
+	// run can say who operates the agent and open it to the project.
+	t.Run("allow names operators alongside project trust", func(t *testing.T) {
+		out, err := Apply(base, Changes{Trust: admission.TrustProject, Allow: []int64{9, 3}})
+		require.NoError(t, err)
+		assert.Equal(t, admission.TrustProject, out.Trust.Mode)
+		assert.Equal(t, []int64{3, 9}, out.Trust.AllowlistIDs)
+		_, err = out.Policy(agentID)
+		assert.NoError(t, err, "admission accepts the result")
+
+		// A later run's --allow replaces the operators it kept, never adds.
+		again, err := Apply(out, Changes{Trust: admission.TrustProject, Allow: []int64{5}})
+		require.NoError(t, err)
+		assert.Equal(t, []int64{5}, again.Trust.AllowlistIDs)
 	})
 	t.Run("allowlist with nobody on it is refused", func(t *testing.T) {
 		_, err := Apply(base, Changes{Trust: admission.TrustAllowlist})
 		assert.Error(t, err)
 	})
-	t.Run("leaving allowlist drops the list", func(t *testing.T) {
+	// What a run does not pass is kept: the operators named before stay
+	// operators under project trust, and only --trust operator, which has
+	// no one to name, clears them.
+	t.Run("moving to project trust keeps the named operators", func(t *testing.T) {
 		f := base
 		f.Trust = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7}}
 		out, err := Apply(f, Changes{Trust: admission.TrustProject})
 		require.NoError(t, err)
 		assert.Equal(t, admission.TrustProject, out.Trust.Mode)
-		assert.Empty(t, out.Trust.AllowlistIDs)
+		assert.Equal(t, []int64{7}, out.Trust.AllowlistIDs)
 		_, err = out.Policy(agentID)
 		assert.NoError(t, err, "admission accepts the result")
+
+		again, err := Apply(out, Changes{Trust: admission.TrustProject, Serve: []int64{777}})
+		require.NoError(t, err)
+		assert.Equal(t, []int64{7}, again.Trust.AllowlistIDs, "a re-run to serve a project keeps them")
+	})
+	t.Run("operator trust clears the named operators", func(t *testing.T) {
+		f := base
+		f.Trust = admission.Trust{Mode: admission.TrustProject, OperatorID: operatorID, AllowlistIDs: []int64{7}}
+		out, err := Apply(f, Changes{Trust: admission.TrustOperator})
+		require.NoError(t, err)
+		assert.Empty(t, out.Trust.AllowlistIDs)
 	})
 	t.Run("the operator is untouched", func(t *testing.T) {
 		out, err := Apply(base, Changes{Trust: admission.TrustProject})
@@ -116,4 +145,96 @@ func TestApplyServedProjects(t *testing.T) {
 		_, err = Apply(base, Changes{Remove: []int64{projectID}, Serve: []int64{projectID}})
 		assert.Error(t, err, "serving and removing one project in one run")
 	})
+}
+
+// The assignment opt-in rides with the allowlist it opts in: setting it needs
+// someone named, and a run that empties the list takes it away too.
+func TestApplyAssignmentOptIn(t *testing.T) {
+	on, off := true, false
+	base := validFile(t)
+
+	t.Run("set with the people it opts in", func(t *testing.T) {
+		out, err := Apply(base, Changes{Allow: []int64{9}, AllowAssignments: &on})
+		require.NoError(t, err)
+		assert.True(t, out.Trust.AllowAssignments)
+		_, err = out.Policy(agentID)
+		assert.NoError(t, err, "admission accepts the result")
+	})
+	t.Run("refused with nobody named", func(t *testing.T) {
+		_, err := Apply(base, Changes{AllowAssignments: &on})
+		assert.Error(t, err)
+	})
+	optedIn := base
+	optedIn.Trust = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7}, AllowAssignments: true}
+	t.Run("kept when neither it nor the list is passed", func(t *testing.T) {
+		out, err := Apply(optedIn, Changes{Serve: []int64{777}})
+		require.NoError(t, err)
+		assert.True(t, out.Trust.AllowAssignments)
+	})
+	// The opt-in was given for the people named then. A run that names
+	// others does not hand them assignments unless it says so again.
+	t.Run("reset when the list is replaced without it", func(t *testing.T) {
+		out, err := Apply(optedIn, Changes{Allow: []int64{8}})
+		require.NoError(t, err)
+		assert.False(t, out.Trust.AllowAssignments)
+
+		out, err = Apply(optedIn, Changes{Allow: []int64{8}, AllowAssignments: &on})
+		require.NoError(t, err)
+		assert.True(t, out.Trust.AllowAssignments, "restated with the new list")
+	})
+	// One rule, no history: a run that passes --allow says the opt-in too,
+	// off unless it passes the flag, whoever the list names.
+	t.Run("a run that passes --allow restates it", func(t *testing.T) {
+		f := base
+		f.Trust = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7, 9}, AllowAssignments: true}
+		for _, allow := range [][]int64{{9, 7}, {7}, {7, 9, 11}} {
+			out, err := Apply(f, Changes{Allow: allow})
+			require.NoError(t, err)
+			assert.False(t, out.Trust.AllowAssignments, "allow %v without the flag", allow)
+			out, err = Apply(f, Changes{Allow: allow, AllowAssignments: &on})
+			require.NoError(t, err)
+			assert.True(t, out.Trust.AllowAssignments, "allow %v with it", allow)
+		}
+	})
+	t.Run("set over the list connect.json keeps", func(t *testing.T) {
+		f := base
+		f.Trust = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7}}
+		out, err := Apply(f, Changes{AllowAssignments: &on})
+		require.NoError(t, err)
+		assert.True(t, out.Trust.AllowAssignments)
+		assert.Equal(t, []int64{7}, out.Trust.AllowlistIDs)
+	})
+	t.Run("refused under project trust with nobody named", func(t *testing.T) {
+		_, err := Apply(base, Changes{Trust: admission.TrustProject, AllowAssignments: &on})
+		assert.Error(t, err, "the members are participants, and the opt-in never covers them")
+	})
+	t.Run("turned off", func(t *testing.T) {
+		out, err := Apply(optedIn, Changes{AllowAssignments: &off})
+		require.NoError(t, err)
+		assert.False(t, out.Trust.AllowAssignments)
+	})
+	t.Run("dropped with the list", func(t *testing.T) {
+		out, err := Apply(optedIn, Changes{Trust: admission.TrustOperator})
+		require.NoError(t, err)
+		assert.False(t, out.Trust.AllowAssignments)
+		_, err = out.Policy(agentID)
+		assert.NoError(t, err)
+	})
+}
+
+// Making the one person the allowlist names the operator leaves the opt-in
+// nobody to cover. Setup drops it rather than refusing the change.
+func TestSetOperatorDropsAnOptInWithNobodyLeftToCover(t *testing.T) {
+	tr := admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7}, AllowAssignments: true}
+	require.NoError(t, SetOperator(&tr, 7, false))
+	assert.Equal(t, int64(7), tr.OperatorID)
+	assert.False(t, tr.AllowAssignments)
+
+	tr = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7, 9}, AllowAssignments: true}
+	require.NoError(t, SetOperator(&tr, 7, false))
+	assert.True(t, tr.AllowAssignments, "9 is still covered")
+
+	// Asked for in this very run, it is refused rather than quietly dropped.
+	tr = admission.Trust{Mode: admission.TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{7}, AllowAssignments: true}
+	assert.Error(t, SetOperator(&tr, 7, true))
 }

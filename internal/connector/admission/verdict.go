@@ -57,6 +57,8 @@ type Snapshot struct {
 	// RequesterName is known only when the requester wrote the recording.
 	ProjectName   string `json:"project_name,omitempty"`
 	RequesterName string `json:"requester_name,omitempty"`
+	// Role is whose request this is: an operator's or a participant's.
+	Role Role `json:"role,omitempty"`
 }
 
 // Verdict is admission's decision about one event.
@@ -70,8 +72,14 @@ type Verdict struct {
 	// RetryAt is set on a blocked(throttled) verdict: the server's deadline,
 	// before which the record is not decided again.
 	RetryAt time.Time
-	// RequesterID is the performer whose trust admitted the event.
+	// RequesterID is who asked: the performer, or, when a participant wrote
+	// the words the performer brought in, that participant, the person the
+	// role was settled on.
 	RequesterID int64
+	// Role is whose request an admitted event is, settled on everyone whose
+	// trust admitted it: the performer and, for the triggers whose
+	// instruction is the recording's content, its author.
+	Role Role
 
 	State  State
 	Reason Reason
@@ -345,7 +353,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		v.Served, v.Class = true, project.Class
 	}
 
-	rule, state, reason, err := d.match(ctx, ev, policy, gate.Rules, summary)
+	rule, author, state, reason, err := d.match(ctx, ev, policy, gate.Rules, summary)
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -354,6 +362,19 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	}
 
 	v.Trigger, v.Acknowledge = rule.Trigger, rule.Acknowledge
+	// The performer's role, lowered to the author's when the instruction is
+	// words someone else wrote: whoever wrote them settles whose request it
+	// is, and bringing them in does not lend them more.
+	v.Role = gate.Role
+	if author != "" {
+		v.Role = least(v.Role, author)
+		if author == RoleParticipant {
+			// The requester is who the role was settled on: a member's
+			// words stay the member's request, so a reply that names the
+			// requester names them, never the operator who moved them in.
+			v.RequesterID = summary.Creator.ID
+		}
+	}
 	v.address(summary)
 
 	if !v.Served {
@@ -371,6 +392,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		AppURL:    summary.AppURL,
 		Content:   summary.Content,
 		UpdatedAt: summary.UpdatedAt,
+		Role:      v.Role,
 	}
 	if summary.Bucket != nil {
 		v.Snapshot.ProjectName = summary.Bucket.Name
@@ -382,8 +404,10 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 }
 
 // match tries the gate's open rules in matrix order and returns the first
-// that admits, or the state and reason that end the event.
-func (a *decision) match(ctx context.Context, ev Event, policy Policy, rules []Rule, summary *basecamp.RecordingSummary) (Rule, State, Reason, error) {
+// that admits, or the state and reason that end the event. For a rule whose
+// instruction is the recording's content it also returns the author's role;
+// for any other it returns none.
+func (a *decision) match(ctx context.Context, ev Event, policy Policy, rules []Rule, summary *basecamp.RecordingSummary) (Rule, Role, State, Reason, error) {
 	agent := a.policy.AgentID
 	mentioned := slices.Contains(summary.MentionedPersonIDs, agent)
 	endState, endReason := StateDiscarded, ReasonNotAddressed
@@ -394,11 +418,11 @@ func (a *decision) match(ctx context.Context, ev Event, policy Policy, rules []R
 			if !mentioned {
 				continue
 			}
-			state, reason, err := a.authorTrusted(ctx, ev, summary)
+			author, state, reason, err := a.authorTrusted(ctx, ev, summary)
 			if err != nil || state != "" {
-				return Rule{}, state, reason, err
+				return Rule{}, "", state, reason, err
 			}
-			return rule, "", "", nil
+			return rule, author, "", "", nil
 
 		case TriggerSubscribed:
 			// A mention is its own trigger; a comment that mentions the agent
@@ -410,23 +434,23 @@ func (a *decision) match(ctx context.Context, ev Event, policy Policy, rules []R
 			if summary.Parent == nil || summary.Parent.ID <= 0 {
 				// The subscription asked is the parent's; without one there is
 				// nothing to ask, and nothing verified.
-				return Rule{}, StateBlocked, ReasonReadFailed, nil
+				return Rule{}, "", StateBlocked, ReasonReadFailed, nil
 			}
 			subscribed, reason, err := a.subscribed(ctx, summary.Parent.ID)
 			if err != nil {
-				return Rule{}, "", "", err
+				return Rule{}, "", "", "", err
 			}
 			if reason != "" {
-				return Rule{}, StateBlocked, reason, nil
+				return Rule{}, "", StateBlocked, reason, nil
 			}
 			if !subscribed {
 				continue
 			}
-			state, reason, err := a.authorTrusted(ctx, ev, summary)
+			author, state, reason, err := a.authorTrusted(ctx, ev, summary)
 			if err != nil || state != "" {
-				return Rule{}, state, reason, err
+				return Rule{}, "", state, reason, err
 			}
-			return rule, "", "", nil
+			return rule, author, "", "", nil
 
 		case TriggerAssigned:
 			var (
@@ -441,9 +465,9 @@ func (a *decision) match(ctx context.Context, ev Event, policy Policy, rules []R
 			if err != nil {
 				reason, ctxErr := failure(ctx, err)
 				if ctxErr != nil {
-					return Rule{}, "", "", ctxErr
+					return Rule{}, "", "", "", ctxErr
 				}
-				return Rule{}, StateBlocked, reason, nil
+				return Rule{}, "", StateBlocked, reason, nil
 			}
 			if !found {
 				// Current assignees are not evidence of who this event added.
@@ -454,30 +478,30 @@ func (a *decision) match(ctx context.Context, ev Event, policy Policy, rules []R
 			// instruction; the second refuses one withdrawn before admission
 			// got to it. Neither alone admits.
 			if slices.Contains(added, agent) && assigned(summary, agent) {
-				return rule, "", "", nil
+				return rule, "", "", "", nil
 			}
 
 		case TriggerCompleted:
 			project, served := policy.served(ev.BucketID)
 			if served && project.WatchCompletions {
-				return rule, "", "", nil
+				return rule, "", "", "", nil
 			}
 			if assigned(summary, agent) {
-				return rule, "", "", nil
+				return rule, "", "", "", nil
 			}
 			subscribed, reason, err := a.subscribed(ctx, ev.RecordingID)
 			if err != nil {
-				return Rule{}, "", "", err
+				return Rule{}, "", "", "", err
 			}
 			if reason != "" {
-				return Rule{}, StateBlocked, reason, nil
+				return Rule{}, "", StateBlocked, reason, nil
 			}
 			if subscribed {
-				return rule, "", "", nil
+				return rule, "", "", "", nil
 			}
 		}
 	}
-	return Rule{}, endState, endReason, nil
+	return Rule{}, "", endState, endReason, nil
 }
 
 func assigned(summary *basecamp.RecordingSummary, personID int64) bool {
@@ -485,33 +509,35 @@ func assigned(summary *basecamp.RecordingSummary, personID int64) bool {
 }
 
 // authorTrusted checks the person who wrote the recording, for the triggers
-// whose instruction is that recording's content. The performer was trusted
-// at the gate; the author is usually the same person, but not always.
-func (a *decision) authorTrusted(ctx context.Context, ev Event, summary *basecamp.RecordingSummary) (State, Reason, error) {
+// whose instruction is that recording's content, and returns their role. The
+// performer was trusted at the gate; the author is usually the same person,
+// but not always.
+func (a *decision) authorTrusted(ctx context.Context, ev Event, summary *basecamp.RecordingSummary) (Role, State, Reason, error) {
 	author := summary.Creator.ID
 	switch {
 	case author == a.policy.AgentID, summary.Creator.PersonableType == personableAgent:
 		// The agent itself, or any Agent principal. The poll lane carries no
 		// actor type, so this read is where another agent's content shows.
-		return StateDiscarded, ReasonAgentAuthored, nil
+		return "", StateDiscarded, ReasonAgentAuthored, nil
+	case a.policy.Trust.roleOf(author) == RoleOperator:
+		// The operator, or someone the allowlist names; Validate keeps an
+		// allowlist out of operator mode.
+		return RoleOperator, "", "", nil
 	case author == ev.Performer():
-		return "", "", nil
-	case author == a.policy.Trust.OperatorID:
-		return "", "", nil
-	case a.policy.Trust.Mode == TrustAllowlist && slices.Contains(a.policy.Trust.AllowlistIDs, author):
-		return "", "", nil
+		// Trusted at the gate, and named by nobody: a member.
+		return RoleParticipant, "", "", nil
 	case a.policy.Trust.Mode == TrustProject:
 		member, reason, err := a.memberOf(ctx, ev.BucketID, author, ev.SeenAt)
 		switch {
 		case err != nil:
-			return "", "", err
+			return "", "", "", err
 		case reason != "":
-			return StateBlocked, reason, nil
+			return "", StateBlocked, reason, nil
 		case member:
-			return "", "", nil
+			return RoleParticipant, "", "", nil
 		}
 	}
-	return StateDiscarded, ReasonUntrustedAuthor, nil
+	return "", StateDiscarded, ReasonUntrustedAuthor, nil
 }
 
 // address sets the conversation key and reply destination. Decide has

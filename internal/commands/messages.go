@@ -32,7 +32,7 @@ func NewMessagesCmd() *cobra.Command {
 
 Most projects have a single message board. If a project has multiple,
 use --message-board <id> to specify which one.`,
-		Annotations: map[string]string{"agent_notes": "Rich text content accepts Markdown — the CLI converts to HTML\nCross-project messages: basecamp recordings messages --json\nPinned messages appear at the top of the message board\n@mentions: prefer [@Name](mention:SGID) for zero API calls, or [@Name](person:ID) for one lookup; @Name/@First.Last for fuzzy matching"},
+		Annotations: map[string]string{"agent_notes": "Rich text content is Markdown by default — the CLI converts it to HTML; --format html skips Markdown conversion (@mentions and local images are still resolved)\nCross-project messages: basecamp recordings messages --json\nPinned messages appear at the top of the message board\n@mentions: prefer [@Name](mention:SGID) for zero API calls, or [@Name](person:ID) for one lookup; @Name/@First.Last for fuzzy matching"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
@@ -554,7 +554,7 @@ List a project's message types with: basecamp messagetypes list --in <project>`,
 
 			// Build SDK request
 			// Convert Markdown content to HTML for Basecamp's rich text fields
-			html := richtext.MarkdownToHTML(body)
+			html := richTextToHTML(cmd, body)
 
 			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
 			html, err = resolveLocalImages(cmd, app, html)
@@ -639,6 +639,7 @@ List a project's message types with: basecamp messagetypes list --in <project>`,
 
 	allowDash(cmd, "arg:1")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
@@ -708,7 +709,7 @@ anything else is a name matched against the message's project. List a project's 
 
 			// Build SDK request
 			// Convert Markdown content to HTML for Basecamp's rich text fields
-			html := richtext.MarkdownToHTML(body)
+			html := richTextToHTML(cmd, body)
 
 			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
 			html, err = resolveLocalImages(cmd, app, html)
@@ -760,6 +761,7 @@ anything else is a name matched against the message's project. List a project's 
 
 	allowDash(cmd, "flag:body")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 

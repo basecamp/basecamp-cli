@@ -19,7 +19,7 @@ import (
 )
 
 // mentionServer fakes the three endpoints mention resolution reads: the
-// pingable set (people only — agents cannot be pinged), a project's people
+// pingable set (people only here, as if the caller reached no agent), a project's people
 // (people and agents alike), and a single person. It counts requests by path
 // so tests can hold the resolver to one fetch per list per run.
 type mentionServer struct {
@@ -136,7 +136,7 @@ func TestResolveMentionByNameLeavesPeopleSemanticsAlone(t *testing.T) {
 	r, _ := newMentionFixture(t)
 
 	// A person who is in the project but not pingable stays unmentionable:
-	// only agents are unpingable by design.
+	// the project fallback reaches agents only.
 	_, err := r.ResolveMentionByName(context.Background(), "Shy Human", inProject(123))
 	var outErr *output.Error
 	require.True(t, errors.As(err, &outErr), "got %v", err)

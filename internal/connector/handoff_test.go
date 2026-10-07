@@ -191,3 +191,36 @@ func TestATaskLeftOpenByTheWorkerConnectorBlocksNothing(t *testing.T) {
 	require.Len(t, lines, 1)
 	assert.Equal(t, int64(2), lines[0].EventID)
 }
+
+// Every line says whose request it is, in the words the local connector uses:
+// "operator" or "participant". A record admitted before admission settled a
+// role, or carrying a role this build doesn't know, is handed off as a
+// participant's: the session's participant rules are the ones that cannot
+// lend anyone an operator's standing.
+func TestTheLineSaysWhoseRequestItIs(t *testing.T) {
+	for name, tc := range map[string]struct {
+		role admission.Role
+		want string
+	}{
+		"an operator's":                {admission.RoleOperator, "operator"},
+		"a participant's":              {admission.RoleParticipant, "participant"},
+		"one admitted before roles":    {"", "participant"},
+		"one with a role nobody knows": {"owner", "participant"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ledger := newTestLedger(t)
+			seenRecord(t, ledger, 1)
+			v := admittedVerdict(1, 0, "recording:1")
+			v.Snapshot.Role = tc.role
+			_, err := ledger.Admission().Commit(context.Background(), v)
+			require.NoError(t, err)
+			var out bytes.Buffer
+
+			require.NoError(t, handOffReady(context.Background(), handoffOptions(ledger, &out)))
+
+			lines := handedOffLines(t, &out)
+			require.Len(t, lines, 1)
+			assert.Equal(t, tc.want, lines[0].Role)
+		})
+	}
+}

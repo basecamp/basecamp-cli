@@ -375,7 +375,7 @@ func newTodolistsCreateCmd(project, todosetID *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(todosetID, "todoset", "t", "", "Todoset ID (for projects with multiple todosets)")
-	cmd.Flags().StringVarP(&description, "description", "d", "", "Todolist description; use - to read from stdin")
+	cmd.Flags().StringVarP(&description, "description", "d", "", "Todolist description (rich text HTML); use - to read from stdin")
 	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the todolist visible to clients on the project (omit for the server default; client-authenticated callers always post client-visible)")
 
 	allowDash(cmd, "flag:description")
@@ -476,7 +476,7 @@ You can pass either a todolist ID or a Basecamp URL:
 	}
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "New name")
-	cmd.Flags().StringVarP(&description, "description", "d", "", "New description; use - to read from stdin")
+	cmd.Flags().StringVarP(&description, "description", "d", "", "New todolist description (rich text HTML); use - to read from stdin")
 
 	allowDash(cmd, "flag:description")
 

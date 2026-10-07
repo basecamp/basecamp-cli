@@ -640,10 +640,11 @@ func applySubscribeFlags(ctx context.Context, resolver *names.Resolver, subscrib
 // Also supports @sgid:VALUE inline syntax for pipeline composability.
 // Silently returns unchanged HTML if no mentions are found.
 //
-// Agents cannot be pinged, so the pingable set never holds them. scope names
-// the project whose agents a fuzzy @Name may reach; it is consulted only when
-// the pingable set has no exact answer, and may be nil when the command has
-// no project in scope.
+// The pingable set holds the agents a person can reach, but not every agent
+// on a project, so an agent may be missing from it. scope names the project
+// whose agents a fuzzy @Name may reach; it is consulted only when the
+// pingable set has no exact answer, and may be nil when the command has no
+// project in scope.
 //
 // Fuzzy @Name mentions that cannot be resolved (not found or ambiguous) are
 // left as plain text; their names are returned in the Unresolved slice.

@@ -481,7 +481,7 @@ func TestConnectSetupRefusesBadInput(t *testing.T) {
 	for name, args := range map[string][]string{
 		"class without a served project": {"--operator", op, "--class", fmt.Sprintf("%d=internal", setupProject)},
 		"bad trust mode":                 {"--operator", op, "--trust", "domain"},
-		"allow outside allowlist":        {"--operator", op, "--trust", "project", "--allow", "7"},
+		"allow under operator trust":     {"--operator", op, "--trust", "operator", "--allow", "7"},
 		"malformed serve":                {"--operator", op, "--serve", "not-a-number"},
 		"zero serve":                     {"--operator", op, "--serve", "0"},
 		"no operator":                    {serveArg()},
@@ -1015,6 +1015,60 @@ func TestConnectSetupVerifiesTheAllowlistBeforeWriting(t *testing.T) {
 	require.NoError(t, err, out)
 	f, err := setup.Load(connectSetupPath(t, "agent"))
 	require.NoError(t, err)
+	assert.Equal(t, []int64{setupOperatorPerson + 1}, f.Trust.AllowlistIDs)
+}
+
+// Named operators beside the project's members: the same verification, and
+// the file says both.
+func TestConnectSetupNamesOperatorsAlongsideProjectTrust(t *testing.T) {
+	for name, id := range map[string]int64{"unknown person": 424242, "client": setupClientPerson} {
+		t.Run(name, func(t *testing.T) {
+			s := startConnectSetupServer(t)
+			connectSetupApp(t, s, "agent")
+			storeConnectProfile(t, s, "me", setupOperatorToken)
+
+			out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", "--trust", "project", "--allow", fmt.Sprint(id), serveArg())
+			require.Error(t, err, out)
+			assert.Contains(t, err.Error(), fmt.Sprintf("Allowlist %d", id))
+			assertNotWritten(t, "agent")
+		})
+	}
+
+	s := startConnectSetupServer(t)
+	connectSetupApp(t, s, "agent")
+	storeConnectProfile(t, s, "me", setupOperatorToken)
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", "--trust", "project", "--allow", fmt.Sprint(setupOperatorPerson+1), serveArg())
+	require.NoError(t, err, out)
+	f, err := setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Equal(t, admission.TrustProject, f.Trust.Mode)
+	assert.Equal(t, []int64{setupOperatorPerson + 1}, f.Trust.AllowlistIDs)
+}
+
+// --allow-assignments-from-authorized opts the named people in to assigning
+// the agent work; =false takes it back, and leaving it out keeps it.
+func TestConnectSetupOptsNamedOperatorsInToAssignments(t *testing.T) {
+	s := startConnectSetupServer(t)
+	connectSetupApp(t, s, "agent")
+	storeConnectProfile(t, s, "me", setupOperatorToken)
+	run := func(args ...string) *setup.File {
+		t.Helper()
+		out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), append([]string{"--operator-profile", "me", serveArg()}, args...)...)
+		require.NoError(t, err, out)
+		f, err := setup.Load(connectSetupPath(t, "agent"))
+		require.NoError(t, err)
+		return &f
+	}
+
+	assert.True(t, run("--allow", fmt.Sprint(setupOperatorPerson+1), "--allow-assignments-from-authorized").Trust.AllowAssignments)
+	assert.True(t, run().Trust.AllowAssignments, "kept when not passed")
+	assert.False(t, run("--allow-assignments-from-authorized=false").Trust.AllowAssignments)
+
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), "--operator-profile", "me", "--trust", "operator", "--allow-assignments-from-authorized")
+	require.Error(t, err, out, "an opt-in with nobody named is refused")
+	f, err := setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.False(t, f.Trust.AllowAssignments, "and nothing was written")
 	assert.Equal(t, []int64{setupOperatorPerson + 1}, f.Trust.AllowlistIDs)
 }
 

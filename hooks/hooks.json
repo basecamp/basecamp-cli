@@ -1,15 +1,13 @@
 {
-  "description": "Basecamp agent hooks: session context and commit-reference nudges.",
+  "description": "Basecamp agent hooks: commit-reference nudges, and a one-time notice for installs under the plugin's pre-rename id.",
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",
-            "command": "basecamp agent-hook session-start",
-            "timeout": 5,
-            "statusMessage": "Checking Basecamp status"
+            "command": "basecamp agent-hook pre-commit-snapshot",
+            "timeout": 5
           }
         ]
       }

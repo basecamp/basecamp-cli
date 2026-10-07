@@ -132,6 +132,22 @@ func TestBuildRequestBody(t *testing.T) {
 		assert.Equal(t, map[string]any{"content": "Buy milk"}, body)
 	})
 
+	// MCP tools take the API's own rich text, which is HTML. Nothing on this
+	// path reads it as Markdown or guesses which it is: content goes out as
+	// the client sent it.
+	t.Run("rich text is sent exactly as given", func(t *testing.T) {
+		for _, content := range []string{
+			"## not a heading **not bold**",
+			"<p>A</p><p>B</p>\n\n    <em>indented</em>",
+		} {
+			_, body, err := buildRequest(op, map[string]any{
+				"projectId": "1", "todolistId": "2", "content": "t", "description": content,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, map[string]any{"content": "t", "description": content}, body)
+		}
+	})
+
 	t.Run("rejects properties the body schema does not declare", func(t *testing.T) {
 		_, _, err := buildRequest(op, map[string]any{
 			"projectId": "1", "todolistId": "2", "contnet": "typo",

@@ -6,12 +6,14 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 52 | 203 |
+| ✅ Implemented | 52 | 204 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **56** | **215** |
+| **Total tracked** | **56** | **216** |
 
-**203 of 203 tracked in-scope endpoints.** The eight subtask endpoints bc3
+**204 of 204 tracked in-scope endpoints.** Moving a document, upload or folder
+between folders (`POST /recordings/:id/filing.json`, documented by bc3#13644 and
+modelled by basecamp/basecamp-sdk#960) lands as `files move`. The eight subtask endpoints bc3
 #12659 documented — the flat `/recordings/:id/subtasks.json` and
 `/subtasks/:id` routes, modelled by basecamp/basecamp-sdk#883 — land as
 `subtasks`. The client-admission endpoints
@@ -53,7 +55,9 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 **SDK version:** the pin in `go.mod`, with
 `internal/version/sdk-provenance.json` authoritative for the exact commit. That
-pin is basecamp-sdk v0.21.0, which ships the Subtasks service
+pin is basecamp-sdk v0.23.0, which sends a check-in question's time as
+`time_of_day` (basecamp/basecamp-sdk#968). v0.22.0 shipped
+`Recordings().MoveToVault` (basecamp/basecamp-sdk#960). v0.21.0 shipped the Subtasks service
 (basecamp/basecamp-sdk#883). v0.19.0 shipped the event-feed operations.
 The command surface below largely dates to the v0.12.0 bump, which added 20 exported
 Go methods over 13 new backend operations; the extra seven wrapped endpoints
@@ -228,6 +232,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | **Files & Documents** |
 | uploads | 8 | `files`, `uploads` | ✅ | BC4 | - | list, show, create, update, download, versions (`files versions <id>`), replace (`files replace <id> <file>`); trash/archive/restore go through `recordings`. Create supports `--visible-to-clients` (root vault only) |
 | vaults | 8 | `files`, `vaults` | ✅ | BC4 | - | list, show, create |
+| vaults (move) | 1 | `files move` | ✅ | BC5 | - | `POST /recordings/:id/filing.json`: moves a document, upload or folder into another folder in the same project, in place (same id and comments). `--to` takes a folder ID or URL; `--position` is 1-indexed. Flat route, so no `--in` |
 | documents | 8 | `files`, `docs` | ✅ | BC4 | - | list, show, create, update. Create supports `--subscribe`/`--no-subscribe`, `--visible-to-clients` (root vault only) |
 | attachments | 1 | `uploads`, `attachments` | ✅ | BC4 | - | Upload via `attach`; list embedded attachments via `attachments list` (parses `<bc-attachment>` from content) |
 | **Schedule** |

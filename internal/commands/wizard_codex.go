@@ -21,6 +21,9 @@ const (
 	codexMarketplaceTimeout = 20 * time.Second
 	codexInstallTimeout     = 20 * time.Second
 	codexVerifyTimeout      = 5 * time.Second
+	// codexRemoveTimeout bounds `plugin remove`, which only deletes local
+	// state — no clone — so it needs less than an install.
+	codexRemoveTimeout = 10 * time.Second
 )
 
 // runCodexSetupCommand runs a codex subcommand, capturing stdout for --json
@@ -65,8 +68,6 @@ func runCodexSetup(cmd *cobra.Command, styles *tui.Styles) error {
 	fmt.Fprintln(w, styles.RenderStatus(true, "37signals marketplace ready"))
 	fmt.Fprintln(w, styles.RenderStatus(true, "Codex plugin installed and enabled"))
 	fmt.Fprintln(w)
-	// Trust must come first: an untrusted SessionStart hook is silently
-	// skipped, so a thread started before trusting gets no hook context.
 	fmt.Fprintln(w, styles.Muted.Render("  Review and trust the plugin hooks with /hooks."))
 	fmt.Fprintln(w, styles.Muted.Render("  Then start a new Codex thread to load the Basecamp skills."))
 	return nil
@@ -102,11 +103,29 @@ func installCodexPlugin(parent context.Context, stderr io.Writer, progress func(
 		}
 	}
 
-	progress("Installing basecamp plugin…")
+	progress("Installing " + harness.CodexPluginName + " plugin…")
 	stdout, stderrOutput, err = runCodexStep(parent, stderr, codexInstallTimeout, codexPath,
 		"plugin", "add", harness.CodexExpectedPluginKey, "--json")
 	if err != nil && !codexPluginAlreadyInstalled(stdout, stderrOutput) {
 		return codexSetupError("plugin add failed: " + codexCommandFailure(stdout, stderrOutput, err))
+	}
+
+	// The plugin was renamed basecamp → basecamp-cli. Remove a pre-rename
+	// install only once its replacement is installed and enabled, so a failed
+	// or disabled install never leaves the user without a working plugin.
+	legacyCtx, cancelLegacy := context.WithTimeout(parent, codexVerifyTimeout)
+	legacy := harness.CodexLegacyReplaced(legacyCtx)
+	cancelLegacy()
+	if legacy {
+		progress("Removing the pre-rename " + harness.CodexLegacyPluginKey + " plugin…")
+		removeStdout, removeStderr, removeErr := runCodexStep(parent, stderr, codexRemoveTimeout, codexPath,
+			"plugin", "remove", harness.CodexLegacyPluginKey, "--json")
+		if removeErr != nil {
+			return &agentSetupError{
+				Summary: "removing the pre-rename plugin failed: " + codexCommandFailure(removeStdout, removeStderr, removeErr),
+				Manual:  []string{"codex plugin remove " + harness.CodexLegacyPluginKey},
+			}
+		}
 	}
 
 	progress("Verifying installation…")

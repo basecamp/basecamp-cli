@@ -20,7 +20,7 @@ func OpenPTY(t *testing.T) *os.File {
 	}
 	master, slave, err := pty.Open()
 	if err != nil {
-		t.Fatalf("open PTY: %v", err)
+		t.Skipf("PTY unavailable: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = slave.Close()

@@ -76,9 +76,9 @@ func TestARefusedSecretIsNeverSentAgain(t *testing.T) {
 
 	stored, loadErr := m.store.Load(key)
 	require.NoError(t, loadErr)
-	require.NotNil(t, stored.MintHold)
-	assert.Zero(t, stored.MintHold.Until, "invalid_client is permanent for the secret it refused")
-	assert.Equal(t, agentClientFingerprint("agent-client", "agent-secret"), stored.MintHold.Client)
+	require.NotNil(t, stored.RenewalHold)
+	assert.Zero(t, stored.RenewalHold.Until, "invalid_client is permanent for the secret it refused")
+	assert.Equal(t, agentClientFingerprint("agent-client", "agent-secret"), stored.RenewalHold.Client)
 
 	*now = now.Add(30 * 24 * time.Hour)
 	for range 3 {
@@ -123,7 +123,7 @@ func TestANewSecretIsNotHeldToTheOldOnesRefusal(t *testing.T) {
 
 	stored, err := m.store.Load(key)
 	require.NoError(t, err)
-	require.NotNil(t, stored.MintHold)
+	require.NotNil(t, stored.RenewalHold)
 	stored.ClientSecret = "a-new-secret"
 	require.NoError(t, m.store.Save(key, stored))
 
@@ -135,7 +135,7 @@ func TestANewSecretIsNotHeldToTheOldOnesRefusal(t *testing.T) {
 
 	stored, err = m.store.Load(key)
 	require.NoError(t, err)
-	assert.Nil(t, stored.MintHold, "a successful mint left the old refusal behind")
+	assert.Nil(t, stored.RenewalHold, "a successful mint left the old refusal behind")
 }
 
 // TestARateLimitIsHeldUntilItsRetryAfter: nothing goes out until the
@@ -169,7 +169,7 @@ func TestARateLimitIsHeldUntilItsRetryAfter(t *testing.T) {
 	assert.NotContains(t, held.Message, "invalid_client")
 	assert.Contains(t, held.Hint, "1 seconds")
 	assert.Equal(t, 1, RetryAfter(err), "a held mint carries what is left of the hold")
-	assert.ErrorIs(t, err, errMintHeld)
+	assert.ErrorIs(t, err, errRenewalHeld)
 	assert.NotContains(t, held.Hint, "--with-client-credentials", "a rate limit is not a refused secret")
 	assert.False(t, errors.Is(err, ErrAgentCredentialRefused), "a rate limit is not a disconnect")
 
@@ -181,7 +181,7 @@ func TestARateLimitIsHeldUntilItsRetryAfter(t *testing.T) {
 
 	stored, err := m.store.Load(key)
 	require.NoError(t, err)
-	assert.Nil(t, stored.MintHold)
+	assert.Nil(t, stored.RenewalHold)
 }
 
 // TestARateLimitHoldRoundsItsDeadlineUp: the hold is stored in whole
@@ -244,15 +244,15 @@ func TestARateLimitHoldIsBounded(t *testing.T) {
 
 			stored, err := m.store.Load(key)
 			require.NoError(t, err)
-			require.NotNil(t, stored.MintHold)
-			assert.Equal(t, mintHoldRateLimited, stored.MintHold.Kind)
-			assert.InDelta(t, now.Add(c.want).Unix(), stored.MintHold.Until, 2)
+			require.NotNil(t, stored.RenewalHold)
+			assert.Equal(t, renewalHoldRateLimited, stored.RenewalHold.Kind)
+			assert.InDelta(t, now.Add(c.want).Unix(), stored.RenewalHold.Until, 2)
 
 			// The refusal itself names the wait the hold will keep.
 			first := output.AsError(mintErr)
 			assert.Equal(t, output.CodeRateLimit, first.Code)
-			assert.Equal(t, fmt.Sprintf("Try again in %d seconds", stored.MintHold.Until-now.Unix()), first.Hint)
-			assert.LessOrEqual(t, stored.MintHold.Until, now.Add(maxAgentMintHold).Unix())
+			assert.Equal(t, fmt.Sprintf("Try again in %d seconds", stored.RenewalHold.Until-now.Unix()), first.Hint)
+			assert.LessOrEqual(t, stored.RenewalHold.Until, now.Add(maxRenewalHold).Unix())
 		})
 	}
 }
@@ -282,7 +282,7 @@ func TestAServerFaultHoldsNothing(t *testing.T) {
 
 			stored, err := m.store.Load(key)
 			require.NoError(t, err)
-			assert.Nil(t, stored.MintHold)
+			assert.Nil(t, stored.RenewalHold)
 		})
 	}
 }
@@ -337,7 +337,7 @@ func TestARefusalThatCanReverseIsRecheckedHourly(t *testing.T) {
 
 			stored, err := m.store.Load(key)
 			require.NoError(t, err)
-			assert.Nil(t, stored.MintHold)
+			assert.Nil(t, stored.RenewalHold)
 		})
 	}
 }
@@ -350,8 +350,8 @@ func TestAStaleRefusalNeverLandsOnANewSecret(t *testing.T) {
 	e := startMintEndpoint(t)
 	m, key, _ := heldManager(t, e)
 
-	stale := &MintHold{
-		Kind:   mintHoldRefused,
+	stale := &RenewalHold{
+		Kind:   renewalHoldRefused,
 		Detail: "token error: invalid_client",
 		Client: agentClientFingerprint("agent-client", "agent-secret"),
 	}
@@ -360,11 +360,11 @@ func TestAStaleRefusalNeverLandsOnANewSecret(t *testing.T) {
 	relogged.ClientSecret = "a-new-secret"
 	require.NoError(t, m.store.Save(key, relogged))
 
-	m.rememberMintHold(key, stale)
+	m.rememberRenewalHold(key, stale)
 
 	stored, err := m.store.Load(key)
 	require.NoError(t, err)
-	assert.Nil(t, stored.MintHold, "a refusal of the old secret was written over the new one")
+	assert.Nil(t, stored.RenewalHold, "a refusal of the old secret was written over the new one")
 	assert.Equal(t, "a-new-secret", stored.ClientSecret)
 }
 
@@ -373,14 +373,14 @@ func TestAStaleRefusalNeverLandsOnANewSecret(t *testing.T) {
 // allowed to last — nor can a kind this version does not know hold one at
 // all. Either is ignored, which is the old behavior: ask again.
 func TestAHoldTooFarOutIsNotBelieved(t *testing.T) {
-	for name, hold := range map[string]MintHold{
-		"a day out":                     {Kind: mintHoldRateLimited, Until: time.Now().Add(24 * time.Hour).Unix()},
+	for name, hold := range map[string]RenewalHold{
+		"a day out":                     {Kind: renewalHoldRateLimited, Until: time.Now().Add(24 * time.Hour).Unix()},
 		"a kind unknown":                {Kind: "something_newer"},
-		"a rate limit with no deadline": {Kind: mintHoldRateLimited},
+		"a rate limit with no deadline": {Kind: renewalHoldRateLimited},
 		// Only invalid_client is held forever; any other refusal that
 		// lost its deadline would otherwise never be rechecked.
-		"a reversible refusal with no deadline": {Kind: mintHoldRefused, Detail: "token error: invalid_grant"},
-		"a bare 401 with no deadline":           {Kind: mintHoldRefused, Detail: "the server answered HTTP 401"},
+		"a reversible refusal with no deadline": {Kind: renewalHoldRefused, Detail: "token error: invalid_grant"},
+		"a bare 401 with no deadline":           {Kind: renewalHoldRefused, Detail: "the server answered HTTP 401"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := startMintEndpoint(t)
@@ -390,7 +390,7 @@ func TestAHoldTooFarOutIsNotBelieved(t *testing.T) {
 			stored, err := m.store.Load(key)
 			require.NoError(t, err)
 			hold.Client = agentClientFingerprint(stored.ClientID, stored.ClientSecret)
-			stored.MintHold = &hold
+			stored.RenewalHold = &hold
 			require.NoError(t, m.store.Save(key, stored))
 
 			_, err = m.AccessToken(context.Background())
@@ -428,8 +428,8 @@ func TestEveryHoldDeadlineIsRoundedUpAndEveryWaitReadFromIt(t *testing.T) {
 
 			stored, loadErr := m.store.Load(key)
 			require.NoError(t, loadErr)
-			require.NotNil(t, stored.MintHold)
-			assert.Equal(t, now.Truncate(time.Second).Add(c.want+time.Second).Unix(), stored.MintHold.Until, "the deadline was not rounded up")
+			require.NotNil(t, stored.RenewalHold)
+			assert.Equal(t, now.Truncate(time.Second).Add(c.want+time.Second).Unix(), stored.RenewalHold.Until, "the deadline was not rounded up")
 
 			// Believed at once, though rounding put it past the bound.
 			_, err = m.AccessToken(context.Background())
@@ -463,21 +463,21 @@ func TestAHoldIsReportedOnlyAsTheAnswerARenewalWouldMeet(t *testing.T) {
 
 	stored, err := m.store.Load(key)
 	require.NoError(t, err)
-	require.NotNil(t, stored.MintHold)
+	require.NotNil(t, stored.RenewalHold)
 
 	refusal := m.RefreshRefusal(stored)
 	require.Error(t, refusal)
 	*now = now.Add(time.Hour)
-	status := m.MintHoldStatus(stored, refusal)
+	status := m.RenewalHoldStatus(stored, refusal)
 	require.NotNil(t, status, "the hold expired between the answer and the report, and the two disagree")
-	assert.Equal(t, mintHoldRateLimited, status.Kind)
+	assert.Equal(t, renewalHoldRateLimited, status.Kind)
 	assert.False(t, status.Permanent())
 
 	broken := *stored
 	broken.TokenEndpoint = ""
 	refusal = m.RefreshRefusal(&broken)
 	require.Error(t, refusal)
-	assert.Nil(t, m.MintHoldStatus(&broken, refusal), "a hold masked a credential that cannot mint at all")
+	assert.Nil(t, m.RenewalHoldStatus(&broken, refusal), "a hold masked a credential that cannot mint at all")
 }
 
 // TestAFailedReadIsReportedWhenARefusalCannotBeRemembered: the refusal is
@@ -489,12 +489,12 @@ func TestAFailedReadIsReportedWhenARefusalCannotBeRemembered(t *testing.T) {
 	var warned []string
 	m.Warnf = func(format string, args ...any) { warned = append(warned, fmt.Sprintf(format, args...)) }
 
-	m.rememberMintHold("nowhere", &MintHold{Kind: mintHoldRefused})
+	m.rememberRenewalHold("nowhere", &RenewalHold{Kind: renewalHoldRefused})
 	assert.Empty(t, warned, "a credential that is gone has nothing to remember a refusal on")
 
 	m.store = &Store{inner: unreadableStore{}}
 	m.store.initOnce.Do(func() {})
-	m.rememberMintHold(key, &MintHold{Kind: mintHoldRefused})
+	m.rememberRenewalHold(key, &RenewalHold{Kind: renewalHoldRefused})
 	require.Len(t, warned, 1)
 	assert.Contains(t, warned[0], "could not read the credential")
 }
@@ -541,8 +541,8 @@ func TestARateLimitWithAnUnreadableBodyIsStillHeld(t *testing.T) {
 
 			stored, err := m.store.Load(key)
 			require.NoError(t, err)
-			require.NotNil(t, stored.MintHold)
-			assert.Equal(t, now.Add(300*time.Second).Unix(), stored.MintHold.Until)
+			require.NotNil(t, stored.RenewalHold)
+			assert.Equal(t, now.Add(300*time.Second).Unix(), stored.RenewalHold.Until)
 
 			_, err = m.AccessToken(context.Background())
 			require.Error(t, err)
@@ -567,5 +567,5 @@ func TestARefusalNamingAnUnknownCodeIsNotHeld(t *testing.T) {
 
 	stored, err := m.store.Load(key)
 	require.NoError(t, err)
-	assert.Nil(t, stored.MintHold)
+	assert.Nil(t, stored.RenewalHold)
 }

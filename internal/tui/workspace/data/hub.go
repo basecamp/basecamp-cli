@@ -691,11 +691,16 @@ func mapCardInfo(c basecamp.Card) CardInfo {
 	for _, a := range c.Assignees {
 		names = append(names, a.Name)
 	}
+	stepsTotal := len(c.Steps)
 	stepsDone := 0
 	for _, s := range c.Steps {
 		if s.Completed {
 			stepsDone++
 		}
+	}
+	// Steps embeds at most 100; the card's own counts cover the rest.
+	if c.SubtasksCount > stepsTotal {
+		stepsTotal, stepsDone = c.SubtasksCount, c.SubtasksCompletedCount
 	}
 	return CardInfo{
 		ID:            c.ID,
@@ -704,7 +709,7 @@ func mapCardInfo(c basecamp.Card) CardInfo {
 		DueOn:         c.DueOn,
 		Position:      c.Position,
 		Completed:     c.Completed,
-		StepsTotal:    len(c.Steps),
+		StepsTotal:    stepsTotal,
 		StepsDone:     stepsDone,
 		CommentsCount: c.CommentsCount,
 		BoostEmbed: BoostEmbed{

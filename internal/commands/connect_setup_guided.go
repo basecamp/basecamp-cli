@@ -47,6 +47,7 @@ const connectAgentProfileName = "agent"
 var connectSetupPolicyFlags = []string{
 	"expect-identity", "operator", "operator-profile", "trust", "allow",
 	"serve", "unserve", "class", "watch-completions", "no-watch-completions",
+	"allow-assignments-from-authorized",
 }
 
 // connectGOOS is the platform guided setup checks before connecting. A

@@ -242,6 +242,41 @@ yet. `basecamp auth logout` forgets the credential; there is no useful
 revocation, since the same client would mint another — rotate the client
 secret in Basecamp to end an agent's access.
 
+### Containers, CI and scheduled jobs
+
+An OAuth login refreshes by rotation: each refresh replaces its refresh token,
+and Basecamp signs the whole login out when a replaced token is used again.
+That is how it notices a stolen one. So one login can be **shared** by many
+processes, but never **copied**: two containers that each hold a copy of
+`credentials.json` sign each other out as soon as both have refreshed more
+than a minute apart, which a retry window forgives but a schedule won't.
+
+For containers, CI and cron, pick one:
+
+- **A token that never rotates.** Set `BASECAMP_TOKEN` to a
+  [personal access token](#personal-access-tokens), where your account offers
+  them, injected as a secret. Nothing refreshes, so every replica can hold the
+  same one, and revoking it ends access everywhere.
+- **One shared login, on one host.** Mount one config directory into every
+  replica as a read-write volume, with `BASECAMP_NO_KEYRING=1`. The CLI locks
+  the login while it refreshes, so replicas take turns instead of signing
+  each other out. The lock is an `flock` in that directory, which holds
+  between containers on one host. Across hosts, use one of the other two:
+  the CLI can't tell a shared filesystem whose `flock` is local to each host,
+  and there copies would sign each other out with no warning.
+- **One login per install.** Run `basecamp auth login --device-code` in each
+  install, and keep its config directory to itself.
+
+Never bake `credentials.json` into an image or copy it between machines. The
+CLI says so once, the first time a login refreshes inside a container (again
+later only if it cannot write its marker in the config directory).
+
+If refreshes keep failing, Basecamp blocks sign-ins from that address for a
+while. The CLI then waits out the block instead of retrying on every run
+(`basecamp auth status` shows the wait), and forgets a revoked login after
+its first refusal; sign in again once whatever was using the old copy has
+stopped.
+
 ### Multiple Identities
 
 Use named profiles when the same machine or agent gateway needs more than one Basecamp identity. Each profile has its own stored OAuth credentials and can be selected per command:
@@ -286,17 +321,42 @@ CLI needs upgrading.
 
 **Claude Code:** `basecamp setup claude` — installs the plugin with skills, hooks, and agent workflow support.
 
-**Codex:** `basecamp setup codex` — registers the 37signals marketplace and installs the native plugin with Basecamp skills, diagnostics, and opt-in hooks. In Codex, review and trust the plugin hooks with `/hooks`, then start a new thread to load the skills and hooks.
+**Codex:** `basecamp setup codex` — registers the 37signals marketplace and installs the native plugin with Basecamp skills, diagnostics, and opt-in commit-reference hooks. In Codex, review and trust the plugin hooks with `/hooks`, then start a new thread to load the skills and hooks. The plugin does not inject Basecamp context at session start; Codex selects the skill when a request is relevant or explicitly references Basecamp.
 
 Manual Codex installation uses the same marketplace:
 
 ```bash
 codex plugin marketplace add basecamp/claude-plugins
-codex plugin add basecamp@37signals
+codex plugin add basecamp-cli@37signals
 ```
 
 To pick up a newer plugin version later, refresh the marketplace with
 `codex plugin marketplace upgrade 37signals` (or re-run `basecamp setup codex`).
+
+**Plugin name:** in the 37signals marketplace this plugin is `basecamp-cli`
+(`basecamp-cli@37signals`). It was published as `basecamp`, a name set aside
+for the hosted Basecamp connector plugin, which works through Basecamp's own
+MCP server rather than this CLI. During a deprecation window the marketplace
+keeps `basecamp` as an alias of `basecamp-cli`, so an existing
+`basecamp@37signals` install keeps working and updating; once per agent it
+says the plugin has been renamed. Switch with `basecamp setup claude` or
+`basecamp setup codex` (or `basecamp setup agents`). For Claude Code, setup
+replaces `basecamp@37signals` with `basecamp-cli` at the scopes it was
+installed in. Codex installs have no scopes, so setup adds `basecamp-cli` and
+then removes the old ID. To switch by hand:
+
+```bash
+claude plugin marketplace update 37signals
+claude plugin install basecamp-cli@37signals
+claude plugin uninstall basecamp@37signals
+
+codex plugin marketplace upgrade 37signals
+codex plugin add basecamp-cli@37signals
+codex plugin remove basecamp@37signals
+```
+
+Skills from the plugin are namespaced by its name, so `basecamp:basecamp`
+becomes `basecamp-cli:basecamp`. The CLI itself is still `basecamp`.
 
 **Grok Build:** `basecamp setup grok` — installs the shared skill and confirms it is healthy. There is no Grok plugin: Grok reads user skills from `~/.grok/skills/` and from the cross-agent `~/.agents/skills/`, so the shared `~/.agents/skills/basecamp` skill is the whole integration. Grok is detected by `$GROK_HOME` (default `~/.grok`) or a `grok` binary on `PATH`, in `~/.local/bin`, or in `$GROK_HOME/bin` where its installers put it. Start a new Grok session after setup to load the skill.
 

@@ -53,6 +53,8 @@ var runAgentRemoveCommand = func(ctx context.Context, path, dir string, args ...
 		command.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+configDir)
 	}
 	startRemoveProcessGroup(command)
+	// Replace CommandContext's wrapper-only cancellation before starting it.
+	command.Cancel = func() error { return killRemoveProcessGroup(command) }
 	command.WaitDelay = time.Second
 	stdout, err := command.StdoutPipe()
 	if err != nil {
@@ -71,7 +73,6 @@ var runAgentRemoveCommand = func(ctx context.Context, path, dir string, args ...
 	select {
 	case output = <-read:
 	case <-ctx.Done():
-		_ = killRemoveProcessGroup(command)
 		select {
 		case output = <-read:
 		case <-time.After(time.Second):

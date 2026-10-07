@@ -336,10 +336,10 @@ func runCheckinsQuestionSchedule(cmd *cobra.Command, arg string, pause bool) err
 
 func newCheckinsQuestionNotifyCmd() *cobra.Command {
 	var (
-		onAnswer          bool
-		noOnAnswer        bool
-		includeUnanswered bool
-		noIncludeUnanswer bool
+		onAnswer     bool
+		noOnAnswer   bool
+		responding   bool
+		noResponding bool
 	)
 
 	cmd := &cobra.Command{
@@ -347,12 +347,17 @@ func newCheckinsQuestionNotifyCmd() *cobra.Command {
 		Short: "Change your notification settings for a question",
 		Long: `Change your own notification settings for a check-in question.
 
-Each setting is left alone unless you name it, so you can change one without
-restating the other:
+--on-answer notifies you when someone answers; --responding has the question
+ask you. Each setting is left alone unless you name it, so you can change one
+without restating the other. The exception is Basecamp's own: --responding also
+turns on --on-answer, unless you pass --no-on-answer with it.
 
   basecamp checkins question notify 789 --on-answer
   basecamp checkins question notify 789 --no-on-answer
-  basecamp checkins question notify 789 --digest-include-unanswered`,
+  basecamp checkins question notify 789 --responding
+
+The result is the settings Basecamp answered with, and the command fails if
+they differ from what you asked for.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -366,18 +371,16 @@ restating the other:
 			// setting alone, and an explicit --no-... sends false rather than
 			// being indistinguishable from "not mentioned".
 			req := &basecamp.UpdateQuestionNotificationSettingsRequest{}
-			if req.NotifyOnAnswer, err = checkinsTriState(cmd, "on-answer", "no-on-answer", onAnswer, noOnAnswer); err != nil {
+			if req.Subscribed, err = checkinsTriState(cmd, "on-answer", "no-on-answer", onAnswer, noOnAnswer); err != nil {
 				return err
 			}
-			if req.DigestIncludeUnanswered, err = checkinsTriState(cmd,
-				"digest-include-unanswered", "no-digest-include-unanswered",
-				includeUnanswered, noIncludeUnanswer); err != nil {
+			if req.Responding, err = checkinsTriState(cmd, "responding", "no-responding", responding, noResponding); err != nil {
 				return err
 			}
-			if req.NotifyOnAnswer == nil && req.DigestIncludeUnanswered == nil {
+			if req.Subscribed == nil && req.Responding == nil {
 				return output.ErrUsageHint(
 					"no notification setting was named",
-					"Pass --on-answer/--no-on-answer or --digest-include-unanswered/--no-digest-include-unanswered")
+					"Pass --on-answer/--no-on-answer or --responding/--no-responding")
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -389,8 +392,22 @@ restating the other:
 				return convertSDKError(err)
 			}
 
+			state := checkinsNotificationState(settings)
+			if (req.Responding != nil && *req.Responding != settings.Responding) ||
+				(req.Subscribed != nil && *req.Subscribed != settings.Subscribed) {
+				hint := "Basecamp accepted the request but answered with different settings from the ones asked for. Check the question in Basecamp."
+				if req.Responding != nil && *req.Responding && !settings.Responding {
+					hint = "Basecamp accepted the request but did not add you. It does not ask agent accounts check-in questions."
+				}
+				return &output.Error{
+					Code:    output.CodeAPI,
+					Message: fmt.Sprintf("Basecamp did not apply the change to question %d: %s", questionID, state),
+					Hint:    hint,
+				}
+			}
+
 			return app.OK(settings,
-				output.WithSummary(fmt.Sprintf("Updated your notification settings for question %d", questionID)),
+				output.WithSummary(fmt.Sprintf("Question %d: %s", questionID, state)),
 				output.WithBreadcrumbs(output.Breadcrumb{
 					Action:      "show",
 					Cmd:         fmt.Sprintf("basecamp checkins question show %d", questionID),
@@ -402,10 +419,21 @@ restating the other:
 
 	cmd.Flags().BoolVar(&onAnswer, "on-answer", false, "Notify you when someone answers")
 	cmd.Flags().BoolVar(&noOnAnswer, "no-on-answer", false, "Stop notifying you when someone answers")
-	cmd.Flags().BoolVar(&includeUnanswered, "digest-include-unanswered", false, "Include unanswered questions in your digest")
-	cmd.Flags().BoolVar(&noIncludeUnanswer, "no-digest-include-unanswered", false, "Exclude unanswered questions from your digest")
+	cmd.Flags().BoolVar(&responding, "responding", false, "Have the question ask you")
+	cmd.Flags().BoolVar(&noResponding, "no-responding", false, "Stop the question asking you")
 
 	return cmd
+}
+
+func checkinsNotificationState(settings *basecamp.QuestionNotificationSettings) string {
+	asked, notified := "the question asks you", "you are notified when someone answers"
+	if !settings.Responding {
+		asked = "the question does not ask you"
+	}
+	if !settings.Subscribed {
+		notified = "you are not notified when someone answers"
+	}
+	return asked + ", and " + notified
 }
 
 // checkinsTriState resolves an on/off flag pair into the SDK's *bool.
@@ -664,23 +692,20 @@ Days format: comma-separated (0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)`,
 				}
 			}
 
-			// Parse time of day (default 5:00pm = 17:00)
-			hour := 17
-			minute := 0
+			// Time of day (default 5:00pm)
+			askAt := "17:00"
 			if timeOfDay != "" {
-				hour, minute, err = parseTimeOfDay(timeOfDay)
-				if err != nil {
+				if askAt, err = questionTimeOfDay(timeOfDay); err != nil {
 					return output.ErrUsage("Invalid time format: " + timeOfDay)
 				}
 			}
 
 			req := &basecamp.CreateQuestionRequest{
 				Title: title,
-				Schedule: &basecamp.QuestionSchedule{
+				Schedule: &basecamp.QuestionScheduleInput{
 					Frequency: frequency,
 					Days:      daysArray,
-					Hour:      &hour,
-					Minute:    &minute,
+					TimeOfDay: askAt,
 				},
 			}
 
@@ -792,17 +817,16 @@ You can pass either a question ID or a Basecamp URL:
 			}
 
 			if frequency != "" || timeOfDay != "" || days != "" {
-				schedule := &basecamp.QuestionSchedule{}
+				schedule := &basecamp.QuestionScheduleInput{}
 				if frequency != "" {
 					schedule.Frequency = frequency
 				}
 				if timeOfDay != "" {
-					hour, minute, err := parseTimeOfDay(timeOfDay)
+					askAt, err := questionTimeOfDay(timeOfDay)
 					if err != nil {
 						return output.ErrUsage("Invalid time format: " + timeOfDay)
 					}
-					schedule.Hour = &hour
-					schedule.Minute = &minute
+					schedule.TimeOfDay = askAt
 				}
 				if days != "" {
 					dayParts := strings.Split(days, ",")
@@ -818,6 +842,16 @@ You can pass either a question ID or a Basecamp URL:
 						}
 					}
 					schedule.Days = daysArray
+				}
+
+				current, err := app.Account().Checkins().GetQuestion(cmd.Context(), questionID)
+				if err != nil {
+					return convertSDKError(err)
+				}
+				completeQuestionSchedule(schedule, current.Schedule)
+				if schedule.Frequency == "" || schedule.TimeOfDay == "" {
+					return output.ErrUsageHint("This question has no schedule to carry over",
+						"Pass the whole schedule: --frequency, --time and --days")
 				}
 				req.Schedule = schedule
 			}
@@ -1322,7 +1356,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 				effectiveGroupOn = checkinsNow().Format("2006-01-02")
 			}
 
-			html := richtext.MarkdownToHTML(content)
+			html := richTextToHTML(cmd, content)
 
 			// Resolve inline images
 			html, imgErr := resolveLocalImages(cmd, app, html)
@@ -1377,6 +1411,7 @@ func newCheckinsAnswerCreateCmd(project *string) *cobra.Command {
 
 	allowDash(cmd, "arg:1+")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
@@ -1444,7 +1479,7 @@ You can pass either an answer ID or a Basecamp URL:
 				return output.ErrUsage("Invalid answer ID")
 			}
 
-			answerHTML := richtext.MarkdownToHTML(content)
+			answerHTML := richTextToHTML(cmd, content)
 			answerHTML, resolveErr := resolveLocalImages(cmd, app, answerHTML)
 			if resolveErr != nil {
 				return resolveErr
@@ -1490,12 +1525,50 @@ You can pass either an answer ID or a Basecamp URL:
 
 	allowDash(cmd, "arg:1+")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
 // getQuestionnaireID retrieves the questionnaire ID from a project's dock, handling multi-dock projects.
 func getQuestionnaireID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
 	return getDockToolID(cmd.Context(), app, projectID, "questionnaire", "", "questionnaire", "questionnaire")
+}
+
+// completeQuestionSchedule fills the parts of an update's schedule that no flag
+// set from the question's current schedule. BC3 replaces the whole schedule on
+// update and refuses one without its frequency or time of day.
+func completeQuestionSchedule(schedule *basecamp.QuestionScheduleInput, current *basecamp.QuestionSchedule) {
+	if current == nil {
+		return
+	}
+	if schedule.Frequency == "" {
+		schedule.Frequency = current.Frequency
+	}
+	if schedule.Days == nil {
+		schedule.Days = current.Days
+	}
+	if schedule.TimeOfDay == "" && current.Hour != nil && current.Minute != nil {
+		schedule.TimeOfDay = fmt.Sprintf("%02d:%02d", *current.Hour, *current.Minute)
+	}
+	if schedule.WeekInstance == nil {
+		schedule.WeekInstance = current.WeekInstance
+	}
+	if schedule.StartDate == "" {
+		schedule.StartDate = current.StartDate
+	}
+}
+
+// questionTimeOfDay validates a --time value such as "5:00pm", "5pm" or "17:00"
+// and returns it as the 24-hour "HH:MM" BC3 reads from schedule.time_of_day.
+func questionTimeOfDay(t string) (string, error) {
+	hour, minute, err := parseTimeOfDay(t)
+	if err != nil {
+		return "", err
+	}
+	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return "", fmt.Errorf("time out of range")
+	}
+	return fmt.Sprintf("%02d:%02d", hour, minute), nil
 }
 
 // parseTimeOfDay parses a time string like "5:00pm" or "17:00" and returns hour and minute.
@@ -1521,14 +1594,21 @@ func parseTimeOfDay(t string) (int, int, error) {
 
 	// Handle 12-hour format with am/pm
 	isPM := strings.Contains(t, "pm")
+	hasMeridiem := isPM || strings.Contains(t, "am")
 	t = strings.TrimSuffix(t, "am")
 	t = strings.TrimSuffix(t, "pm")
 	t = strings.TrimSpace(t)
 
 	parts := strings.Split(t, ":")
+	if len(parts) > 2 {
+		return 0, 0, fmt.Errorf("invalid time format")
+	}
 	hour, err := strconv.Atoi(parts[0])
 	if err != nil {
 		return 0, 0, err
+	}
+	if hasMeridiem && (hour < 1 || hour > 12) {
+		return 0, 0, fmt.Errorf("invalid time format")
 	}
 
 	minute := 0

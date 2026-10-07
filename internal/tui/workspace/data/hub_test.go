@@ -699,3 +699,20 @@ func TestMapCardInfo_AllStepsComplete(t *testing.T) {
 	assert.Equal(t, 2, info.StepsTotal)
 	assert.Equal(t, 2, info.StepsDone)
 }
+
+// A card embeds at most 100 steps; the progress count comes from the card's
+// own subtask counts when they say there are more.
+func TestMapCardInfo_StepsPastTheEmbedCap(t *testing.T) {
+	card := basecamp.Card{
+		ID:                     1,
+		Title:                  "Big checklist",
+		SubtasksCount:          135,
+		SubtasksCompletedCount: 40,
+		Steps:                  make([]basecamp.CardStep, 100),
+	}
+
+	info := mapCardInfo(card)
+
+	assert.Equal(t, 135, info.StepsTotal)
+	assert.Equal(t, 40, info.StepsDone)
+}

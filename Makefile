@@ -404,9 +404,15 @@ check-eval-patterns:
 	@command -v $(RUBY) >/dev/null || (echo "Install ruby: the skill-eval patterns are Ruby regexes and cannot be compiled without it" && exit 1)
 	@$(RUBY) scripts/check-eval-patterns.rb
 
+# Verify the eval harness serves live structured CLI help without calling a model.
+.PHONY: check-eval-harness
+check-eval-harness: build
+	@command -v $(RUBY) >/dev/null || (echo "Install ruby: the skill-eval harness requires it" && exit 1)
+	@$(RUBY) skill-evals/run --self-test --basecamp-bin $(BUILD_DIR)/$(BINARY)
+
 # Run all checks (local CI gate)
 .PHONY: check
-check: fmt-check vet lint lint-actions test test-e2e test-sync-skills check-naming check-surface check-skill-drift test-skill-drift check-bare-groups check-lint-lockstep check-smoke-coverage check-eval-patterns check-race-shards provenance-check tidy-check
+check: fmt-check vet lint lint-actions test test-e2e test-sync-skills check-naming check-surface check-skill-drift test-skill-drift check-bare-groups check-lint-lockstep check-smoke-coverage check-eval-patterns check-eval-harness check-race-shards provenance-check tidy-check
 
 # Lint GitHub Actions workflows (requires actionlint + zizmor)
 .PHONY: lint-actions
@@ -580,9 +586,10 @@ tools:
 	}
 
 
-# Run skill evals (requires ANTHROPIC_API_KEY and Ruby)
+# Run skill evals (requires ANTHROPIC_API_KEY and Ruby). Build first so the
+# eval harness can answer structured --agent --help calls from the live CLI.
 .PHONY: skill-eval
-skill-eval:
+skill-eval: build
 	$(MAKE) -C skill-evals eval
 	$(MAKE) -C skill-evals eval-connect
 

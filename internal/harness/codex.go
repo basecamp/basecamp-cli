@@ -17,12 +17,19 @@ import (
 const (
 	// CodexMarketplaceSource is the Git marketplace repository containing Basecamp.
 	CodexMarketplaceSource = "basecamp/claude-plugins"
-	// CodexPluginName is the plugin identifier to install.
-	CodexPluginName = "basecamp"
+	// CodexPluginName is the plugin identifier to install. It was "basecamp"
+	// until that name was set aside for the hosted-connector plugin; see
+	// CodexLegacyPluginKey.
+	CodexPluginName = "basecamp-cli"
 	// CodexMarketplaceName is the marketplace name published by 37signals.
 	CodexMarketplaceName = "37signals"
 	// CodexExpectedPluginKey is the fully qualified Basecamp plugin ID.
 	CodexExpectedPluginKey = CodexPluginName + "@" + CodexMarketplaceName
+	// CodexLegacyPluginKey is the pre-rename plugin ID. During the migration
+	// window the marketplace lists "basecamp" only as an alias of basecamp-cli,
+	// with the same source, so an install under it is always this CLI's (see
+	// ClaudeLegacyPluginKey).
+	CodexLegacyPluginKey = "basecamp@" + CodexMarketplaceName
 
 	// codexQueryTimeout bounds how long the Codex probe may run.
 	codexQueryTimeout = 5 * time.Second
@@ -106,6 +113,10 @@ type codexPluginState struct {
 	Version     string `json:"version"`
 	Installed   bool   `json:"installed"`
 	Enabled     bool   `json:"enabled"`
+
+	// legacyInstalled is set, on the state queryCodexPlugin returns, when
+	// this CLI's plugin is still installed under CodexLegacyPluginKey.
+	legacyInstalled bool
 }
 
 func init() {
@@ -186,6 +197,14 @@ func codexPluginCheck(state codexPluginState, found bool, err error) *StatusChec
 		return codexQueryFailure("Codex Plugin", err)
 	}
 	if !found || !state.Installed {
+		if state.legacyInstalled {
+			return &StatusCheck{
+				Name:    "Codex Plugin",
+				Status:  "fail",
+				Message: "Installed under the old name " + CodexLegacyPluginKey,
+				Hint:    "Run: basecamp setup codex (reinstalls it as " + CodexExpectedPluginKey + ")",
+			}
+		}
 		return &StatusCheck{
 			Name:    "Codex Plugin",
 			Status:  "fail",
@@ -194,10 +213,22 @@ func codexPluginCheck(state codexPluginState, found bool, err error) *StatusChec
 		}
 	}
 	if !state.Enabled {
+		message := "Installed but disabled"
+		if state.legacyInstalled {
+			message += "; the old " + CodexLegacyPluginKey + " copy is still installed too"
+		}
 		return &StatusCheck{
 			Name:    "Codex Plugin",
 			Status:  "fail",
-			Message: "Installed but disabled",
+			Message: message,
+			Hint:    "Run: basecamp setup codex",
+		}
+	}
+	if state.legacyInstalled {
+		return &StatusCheck{
+			Name:    "Codex Plugin",
+			Status:  "warn",
+			Message: "Installed, but the old " + CodexLegacyPluginKey + " copy is still installed too",
 			Hint:    "Run: basecamp setup codex",
 		}
 	}
@@ -282,9 +313,16 @@ func queryCodexPlugin(parent context.Context) (codexPluginState, bool, error) {
 	if envelope.Installed == nil && envelope.Available == nil {
 		return codexPluginState{}, false, fmt.Errorf("%w: missing installed and available fields", errCodexParse)
 	}
+	legacy := false
 	if envelope.Installed != nil {
 		for _, plugin := range *envelope.Installed {
+			if plugin.PluginID == CodexLegacyPluginKey && plugin.Installed {
+				legacy = true
+			}
+		}
+		for _, plugin := range *envelope.Installed {
 			if plugin.PluginID == CodexExpectedPluginKey {
+				plugin.legacyInstalled = legacy
 				return plugin, true, nil
 			}
 		}
@@ -292,11 +330,21 @@ func queryCodexPlugin(parent context.Context) (codexPluginState, bool, error) {
 	if envelope.Available != nil {
 		for _, plugin := range *envelope.Available {
 			if plugin.PluginID == CodexExpectedPluginKey {
+				plugin.legacyInstalled = legacy
 				return plugin, true, nil
 			}
 		}
 	}
-	return codexPluginState{}, false, nil
+	return codexPluginState{legacyInstalled: legacy}, false, nil
+}
+
+// CodexLegacyReplaced reports whether this CLI's plugin is still installed in
+// Codex under CodexLegacyPluginKey while CodexExpectedPluginKey is installed
+// and enabled, so removing the old ID leaves a working plugin behind. A
+// disabled replacement (Codex keeps those installed) doesn't count.
+func CodexLegacyReplaced(ctx context.Context) bool {
+	state, found, err := queryCodexPlugin(ctx)
+	return err == nil && found && state.Installed && state.Enabled && state.legacyInstalled
 }
 
 func codexQueryFailure(name string, err error) *StatusCheck {

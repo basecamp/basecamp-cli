@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -40,12 +42,12 @@ import (
 // read degrades to the old behavior of trying again, never to a refusal
 // nobody can explain.
 const (
-	// mintHoldRefused is the token endpoint refusing the client
+	// renewalHoldRefused is the token endpoint refusing the client
 	// credentials themselves (clientRefusalCodes, or a bare 401/403).
-	mintHoldRefused = "refused"
+	renewalHoldRefused = "refused"
 
-	// mintHoldRateLimited is a 429, held until its Retry-After.
-	mintHoldRateLimited = "rate_limited"
+	// renewalHoldRateLimited is a 429, held until its Retry-After.
+	renewalHoldRateLimited = "rate_limited"
 )
 
 // agentRefusalRecheck is how long a refusal that could reverse is held
@@ -91,14 +93,14 @@ const invalidClientDetail = "token error: invalid_client"
 // resilience.GatingHooks.OnRequestEnd).
 const defaultAgentRateLimitHold = 60 * time.Second
 
-// maxAgentMintHold bounds any hold that expires, both measured to the whole
+// maxRenewalHold bounds any hold that expires, both measured to the whole
 // second rounded up, as every stored deadline is. No hold is written past it
 // (retryAfter already caps a Retry-After at maxAgentConnectLifetime, below
 // it), and a stored expiry further out than this from now —
 // a clock that stepped back, a damaged record — is not believed at all:
 // that hold is ignored and the mint goes out, which is the old behavior and
 // the safe direction to fail in.
-const maxAgentMintHold = time.Hour
+const maxRenewalHold = time.Hour
 
 // MaxServerWait is the longest any wait a server names is waited, whatever
 // the status or the token path: the bound a rate-limit hold is written
@@ -106,24 +108,27 @@ const maxAgentMintHold = time.Hour
 // that waited a server's word for years would be a hang, not a wait.
 const MaxServerWait = maxAgentConnectLifetime
 
-// MintHold is the token endpoint's last refusal of an agent credential's
-// client, remembered so the next mint can answer it without asking again.
+// RenewalHold is the token endpoint's last refusal of a credential's renewal
+// — an agent's mint, or anyone else's refresh — remembered so the next
+// renewal can answer it without asking again. A refresh is only ever held
+// for a rate limit (holdRateLimitedRefresh).
 //
 // Nothing in it came from the server as free text: Detail is the same fixed
 // vocabulary agentMintRefusal renders (see oauthErrorCodes).
-type MintHold struct {
-	// Kind is mintHoldRefused or mintHoldRateLimited.
+type RenewalHold struct {
+	// Kind is renewalHoldRefused or renewalHoldRateLimited.
 	Kind string `json:"kind"`
 
 	// Detail is what the server said, as agentMintRefusal rendered it:
 	// "token error: invalid_client", or "the server answered HTTP 401".
 	Detail string `json:"detail"`
 
-	// Client is agentClientFingerprint of the client credentials the
-	// verdict was about. A hold for any others holds nothing.
+	// Client is renewalSubject of the credential the verdict was about:
+	// an agent's client credentials, or a refresh token. A hold for any
+	// others holds nothing.
 	Client string `json:"client"`
 
-	// Until is when the next mint may be sent, in Unix seconds, rounded
+	// Until is when the next renewal may be sent, in Unix seconds, rounded
 	// up. Zero on an invalid_client refusal means never with these client
 	// credentials; any other hold without one is damaged, and holds nothing.
 	Until int64 `json:"until,omitempty"`
@@ -139,25 +144,100 @@ func agentClientFingerprint(clientID, clientSecret string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
+// renewalSubject is the fingerprint of what renewing creds presents to the
+// token endpoint: an agent's client credentials, or anyone else's refresh
+// token. A hold is about exactly one of these.
+func renewalSubject(creds *Credentials) string {
+	if creds.OAuthType == oauthTypeAgent {
+		return agentClientFingerprint(creds.ClientID, creds.ClientSecret)
+	}
+	return refreshTokenFingerprint(creds.RefreshToken)
+}
+
+// holdRateLimitedRefresh remembers a 429 on a refresh as a hold on the stored
+// login and returns the rate-limit error it is answered with; nil for any
+// other failure.
+//
+// A refresh is renewed by every process that finds the access token near
+// expiry, so a scheduled job resends it on every run. Into one of
+// Basecamp's abuse blocks — which answers every OAuth request from the
+// address for up to a day once enough refreshes have failed — that is a
+// request per run for hours, none of which can succeed. Held, the next run
+// answers locally until the wait is over. The hold is capped at
+// MaxServerWait, as an agent's is: a request inside a block is answered 429
+// without being counted against the address, so the cap costs one request
+// per cap and notices a block lifted early.
+func (m *Manager) holdRateLimitedRefresh(origin string, creds *Credentials, err error) error {
+	var refusal *basecamp.Error
+	if !errors.As(err, &refusal) || refusal.HTTPStatus != http.StatusTooManyRequests {
+		return nil
+	}
+	now := m.now()
+	named := time.Duration(refusal.RetryAfter) * time.Second
+	wait := named
+	if wait <= 0 {
+		wait = defaultAgentRateLimitHold
+	}
+	hold := &RenewalHold{
+		Kind:   renewalHoldRateLimited,
+		Detail: fmt.Sprintf("the server answered HTTP %d", refusal.HTTPStatus),
+		Client: refreshTokenFingerprint(creds.RefreshToken),
+		Until:  ceilUnix(now.Add(min(wait, MaxServerWait))),
+	}
+	m.rememberRenewalHold(origin, hold)
+
+	held := time.Unix(hold.Until, 0).UTC().Format(time.RFC3339)
+	var msg string
+	switch {
+	case named > MaxServerWait:
+		msg = fmt.Sprintf("Basecamp rate-limited refreshing this login until %s; the refresh is held until %s, then tried once to see whether the limit has lifted",
+			now.Add(named).UTC().Format(time.RFC3339), held)
+	case named > 0:
+		msg = fmt.Sprintf("Basecamp rate-limited refreshing this login until %s; the refresh is held until then", held)
+	default:
+		msg = fmt.Sprintf("Basecamp rate-limited refreshing this login; the refresh is held until %s", held)
+	}
+	e := holdRateLimitError(hold, now, msg)
+	if refusal.RetryAfter > holdWait(hold, now) {
+		// Held for the cap; what the server asked for is kept too, so a
+		// caller can say both.
+		e.Cause = errors.Join(e.Cause, namedWaitError(refusal.RetryAfter))
+	}
+	// The SDK's refusal stays in the chain, so its request id and OAuth
+	// error still reach the error envelope.
+	e.Cause = errors.Join(e.Cause, err)
+	return e
+}
+
+// refreshTokenFingerprint names a refresh token the way
+// agentClientFingerprint names a client: a truncated SHA-256 under a label of
+// its own, so a hold can say which refresh token it is about without
+// carrying it. A hold for any other refresh token — one another process has
+// rotated to, or a fresh login's — holds nothing.
+func refreshTokenFingerprint(refreshToken string) string {
+	sum := sha256.Sum256([]byte("basecamp-cli refresh hold\x00" + refreshToken))
+	return hex.EncodeToString(sum[:16])
+}
+
 // mintHoldFor is the hold a refused mint leaves, or nil for a failure the
 // next command should simply retry — a 5xx, a redirect, a response that
 // does not name the client. A 429 is told by resp's status; refused is a
 // verdict on the client credentials, and code the RFC 6749 §5.2 code the
 // server named with it, if any.
-func mintHoldFor(mint *agentMint, resp *http.Response, detail, code string, refused bool, now time.Time) *MintHold {
-	hold := &MintHold{
+func mintHoldFor(mint *agentMint, resp *http.Response, detail, code string, refused bool, now time.Time) *RenewalHold {
+	hold := &RenewalHold{
 		Detail: detail,
 		Client: agentClientFingerprint(mint.clientID, mint.clientSecret),
 	}
 	switch {
 	case resp.StatusCode == http.StatusTooManyRequests:
-		hold.Kind = mintHoldRateLimited
+		hold.Kind = renewalHoldRateLimited
 		hold.Until = ceilUnix(now.Add(rateLimitHold(resp.Header, now)))
 	case refused && code == "invalid_client":
 		// Permanent for this secret; see agentRefusalRecheck.
-		hold.Kind = mintHoldRefused
+		hold.Kind = renewalHoldRefused
 	case refused:
-		hold.Kind = mintHoldRefused
+		hold.Kind = renewalHoldRefused
 		hold.Until = ceilUnix(now.Add(agentRefusalRecheck))
 	default:
 		return nil
@@ -185,7 +265,7 @@ func ceilUnix(t time.Time) int64 {
 // stored deadline, rounded up. The stored deadline is the one source of
 // truth; every wait reported for a hold is read from it, so a caller that
 // retries after the wait it was told is never held locally.
-func holdWait(hold *MintHold, now time.Time) int {
+func holdWait(hold *RenewalHold, now time.Time) int {
 	return int(math.Ceil(time.Unix(hold.Until, 0).Sub(now).Seconds()))
 }
 
@@ -193,7 +273,7 @@ func holdWait(hold *MintHold, now time.Time) int {
 // whether the 429 that set it or a later mint it held. It carries the
 // hold's wait, read from its deadline, for a caller that reschedules the
 // mint itself (RetryAfter): one sent any sooner is answered by the hold.
-func holdRateLimitError(hold *MintHold, now time.Time, message string) *output.Error {
+func holdRateLimitError(hold *RenewalHold, now time.Time, message string) *output.Error {
 	wait := holdWait(hold, now)
 	e := output.ErrRateLimit(wait)
 	e.Message = message
@@ -203,15 +283,15 @@ func holdRateLimitError(hold *MintHold, now time.Time, message string) *output.E
 	return e
 }
 
-// errMintHeld is in the cause of every error a stored hold answers a mint
+// errRenewalHeld is in the cause of every error a stored hold answers a mint
 // with, so a report can tell the hold's answer from any other.
-var errMintHeld = errors.New("a stored hold answered the mint")
+var errRenewalHeld = errors.New("a stored hold answered the mint")
 
-// heldMint is the error a remembered verdict answers a mint with, or nil
+// heldRenewal is the error a remembered verdict answers a mint with, or nil
 // when the mint may be sent. It reads nothing but creds, so a report can
 // ask it too.
-func (m *Manager) heldMint(creds *Credentials) error {
-	hold := creds.MintHold
+func (m *Manager) heldRenewal(creds *Credentials) error {
+	hold := creds.RenewalHold
 	now := m.now()
 	if !hold.holds(creds, now) {
 		return nil
@@ -219,11 +299,15 @@ func (m *Manager) heldMint(creds *Credentials) error {
 	when := time.Unix(hold.Until, 0).UTC().Format(time.RFC3339)
 
 	switch hold.Kind {
-	case mintHoldRateLimited:
-		e := holdRateLimitError(hold, now, fmt.Sprintf("Minting an agent token is held until %s: the token endpoint rate-limited the last attempt (%s)", when, hold.Detail))
-		e.Cause = errors.Join(e.Cause, errMintHeld)
+	case renewalHoldRateLimited:
+		what := "Minting an agent token"
+		if creds.OAuthType != oauthTypeAgent {
+			what = "Refreshing this login"
+		}
+		e := holdRateLimitError(hold, now, fmt.Sprintf("%s is held until %s: the token endpoint rate-limited the last attempt (%s)", what, when, hold.Detail))
+		e.Cause = errors.Join(e.Cause, errRenewalHeld)
 		return e
-	case mintHoldRefused:
+	case renewalHoldRefused:
 		msg := "Minting an agent token was refused (" + hold.Detail + ")"
 		if hold.Until == 0 {
 			msg += "; the refusal is remembered, and this client secret will not be sent again — a login with a new secret replaces it"
@@ -231,7 +315,7 @@ func (m *Manager) heldMint(creds *Credentials) error {
 			msg += "; the refusal is remembered until " + when + ", when this client secret will be tried once more — a login with a new secret replaces it sooner"
 		}
 		e := output.ErrAuth(msg)
-		e.Cause = errors.Join(ErrAgentCredentialRefused, errMintHeld)
+		e.Cause = errors.Join(ErrAgentCredentialRefused, errRenewalHeld)
 		if hold.Until != 0 {
 			// The hold ends on its own, so the remedy is to wait for it.
 			e.Hint = fmt.Sprintf("Wait until %s (%d seconds); the next mint after that sends this client secret once more", when, holdWait(hold, now))
@@ -241,9 +325,9 @@ func (m *Manager) heldMint(creds *Credentials) error {
 	return nil
 }
 
-// MintHoldStatus is a stored mint hold as a report shows it: what would
+// RenewalHoldStatus is a stored mint hold as a report shows it: what would
 // happen to a renewal sent now.
-type MintHoldStatus struct {
+type RenewalHoldStatus struct {
 	// Kind is "refused" or "rate_limited".
 	Kind string `json:"kind"`
 
@@ -262,21 +346,21 @@ type MintHoldStatus struct {
 
 // Permanent reports whether the hold never ends with these client
 // credentials — only a login with a new secret replaces it.
-func (s *MintHoldStatus) Permanent() bool { return s.Until == "" }
+func (s *RenewalHoldStatus) Permanent() bool { return s.Until == "" }
 
-// MintHoldStatus is the stored hold of creds as a report shows it, when
+// RenewalHoldStatus is the stored hold of creds as a report shows it, when
 // refusal — RefreshRefusal's answer for the same creds — is that hold's
 // answer; nil otherwise. It reads no clock: whether the hold is what a
 // renewal sent now would meet was decided once, by RefreshRefusal, and a
 // local failure checked ahead of the hold (a missing token endpoint) is
 // not masked by it.
-func (m *Manager) MintHoldStatus(creds *Credentials, refusal error) *MintHoldStatus {
-	if creds == nil || creds.MintHold == nil || !errors.Is(refusal, errMintHeld) {
+func (m *Manager) RenewalHoldStatus(creds *Credentials, refusal error) *RenewalHoldStatus {
+	if creds == nil || creds.RenewalHold == nil || !errors.Is(refusal, errRenewalHeld) {
 		return nil
 	}
-	hold := creds.MintHold
+	hold := creds.RenewalHold
 	e := output.AsError(refusal)
-	status := &MintHoldStatus{Kind: hold.Kind, Detail: hold.Detail, Message: e.Message, Hint: e.Hint}
+	status := &RenewalHoldStatus{Kind: hold.Kind, Detail: hold.Detail, Message: e.Message, Hint: e.Hint}
 	if hold.Until != 0 {
 		status.Until = time.Unix(hold.Until, 0).UTC().Format(time.RFC3339)
 	}
@@ -285,26 +369,31 @@ func (m *Manager) MintHoldStatus(creds *Credentials, refusal error) *MintHoldSta
 
 // holds reports whether a stored hold is one this version believes: about
 // these client credentials, of a kind it knows, and — where it expires —
-// expiring in the future and within maxAgentMintHold. Only an
+// expiring in the future and within maxRenewalHold. Only an
 // invalid_client refusal never expires. Anything else is ignored, and the mint goes out.
-func (hold *MintHold) holds(creds *Credentials, now time.Time) bool {
-	if hold == nil || hold.Client != agentClientFingerprint(creds.ClientID, creds.ClientSecret) {
+func (hold *RenewalHold) holds(creds *Credentials, now time.Time) bool {
+	if hold == nil || hold.Client != renewalSubject(creds) {
+		return false
+	}
+	// A refresh is only ever held for a rate limit: a refused refresh token
+	// is forgotten outright rather than held (refreshCredential).
+	if creds.OAuthType != oauthTypeAgent && hold.Kind != renewalHoldRateLimited {
 		return false
 	}
 	switch {
-	case hold.Kind == mintHoldRefused && hold.Until == 0:
+	case hold.Kind == renewalHoldRefused && hold.Until == 0:
 		return hold.Detail == invalidClientDetail
-	case hold.Kind == mintHoldRefused, hold.Kind == mintHoldRateLimited:
+	case hold.Kind == renewalHoldRefused, hold.Kind == renewalHoldRateLimited:
 		// The bound is rounded up as a stored deadline is, so a hold of
-		// the full maxAgentMintHold set partway through a second is
+		// the full maxRenewalHold set partway through a second is
 		// believed.
-		return hold.Until > 0 && now.Before(time.Unix(hold.Until, 0)) && hold.Until <= ceilUnix(now.Add(maxAgentMintHold))
+		return hold.Until > 0 && now.Before(time.Unix(hold.Until, 0)) && hold.Until <= ceilUnix(now.Add(maxRenewalHold))
 	default:
 		return false
 	}
 }
 
-// rememberMintHold records hold on the stored credential — if the stored
+// rememberRenewalHold records hold on the stored credential — if the stored
 // credential is still the one the verdict was about.
 //
 // The caller holds the credential key's cross-process lock, so no login can
@@ -322,7 +411,7 @@ func (hold *MintHold) holds(creds *Credentials, now time.Time) bool {
 //
 // A failure to write is reported and otherwise changes nothing — the
 // refusal is what the caller sees either way.
-func (m *Manager) rememberMintHold(origin string, hold *MintHold) {
+func (m *Manager) rememberRenewalHold(origin string, hold *RenewalHold) {
 	current, err := m.store.Load(origin)
 	if err != nil {
 		// A credential removed since the mint (a logout) has nothing to
@@ -332,10 +421,10 @@ func (m *Manager) rememberMintHold(origin string, hold *MintHold) {
 		}
 		return
 	}
-	if current.OAuthType != oauthTypeAgent || agentClientFingerprint(current.ClientID, current.ClientSecret) != hold.Client {
+	if renewalSubject(current) != hold.Client {
 		return
 	}
-	current.MintHold = hold
+	current.RenewalHold = hold
 	if err := m.store.Save(origin, current); err != nil {
 		m.warnf("warning: could not remember the token endpoint's refusal for %s, so the next command will ask again: %v", origin, err)
 	}

@@ -140,6 +140,7 @@ ARG basecamp docs documents create 01 [content]
 ARG basecamp docs download 00 <upload-id|url>
 ARG basecamp docs folder create 00 <name>
 ARG basecamp docs folders create 00 <name>
+ARG basecamp docs move 00 <id|url>
 ARG basecamp docs new-version 00 <upload-id|url>
 ARG basecamp docs new-version 01 <file>
 ARG basecamp docs replace 00 <upload-id|url>
@@ -163,6 +164,7 @@ ARG basecamp documents documents create 01 [content]
 ARG basecamp documents download 00 <upload-id|url>
 ARG basecamp documents folder create 00 <name>
 ARG basecamp documents folders create 00 <name>
+ARG basecamp documents move 00 <id|url>
 ARG basecamp documents new-version 00 <upload-id|url>
 ARG basecamp documents new-version 01 <file>
 ARG basecamp documents replace 00 <upload-id|url>
@@ -187,6 +189,7 @@ ARG basecamp file documents create 01 [content]
 ARG basecamp file download 00 <upload-id|url>
 ARG basecamp file folder create 00 <name>
 ARG basecamp file folders create 00 <name>
+ARG basecamp file move 00 <id|url>
 ARG basecamp file new-version 00 <upload-id|url>
 ARG basecamp file new-version 01 <file>
 ARG basecamp file replace 00 <upload-id|url>
@@ -210,6 +213,7 @@ ARG basecamp files documents create 01 [content]
 ARG basecamp files download 00 <upload-id|url>
 ARG basecamp files folder create 00 <name>
 ARG basecamp files folders create 00 <name>
+ARG basecamp files move 00 <id|url>
 ARG basecamp files new-version 00 <upload-id|url>
 ARG basecamp files new-version 01 <file>
 ARG basecamp files replace 00 <upload-id|url>
@@ -233,6 +237,7 @@ ARG basecamp folders documents create 01 [content]
 ARG basecamp folders download 00 <upload-id|url>
 ARG basecamp folders folder create 00 <name>
 ARG basecamp folders folders create 00 <name>
+ARG basecamp folders move 00 <id|url>
 ARG basecamp folders new-version 00 <upload-id|url>
 ARG basecamp folders new-version 01 <file>
 ARG basecamp folders replace 00 <upload-id|url>
@@ -451,6 +456,7 @@ ARG basecamp vault documents create 01 [content]
 ARG basecamp vault download 00 <upload-id|url>
 ARG basecamp vault folder create 00 <name>
 ARG basecamp vault folders create 00 <name>
+ARG basecamp vault move 00 <id|url>
 ARG basecamp vault new-version 00 <upload-id|url>
 ARG basecamp vault new-version 01 <file>
 ARG basecamp vault replace 00 <upload-id|url>
@@ -474,6 +480,7 @@ ARG basecamp vaults documents create 01 [content]
 ARG basecamp vaults download 00 <upload-id|url>
 ARG basecamp vaults folder create 00 <name>
 ARG basecamp vaults folders create 00 <name>
+ARG basecamp vaults move 00 <id|url>
 ARG basecamp vaults new-version 00 <upload-id|url>
 ARG basecamp vaults new-version 01 <file>
 ARG basecamp vaults replace 00 <upload-id|url>
@@ -697,6 +704,7 @@ CMD basecamp docs folders
 CMD basecamp docs folders create
 CMD basecamp docs folders list
 CMD basecamp docs list
+CMD basecamp docs move
 CMD basecamp docs new-version
 CMD basecamp docs replace
 CMD basecamp docs restore
@@ -736,6 +744,7 @@ CMD basecamp documents folders
 CMD basecamp documents folders create
 CMD basecamp documents folders list
 CMD basecamp documents list
+CMD basecamp documents move
 CMD basecamp documents new-version
 CMD basecamp documents replace
 CMD basecamp documents restore
@@ -779,6 +788,7 @@ CMD basecamp file folders
 CMD basecamp file folders create
 CMD basecamp file folders list
 CMD basecamp file list
+CMD basecamp file move
 CMD basecamp file new-version
 CMD basecamp file replace
 CMD basecamp file restore
@@ -817,6 +827,7 @@ CMD basecamp files folders
 CMD basecamp files folders create
 CMD basecamp files folders list
 CMD basecamp files list
+CMD basecamp files move
 CMD basecamp files new-version
 CMD basecamp files replace
 CMD basecamp files restore
@@ -855,6 +866,7 @@ CMD basecamp folders folders
 CMD basecamp folders folders create
 CMD basecamp folders folders list
 CMD basecamp folders list
+CMD basecamp folders move
 CMD basecamp folders new-version
 CMD basecamp folders replace
 CMD basecamp folders restore
@@ -1155,6 +1167,7 @@ CMD basecamp vault folders
 CMD basecamp vault folders create
 CMD basecamp vault folders list
 CMD basecamp vault list
+CMD basecamp vault move
 CMD basecamp vault new-version
 CMD basecamp vault replace
 CMD basecamp vault restore
@@ -1193,6 +1206,7 @@ CMD basecamp vaults folders
 CMD basecamp vaults folders create
 CMD basecamp vaults folders list
 CMD basecamp vaults list
+CMD basecamp vaults move
 CMD basecamp vaults new-version
 CMD basecamp vaults replace
 CMD basecamp vaults restore
@@ -3249,6 +3263,7 @@ FLAG basecamp cards create --cache-dir type=string
 FLAG basecamp cards create --card-table type=string
 FLAG basecamp cards create --column type=string
 FLAG basecamp cards create --count type=bool
+FLAG basecamp cards create --format type=string
 FLAG basecamp cards create --help type=bool
 FLAG basecamp cards create --hints type=bool
 FLAG basecamp cards create --ids-only type=bool
@@ -3643,6 +3658,7 @@ FLAG basecamp cards update --cache-dir type=string
 FLAG basecamp cards update --card-table type=string
 FLAG basecamp cards update --count type=bool
 FLAG basecamp cards update --due type=string
+FLAG basecamp cards update --format type=string
 FLAG basecamp cards update --help type=bool
 FLAG basecamp cards update --hints type=bool
 FLAG basecamp cards update --ids-only type=bool
@@ -4082,6 +4098,7 @@ FLAG basecamp checkin answer create --attach type=stringArray
 FLAG basecamp checkin answer create --cache-dir type=string
 FLAG basecamp checkin answer create --count type=bool
 FLAG basecamp checkin answer create --date type=string
+FLAG basecamp checkin answer create --format type=string
 FLAG basecamp checkin answer create --help type=bool
 FLAG basecamp checkin answer create --hints type=bool
 FLAG basecamp checkin answer create --ids-only type=bool
@@ -4129,6 +4146,7 @@ FLAG basecamp checkin answer update --account type=string
 FLAG basecamp checkin answer update --agent type=bool
 FLAG basecamp checkin answer update --cache-dir type=string
 FLAG basecamp checkin answer update --count type=bool
+FLAG basecamp checkin answer update --format type=string
 FLAG basecamp checkin answer update --help type=bool
 FLAG basecamp checkin answer update --hints type=bool
 FLAG basecamp checkin answer update --ids-only type=bool
@@ -4252,7 +4270,6 @@ FLAG basecamp checkin question notify --account type=string
 FLAG basecamp checkin question notify --agent type=bool
 FLAG basecamp checkin question notify --cache-dir type=string
 FLAG basecamp checkin question notify --count type=bool
-FLAG basecamp checkin question notify --digest-include-unanswered type=bool
 FLAG basecamp checkin question notify --help type=bool
 FLAG basecamp checkin question notify --hints type=bool
 FLAG basecamp checkin question notify --ids-only type=bool
@@ -4261,15 +4278,16 @@ FLAG basecamp checkin question notify --jq type=string
 FLAG basecamp checkin question notify --json type=bool
 FLAG basecamp checkin question notify --markdown type=bool
 FLAG basecamp checkin question notify --md type=bool
-FLAG basecamp checkin question notify --no-digest-include-unanswered type=bool
 FLAG basecamp checkin question notify --no-hints type=bool
 FLAG basecamp checkin question notify --no-on-answer type=bool
+FLAG basecamp checkin question notify --no-responding type=bool
 FLAG basecamp checkin question notify --no-stats type=bool
 FLAG basecamp checkin question notify --on-answer type=bool
 FLAG basecamp checkin question notify --profile type=string
 FLAG basecamp checkin question notify --project type=string
 FLAG basecamp checkin question notify --questionnaire type=string
 FLAG basecamp checkin question notify --quiet type=bool
+FLAG basecamp checkin question notify --responding type=bool
 FLAG basecamp checkin question notify --stats type=bool
 FLAG basecamp checkin question notify --styled type=bool
 FLAG basecamp checkin question notify --todolist type=string
@@ -4469,6 +4487,7 @@ FLAG basecamp checkins answer create --attach type=stringArray
 FLAG basecamp checkins answer create --cache-dir type=string
 FLAG basecamp checkins answer create --count type=bool
 FLAG basecamp checkins answer create --date type=string
+FLAG basecamp checkins answer create --format type=string
 FLAG basecamp checkins answer create --help type=bool
 FLAG basecamp checkins answer create --hints type=bool
 FLAG basecamp checkins answer create --ids-only type=bool
@@ -4516,6 +4535,7 @@ FLAG basecamp checkins answer update --account type=string
 FLAG basecamp checkins answer update --agent type=bool
 FLAG basecamp checkins answer update --cache-dir type=string
 FLAG basecamp checkins answer update --count type=bool
+FLAG basecamp checkins answer update --format type=string
 FLAG basecamp checkins answer update --help type=bool
 FLAG basecamp checkins answer update --hints type=bool
 FLAG basecamp checkins answer update --ids-only type=bool
@@ -4639,7 +4659,6 @@ FLAG basecamp checkins question notify --account type=string
 FLAG basecamp checkins question notify --agent type=bool
 FLAG basecamp checkins question notify --cache-dir type=string
 FLAG basecamp checkins question notify --count type=bool
-FLAG basecamp checkins question notify --digest-include-unanswered type=bool
 FLAG basecamp checkins question notify --help type=bool
 FLAG basecamp checkins question notify --hints type=bool
 FLAG basecamp checkins question notify --ids-only type=bool
@@ -4648,15 +4667,16 @@ FLAG basecamp checkins question notify --jq type=string
 FLAG basecamp checkins question notify --json type=bool
 FLAG basecamp checkins question notify --markdown type=bool
 FLAG basecamp checkins question notify --md type=bool
-FLAG basecamp checkins question notify --no-digest-include-unanswered type=bool
 FLAG basecamp checkins question notify --no-hints type=bool
 FLAG basecamp checkins question notify --no-on-answer type=bool
+FLAG basecamp checkins question notify --no-responding type=bool
 FLAG basecamp checkins question notify --no-stats type=bool
 FLAG basecamp checkins question notify --on-answer type=bool
 FLAG basecamp checkins question notify --profile type=string
 FLAG basecamp checkins question notify --project type=string
 FLAG basecamp checkins question notify --questionnaire type=string
 FLAG basecamp checkins question notify --quiet type=bool
+FLAG basecamp checkins question notify --responding type=bool
 FLAG basecamp checkins question notify --stats type=bool
 FLAG basecamp checkins question notify --styled type=bool
 FLAG basecamp checkins question notify --todolist type=string
@@ -4893,6 +4913,7 @@ FLAG basecamp comments create --attach type=stringArray
 FLAG basecamp comments create --cache-dir type=string
 FLAG basecamp comments create --count type=bool
 FLAG basecamp comments create --edit type=bool
+FLAG basecamp comments create --format type=string
 FLAG basecamp comments create --help type=bool
 FLAG basecamp comments create --hints type=bool
 FLAG basecamp comments create --ids-only type=bool
@@ -5025,6 +5046,7 @@ FLAG basecamp comments update --account type=string
 FLAG basecamp comments update --agent type=bool
 FLAG basecamp comments update --cache-dir type=string
 FLAG basecamp comments update --count type=bool
+FLAG basecamp comments update --format type=string
 FLAG basecamp comments update --help type=bool
 FLAG basecamp comments update --hints type=bool
 FLAG basecamp comments update --ids-only type=bool
@@ -5439,6 +5461,7 @@ FLAG basecamp docs doc create --cache-dir type=string
 FLAG basecamp docs doc create --count type=bool
 FLAG basecamp docs doc create --draft type=bool
 FLAG basecamp docs doc create --folder type=string
+FLAG basecamp docs doc create --format type=string
 FLAG basecamp docs doc create --help type=bool
 FLAG basecamp docs doc create --hints type=bool
 FLAG basecamp docs doc create --ids-only type=bool
@@ -5519,6 +5542,7 @@ FLAG basecamp docs document create --cache-dir type=string
 FLAG basecamp docs document create --count type=bool
 FLAG basecamp docs document create --draft type=bool
 FLAG basecamp docs document create --folder type=string
+FLAG basecamp docs document create --format type=string
 FLAG basecamp docs document create --help type=bool
 FLAG basecamp docs document create --hints type=bool
 FLAG basecamp docs document create --ids-only type=bool
@@ -5599,6 +5623,7 @@ FLAG basecamp docs documents create --cache-dir type=string
 FLAG basecamp docs documents create --count type=bool
 FLAG basecamp docs documents create --draft type=bool
 FLAG basecamp docs documents create --folder type=string
+FLAG basecamp docs documents create --format type=string
 FLAG basecamp docs documents create --help type=bool
 FLAG basecamp docs documents create --hints type=bool
 FLAG basecamp docs documents create --ids-only type=bool
@@ -5849,6 +5874,31 @@ FLAG basecamp docs list --styled type=bool
 FLAG basecamp docs list --todolist type=string
 FLAG basecamp docs list --vault type=string
 FLAG basecamp docs list --verbose type=count
+FLAG basecamp docs move --account type=string
+FLAG basecamp docs move --agent type=bool
+FLAG basecamp docs move --cache-dir type=string
+FLAG basecamp docs move --count type=bool
+FLAG basecamp docs move --folder type=string
+FLAG basecamp docs move --help type=bool
+FLAG basecamp docs move --hints type=bool
+FLAG basecamp docs move --ids-only type=bool
+FLAG basecamp docs move --in type=string
+FLAG basecamp docs move --jq type=string
+FLAG basecamp docs move --json type=bool
+FLAG basecamp docs move --markdown type=bool
+FLAG basecamp docs move --md type=bool
+FLAG basecamp docs move --no-hints type=bool
+FLAG basecamp docs move --no-stats type=bool
+FLAG basecamp docs move --position type=int
+FLAG basecamp docs move --profile type=string
+FLAG basecamp docs move --project type=string
+FLAG basecamp docs move --quiet type=bool
+FLAG basecamp docs move --stats type=bool
+FLAG basecamp docs move --styled type=bool
+FLAG basecamp docs move --to type=string
+FLAG basecamp docs move --todolist type=string
+FLAG basecamp docs move --vault type=string
+FLAG basecamp docs move --verbose type=count
 FLAG basecamp docs new-version --account type=string
 FLAG basecamp docs new-version --agent type=bool
 FLAG basecamp docs new-version --base-name type=string
@@ -5856,6 +5906,7 @@ FLAG basecamp docs new-version --cache-dir type=string
 FLAG basecamp docs new-version --count type=bool
 FLAG basecamp docs new-version --description type=string
 FLAG basecamp docs new-version --folder type=string
+FLAG basecamp docs new-version --format type=string
 FLAG basecamp docs new-version --help type=bool
 FLAG basecamp docs new-version --hints type=bool
 FLAG basecamp docs new-version --ids-only type=bool
@@ -5881,6 +5932,7 @@ FLAG basecamp docs replace --cache-dir type=string
 FLAG basecamp docs replace --count type=bool
 FLAG basecamp docs replace --description type=string
 FLAG basecamp docs replace --folder type=string
+FLAG basecamp docs replace --format type=string
 FLAG basecamp docs replace --help type=bool
 FLAG basecamp docs replace --hints type=bool
 FLAG basecamp docs replace --ids-only type=bool
@@ -5979,6 +6031,7 @@ FLAG basecamp docs update --cache-dir type=string
 FLAG basecamp docs update --content type=string
 FLAG basecamp docs update --count type=bool
 FLAG basecamp docs update --folder type=string
+FLAG basecamp docs update --format type=string
 FLAG basecamp docs update --help type=bool
 FLAG basecamp docs update --hints type=bool
 FLAG basecamp docs update --ids-only type=bool
@@ -6031,6 +6084,7 @@ FLAG basecamp docs upload create --cache-dir type=string
 FLAG basecamp docs upload create --count type=bool
 FLAG basecamp docs upload create --description type=string
 FLAG basecamp docs upload create --folder type=string
+FLAG basecamp docs upload create --format type=string
 FLAG basecamp docs upload create --help type=bool
 FLAG basecamp docs upload create --hints type=bool
 FLAG basecamp docs upload create --ids-only type=bool
@@ -6108,6 +6162,7 @@ FLAG basecamp docs uploads create --cache-dir type=string
 FLAG basecamp docs uploads create --count type=bool
 FLAG basecamp docs uploads create --description type=string
 FLAG basecamp docs uploads create --folder type=string
+FLAG basecamp docs uploads create --format type=string
 FLAG basecamp docs uploads create --help type=bool
 FLAG basecamp docs uploads create --hints type=bool
 FLAG basecamp docs uploads create --ids-only type=bool
@@ -6429,6 +6484,7 @@ FLAG basecamp documents doc create --cache-dir type=string
 FLAG basecamp documents doc create --count type=bool
 FLAG basecamp documents doc create --draft type=bool
 FLAG basecamp documents doc create --folder type=string
+FLAG basecamp documents doc create --format type=string
 FLAG basecamp documents doc create --help type=bool
 FLAG basecamp documents doc create --hints type=bool
 FLAG basecamp documents doc create --ids-only type=bool
@@ -6509,6 +6565,7 @@ FLAG basecamp documents document create --cache-dir type=string
 FLAG basecamp documents document create --count type=bool
 FLAG basecamp documents document create --draft type=bool
 FLAG basecamp documents document create --folder type=string
+FLAG basecamp documents document create --format type=string
 FLAG basecamp documents document create --help type=bool
 FLAG basecamp documents document create --hints type=bool
 FLAG basecamp documents document create --ids-only type=bool
@@ -6589,6 +6646,7 @@ FLAG basecamp documents documents create --cache-dir type=string
 FLAG basecamp documents documents create --count type=bool
 FLAG basecamp documents documents create --draft type=bool
 FLAG basecamp documents documents create --folder type=string
+FLAG basecamp documents documents create --format type=string
 FLAG basecamp documents documents create --help type=bool
 FLAG basecamp documents documents create --hints type=bool
 FLAG basecamp documents documents create --ids-only type=bool
@@ -6839,6 +6897,31 @@ FLAG basecamp documents list --styled type=bool
 FLAG basecamp documents list --todolist type=string
 FLAG basecamp documents list --vault type=string
 FLAG basecamp documents list --verbose type=count
+FLAG basecamp documents move --account type=string
+FLAG basecamp documents move --agent type=bool
+FLAG basecamp documents move --cache-dir type=string
+FLAG basecamp documents move --count type=bool
+FLAG basecamp documents move --folder type=string
+FLAG basecamp documents move --help type=bool
+FLAG basecamp documents move --hints type=bool
+FLAG basecamp documents move --ids-only type=bool
+FLAG basecamp documents move --in type=string
+FLAG basecamp documents move --jq type=string
+FLAG basecamp documents move --json type=bool
+FLAG basecamp documents move --markdown type=bool
+FLAG basecamp documents move --md type=bool
+FLAG basecamp documents move --no-hints type=bool
+FLAG basecamp documents move --no-stats type=bool
+FLAG basecamp documents move --position type=int
+FLAG basecamp documents move --profile type=string
+FLAG basecamp documents move --project type=string
+FLAG basecamp documents move --quiet type=bool
+FLAG basecamp documents move --stats type=bool
+FLAG basecamp documents move --styled type=bool
+FLAG basecamp documents move --to type=string
+FLAG basecamp documents move --todolist type=string
+FLAG basecamp documents move --vault type=string
+FLAG basecamp documents move --verbose type=count
 FLAG basecamp documents new-version --account type=string
 FLAG basecamp documents new-version --agent type=bool
 FLAG basecamp documents new-version --base-name type=string
@@ -6846,6 +6929,7 @@ FLAG basecamp documents new-version --cache-dir type=string
 FLAG basecamp documents new-version --count type=bool
 FLAG basecamp documents new-version --description type=string
 FLAG basecamp documents new-version --folder type=string
+FLAG basecamp documents new-version --format type=string
 FLAG basecamp documents new-version --help type=bool
 FLAG basecamp documents new-version --hints type=bool
 FLAG basecamp documents new-version --ids-only type=bool
@@ -6871,6 +6955,7 @@ FLAG basecamp documents replace --cache-dir type=string
 FLAG basecamp documents replace --count type=bool
 FLAG basecamp documents replace --description type=string
 FLAG basecamp documents replace --folder type=string
+FLAG basecamp documents replace --format type=string
 FLAG basecamp documents replace --help type=bool
 FLAG basecamp documents replace --hints type=bool
 FLAG basecamp documents replace --ids-only type=bool
@@ -6969,6 +7054,7 @@ FLAG basecamp documents update --cache-dir type=string
 FLAG basecamp documents update --content type=string
 FLAG basecamp documents update --count type=bool
 FLAG basecamp documents update --folder type=string
+FLAG basecamp documents update --format type=string
 FLAG basecamp documents update --help type=bool
 FLAG basecamp documents update --hints type=bool
 FLAG basecamp documents update --ids-only type=bool
@@ -7021,6 +7107,7 @@ FLAG basecamp documents upload create --cache-dir type=string
 FLAG basecamp documents upload create --count type=bool
 FLAG basecamp documents upload create --description type=string
 FLAG basecamp documents upload create --folder type=string
+FLAG basecamp documents upload create --format type=string
 FLAG basecamp documents upload create --help type=bool
 FLAG basecamp documents upload create --hints type=bool
 FLAG basecamp documents upload create --ids-only type=bool
@@ -7098,6 +7185,7 @@ FLAG basecamp documents uploads create --cache-dir type=string
 FLAG basecamp documents uploads create --count type=bool
 FLAG basecamp documents uploads create --description type=string
 FLAG basecamp documents uploads create --folder type=string
+FLAG basecamp documents uploads create --format type=string
 FLAG basecamp documents uploads create --help type=bool
 FLAG basecamp documents uploads create --hints type=bool
 FLAG basecamp documents uploads create --ids-only type=bool
@@ -7520,6 +7608,7 @@ FLAG basecamp file doc create --cache-dir type=string
 FLAG basecamp file doc create --count type=bool
 FLAG basecamp file doc create --draft type=bool
 FLAG basecamp file doc create --folder type=string
+FLAG basecamp file doc create --format type=string
 FLAG basecamp file doc create --help type=bool
 FLAG basecamp file doc create --hints type=bool
 FLAG basecamp file doc create --ids-only type=bool
@@ -7600,6 +7689,7 @@ FLAG basecamp file document create --cache-dir type=string
 FLAG basecamp file document create --count type=bool
 FLAG basecamp file document create --draft type=bool
 FLAG basecamp file document create --folder type=string
+FLAG basecamp file document create --format type=string
 FLAG basecamp file document create --help type=bool
 FLAG basecamp file document create --hints type=bool
 FLAG basecamp file document create --ids-only type=bool
@@ -7680,6 +7770,7 @@ FLAG basecamp file documents create --cache-dir type=string
 FLAG basecamp file documents create --count type=bool
 FLAG basecamp file documents create --draft type=bool
 FLAG basecamp file documents create --folder type=string
+FLAG basecamp file documents create --format type=string
 FLAG basecamp file documents create --help type=bool
 FLAG basecamp file documents create --hints type=bool
 FLAG basecamp file documents create --ids-only type=bool
@@ -7930,6 +8021,31 @@ FLAG basecamp file list --styled type=bool
 FLAG basecamp file list --todolist type=string
 FLAG basecamp file list --vault type=string
 FLAG basecamp file list --verbose type=count
+FLAG basecamp file move --account type=string
+FLAG basecamp file move --agent type=bool
+FLAG basecamp file move --cache-dir type=string
+FLAG basecamp file move --count type=bool
+FLAG basecamp file move --folder type=string
+FLAG basecamp file move --help type=bool
+FLAG basecamp file move --hints type=bool
+FLAG basecamp file move --ids-only type=bool
+FLAG basecamp file move --in type=string
+FLAG basecamp file move --jq type=string
+FLAG basecamp file move --json type=bool
+FLAG basecamp file move --markdown type=bool
+FLAG basecamp file move --md type=bool
+FLAG basecamp file move --no-hints type=bool
+FLAG basecamp file move --no-stats type=bool
+FLAG basecamp file move --position type=int
+FLAG basecamp file move --profile type=string
+FLAG basecamp file move --project type=string
+FLAG basecamp file move --quiet type=bool
+FLAG basecamp file move --stats type=bool
+FLAG basecamp file move --styled type=bool
+FLAG basecamp file move --to type=string
+FLAG basecamp file move --todolist type=string
+FLAG basecamp file move --vault type=string
+FLAG basecamp file move --verbose type=count
 FLAG basecamp file new-version --account type=string
 FLAG basecamp file new-version --agent type=bool
 FLAG basecamp file new-version --base-name type=string
@@ -7937,6 +8053,7 @@ FLAG basecamp file new-version --cache-dir type=string
 FLAG basecamp file new-version --count type=bool
 FLAG basecamp file new-version --description type=string
 FLAG basecamp file new-version --folder type=string
+FLAG basecamp file new-version --format type=string
 FLAG basecamp file new-version --help type=bool
 FLAG basecamp file new-version --hints type=bool
 FLAG basecamp file new-version --ids-only type=bool
@@ -7962,6 +8079,7 @@ FLAG basecamp file replace --cache-dir type=string
 FLAG basecamp file replace --count type=bool
 FLAG basecamp file replace --description type=string
 FLAG basecamp file replace --folder type=string
+FLAG basecamp file replace --format type=string
 FLAG basecamp file replace --help type=bool
 FLAG basecamp file replace --hints type=bool
 FLAG basecamp file replace --ids-only type=bool
@@ -8060,6 +8178,7 @@ FLAG basecamp file update --cache-dir type=string
 FLAG basecamp file update --content type=string
 FLAG basecamp file update --count type=bool
 FLAG basecamp file update --folder type=string
+FLAG basecamp file update --format type=string
 FLAG basecamp file update --help type=bool
 FLAG basecamp file update --hints type=bool
 FLAG basecamp file update --ids-only type=bool
@@ -8112,6 +8231,7 @@ FLAG basecamp file upload create --cache-dir type=string
 FLAG basecamp file upload create --count type=bool
 FLAG basecamp file upload create --description type=string
 FLAG basecamp file upload create --folder type=string
+FLAG basecamp file upload create --format type=string
 FLAG basecamp file upload create --help type=bool
 FLAG basecamp file upload create --hints type=bool
 FLAG basecamp file upload create --ids-only type=bool
@@ -8189,6 +8309,7 @@ FLAG basecamp file uploads create --cache-dir type=string
 FLAG basecamp file uploads create --count type=bool
 FLAG basecamp file uploads create --description type=string
 FLAG basecamp file uploads create --folder type=string
+FLAG basecamp file uploads create --format type=string
 FLAG basecamp file uploads create --help type=bool
 FLAG basecamp file uploads create --hints type=bool
 FLAG basecamp file uploads create --ids-only type=bool
@@ -8489,6 +8610,7 @@ FLAG basecamp files doc create --cache-dir type=string
 FLAG basecamp files doc create --count type=bool
 FLAG basecamp files doc create --draft type=bool
 FLAG basecamp files doc create --folder type=string
+FLAG basecamp files doc create --format type=string
 FLAG basecamp files doc create --help type=bool
 FLAG basecamp files doc create --hints type=bool
 FLAG basecamp files doc create --ids-only type=bool
@@ -8569,6 +8691,7 @@ FLAG basecamp files document create --cache-dir type=string
 FLAG basecamp files document create --count type=bool
 FLAG basecamp files document create --draft type=bool
 FLAG basecamp files document create --folder type=string
+FLAG basecamp files document create --format type=string
 FLAG basecamp files document create --help type=bool
 FLAG basecamp files document create --hints type=bool
 FLAG basecamp files document create --ids-only type=bool
@@ -8649,6 +8772,7 @@ FLAG basecamp files documents create --cache-dir type=string
 FLAG basecamp files documents create --count type=bool
 FLAG basecamp files documents create --draft type=bool
 FLAG basecamp files documents create --folder type=string
+FLAG basecamp files documents create --format type=string
 FLAG basecamp files documents create --help type=bool
 FLAG basecamp files documents create --hints type=bool
 FLAG basecamp files documents create --ids-only type=bool
@@ -8899,6 +9023,31 @@ FLAG basecamp files list --styled type=bool
 FLAG basecamp files list --todolist type=string
 FLAG basecamp files list --vault type=string
 FLAG basecamp files list --verbose type=count
+FLAG basecamp files move --account type=string
+FLAG basecamp files move --agent type=bool
+FLAG basecamp files move --cache-dir type=string
+FLAG basecamp files move --count type=bool
+FLAG basecamp files move --folder type=string
+FLAG basecamp files move --help type=bool
+FLAG basecamp files move --hints type=bool
+FLAG basecamp files move --ids-only type=bool
+FLAG basecamp files move --in type=string
+FLAG basecamp files move --jq type=string
+FLAG basecamp files move --json type=bool
+FLAG basecamp files move --markdown type=bool
+FLAG basecamp files move --md type=bool
+FLAG basecamp files move --no-hints type=bool
+FLAG basecamp files move --no-stats type=bool
+FLAG basecamp files move --position type=int
+FLAG basecamp files move --profile type=string
+FLAG basecamp files move --project type=string
+FLAG basecamp files move --quiet type=bool
+FLAG basecamp files move --stats type=bool
+FLAG basecamp files move --styled type=bool
+FLAG basecamp files move --to type=string
+FLAG basecamp files move --todolist type=string
+FLAG basecamp files move --vault type=string
+FLAG basecamp files move --verbose type=count
 FLAG basecamp files new-version --account type=string
 FLAG basecamp files new-version --agent type=bool
 FLAG basecamp files new-version --base-name type=string
@@ -8906,6 +9055,7 @@ FLAG basecamp files new-version --cache-dir type=string
 FLAG basecamp files new-version --count type=bool
 FLAG basecamp files new-version --description type=string
 FLAG basecamp files new-version --folder type=string
+FLAG basecamp files new-version --format type=string
 FLAG basecamp files new-version --help type=bool
 FLAG basecamp files new-version --hints type=bool
 FLAG basecamp files new-version --ids-only type=bool
@@ -8931,6 +9081,7 @@ FLAG basecamp files replace --cache-dir type=string
 FLAG basecamp files replace --count type=bool
 FLAG basecamp files replace --description type=string
 FLAG basecamp files replace --folder type=string
+FLAG basecamp files replace --format type=string
 FLAG basecamp files replace --help type=bool
 FLAG basecamp files replace --hints type=bool
 FLAG basecamp files replace --ids-only type=bool
@@ -9029,6 +9180,7 @@ FLAG basecamp files update --cache-dir type=string
 FLAG basecamp files update --content type=string
 FLAG basecamp files update --count type=bool
 FLAG basecamp files update --folder type=string
+FLAG basecamp files update --format type=string
 FLAG basecamp files update --help type=bool
 FLAG basecamp files update --hints type=bool
 FLAG basecamp files update --ids-only type=bool
@@ -9081,6 +9233,7 @@ FLAG basecamp files upload create --cache-dir type=string
 FLAG basecamp files upload create --count type=bool
 FLAG basecamp files upload create --description type=string
 FLAG basecamp files upload create --folder type=string
+FLAG basecamp files upload create --format type=string
 FLAG basecamp files upload create --help type=bool
 FLAG basecamp files upload create --hints type=bool
 FLAG basecamp files upload create --ids-only type=bool
@@ -9158,6 +9311,7 @@ FLAG basecamp files uploads create --cache-dir type=string
 FLAG basecamp files uploads create --count type=bool
 FLAG basecamp files uploads create --description type=string
 FLAG basecamp files uploads create --folder type=string
+FLAG basecamp files uploads create --format type=string
 FLAG basecamp files uploads create --help type=bool
 FLAG basecamp files uploads create --hints type=bool
 FLAG basecamp files uploads create --ids-only type=bool
@@ -9458,6 +9612,7 @@ FLAG basecamp folders doc create --cache-dir type=string
 FLAG basecamp folders doc create --count type=bool
 FLAG basecamp folders doc create --draft type=bool
 FLAG basecamp folders doc create --folder type=string
+FLAG basecamp folders doc create --format type=string
 FLAG basecamp folders doc create --help type=bool
 FLAG basecamp folders doc create --hints type=bool
 FLAG basecamp folders doc create --ids-only type=bool
@@ -9538,6 +9693,7 @@ FLAG basecamp folders document create --cache-dir type=string
 FLAG basecamp folders document create --count type=bool
 FLAG basecamp folders document create --draft type=bool
 FLAG basecamp folders document create --folder type=string
+FLAG basecamp folders document create --format type=string
 FLAG basecamp folders document create --help type=bool
 FLAG basecamp folders document create --hints type=bool
 FLAG basecamp folders document create --ids-only type=bool
@@ -9618,6 +9774,7 @@ FLAG basecamp folders documents create --cache-dir type=string
 FLAG basecamp folders documents create --count type=bool
 FLAG basecamp folders documents create --draft type=bool
 FLAG basecamp folders documents create --folder type=string
+FLAG basecamp folders documents create --format type=string
 FLAG basecamp folders documents create --help type=bool
 FLAG basecamp folders documents create --hints type=bool
 FLAG basecamp folders documents create --ids-only type=bool
@@ -9868,6 +10025,31 @@ FLAG basecamp folders list --styled type=bool
 FLAG basecamp folders list --todolist type=string
 FLAG basecamp folders list --vault type=string
 FLAG basecamp folders list --verbose type=count
+FLAG basecamp folders move --account type=string
+FLAG basecamp folders move --agent type=bool
+FLAG basecamp folders move --cache-dir type=string
+FLAG basecamp folders move --count type=bool
+FLAG basecamp folders move --folder type=string
+FLAG basecamp folders move --help type=bool
+FLAG basecamp folders move --hints type=bool
+FLAG basecamp folders move --ids-only type=bool
+FLAG basecamp folders move --in type=string
+FLAG basecamp folders move --jq type=string
+FLAG basecamp folders move --json type=bool
+FLAG basecamp folders move --markdown type=bool
+FLAG basecamp folders move --md type=bool
+FLAG basecamp folders move --no-hints type=bool
+FLAG basecamp folders move --no-stats type=bool
+FLAG basecamp folders move --position type=int
+FLAG basecamp folders move --profile type=string
+FLAG basecamp folders move --project type=string
+FLAG basecamp folders move --quiet type=bool
+FLAG basecamp folders move --stats type=bool
+FLAG basecamp folders move --styled type=bool
+FLAG basecamp folders move --to type=string
+FLAG basecamp folders move --todolist type=string
+FLAG basecamp folders move --vault type=string
+FLAG basecamp folders move --verbose type=count
 FLAG basecamp folders new-version --account type=string
 FLAG basecamp folders new-version --agent type=bool
 FLAG basecamp folders new-version --base-name type=string
@@ -9875,6 +10057,7 @@ FLAG basecamp folders new-version --cache-dir type=string
 FLAG basecamp folders new-version --count type=bool
 FLAG basecamp folders new-version --description type=string
 FLAG basecamp folders new-version --folder type=string
+FLAG basecamp folders new-version --format type=string
 FLAG basecamp folders new-version --help type=bool
 FLAG basecamp folders new-version --hints type=bool
 FLAG basecamp folders new-version --ids-only type=bool
@@ -9900,6 +10083,7 @@ FLAG basecamp folders replace --cache-dir type=string
 FLAG basecamp folders replace --count type=bool
 FLAG basecamp folders replace --description type=string
 FLAG basecamp folders replace --folder type=string
+FLAG basecamp folders replace --format type=string
 FLAG basecamp folders replace --help type=bool
 FLAG basecamp folders replace --hints type=bool
 FLAG basecamp folders replace --ids-only type=bool
@@ -9998,6 +10182,7 @@ FLAG basecamp folders update --cache-dir type=string
 FLAG basecamp folders update --content type=string
 FLAG basecamp folders update --count type=bool
 FLAG basecamp folders update --folder type=string
+FLAG basecamp folders update --format type=string
 FLAG basecamp folders update --help type=bool
 FLAG basecamp folders update --hints type=bool
 FLAG basecamp folders update --ids-only type=bool
@@ -10050,6 +10235,7 @@ FLAG basecamp folders upload create --cache-dir type=string
 FLAG basecamp folders upload create --count type=bool
 FLAG basecamp folders upload create --description type=string
 FLAG basecamp folders upload create --folder type=string
+FLAG basecamp folders upload create --format type=string
 FLAG basecamp folders upload create --help type=bool
 FLAG basecamp folders upload create --hints type=bool
 FLAG basecamp folders upload create --ids-only type=bool
@@ -10127,6 +10313,7 @@ FLAG basecamp folders uploads create --cache-dir type=string
 FLAG basecamp folders uploads create --count type=bool
 FLAG basecamp folders uploads create --description type=string
 FLAG basecamp folders uploads create --folder type=string
+FLAG basecamp folders uploads create --format type=string
 FLAG basecamp folders uploads create --help type=bool
 FLAG basecamp folders uploads create --hints type=bool
 FLAG basecamp folders uploads create --ids-only type=bool
@@ -11118,6 +11305,7 @@ FLAG basecamp messages create --category type=string
 FLAG basecamp messages create --count type=bool
 FLAG basecamp messages create --draft type=bool
 FLAG basecamp messages create --edit type=bool
+FLAG basecamp messages create --format type=string
 FLAG basecamp messages create --help type=bool
 FLAG basecamp messages create --hints type=bool
 FLAG basecamp messages create --ids-only type=bool
@@ -11309,6 +11497,7 @@ FLAG basecamp messages update --body type=string
 FLAG basecamp messages update --cache-dir type=string
 FLAG basecamp messages update --category type=string
 FLAG basecamp messages update --count type=bool
+FLAG basecamp messages update --format type=string
 FLAG basecamp messages update --help type=bool
 FLAG basecamp messages update --hints type=bool
 FLAG basecamp messages update --ids-only type=bool
@@ -11533,6 +11722,7 @@ FLAG basecamp msgs create --category type=string
 FLAG basecamp msgs create --count type=bool
 FLAG basecamp msgs create --draft type=bool
 FLAG basecamp msgs create --edit type=bool
+FLAG basecamp msgs create --format type=string
 FLAG basecamp msgs create --help type=bool
 FLAG basecamp msgs create --hints type=bool
 FLAG basecamp msgs create --ids-only type=bool
@@ -11724,6 +11914,7 @@ FLAG basecamp msgs update --body type=string
 FLAG basecamp msgs update --cache-dir type=string
 FLAG basecamp msgs update --category type=string
 FLAG basecamp msgs update --count type=bool
+FLAG basecamp msgs update --format type=string
 FLAG basecamp msgs update --help type=bool
 FLAG basecamp msgs update --hints type=bool
 FLAG basecamp msgs update --ids-only type=bool
@@ -11770,6 +11961,7 @@ FLAG basecamp notes set --agent type=bool
 FLAG basecamp notes set --cache-dir type=string
 FLAG basecamp notes set --count type=bool
 FLAG basecamp notes set --file type=string
+FLAG basecamp notes set --format type=string
 FLAG basecamp notes set --help type=bool
 FLAG basecamp notes set --hints type=bool
 FLAG basecamp notes set --ids-only type=bool
@@ -13070,6 +13262,7 @@ FLAG basecamp schedule create --desc type=string
 FLAG basecamp schedule create --description type=string
 FLAG basecamp schedule create --end type=string
 FLAG basecamp schedule create --ends-at type=string
+FLAG basecamp schedule create --format type=string
 FLAG basecamp schedule create --help type=bool
 FLAG basecamp schedule create --hints type=bool
 FLAG basecamp schedule create --ids-only type=bool
@@ -13209,6 +13402,7 @@ FLAG basecamp schedule update --desc type=string
 FLAG basecamp schedule update --description type=string
 FLAG basecamp schedule update --end type=string
 FLAG basecamp schedule update --ends-at type=string
+FLAG basecamp schedule update --format type=string
 FLAG basecamp schedule update --help type=bool
 FLAG basecamp schedule update --hints type=bool
 FLAG basecamp schedule update --ids-only type=bool
@@ -15505,6 +15699,7 @@ FLAG basecamp todos create --cache-dir type=string
 FLAG basecamp todos create --count type=bool
 FLAG basecamp todos create --description type=string
 FLAG basecamp todos create --due type=string
+FLAG basecamp todos create --format type=string
 FLAG basecamp todos create --help type=bool
 FLAG basecamp todos create --hints type=bool
 FLAG basecamp todos create --ids-only type=bool
@@ -15711,6 +15906,7 @@ FLAG basecamp todos sweep --complete type=bool
 FLAG basecamp todos sweep --count type=bool
 FLAG basecamp todos sweep --done type=bool
 FLAG basecamp todos sweep --dry-run type=bool
+FLAG basecamp todos sweep --format type=string
 FLAG basecamp todos sweep --help type=bool
 FLAG basecamp todos sweep --hints type=bool
 FLAG basecamp todos sweep --ids-only type=bool
@@ -15779,6 +15975,7 @@ FLAG basecamp todos update --cache-dir type=string
 FLAG basecamp todos update --count type=bool
 FLAG basecamp todos update --description type=string
 FLAG basecamp todos update --due type=string
+FLAG basecamp todos update --format type=string
 FLAG basecamp todos update --help type=bool
 FLAG basecamp todos update --hints type=bool
 FLAG basecamp todos update --ids-only type=bool
@@ -16179,6 +16376,7 @@ FLAG basecamp upload --cache-dir type=string
 FLAG basecamp upload --count type=bool
 FLAG basecamp upload --description type=string
 FLAG basecamp upload --folder type=string
+FLAG basecamp upload --format type=string
 FLAG basecamp upload --help type=bool
 FLAG basecamp upload --hints type=bool
 FLAG basecamp upload --ids-only type=bool
@@ -16227,6 +16425,7 @@ FLAG basecamp uploads create --cache-dir type=string
 FLAG basecamp uploads create --count type=bool
 FLAG basecamp uploads create --description type=string
 FLAG basecamp uploads create --folder type=string
+FLAG basecamp uploads create --format type=string
 FLAG basecamp uploads create --help type=bool
 FLAG basecamp uploads create --hints type=bool
 FLAG basecamp uploads create --ids-only type=bool
@@ -16421,6 +16620,7 @@ FLAG basecamp vault doc create --cache-dir type=string
 FLAG basecamp vault doc create --count type=bool
 FLAG basecamp vault doc create --draft type=bool
 FLAG basecamp vault doc create --folder type=string
+FLAG basecamp vault doc create --format type=string
 FLAG basecamp vault doc create --help type=bool
 FLAG basecamp vault doc create --hints type=bool
 FLAG basecamp vault doc create --ids-only type=bool
@@ -16501,6 +16701,7 @@ FLAG basecamp vault document create --cache-dir type=string
 FLAG basecamp vault document create --count type=bool
 FLAG basecamp vault document create --draft type=bool
 FLAG basecamp vault document create --folder type=string
+FLAG basecamp vault document create --format type=string
 FLAG basecamp vault document create --help type=bool
 FLAG basecamp vault document create --hints type=bool
 FLAG basecamp vault document create --ids-only type=bool
@@ -16581,6 +16782,7 @@ FLAG basecamp vault documents create --cache-dir type=string
 FLAG basecamp vault documents create --count type=bool
 FLAG basecamp vault documents create --draft type=bool
 FLAG basecamp vault documents create --folder type=string
+FLAG basecamp vault documents create --format type=string
 FLAG basecamp vault documents create --help type=bool
 FLAG basecamp vault documents create --hints type=bool
 FLAG basecamp vault documents create --ids-only type=bool
@@ -16831,6 +17033,31 @@ FLAG basecamp vault list --styled type=bool
 FLAG basecamp vault list --todolist type=string
 FLAG basecamp vault list --vault type=string
 FLAG basecamp vault list --verbose type=count
+FLAG basecamp vault move --account type=string
+FLAG basecamp vault move --agent type=bool
+FLAG basecamp vault move --cache-dir type=string
+FLAG basecamp vault move --count type=bool
+FLAG basecamp vault move --folder type=string
+FLAG basecamp vault move --help type=bool
+FLAG basecamp vault move --hints type=bool
+FLAG basecamp vault move --ids-only type=bool
+FLAG basecamp vault move --in type=string
+FLAG basecamp vault move --jq type=string
+FLAG basecamp vault move --json type=bool
+FLAG basecamp vault move --markdown type=bool
+FLAG basecamp vault move --md type=bool
+FLAG basecamp vault move --no-hints type=bool
+FLAG basecamp vault move --no-stats type=bool
+FLAG basecamp vault move --position type=int
+FLAG basecamp vault move --profile type=string
+FLAG basecamp vault move --project type=string
+FLAG basecamp vault move --quiet type=bool
+FLAG basecamp vault move --stats type=bool
+FLAG basecamp vault move --styled type=bool
+FLAG basecamp vault move --to type=string
+FLAG basecamp vault move --todolist type=string
+FLAG basecamp vault move --vault type=string
+FLAG basecamp vault move --verbose type=count
 FLAG basecamp vault new-version --account type=string
 FLAG basecamp vault new-version --agent type=bool
 FLAG basecamp vault new-version --base-name type=string
@@ -16838,6 +17065,7 @@ FLAG basecamp vault new-version --cache-dir type=string
 FLAG basecamp vault new-version --count type=bool
 FLAG basecamp vault new-version --description type=string
 FLAG basecamp vault new-version --folder type=string
+FLAG basecamp vault new-version --format type=string
 FLAG basecamp vault new-version --help type=bool
 FLAG basecamp vault new-version --hints type=bool
 FLAG basecamp vault new-version --ids-only type=bool
@@ -16863,6 +17091,7 @@ FLAG basecamp vault replace --cache-dir type=string
 FLAG basecamp vault replace --count type=bool
 FLAG basecamp vault replace --description type=string
 FLAG basecamp vault replace --folder type=string
+FLAG basecamp vault replace --format type=string
 FLAG basecamp vault replace --help type=bool
 FLAG basecamp vault replace --hints type=bool
 FLAG basecamp vault replace --ids-only type=bool
@@ -16961,6 +17190,7 @@ FLAG basecamp vault update --cache-dir type=string
 FLAG basecamp vault update --content type=string
 FLAG basecamp vault update --count type=bool
 FLAG basecamp vault update --folder type=string
+FLAG basecamp vault update --format type=string
 FLAG basecamp vault update --help type=bool
 FLAG basecamp vault update --hints type=bool
 FLAG basecamp vault update --ids-only type=bool
@@ -17013,6 +17243,7 @@ FLAG basecamp vault upload create --cache-dir type=string
 FLAG basecamp vault upload create --count type=bool
 FLAG basecamp vault upload create --description type=string
 FLAG basecamp vault upload create --folder type=string
+FLAG basecamp vault upload create --format type=string
 FLAG basecamp vault upload create --help type=bool
 FLAG basecamp vault upload create --hints type=bool
 FLAG basecamp vault upload create --ids-only type=bool
@@ -17090,6 +17321,7 @@ FLAG basecamp vault uploads create --cache-dir type=string
 FLAG basecamp vault uploads create --count type=bool
 FLAG basecamp vault uploads create --description type=string
 FLAG basecamp vault uploads create --folder type=string
+FLAG basecamp vault uploads create --format type=string
 FLAG basecamp vault uploads create --help type=bool
 FLAG basecamp vault uploads create --hints type=bool
 FLAG basecamp vault uploads create --ids-only type=bool
@@ -17390,6 +17622,7 @@ FLAG basecamp vaults doc create --cache-dir type=string
 FLAG basecamp vaults doc create --count type=bool
 FLAG basecamp vaults doc create --draft type=bool
 FLAG basecamp vaults doc create --folder type=string
+FLAG basecamp vaults doc create --format type=string
 FLAG basecamp vaults doc create --help type=bool
 FLAG basecamp vaults doc create --hints type=bool
 FLAG basecamp vaults doc create --ids-only type=bool
@@ -17470,6 +17703,7 @@ FLAG basecamp vaults document create --cache-dir type=string
 FLAG basecamp vaults document create --count type=bool
 FLAG basecamp vaults document create --draft type=bool
 FLAG basecamp vaults document create --folder type=string
+FLAG basecamp vaults document create --format type=string
 FLAG basecamp vaults document create --help type=bool
 FLAG basecamp vaults document create --hints type=bool
 FLAG basecamp vaults document create --ids-only type=bool
@@ -17550,6 +17784,7 @@ FLAG basecamp vaults documents create --cache-dir type=string
 FLAG basecamp vaults documents create --count type=bool
 FLAG basecamp vaults documents create --draft type=bool
 FLAG basecamp vaults documents create --folder type=string
+FLAG basecamp vaults documents create --format type=string
 FLAG basecamp vaults documents create --help type=bool
 FLAG basecamp vaults documents create --hints type=bool
 FLAG basecamp vaults documents create --ids-only type=bool
@@ -17800,6 +18035,31 @@ FLAG basecamp vaults list --styled type=bool
 FLAG basecamp vaults list --todolist type=string
 FLAG basecamp vaults list --vault type=string
 FLAG basecamp vaults list --verbose type=count
+FLAG basecamp vaults move --account type=string
+FLAG basecamp vaults move --agent type=bool
+FLAG basecamp vaults move --cache-dir type=string
+FLAG basecamp vaults move --count type=bool
+FLAG basecamp vaults move --folder type=string
+FLAG basecamp vaults move --help type=bool
+FLAG basecamp vaults move --hints type=bool
+FLAG basecamp vaults move --ids-only type=bool
+FLAG basecamp vaults move --in type=string
+FLAG basecamp vaults move --jq type=string
+FLAG basecamp vaults move --json type=bool
+FLAG basecamp vaults move --markdown type=bool
+FLAG basecamp vaults move --md type=bool
+FLAG basecamp vaults move --no-hints type=bool
+FLAG basecamp vaults move --no-stats type=bool
+FLAG basecamp vaults move --position type=int
+FLAG basecamp vaults move --profile type=string
+FLAG basecamp vaults move --project type=string
+FLAG basecamp vaults move --quiet type=bool
+FLAG basecamp vaults move --stats type=bool
+FLAG basecamp vaults move --styled type=bool
+FLAG basecamp vaults move --to type=string
+FLAG basecamp vaults move --todolist type=string
+FLAG basecamp vaults move --vault type=string
+FLAG basecamp vaults move --verbose type=count
 FLAG basecamp vaults new-version --account type=string
 FLAG basecamp vaults new-version --agent type=bool
 FLAG basecamp vaults new-version --base-name type=string
@@ -17807,6 +18067,7 @@ FLAG basecamp vaults new-version --cache-dir type=string
 FLAG basecamp vaults new-version --count type=bool
 FLAG basecamp vaults new-version --description type=string
 FLAG basecamp vaults new-version --folder type=string
+FLAG basecamp vaults new-version --format type=string
 FLAG basecamp vaults new-version --help type=bool
 FLAG basecamp vaults new-version --hints type=bool
 FLAG basecamp vaults new-version --ids-only type=bool
@@ -17832,6 +18093,7 @@ FLAG basecamp vaults replace --cache-dir type=string
 FLAG basecamp vaults replace --count type=bool
 FLAG basecamp vaults replace --description type=string
 FLAG basecamp vaults replace --folder type=string
+FLAG basecamp vaults replace --format type=string
 FLAG basecamp vaults replace --help type=bool
 FLAG basecamp vaults replace --hints type=bool
 FLAG basecamp vaults replace --ids-only type=bool
@@ -17930,6 +18192,7 @@ FLAG basecamp vaults update --cache-dir type=string
 FLAG basecamp vaults update --content type=string
 FLAG basecamp vaults update --count type=bool
 FLAG basecamp vaults update --folder type=string
+FLAG basecamp vaults update --format type=string
 FLAG basecamp vaults update --help type=bool
 FLAG basecamp vaults update --hints type=bool
 FLAG basecamp vaults update --ids-only type=bool
@@ -17982,6 +18245,7 @@ FLAG basecamp vaults upload create --cache-dir type=string
 FLAG basecamp vaults upload create --count type=bool
 FLAG basecamp vaults upload create --description type=string
 FLAG basecamp vaults upload create --folder type=string
+FLAG basecamp vaults upload create --format type=string
 FLAG basecamp vaults upload create --help type=bool
 FLAG basecamp vaults upload create --hints type=bool
 FLAG basecamp vaults upload create --ids-only type=bool
@@ -18059,6 +18323,7 @@ FLAG basecamp vaults uploads create --cache-dir type=string
 FLAG basecamp vaults uploads create --count type=bool
 FLAG basecamp vaults uploads create --description type=string
 FLAG basecamp vaults uploads create --folder type=string
+FLAG basecamp vaults uploads create --format type=string
 FLAG basecamp vaults uploads create --help type=bool
 FLAG basecamp vaults uploads create --hints type=bool
 FLAG basecamp vaults uploads create --ids-only type=bool
@@ -18764,6 +19029,7 @@ SUB basecamp docs folders
 SUB basecamp docs folders create
 SUB basecamp docs folders list
 SUB basecamp docs list
+SUB basecamp docs move
 SUB basecamp docs new-version
 SUB basecamp docs replace
 SUB basecamp docs restore
@@ -18803,6 +19069,7 @@ SUB basecamp documents folders
 SUB basecamp documents folders create
 SUB basecamp documents folders list
 SUB basecamp documents list
+SUB basecamp documents move
 SUB basecamp documents new-version
 SUB basecamp documents replace
 SUB basecamp documents restore
@@ -18846,6 +19113,7 @@ SUB basecamp file folders
 SUB basecamp file folders create
 SUB basecamp file folders list
 SUB basecamp file list
+SUB basecamp file move
 SUB basecamp file new-version
 SUB basecamp file replace
 SUB basecamp file restore
@@ -18884,6 +19152,7 @@ SUB basecamp files folders
 SUB basecamp files folders create
 SUB basecamp files folders list
 SUB basecamp files list
+SUB basecamp files move
 SUB basecamp files new-version
 SUB basecamp files replace
 SUB basecamp files restore
@@ -18922,6 +19191,7 @@ SUB basecamp folders folders
 SUB basecamp folders folders create
 SUB basecamp folders folders list
 SUB basecamp folders list
+SUB basecamp folders move
 SUB basecamp folders new-version
 SUB basecamp folders replace
 SUB basecamp folders restore
@@ -19222,6 +19492,7 @@ SUB basecamp vault folders
 SUB basecamp vault folders create
 SUB basecamp vault folders list
 SUB basecamp vault list
+SUB basecamp vault move
 SUB basecamp vault new-version
 SUB basecamp vault replace
 SUB basecamp vault restore
@@ -19260,6 +19531,7 @@ SUB basecamp vaults folders
 SUB basecamp vaults folders create
 SUB basecamp vaults folders list
 SUB basecamp vaults list
+SUB basecamp vaults move
 SUB basecamp vaults new-version
 SUB basecamp vaults replace
 SUB basecamp vaults restore

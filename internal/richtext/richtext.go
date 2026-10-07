@@ -115,6 +115,30 @@ var (
 	reFencedBlock = regexp.MustCompile("(?m)^```[^\n]*\n[\\s\\S]*?^```")
 )
 
+// richTextTags are the tags MarkdownToHTML keeps when they are written inside
+// Markdown: the content elements of Basecamp's rich text. Any other tag is
+// escaped, so prose such as "a Vec<String>" stays text, and so does markup the
+// rich text has no element for.
+var richTextTags = map[string]bool{
+	"a": true, "b": true, "bc-attachment": true, "blockquote": true, "br": true,
+	"caption": true, "code": true, "del": true, "div": true, "em": true,
+	"figcaption": true, "figure": true, "h1": true, "h2": true, "h3": true,
+	"h4": true, "h5": true, "h6": true, "hr": true, "i": true, "img": true,
+	"li": true, "ol": true, "p": true, "pre": true, "s": true, "span": true,
+	"strike": true, "strong": true, "table": true, "tbody": true, "td": true,
+	"tfoot": true, "th": true, "thead": true, "tr": true, "u": true, "ul": true,
+}
+
+// reLeadingTag matches an opening or closing tag at the start of raw HTML and
+// captures its name.
+var reLeadingTag = regexp.MustCompile(`^\s*</?([A-Za-z][A-Za-z0-9-]*)(?:[\s/>]|$)`)
+
+// isRichTextTag reports whether raw HTML begins with a tag in richTextTags.
+func isRichTextTag(raw []byte) bool {
+	m := reLeadingTag.FindSubmatch(raw)
+	return m != nil && richTextTags[strings.ToLower(string(m[1]))]
+}
+
 // Pre-compiled regexes for IsMarkdown detection
 var reMarkdownPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^#{1,6}\s`),
@@ -345,9 +369,15 @@ func (r *trixRenderer) renderRawHTML(w util.BufWriter, source []byte, node ast.N
 	if !ok {
 		return ast.WalkContinue, nil
 	}
+	var raw []byte
 	for i := 0; i < n.Segments.Len(); i++ {
 		seg := n.Segments.At(i)
-		_, _ = w.Write(util.EscapeHTML(seg.Value(source)))
+		raw = append(raw, seg.Value(source)...)
+	}
+	if isRichTextTag(raw) {
+		_, _ = w.Write(raw)
+	} else {
+		_, _ = w.Write(util.EscapeHTML(raw))
 	}
 	return ast.WalkContinue, nil
 }
@@ -361,6 +391,17 @@ func (r *trixRenderer) renderHTMLBlock(w util.BufWriter, source []byte, node ast
 		return ast.WalkContinue, nil
 	}
 	lines := n.Lines()
+	if raw := lines.Value(source); isRichTextTag(raw) {
+		if n.HasClosure() {
+			raw = append(raw, n.ClosureLine.Value(source)...)
+		}
+		block := strings.TrimRight(string(raw), "\n")
+		if n.HTMLBlockType != ast.HTMLBlockType1 {
+			block = insertParagraphSeparators(block)
+		}
+		_, _ = w.WriteString(block + "\n")
+		return ast.WalkContinue, nil
+	}
 	parts := make([]string, 0, lines.Len()+1)
 	for i := 0; i < lines.Len(); i++ {
 		seg := lines.At(i)
@@ -427,16 +468,19 @@ func (r *trixRenderer) renderEscapedAt(w util.BufWriter, _ []byte, _ ast.Node, e
 
 // MarkdownToHTML converts Markdown text to HTML suitable for Basecamp's rich text fields.
 // It uses goldmark with custom AST transformations for Trix editor compatibility.
-// If the input already appears to be HTML, it is passed through with existing
-// formatting preserved, except that a separator is inserted between directly
-// adjacent paragraph blocks (see insertParagraphSeparators).
+//
+// The input is always read as Markdown: it never decides from the content that
+// the input is already HTML. HTML written inside the Markdown is kept when its
+// tag is one that Basecamp's rich text supports (see richTextTags) and escaped, to
+// show as text, otherwise. An inline tag is judged on its own. A raw HTML block
+// is judged as a unit by the tag it opens with — what it holds is kept or
+// escaped with it — and a kept block gets a separator between directly adjacent
+// paragraphs (see insertParagraphSeparators). Markdown inside a raw HTML block
+// is not converted, as CommonMark specifies; a blank line ends the block.
+// Callers that want HTML sent exactly as written skip this function.
 func MarkdownToHTML(md string) string {
 	if md == "" {
 		return ""
-	}
-
-	if IsHTML(md) {
-		return insertParagraphSeparators(md)
 	}
 
 	md = strings.ReplaceAll(md, "\r\n", "\n")
@@ -450,18 +494,56 @@ func MarkdownToHTML(md string) string {
 	return strings.TrimSpace(buf.String())
 }
 
+// HasRichTextHTML reports whether MarkdownToHTML would keep any raw HTML from
+// md other than <bc-attachment> markup: whether the Markdown parser finds an
+// inline tag or an HTML block whose tag is in richTextTags. HTML inside code is
+// not raw HTML to the parser, so it never counts.
+func HasRichTextHTML(md string) bool {
+	if md == "" {
+		return false
+	}
+	source := []byte(strings.ReplaceAll(strings.ReplaceAll(md, "\r\n", "\n"), "\r", "\n"))
+	doc := mdConverter.Parser().Parse(text.NewReader(source))
+	found := false
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		var raw []byte
+		switch v := n.(type) {
+		case *ast.RawHTML:
+			raw = v.Segments.Value(source)
+		case *ast.HTMLBlock:
+			raw = v.Lines().Value(source)
+		default:
+			return ast.WalkContinue, nil
+		}
+		if isRichTextTag(raw) && !reLeadingAttachmentTag.Match(raw) {
+			found = true
+			return ast.WalkStop, nil
+		}
+		return ast.WalkSkipChildren, nil
+	})
+	return found
+}
+
+// reLeadingAttachmentTag matches a <bc-attachment> open or close tag at the
+// start of raw HTML: the mention and attachment markup Markdown content carries
+// routinely.
+var reLeadingAttachmentTag = regexp.MustCompile(`(?i)^\s*</?bc-attachment\b`)
+
 // insertParagraphSeparators puts an empty separator paragraph between directly
-// adjacent, non-empty paragraph blocks so that HTML supplied to the CLI renders
-// with visible paragraph spacing.
+// adjacent, non-empty paragraph blocks so that a raw HTML block written in
+// Markdown renders with visible paragraph spacing.
 //
 // Basecamp's rich text relies on explicit separator nodes for paragraph
 // spacing, not CSS margins: contiguous <p>A</p><p>B</p> renders squished. The
 // Markdown pipeline already inserts a separator between blank-line-separated
-// paragraphs (via TrixBreak), so this brings the raw-HTML passthrough into line
-// with that behavior. Unlike Basecamp's editor, the CLI has no concept of an
-// intentionally-tight single-line-break paragraph (its edit loop collapses that
-// distinction), so contiguous paragraphs from HTML input are treated as
-// separate paragraphs.
+// paragraphs (via TrixBreak), so this brings raw HTML blocks into line with
+// that behavior; HTML sent with --format html never comes through here. Unlike
+// Basecamp's editor, the CLI has no concept of an intentionally-tight
+// single-line-break paragraph (its edit loop collapses that distinction), so
+// contiguous paragraphs from HTML input are treated as separate paragraphs.
 //
 // The transform is byte-preserving apart from the inserted separators and is
 // idempotent: a boundary that already carries a separator — a bare <br> between

@@ -3,12 +3,12 @@
 buildGoModule.override { go = go_1_26; } (finalAttrs: {
   pname = "basecamp";
   # Updated automatically by scripts/update-nix-flake.sh on each release.
-  version = "0.11.0";
+  version = "0.12.0";
 
   src = lib.cleanSource ./..;
 
   # To update: set to lib.fakeHash, run `nix build`, use the hash from the error.
-  vendorHash = "sha256-P4HkRXkm8TXTwCSU5Hzi4INqkbeaCoquiwg4YICm80w=";
+  vendorHash = "sha256-gtSrSu4ZF/IerLLgKx0zjEwRDKYjYKBOY50YU1swy6Q=";
 
   subPackages = [ "cmd/basecamp" ];
 

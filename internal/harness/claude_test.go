@@ -32,6 +32,7 @@ func TestClaudeConfigDirPreservesWhitespaceInOverride(t *testing.T) {
 
 func TestClaudeConfigDirRejectsRelativeHome(t *testing.T) {
 	t.Setenv("HOME", "relative-home")
+	t.Setenv("USERPROFILE", "relative-home")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 
 	_, err := ClaudeConfigDir()
@@ -53,7 +54,7 @@ func TestClaudeChecksReportConfigError(t *testing.T) {
 }
 
 func TestPluginInstalled_ArrayFormat(t *testing.T) {
-	data := []byte(`[{"name": "basecamp", "version": "1.0.0"}]`)
+	data := []byte(`[{"name": "basecamp-cli", "version": "1.0.0"}]`)
 	assert.True(t, pluginInstalled(data))
 }
 
@@ -75,7 +76,7 @@ func TestPluginInstalled_MapFormat_StaleMarketplace(t *testing.T) {
 }
 
 func TestPluginInstalled_MapFormat_Simple(t *testing.T) {
-	data := []byte(`{"basecamp": {"version": "1.0.0"}}`)
+	data := []byte(`{"basecamp-cli": {"version": "1.0.0"}}`)
 	assert.True(t, pluginInstalled(data))
 }
 
@@ -111,7 +112,7 @@ func TestPluginInstalled_V2Envelope_StaleMarketplace(t *testing.T) {
 }
 
 func TestPluginInstalled_V2Envelope_AltMarketplace(t *testing.T) {
-	data := []byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"0.1.0"}]}}`)
+	data := []byte(`{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"0.1.0"}]}}`)
 	assert.True(t, pluginInstalled(data))
 }
 
@@ -126,12 +127,12 @@ func TestPluginInstalled_V2Envelope_EmptyPlugins(t *testing.T) {
 }
 
 func TestPluginInstalled_ArrayFormat_AltMarketplace(t *testing.T) {
-	data := []byte(`[{"package": "basecamp@37signals", "version": "0.1.0"}]`)
+	data := []byte(`[{"package": "basecamp-cli@37signals", "version": "0.1.0"}]`)
 	assert.True(t, pluginInstalled(data))
 }
 
 func TestPluginInstalled_MapFormat_AltMarketplace(t *testing.T) {
-	data := []byte(`{"basecamp@37signals": {"version": "0.1.0"}}`)
+	data := []byte(`{"basecamp-cli@37signals": {"version": "0.1.0"}}`)
 	assert.True(t, pluginInstalled(data))
 }
 
@@ -201,13 +202,13 @@ func TestStalePluginKeys_V2_StaleOnly(t *testing.T) {
 }
 
 func TestStalePluginKeys_V2_Mixed(t *testing.T) {
-	data := []byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user"}],"basecamp@basecamp":[{"scope":"user"}]}}`)
+	data := []byte(`{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user"}],"basecamp@basecamp":[{"scope":"user"}]}}`)
 	plugins := stalePluginKeys(data)
 	assert.Equal(t, []StalePlugin{{Key: "basecamp@basecamp", Scopes: []string{"user"}}}, plugins)
 }
 
 func TestStalePluginKeys_V2_CorrectOnly(t *testing.T) {
-	data := []byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user"}]}}`)
+	data := []byte(`{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user"}]}}`)
 	assert.Empty(t, stalePluginKeys(data))
 }
 
@@ -217,7 +218,7 @@ func TestStalePluginKeys_V1_Stale(t *testing.T) {
 }
 
 func TestStalePluginKeys_V1_Correct(t *testing.T) {
-	data := []byte(`{"basecamp@37signals":{"version":"1.0.0"}}`)
+	data := []byte(`{"basecamp-cli@37signals":{"version":"1.0.0"}}`)
 	assert.Empty(t, stalePluginKeys(data))
 }
 
@@ -228,7 +229,7 @@ func TestStalePluginKeys_BareKey(t *testing.T) {
 }
 
 func TestStalePluginKeys_ArrayFormat_Stale(t *testing.T) {
-	data := []byte(`[{"package":"basecamp@basecamp","version":"1.0.0"},{"package":"basecamp@37signals","version":"0.1.0"}]`)
+	data := []byte(`[{"package":"basecamp@basecamp","version":"1.0.0"},{"package":"basecamp-cli@37signals","version":"0.1.0"}]`)
 	assert.Equal(t, []StalePlugin{{Key: "basecamp@basecamp"}}, stalePluginKeys(data))
 }
 
@@ -262,18 +263,18 @@ func TestStalePluginKeys_ArrayFormat_WithScope(t *testing.T) {
 func TestIsStalePluginKey(t *testing.T) {
 	assert.True(t, isStalePluginKey("basecamp@basecamp"))
 	assert.False(t, isStalePluginKey("basecamp@old-marketplace"))
-	assert.False(t, isStalePluginKey("basecamp@37signals"))
+	assert.False(t, isStalePluginKey("basecamp-cli@37signals"))
 	assert.False(t, isStalePluginKey("basecamp"))
 	assert.False(t, isStalePluginKey("other@basecamp"))
 }
 
 func TestInstalledPluginVersion_V2(t *testing.T) {
-	data := []byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"1.2.3"}]}}`)
+	data := []byte(`{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"1.2.3"}]}}`)
 	assert.Equal(t, "1.2.3", installedPluginVersion(data))
 }
 
 func TestInstalledPluginVersion_V2_BareKey(t *testing.T) {
-	data := []byte(`{"version":2,"plugins":{"basecamp":[{"scope":"user","version":"0.5.0"}]}}`)
+	data := []byte(`{"version":2,"plugins":{"basecamp-cli":[{"scope":"user","version":"0.5.0"}]}}`)
 	assert.Equal(t, "0.5.0", installedPluginVersion(data))
 }
 
@@ -283,7 +284,7 @@ func TestInstalledPluginVersion_V2_NotFound(t *testing.T) {
 }
 
 func TestInstalledPluginVersion_Array(t *testing.T) {
-	data := []byte(`[{"name":"basecamp@37signals","version":"2.0.0"}]`)
+	data := []byte(`[{"name":"basecamp-cli@37signals","version":"2.0.0"}]`)
 	assert.Equal(t, "2.0.0", installedPluginVersion(data))
 }
 
@@ -293,7 +294,7 @@ func TestInstalledPluginVersion_Array_NotFound(t *testing.T) {
 }
 
 func TestInstalledPluginVersion_V1FlatMap(t *testing.T) {
-	data := []byte(`{"basecamp@37signals":{"version":"1.0.0"}}`)
+	data := []byte(`{"basecamp-cli@37signals":{"version":"1.0.0"}}`)
 	assert.Equal(t, "1.0.0", installedPluginVersion(data))
 }
 
@@ -315,7 +316,7 @@ func TestCheckClaudePluginVersion_UpToDate(t *testing.T) {
 	require.NoError(t, os.MkdirAll(pluginsDir, 0o755))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(pluginsDir, "installed_plugins.json"),
-		[]byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"1.5.0"}]}}`),
+		[]byte(`{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"1.5.0"}]}}`),
 		0o644,
 	))
 
@@ -336,7 +337,7 @@ func TestCheckClaudePluginVersion_Outdated(t *testing.T) {
 	require.NoError(t, os.MkdirAll(pluginsDir, 0o755))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(pluginsDir, "installed_plugins.json"),
-		[]byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"0.1.0"}]}}`),
+		[]byte(`{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"0.1.0"}]}}`),
 		0o644,
 	))
 
@@ -359,7 +360,7 @@ func TestCheckClaudePluginVersion_DevBuild(t *testing.T) {
 	require.NoError(t, os.MkdirAll(pluginsDir, 0o755))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(pluginsDir, "installed_plugins.json"),
-		[]byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"0.1.0"}]}}`),
+		[]byte(`{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"0.1.0"}]}}`),
 		0o644,
 	))
 
@@ -375,4 +376,44 @@ func TestCheckClaudePluginVersion_NoFile(t *testing.T) {
 	check := CheckClaudePluginVersion()
 	assert.Equal(t, "pass", check.Status)
 	assert.Contains(t, check.Message, "not tracked")
+}
+
+func TestIsStalePluginKey_LegacyName(t *testing.T) {
+	assert.True(t, isStalePluginKey("basecamp@37signals"))
+	assert.False(t, isStalePluginKey("basecamp-cli@37signals"))
+}
+
+// The pre-rename key is removed by key at every scope it was installed in,
+// whatever the file format.
+func TestStalePluginKeys_LegacyName(t *testing.T) {
+	data := []byte(`{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user"},{"scope":"project","projectPath":"/x"}],"basecamp-cli@37signals":[{"scope":"user"}]}}`)
+	assert.Equal(t, []StalePlugin{{Key: "basecamp@37signals", Scopes: []string{"user", "project"}}}, stalePluginKeys(data))
+	assert.Equal(t, []StalePlugin{{Key: "basecamp@37signals"}}, stalePluginKeys([]byte(`{"basecamp@37signals":{"version":"0.11.0"}}`)))
+}
+
+func writeInstalledPlugins(t *testing.T, home, data string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".claude", "plugins"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"), []byte(data), 0o644))
+}
+
+func TestCheckClaudePlugin_LegacyNameOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeInstalledPlugins(t, home, `{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"0.11.0"}]}}`)
+
+	check := CheckClaudePlugin()
+	assert.Equal(t, "fail", check.Status)
+	assert.Contains(t, check.Message, "old name basecamp@37signals")
+	assert.Contains(t, check.Hint, "basecamp setup claude")
+}
+
+func TestCheckClaudePlugin_BothInstalledWarns(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeInstalledPlugins(t, home, `{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"0.12.0"}],"basecamp@37signals":[{"scope":"user","version":"0.11.0"}]}}`)
+
+	check := CheckClaudePlugin()
+	assert.Equal(t, "warn", check.Status)
+	assert.Contains(t, check.Message, "old basecamp@37signals copy")
 }

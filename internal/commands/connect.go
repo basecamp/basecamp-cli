@@ -184,7 +184,10 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		for i, id := range f.Trust.AllowlistIDs {
 			ids[i] = strconv.FormatInt(id, 10)
 		}
-		trust += ": people " + strings.Join(ids, ", ")
+		trust += ": operators " + strings.Join(ids, ", ")
+	}
+	if f.Trust.AllowAssignments {
+		trust += "; they may assign"
 	}
 	d := map[string]any{
 		"file":     exact(path),
@@ -260,6 +263,9 @@ type connectSetupFlags struct {
 
 	trust string
 	allow []string
+	// allowAssignments is --allow-assignments-from-authorized, unset when
+	// not passed so setup keeps what connect.json has.
+	allowAssignments optionalBool
 
 	serve   []string
 	classes []string
@@ -305,9 +311,17 @@ the operator connect.json already has; on a first setup of an agent with no
 owner, one of the two is required.
 
 Trust. operator (default): the operator alone. allowlist: the operator and
-the people passed with --allow. project: the operator and any non-client
-member of the event's project. Assignments are the operator's alone in every
-mode.
+the people passed with --allow. project: any non-client member of the event's
+project, as a participant, beside the operator and any people passed with
+--allow, now or in an earlier run. The operator and the people passed with
+--allow are operators; a project member is a participant. Each request the
+connector prints names its role. Assignments are the operator's alone in every
+mode, unless --allow-assignments-from-authorized opts in the people the
+allowlist names: the assigner is the account feed's performer, which
+Basecamp writes, so naming someone trusts that person and nothing that claims
+to be them. It rides with --allow: a run that passes --allow turns it off
+unless it passes the flag again, and a run that passes neither keeps both.
+--allow-assignments-from-authorized=false takes it back.
 
 Projects. connect.json is the local list of Basecamp projects this agent
 serves: --serve <project-id>, --unserve <project-id>. Nothing in a project it
@@ -348,6 +362,7 @@ Examples:
   basecamp connect setup -P agent --serve 12345         # a personal agent: its owner operates it
   basecamp connect setup -P agent --operator-profile me --serve 12345
   basecamp connect setup -P agent --operator-profile me --trust allowlist --allow 111 --allow 222
+  basecamp connect setup -P agent --operator-profile me --trust project --allow 111
   basecamp connect setup -P bot --operator-profile me --expect-identity 4242 --serve 12345
   basecamp connect setup -P agent --class 12345=internal`,
 		Annotations: map[string]string{AnnotationProfileMayCreate: "true"},
@@ -369,7 +384,9 @@ Examples:
 	fl.StringVar(&f.operator, "operator", "", "Person id of the operator the agent follows")
 	fl.StringVar(&f.operatorProfile, "operator-profile", "", "Profile whose identity is the operator")
 	fl.StringVar(&f.trust, "trust", "", "Who may drive the agent: operator, allowlist or project")
-	fl.StringArrayVar(&f.allow, "allow", nil, "Person id to trust besides the operator (repeatable; implies --trust allowlist)")
+	fl.StringArrayVar(&f.allow, "allow", nil, "Person id to trust as an operator besides the operator (repeatable; with no --trust it implies allowlist; works with --trust allowlist or project, not operator)")
+	fl.Var(&f.allowAssignments, "allow-assignments-from-authorized", "Let the people the allowlist names, this run's --allow or the list kept, assign the agent work too (default: the operator's alone; =false to turn off)")
+	fl.Lookup("allow-assignments-from-authorized").NoOptDefVal = "true"
 	fl.StringArrayVar(&f.serve, "serve", nil, "Serve a Basecamp project: <project-id> (repeatable)")
 	fl.StringArrayVar(&f.unserve, "unserve", nil, "Stop serving a project (repeatable)")
 	fl.StringArrayVar(&f.classes, "class", nil, "Classify a served project: <project-id>=<class>, or <project-id>= to clear it (repeatable)")
@@ -586,7 +603,9 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if kind == setup.KindBotUser {
 		next.Agent.IdentityID = expect
 	}
-	next.Trust.OperatorID = trust.Operator.ID
+	if err := setup.SetOperator(&next.Trust, trust.Operator.ID, f.allowAssignments.set && f.allowAssignments.value); err != nil {
+		return output.ErrUsage("connect.json was not written: " + err.Error())
+	}
 	if err := next.Validate(); err != nil {
 		return output.ErrUsage("connect.json was not written: " + err.Error())
 	}
@@ -782,6 +801,10 @@ func canonicalAccount(raw string) (string, error) {
 // changes turns setup's flags into the changes connect.json takes.
 func (f *connectSetupFlags) changes() (setup.Changes, error) {
 	var ch setup.Changes
+	if f.allowAssignments.set {
+		on := f.allowAssignments.value
+		ch.AllowAssignments = &on
+	}
 	if f.trust != "" {
 		ch.Trust = admission.TrustMode(f.trust)
 		switch ch.Trust {
@@ -1258,4 +1281,25 @@ func connectSDKOptions() []basecamp.ClientOption {
 		basecamp.WithTransport(http.DefaultTransport),
 		basecamp.WithUserAgent(version.UserAgent() + " " + basecamp.DefaultUserAgent),
 	}
+}
+
+// optionalBool is a boolean flag that knows whether it was given, so a setup
+// run that leaves it out keeps what connect.json has.
+type optionalBool struct {
+	set, value bool
+}
+
+func (b *optionalBool) String() string { return strconv.FormatBool(b.value) }
+func (b *optionalBool) Type() string   { return "bool" }
+func (b *optionalBool) IsBoolFlag() bool {
+	return true
+}
+
+func (b *optionalBool) Set(s string) error {
+	v, err := strconv.ParseBool(s)
+	if err != nil {
+		return err
+	}
+	b.set, b.value = true, v
+	return nil
 }

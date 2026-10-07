@@ -1075,7 +1075,7 @@ as backslash-n.`,
 			}
 
 			// Convert Markdown content to HTML for Basecamp's rich text fields
-			html := richtext.MarkdownToHTML(content)
+			html := richTextToHTML(cmd, content)
 
 			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
 			html, err = resolveLocalImages(cmd, app, html)
@@ -1119,6 +1119,7 @@ as backslash-n.`,
 
 	allowDash(cmd, "arg:1+")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
@@ -1140,8 +1141,13 @@ Comma-separated IDs add the same comment to multiple items:
 Content can be piped from stdin by passing - as the content argument:
   printf 'Looks good!' | basecamp comments create 789 -
 
-Content supports Markdown and @mentions (@Name or @First.Last):
+Content is Markdown, converted to HTML, and supports @mentions (@Name or
+@First.Last):
   basecamp comments create 789 "Hey @Jane.Smith, **please review**"
+
+To send HTML without Markdown conversion, pass --format html (@mentions and
+local images are still resolved):
+  basecamp comments create 789 "<p>Looks <strong>good</strong></p>" --format html
 
 Use - as the content argument to read content from stdin:
   basecamp comments create 789 - < body.md
@@ -1222,7 +1228,7 @@ busybox-ash) it posts a literal leading $ and keeps \n as backslash-n:
 
 			// Create comments on all recordings
 			// Convert Markdown content to HTML for Basecamp's rich text fields
-			html := richtext.MarkdownToHTML(content)
+			html := richTextToHTML(cmd, content)
 
 			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
 			html, err := resolveLocalImages(cmd, app, html)
@@ -1353,5 +1359,6 @@ busybox-ash) it posts a literal leading $ and keeps \n as backslash-n:
 
 	allowDash(cmd, "arg:1+")
 
+	addRichTextFormatFlag(cmd)
 	return cmd
 }

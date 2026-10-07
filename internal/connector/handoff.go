@@ -23,6 +23,11 @@ import (
 // HandoffLine is one trusted request, as the reader gets it. It is the
 // instruction a worker used to pull, written out: the agent's own mention
 // stripped, nothing more than the record carries.
+//
+// Its keys are a contract with whoever reads the lines, the basecamp-connect
+// skill first: renaming or dropping one breaks a reader nothing here runs.
+// requestLineContract holds the names, and the skill's example is held to
+// the line exactly, so a key added here is documented where readers learn it.
 type HandoffLine struct {
 	Type      string `json:"type"` // "request"
 	EventID   int64  `json:"event_id"`
@@ -34,6 +39,10 @@ type HandoffLine struct {
 	RequesterID int64            `json:"requester_id"`
 	// RequesterName is known when the requester wrote the recording.
 	RequesterName string `json:"requester_name,omitempty"`
+	// Role is "operator" or "participant": whether the request carries an
+	// operator's word or only a participant's. The key and its values are
+	// the local agent connector's, so one session can read either.
+	Role string `json:"role"`
 	// Acknowledge says a person asked for something. A comment on a thread
 	// the agent follows, or a completion, is context and is not acknowledged.
 	Acknowledge bool `json:"acknowledge"`
@@ -192,6 +201,7 @@ func handoffLine(record Record, agentID int64) (HandoffLine, error) {
 		UpdatedAt     time.Time `json:"updated_at"`
 		ProjectName   string    `json:"project_name"`
 		RequesterName string    `json:"requester_name"`
+		Role          string    `json:"role"`
 	}
 	if record.ContentDropped || len(record.Decision.Snapshot) == 0 {
 		return HandoffLine{}, errors.New("the record has no content")
@@ -215,12 +225,24 @@ func handoffLine(record Record, agentID int64) (HandoffLine, error) {
 		ReplyTo:       InstructionReply{Kind: record.Decision.ReplyKind, RecordingID: record.Decision.ReplyRecordingID},
 		RequesterID:   record.Decision.RequesterID,
 		RequesterName: richtext.SanitizeTerminal(snapshot.RequesterName),
+		Role:          handoffRole(snapshot.Role),
 		Acknowledge:   record.Decision.Acknowledge,
 		// The line is read in a terminal as often as by a program: no
 		// control sequences from Basecamp's text reach it.
 		Content:          richtext.SanitizeTerminal(StripMentionsOf(snapshot.Content, agentID)),
 		ContentUpdatedAt: snapshot.UpdatedAt,
 	}, nil
+}
+
+// handoffRole is the role a line carries. Only a record admission settled as
+// an operator's says operator. One admitted before admission settled roles,
+// or carrying a value this build does not know, says participant: those are
+// the rules that lend nobody an operator's standing.
+func handoffRole(recorded string) string {
+	if admission.Role(recorded) == admission.RoleOperator {
+		return string(admission.RoleOperator)
+	}
+	return string(admission.RoleParticipant)
 }
 
 // handoffRecords lists the records waiting to be handed off in buckets,

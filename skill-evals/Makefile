@@ -1,25 +1,26 @@
 MODEL ?= claude-sonnet-4-20250514
 SKILL ?= ../skills/basecamp/SKILL.md
+BASECAMP_BIN ?= ../bin/basecamp
 
 .PHONY: eval eval-syntax eval-save eval-compare
 
 eval:
-	./run --model $(MODEL) --skill $(SKILL)
+	./run --model $(MODEL) --skill $(SKILL) --basecamp-bin $(BASECAMP_BIN)
 
 eval-syntax:
-	./run --model $(MODEL) --skill $(SKILL) --tag calling-convention
+	./run --model $(MODEL) --skill $(SKILL) --basecamp-bin $(BASECAMP_BIN) --tag calling-convention
 
 eval-save:
 	@test -n "$(NAME)" || (echo "Usage: make eval-save NAME=baseline" && exit 1)
-	./run --model $(MODEL) --skill $(SKILL) --save $(NAME)
+	./run --model $(MODEL) --skill $(SKILL) --basecamp-bin $(BASECAMP_BIN) --save $(NAME)
 
 eval-compare:
 	@test -n "$(NAME)" || (echo "Usage: make eval-compare NAME=baseline" && exit 1)
-	./run --model $(MODEL) --skill $(SKILL) --compare $(NAME)
+	./run --model $(MODEL) --skill $(SKILL) --basecamp-bin $(BASECAMP_BIN) --compare $(NAME)
 
 # basecamp-connect is its own skill, so its cases run against its own SKILL.md.
 CONNECT_SKILL ?= ../skills/basecamp-connect/SKILL.md
 
 .PHONY: eval-connect
 eval-connect:
-	./run --model $(MODEL) --skill $(CONNECT_SKILL) cases/basecamp-connect/*.yml
+	./run --model $(MODEL) --skill $(CONNECT_SKILL) --basecamp-bin $(BASECAMP_BIN) cases/basecamp-connect/*.yml
