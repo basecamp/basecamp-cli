@@ -14,7 +14,10 @@ import (
 type Changes struct {
 	// Trust is the trust mode, "" to keep the file's.
 	Trust admission.TrustMode
-	// Allow replaces the allowlist when non-empty; it implies allowlist mode.
+	// Allow replaces the allowlist when non-empty: the people trusted as
+	// operators besides the operator. It implies allowlist mode unless the
+	// same run asks for project mode, which admits the project's members as
+	// participants beside them.
 	Allow []int64
 
 	// Serve are the project (bucket) ids to serve. A project already served
@@ -86,25 +89,33 @@ func Apply(f File, ch Changes) (File, error) {
 func applyTrust(t *admission.Trust, ch Changes) error {
 	mode := ch.Trust
 	if len(ch.Allow) > 0 {
-		if mode != "" && mode != admission.TrustAllowlist {
-			return fmt.Errorf("--allow names people to trust, which is allowlist mode, not %q", mode)
+		switch mode {
+		case "":
+			mode = admission.TrustAllowlist
+		case admission.TrustAllowlist, admission.TrustProject:
+		default:
+			return fmt.Errorf("--allow names operators besides the operator, which trust mode %q does not have", mode)
 		}
-		mode = admission.TrustAllowlist
 	}
 	if mode == "" {
 		return nil
 	}
 	switch mode {
-	case admission.TrustOperator, admission.TrustProject:
+	case admission.TrustOperator:
 		// Leaving allowlist mode drops the list: admission refuses a list
 		// outside its mode, and a list kept "for later" is trust nobody
 		// can see.
 		t.AllowlistIDs = nil
+	case admission.TrustProject:
+		// Operators named beside the members, optionally: a run that names
+		// none keeps the ones named before, as setup keeps whatever a run
+		// does not pass.
+		if len(ch.Allow) > 0 {
+			t.AllowlistIDs = sortedIDs(ch.Allow)
+		}
 	case admission.TrustAllowlist:
 		if len(ch.Allow) > 0 {
-			ids := slices.Clone(ch.Allow)
-			slices.Sort(ids)
-			t.AllowlistIDs = slices.Compact(ids)
+			t.AllowlistIDs = sortedIDs(ch.Allow)
 		}
 		if len(t.AllowlistIDs) == 0 {
 			return errors.New("allowlist mode needs at least one --allow <person-id>")
@@ -114,4 +125,14 @@ func applyTrust(t *admission.Trust, ch Changes) error {
 	}
 	t.Mode = mode
 	return nil
+}
+
+// sortedIDs is ids sorted and deduplicated, or nil for none.
+func sortedIDs(ids []int64) []int64 {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := slices.Clone(ids)
+	slices.Sort(out)
+	return slices.Compact(out)
 }

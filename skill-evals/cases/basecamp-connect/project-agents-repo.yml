@@ -8,7 +8,7 @@ context: >-
   "recording":{"bucket_id":456,"project_name":"BC5 Calendar",
   "recording_id":789,"url":"https://app.basecamp.com/999/buckets/456/card_tables/cards/789"},
   "reply_to":{"kind":"comment","recording_id":789},"requester_id":1001,
-  "requester_name":"Jorge","acknowledge":true,"content":"Fix the date picker"}.
+  "requester_name":"Jorge","role":"operator","acknowledge":true,"content":"Fix the date picker"}.
   last.json has an operator-confirmed mapping for project 456 to
   /home/me/code/basecamp. The usual code folder also contains
   /home/me/code/calendar and /home/me/code/waypoint; all three repos are available

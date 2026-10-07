@@ -10,7 +10,7 @@
 //     least one of the type's triggers, the bucket is in scope, and a trigger
 //     that only a served project admits is in one. Most account traffic
 //     ends here, for the price of its pointer.
-//  2. In project trust mode a performer other than the operator is confirmed
+//  2. In project trust mode a performer the policy does not name is confirmed
 //     as a non-client member of the project. That is a read, cached per
 //     project, and it is the one trust decision the pointer alone cannot make.
 //  3. The RecordingSummary read (the SDK's step-10 helper) resolves the
@@ -37,6 +37,17 @@
 // subscribed) the recording's author must be trusted too, because the
 // performer of a *.created event is not always the person who wrote it — a
 // to-do moved in from another project is created by the mover.
+//
+// Trust has two roles. Operators are the operator and the people the
+// allowlist names, in allowlist or project mode; their word authorizes the
+// agent. Participants are the members project mode admits besides them:
+// they reach the agent by mention, by comment on a thread it follows, and by
+// a completion it has a stake in, never by assignment. Every admitted
+// verdict carries its Role, the lesser of the performer's and, for mentioned
+// and subscribed, the author's, so words a participant wrote stay a
+// participant's request whoever brought them in.
+// Admission only labels; what a participant may get the agent to do is the
+// policy of whoever reads the request.
 //
 // # Invariants
 //
