@@ -40,14 +40,30 @@ func claudeChecks() []*StatusCheck {
 // Migrating from basecamp/basecamp-cli → basecamp/claude-plugins.
 const ClaudeMarketplaceSource = "basecamp/claude-plugins"
 
-// ClaudePluginName is the plugin identifier to install.
-const ClaudePluginName = "basecamp"
+// ClaudePluginName is the plugin identifier to install. It was "basecamp"
+// until that name was set aside for the hosted-connector plugin; see
+// ClaudeLegacyPluginKey.
+const ClaudePluginName = "basecamp-cli"
 
 // ClaudeMarketplaceName is the marketplace name as it appears in plugin keys.
 const ClaudeMarketplaceName = "37signals"
 
 // ClaudeExpectedPluginKey is the fully-qualified key for a correctly installed plugin.
 const ClaudeExpectedPluginKey = ClaudePluginName + "@" + ClaudeMarketplaceName
+
+// ClaudeLegacyPluginKey is the key this plugin was installed under before the
+// rename. During the migration window the 37signals marketplace lists
+// "basecamp" only as a deprecated alias of basecamp-cli with the same source,
+// so an install under this key is always this CLI's pre-rename plugin and
+// setup removes it by key, like any stale entry.
+//
+// The marketplace may later list the hosted Basecamp connector as "basecamp"
+// again. That step has to wait until this key is no longer treated as stale
+// here (isStalePluginKey); otherwise setup would uninstall the connector.
+const ClaudeLegacyPluginKey = LegacyPluginName + "@" + ClaudeMarketplaceName
+
+// LegacyPluginName is the plugin's pre-rename name.
+const LegacyPluginName = "basecamp"
 
 // DetectClaude returns true if Claude Code is installed.
 // Checks ~/.claude/ directory first, then falls back to binary on PATH.
@@ -122,10 +138,27 @@ func CheckClaudePlugin() *StatusCheck {
 	// Try as array of objects with "name" or "package" fields,
 	// or as a map with plugin keys.
 	if pluginInstalled(data) {
+		if hasLegacyPluginKey(data) {
+			return &StatusCheck{
+				Name:    "Claude Code Plugin",
+				Status:  "warn",
+				Message: "Installed, but the old " + ClaudeLegacyPluginKey + " copy is still installed too",
+				Hint:    "Run: basecamp setup claude",
+			}
+		}
 		return &StatusCheck{
 			Name:    "Claude Code Plugin",
 			Status:  "pass",
 			Message: "Installed",
+		}
+	}
+
+	if hasLegacyPluginKey(data) {
+		return &StatusCheck{
+			Name:    "Claude Code Plugin",
+			Status:  "fail",
+			Message: "Installed under the old name " + ClaudeLegacyPluginKey,
+			Hint:    "Run: basecamp setup claude (reinstalls it as " + ClaudeExpectedPluginKey + ")",
 		}
 	}
 
@@ -336,18 +369,19 @@ func matchesBasecamp(p map[string]any) bool {
 }
 
 // matchesPluginKey returns true if the key identifies a correctly installed
-// basecamp plugin — either bare "basecamp" (legacy) or the expected
-// marketplace-qualified key "basecamp@37signals".
+// plugin — either the bare name or the expected marketplace-qualified key
+// "basecamp-cli@37signals". The pre-rename "basecamp" names deliberately do
+// not match: they now belong to the hosted-connector plugin.
 func matchesPluginKey(key string) bool {
-	return key == "basecamp" || key == ClaudeExpectedPluginKey
+	return key == ClaudePluginName || key == ClaudeExpectedPluginKey
 }
 
 func jsonContainsBasecamp(data []byte) bool {
 	// Fallback: raw string search for the expected plugin key or bare name.
-	// Note: `"basecamp"` (with quotes) won't match `"basecamp@old"` since
-	// the closing quote requires an exact boundary.
+	// Note: `"basecamp-cli"` (with quotes) won't match `"basecamp-cli@old"`
+	// since the closing quote requires an exact boundary.
 	s := string(data)
-	return len(s) > 0 && (contains(s, `"`+ClaudeExpectedPluginKey+`"`) || contains(s, `"basecamp"`))
+	return len(s) > 0 && (contains(s, `"`+ClaudeExpectedPluginKey+`"`) || contains(s, `"`+ClaudePluginName+`"`))
 }
 
 func contains(s, substr string) bool {
@@ -369,8 +403,10 @@ type StalePlugin struct {
 	Scopes []string // empty = unknown, fall back to unscoped uninstall
 }
 
-// StalePluginKeys returns stale plugin entries from installed_plugins.json
-// that belong to old/dead marketplaces.
+// StalePluginKeys returns stale plugin entries from installed_plugins.json:
+// entries from old/dead marketplaces, and this plugin still installed under
+// its pre-rename key. Setup uninstalls each and reinstalls
+// ClaudeExpectedPluginKey at the scopes it removed.
 func StalePluginKeys() []StalePlugin {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -459,11 +495,23 @@ func stalePluginKeys(data []byte) []StalePlugin {
 }
 
 // claudeStalePluginKey is the known stale key from the basecamp → 37signals marketplace rename.
-const claudeStalePluginKey = ClaudePluginName + "@" + "basecamp"
+const claudeStalePluginKey = "basecamp@basecamp"
 
-// isStalePluginKey returns true only for the known stale marketplace key.
+// isStalePluginKey returns true for the known stale keys: the old marketplace
+// name, and this plugin's pre-rename key (see ClaudeLegacyPluginKey).
 func isStalePluginKey(key string) bool {
-	return key == claudeStalePluginKey
+	return key == claudeStalePluginKey || key == ClaudeLegacyPluginKey
+}
+
+// hasLegacyPluginKey reports whether this plugin is still installed under
+// ClaudeLegacyPluginKey.
+func hasLegacyPluginKey(data []byte) bool {
+	for _, p := range stalePluginKeys(data) {
+		if p.Key == ClaudeLegacyPluginKey {
+			return true
+		}
+	}
+	return false
 }
 
 func appendUnique(ss []string, s string) []string {

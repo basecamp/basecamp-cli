@@ -20,6 +20,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/harness"
 )
 
 // semverPattern is the strict semver 2.0.0 grammar (semver.org). Go's \d is
@@ -50,8 +52,8 @@ func TestManifestsParseWithMatchingIdentity(t *testing.T) {
 	claude := readManifest(t, filepath.Join(root, ".claude-plugin", "plugin.json"))
 	codex := readManifest(t, filepath.Join(root, ".codex-plugin", "plugin.json"))
 
-	assert.Equal(t, "basecamp", claude.Name)
-	assert.Equal(t, "basecamp", codex.Name)
+	assert.Equal(t, harness.ClaudePluginName, claude.Name)
+	assert.Equal(t, harness.CodexPluginName, codex.Name)
 	assert.Regexp(t, semverPattern, claude.Version)
 	assert.Regexp(t, semverPattern, codex.Version)
 	assert.Equal(t, claude.Version, codex.Version, "manifest versions must stay in lockstep")
@@ -141,7 +143,16 @@ func TestHooksFileCommandsInvokeBasecamp(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(data, &config))
 	require.NotEmpty(t, config.Hooks)
-	assert.NotContains(t, config.Hooks, "SessionStart", "plugins must not inject Basecamp context into every agent session")
+	// Plugins must not inject Basecamp context into every agent session. The
+	// one SessionStart hook allowed is the rename notice, which stays silent
+	// unless the plugin runs under its pre-rename id, and then speaks once.
+	// It goes through pre-commit-snapshot, which every hook-capable CLI has
+	// and which older ones answer silently: a new subcommand would fail
+	// every session start for anyone whose CLI is older than the plugin.
+	sessionStart := config.Hooks["SessionStart"]
+	require.Len(t, sessionStart, 1, "exactly one SessionStart matcher: the rename notice")
+	require.Len(t, sessionStart[0].Hooks, 1, "exactly one SessionStart hook: the rename notice")
+	assert.Equal(t, "basecamp agent-hook pre-commit-snapshot", sessionStart[0].Hooks[0].Command, "only the rename notice may run at session start")
 
 	for event, matchers := range config.Hooks {
 		require.NotEmpty(t, matchers, event)

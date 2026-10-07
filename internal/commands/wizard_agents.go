@@ -129,7 +129,7 @@ func agentSetupHandlersFor(skillAgents []harness.SkillAgent) map[string]agentSet
 		"claude": {
 			Labels: []string{
 				"Add basecamp/claude-plugins marketplace to Claude Code",
-				"Install the basecamp plugin for Claude Code",
+				"Install the basecamp-cli plugin for Claude Code",
 			},
 			Run:               runClaudeSetup,
 			RunNonInteractive: runClaudeSetupNonInteractive,
@@ -137,7 +137,7 @@ func agentSetupHandlersFor(skillAgents []harness.SkillAgent) map[string]agentSet
 		"codex": {
 			Labels: []string{
 				"Add the 37signals marketplace to Codex",
-				"Install the basecamp plugin for Codex",
+				"Install the basecamp-cli plugin for Codex",
 			},
 			Run:               runCodexSetup,
 			RunNonInteractive: runCodexSetupNonInteractive,

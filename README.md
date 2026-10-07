@@ -292,11 +292,36 @@ Manual Codex installation uses the same marketplace:
 
 ```bash
 codex plugin marketplace add basecamp/claude-plugins
-codex plugin add basecamp@37signals
+codex plugin add basecamp-cli@37signals
 ```
 
 To pick up a newer plugin version later, refresh the marketplace with
 `codex plugin marketplace upgrade 37signals` (or re-run `basecamp setup codex`).
+
+**Plugin name:** in the 37signals marketplace this plugin is `basecamp-cli`
+(`basecamp-cli@37signals`). It was published as `basecamp`, a name set aside
+for the hosted Basecamp connector plugin, which works through Basecamp's own
+MCP server rather than this CLI. During a deprecation window the marketplace
+keeps `basecamp` as an alias of `basecamp-cli`, so an existing
+`basecamp@37signals` install keeps working and updating; once per agent it
+says the plugin has been renamed. Switch with `basecamp setup claude` or
+`basecamp setup codex` (or `basecamp setup agents`). For Claude Code, setup
+replaces `basecamp@37signals` with `basecamp-cli` at the scopes it was
+installed in. Codex installs have no scopes, so setup adds `basecamp-cli` and
+then removes the old ID. To switch by hand:
+
+```bash
+claude plugin marketplace update 37signals
+claude plugin install basecamp-cli@37signals
+claude plugin uninstall basecamp@37signals
+
+codex plugin marketplace upgrade 37signals
+codex plugin add basecamp-cli@37signals
+codex plugin remove basecamp@37signals
+```
+
+Skills from the plugin are namespaced by its name, so `basecamp:basecamp`
+becomes `basecamp-cli:basecamp`. The CLI itself is still `basecamp`.
 
 **Grok Build:** `basecamp setup grok` — installs the shared skill and confirms it is healthy. There is no Grok plugin: Grok reads user skills from `~/.grok/skills/` and from the cross-agent `~/.agents/skills/`, so the shared `~/.agents/skills/basecamp` skill is the whole integration. Grok is detected by `$GROK_HOME` (default `~/.grok`) or a `grok` binary on `PATH`, in `~/.local/bin`, or in `$GROK_HOME/bin` where its installers put it. Start a new Grok session after setup to load the skill.
 

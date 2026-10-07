@@ -45,7 +45,7 @@ func TestCheckCodexPluginMissingBinary(t *testing.T) {
 }
 
 func TestCheckCodexPluginMissing(t *testing.T) {
-	stubCodexList(t, `{"installed":[],"available":[{"pluginId":"basecamp@37signals","name":"basecamp","marketplaceName":"37signals","version":"0.7.2","installed":false,"enabled":false}]}`, nil)
+	stubCodexList(t, `{"installed":[],"available":[{"pluginId":"basecamp-cli@37signals","name":"basecamp-cli","marketplaceName":"37signals","version":"0.7.2","installed":false,"enabled":false}]}`, nil)
 
 	check := CheckCodexPlugin()
 
@@ -192,7 +192,7 @@ func stubCodexList(t *testing.T, output string, commandErr error) {
 }
 
 func codexListFixture(pluginVersion string, installed, enabled bool) string {
-	return `{"installed":[{"pluginId":"basecamp@37signals","name":"basecamp","marketplaceName":"37signals","version":"` + pluginVersion + `","installed":` + boolJSON(installed) + `,"enabled":` + boolJSON(enabled) + `}],"available":[]}`
+	return `{"installed":[{"pluginId":"basecamp-cli@37signals","name":"basecamp-cli","marketplaceName":"37signals","version":"` + pluginVersion + `","installed":` + boolJSON(installed) + `,"enabled":` + boolJSON(enabled) + `}],"available":[]}`
 }
 
 func boolJSON(value bool) string {
@@ -200,4 +200,45 @@ func boolJSON(value bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+const codexLegacyInstalledJSON = `{"pluginId":"basecamp@37signals","name":"basecamp","marketplaceName":"37signals","version":"0.11.0","installed":true,"enabled":true}`
+
+func TestCheckCodexPluginLegacyCLIInstall(t *testing.T) {
+	stubCodexList(t, `{"installed":[`+codexLegacyInstalledJSON+`],"available":[{"pluginId":"basecamp-cli@37signals","version":"0.11.0","installed":false,"enabled":false}]}`, nil)
+
+	check := CheckCodexPlugin()
+
+	assert.Equal(t, "fail", check.Status)
+	assert.Contains(t, check.Message, "old name basecamp@37signals")
+	assert.Contains(t, check.Hint, "basecamp setup codex")
+	assert.False(t, CodexLegacyReplaced(context.Background()), "no replacement installed yet")
+}
+
+func TestCheckCodexPluginLegacyAvailableOnlyIsNotInstalled(t *testing.T) {
+	stubCodexList(t, `{"installed":[],"available":[{"pluginId":"basecamp@37signals","version":"0.11.0","installed":false,"enabled":false}]}`, nil)
+
+	assert.Equal(t, "Plugin not installed", CheckCodexPlugin().Message)
+	assert.False(t, CodexLegacyReplaced(context.Background()))
+}
+
+func TestCheckCodexPluginBothInstalledWarns(t *testing.T) {
+	stubCodexList(t, `{"installed":[`+codexLegacyInstalledJSON+`,{"pluginId":"basecamp-cli@37signals","version":"0.11.0","installed":true,"enabled":true}],"available":[]}`, nil)
+
+	check := CheckCodexPlugin()
+
+	assert.Equal(t, "warn", check.Status)
+	assert.Contains(t, check.Message, "old basecamp@37signals copy")
+	assert.True(t, CodexLegacyReplaced(context.Background()))
+}
+
+func TestCheckCodexPluginDisabledMentionsLegacyCopy(t *testing.T) {
+	stubCodexList(t, `{"installed":[`+codexLegacyInstalledJSON+`,{"pluginId":"basecamp-cli@37signals","version":"0.11.0","installed":true,"enabled":false}],"available":[]}`, nil)
+
+	check := CheckCodexPlugin()
+
+	assert.Equal(t, "fail", check.Status)
+	assert.Contains(t, check.Message, "disabled")
+	assert.False(t, CodexLegacyReplaced(context.Background()), "a disabled replacement doesn't replace the old ID")
+	assert.Contains(t, check.Message, "old basecamp@37signals copy")
 }
