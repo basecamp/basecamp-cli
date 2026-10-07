@@ -76,6 +76,7 @@ Each becomes a flag on setup (*First-time setup*, step 4):
 | "anyone in the project can ask it things" | `--trust project` (they ask as participants) |
 | "Jane operates it, and anyone in the project can ask" | `--trust project --allow <jane's person id>` |
 | "the people I named can assign it work too" | `--allow-assignments-from-authorized`: it covers the whole allowlist setup leaves (this run's `--allow`, or the list kept), not one person, so say who that is and confirm. With nobody on the allowlist setup refuses it, so name someone first. A run that passes `--allow` turns it off unless it's passed again |
+| "let Zach's agent ping mine" | `--allow-agent <that agent's person id>` (repeatable; `--disallow-agent <id>` removes one). It wakes this agent only by @mentioning it, as a participant, never by assignment. Mentions are capped per 24 hours: `--agent-thread-cap` (default 3 per thread) and `--agent-daily-cap` (default 20 per agent). Restart the connector after changing it |
 | "also work in project X" | `--serve <id of X>` |
 | "stop working in X" | `--unserve <id of X>` |
 
