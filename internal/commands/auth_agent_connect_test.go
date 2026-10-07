@@ -221,7 +221,7 @@ func TestAuthAgentConnectNeedsAProfile(t *testing.T) {
 // runAgentConnectJSON runs the ceremony under --json with stdout and stderr
 // kept apart, as a program driving it would read them. stdout is a
 // lockedBuffer so the mock server's handlers can read it mid-ceremony.
-func runAgentConnectJSON(t *testing.T, app *appctx.App, stdout *lockedBuffer, args ...string) (string, error) {
+func runAgentConnectJSON(t *testing.T, app *appctx.App, stdout io.Writer, args ...string) (string, error) {
 	t.Helper()
 	app.Flags.JSON = true
 	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: stdout})
@@ -268,16 +268,25 @@ func TestAuthAgentConnectJSONWritesTheVerificationThenTheResult(t *testing.T) {
 	app := connectApp(t, as, &config.Config{ActiveProfile: "agent"})
 	stdout := &lockedBuffer{}
 
+	// The poll handler runs on the server's goroutine, so what it saw is
+	// handed over under a lock.
 	approve := as.connection
-	var atPoll string
+	var (
+		atPollMu sync.Mutex
+		atPoll   string
+	)
 	as.connection = func() string {
+		atPollMu.Lock()
 		atPoll = stdout.String()
+		atPollMu.Unlock()
 		return approve()
 	}
 
 	stderr, err := runAgentConnectJSON(t, app, stdout, "--device-name", "build-box")
 	require.NoError(t, err, stderr)
 
+	atPollMu.Lock()
+	defer atPollMu.Unlock()
 	require.NotEmpty(t, atPoll, "the verification line is written before the operator approves, not after")
 	require.True(t, strings.HasSuffix(atPoll, "}\n") && strings.Count(atPoll, "\n") == 1,
 		"the verification is one line, newline-terminated, so a reader can act on it at once: %q", atPoll)
@@ -336,6 +345,32 @@ func TestAuthAgentConnectJSONVerificationCarriesNoControls(t *testing.T) {
 	require.Len(t, lines, 2)
 	assert.Equal(t, as.srv.URL+"/connect31m?user_code=WDJB-MJHT", lines[0]["verification_uri"],
 		"the link is the copy the terminal shows")
+}
+
+// failingWriter is a stdout that refuses every write: a full disk behind a
+// redirect, or an embedding whose sink has failed.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("no space left on device") }
+
+// TestAuthAgentConnectJSONStopsWhenTheVerificationCannotBeWritten: under
+// --json the verification line is how the link and the code reach whoever
+// shows them to the person, so a stdout that refuses it ends the ceremony
+// there: no wait, no poll, nothing stored.
+func TestAuthAgentConnectJSONStopsWhenTheVerificationCannotBeWritten(t *testing.T) {
+	as := startConnectAS(t)
+	app := connectApp(t, as, &config.Config{ActiveProfile: "agent"})
+
+	_, err := runAgentConnectJSON(t, app, failingWriter{}, "--device-name", "build-box")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no space left on device")
+
+	as.mu.Lock()
+	polls := len(as.pollForms)
+	as.mu.Unlock()
+	assert.Zero(t, polls, "nothing waits on an approval whose link never reached anyone")
+	assert.Empty(t, as.mints())
+	assertNothingStored(t, app, "agent")
 }
 
 // TestAuthAgentConnectJSONOnADeclineWritesOnlyTheVerification: a declined

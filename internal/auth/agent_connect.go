@@ -163,8 +163,10 @@ type AgentConnectOptions struct {
 	// opened and the wait begins: a caller reading the ceremony as data
 	// learns the link and the code without parsing the operator's half.
 	// It is never given the device code, which is the poll's bearer and
-	// stays inside this flow.
-	OnIntake func(AgentConnectIntake)
+	// stays inside this flow. A non-nil error ends the ceremony before
+	// the browser is opened or anything waits: the link has not reached
+	// whoever was to show it, and nothing is stored.
+	OnIntake func(AgentConnectIntake) error
 
 	// BeforeStore, when set, runs after the poll has handed over the
 	// credential and the mint has proved it, and before anything is
@@ -277,11 +279,13 @@ func (m *Manager) ConnectAgent(ctx context.Context, opts AgentConnectOptions) (*
 	}
 
 	if opts.OnIntake != nil {
-		opts.OnIntake(AgentConnectIntake{
+		if err := opts.OnIntake(AgentConnectIntake{
 			VerificationURI: intake.shownURI,
 			UserCode:        intake.userCode,
 			ExpiresAt:       opts.now().Add(intake.lifetime),
-		})
+		}); err != nil {
+			return nil, err
+		}
 	}
 
 	wait := announceAgentConnection(opts.presentation(), intake, opts.now())
