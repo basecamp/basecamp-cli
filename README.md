@@ -277,6 +277,57 @@ while. The CLI then waits out the block instead of retrying on every run
 its first refusal; sign in again once whatever was using the old copy has
 stopped.
 
+### AI agent sandboxes
+
+Coding agents such as Codex, Claude Code and Grok Build can run commands in
+a sandbox, and a sandbox may refuse access to the OS credential store
+(Windows Credential Manager, the macOS Keychain, the Secret Service on
+Linux). Codex's Windows sandbox, for one, answers Credential Manager with
+"Access is denied." A login stored there is then out of reach, even though
+it works in your own terminal. The CLI reports this as `auth_required` and
+names the refused store. Its hint points to a token rather than a login,
+because a new login would be refused in the same way.
+
+Pick one:
+
+- **A personal access token. This is the simplest option.** Create a
+  [personal access token](https://app.basecamp.com/my/access_tokens) and set
+  `BASECAMP_TOKEN` to it in the environment the agent starts from, then
+  restart the agent. The CLI reads the token before it opens the credential
+  store, so the sandbox never gets in the way. Some agents strip environment
+  variables whose names contain `TOKEN`. Codex does when
+  `shell_environment_policy.ignore_default_excludes` is `false`, so let
+  `BASECAMP_TOKEN` through if your agent does this.
+- **A login made outside the sandbox, kept in a file.** A login in the OS
+  keyring can't help here. The CLI doesn't read the keyring from a process
+  the keyring refused, so a login from your own terminal reaches the
+  sandbox only through file storage. Run
+  `BASECAMP_NO_KEYRING=1 basecamp auth login` outside the sandbox, and give
+  the agent `BASECAMP_NO_KEYRING=1` as well. The sandbox has to be able to
+  read and write the config directory (`~/.config/basecamp`, or under
+  `XDG_CONFIG_HOME`), because every refresh rewrites it. If your agent's
+  sandbox supports writable roots, add that directory as one. The
+  credential is stored in plaintext there, as on any host without a
+  keyring.
+- **Basecamp's hosted MCP server.** Agents that can connect to a remote MCP
+  server can use `https://mcp.basecamp.com/mcp` and sign in through the
+  browser. Nothing runs inside the sandbox, and this CLI stores nothing.
+  [basecamp.com/ai](https://basecamp.com/ai) has setup steps for each
+  client. This is also the route for hosted agents that can't run the CLI
+  at all, such as ChatGPT, Claude and Grok on the web.
+
+Sandboxes and hosted machines often send their traffic through an egress
+proxy. API requests follow `HTTPS_PROXY`. Login and token refresh follow it
+only with `BASECAMP_OAUTH_USE_PROXY=1`, and the value must be exactly `1`.
+Without that setting they refuse addresses outside the public internet,
+including the placeholder addresses that fake-IP DNS hands out
+([#849](https://github.com/basecamp/basecamp-cli/issues/849)). A proxy that
+intercepts TLS also needs its CA certificate in `SSL_CERT_FILE`. A
+`BASECAMP_TOKEN` is never refreshed, so it avoids all of this.
+
+`BASECAMP_NO_KEYRING=1` also fixes a keyring that hangs instead of refusing
+([#800](https://github.com/basecamp/basecamp-cli/issues/800)).
+
 ### Multiple Identities
 
 Use named profiles when the same machine or agent gateway needs more than one Basecamp identity. Each profile has its own stored OAuth credentials and can be selected per command:
