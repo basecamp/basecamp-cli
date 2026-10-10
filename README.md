@@ -206,7 +206,9 @@ never authenticates on its own; ignored by Launchpad).
 
 A [personal access token](https://app.basecamp.com/my/access_tokens) can be
 imported instead of running OAuth — the shape for bots, CI, and any machine
-that should never sign in interactively. The token is read from stdin (never
+that should never sign in interactively. Personal access tokens are not
+available on every Basecamp account; if that page does not open for you, use
+the OAuth login above. The token is read from stdin (never
 an argument), verified against the server — who it authenticates as, and that
 it can reach the profile's account — and only then stored under a named
 profile, with whatever expiry the server reports for it:
@@ -285,36 +287,42 @@ a sandbox, and a sandbox may refuse access to the OS credential store
 Linux). Codex's Windows sandbox, for one, answers Credential Manager with
 "Access is denied." A login stored there is then out of reach, even though
 it works in your own terminal. The CLI reports this as `auth_required` and
-names the refused store. Its hint points to a token rather than a login,
-because a new login would be refused in the same way.
+names the refused store. Its hint lists the remedies below rather than
+"log in", because a login stored in the keyring is the one thing the
+sandbox can't reach.
 
 Pick one:
 
-- **A personal access token. This is the simplest option.** Create a
-  [personal access token](https://app.basecamp.com/my/access_tokens) and set
-  `BASECAMP_TOKEN` to it in the environment the agent starts from, then
-  restart the agent. The CLI reads the token before it opens the credential
-  store, so the sandbox never gets in the way. Some agents strip environment
-  variables whose names contain `TOKEN`. Codex does when
-  `shell_environment_policy.ignore_default_excludes` is `false`, so let
-  `BASECAMP_TOKEN` through if your agent does this.
-- **A login made outside the sandbox, kept in a file.** A login in the OS
-  keyring can't help here. The CLI doesn't read the keyring from a process
-  the keyring refused, so a login from your own terminal reaches the
-  sandbox only through file storage. Run
-  `BASECAMP_NO_KEYRING=1 basecamp auth login` outside the sandbox, and give
-  the agent `BASECAMP_NO_KEYRING=1` as well. The sandbox has to be able to
-  read and write the config directory (`~/.config/basecamp`, or under
-  `XDG_CONFIG_HOME`), because every refresh rewrites it. If your agent's
-  sandbox supports writable roots, add that directory as one. The
-  credential is stored in plaintext there, as on any host without a
-  keyring.
+- **Run the CLI outside the sandbox.** Most agents can ask before running
+  a command unsandboxed. In Codex, that is an approval prompt, unless
+  approvals are set to be rejected automatically, or a rule that allows
+  `basecamp`. The command then runs as you and uses your normal login.
 - **Basecamp's hosted MCP server.** Agents that can connect to a remote MCP
   server can use `https://mcp.basecamp.com/mcp` and sign in through the
   browser. Nothing runs inside the sandbox, and this CLI stores nothing.
   [basecamp.com/ai](https://basecamp.com/ai) has setup steps for each
   client. This is also the route for hosted agents that can't run the CLI
   at all, such as ChatGPT, Claude and Grok on the web.
+- **Keep the login in a file the sandbox can write.** The CLI doesn't read
+  the keyring from a process the keyring refused, so a login from your own
+  terminal reaches the sandbox only through file storage. Choose a
+  directory the sandbox may write to, such as one of its writable roots.
+  Log in outside the sandbox with both settings:
+
+  ```bash
+  BASECAMP_NO_KEYRING=1 XDG_CONFIG_HOME=/path/the/sandbox/can/write basecamp auth login
+  ```
+
+  Then give the agent the same `BASECAMP_NO_KEYRING=1` and
+  `XDG_CONFIG_HOME`. The directory has to be writable, not just readable.
+  Each refresh replaces the refresh token, and a refresh that can't save
+  the new one loses the login. The credential is stored in plaintext. Keep
+  the directory out of any repository: a writable root inside a project is
+  exactly where `git add .` would pick it up.
+- **A token you already have.** `BASECAMP_TOKEN` is read before the
+  credential store is opened, so a token issued to you (see
+  [Personal access tokens](#personal-access-tokens)) works in a sandbox
+  unchanged.
 
 Sandboxes and hosted machines often send their traffic through an egress
 proxy. API requests follow `HTTPS_PROXY`. Login and token refresh follow it
@@ -322,8 +330,7 @@ only with `BASECAMP_OAUTH_USE_PROXY=1`, and the value must be exactly `1`.
 Without that setting they refuse addresses outside the public internet,
 including the placeholder addresses that fake-IP DNS hands out
 ([#849](https://github.com/basecamp/basecamp-cli/issues/849)). A proxy that
-intercepts TLS also needs its CA certificate in `SSL_CERT_FILE`. A
-`BASECAMP_TOKEN` is never refreshed, so it avoids all of this.
+intercepts TLS also needs its CA certificate in `SSL_CERT_FILE`.
 
 `BASECAMP_NO_KEYRING=1` also fixes a keyring that hangs instead of refusing
 ([#800](https://github.com/basecamp/basecamp-cli/issues/800)).

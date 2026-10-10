@@ -176,9 +176,9 @@ func managerWithStore(t *testing.T, inner credStore) *Manager {
 // Regression: inside an agent's sandbox the OS refuses the keyring, the
 // store falls back to an empty file, and the miss was reported as "not
 // logged in" with "Run: basecamp auth login" — a login the person already
-// has, and one the sandbox would refuse in turn. The error must name the
-// refusal and the remedy that never touches the store.
-func TestAccessTokenWhenTheKeyringRefusesAccessNamesTheToken(t *testing.T) {
+// has, and no answer to a store the sandbox will not open. The error must
+// name the refusal and remedies that work there.
+func TestAccessTokenWhenTheKeyringRefusesAccessNamesTheRefusal(t *testing.T) {
 	m := managerWithStore(t, refusedStore{})
 
 	_, err := m.AccessToken(context.Background())
@@ -190,6 +190,18 @@ func TestAccessTokenWhenTheKeyringRefusesAccessNamesTheToken(t *testing.T) {
 	assert.Contains(t, e.Message, syscall.EACCES.Error(), "the OS's own words stay in the message")
 	assert.Equal(t, CredentialStoreRefusedHint, e.Hint)
 	assert.NotContains(t, e.Hint, "auth login")
+}
+
+// The refused-store remedy is read by customers, and personal access tokens
+// are not issued to every account: the hint must name only remedies anyone
+// can take, and never send people to mint a token.
+func TestCredentialStoreRefusedHintNamesRemediesAnyoneCanTake(t *testing.T) {
+	assert.NotContains(t, CredentialStoreRefusedHint, "access_tokens")
+	assert.NotContains(t, CredentialStoreRefusedHint, "personal access token")
+	assert.Contains(t, CredentialStoreRefusedHint, "outside the sandbox")
+	assert.Contains(t, CredentialStoreRefusedHint, "BASECAMP_NO_KEYRING=1")
+	assert.Contains(t, CredentialStoreRefusedHint, "XDG_CONFIG_HOME")
+	assert.Contains(t, CredentialStoreRefusedHint, "https://basecamp.com/ai")
 }
 
 // A gate that acts on CheckAuthenticated must not read a refused store as
