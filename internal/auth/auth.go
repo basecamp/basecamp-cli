@@ -412,8 +412,8 @@ func storeRefused(err error) bool {
 // CredentialStoreRefusedHint is the remedy when the operating system
 // refused this process access to the credential store. That is what an AI
 // agent's sandbox does — Codex on Windows answers Credential Manager with
-// "Access is denied." — and "log in" is no answer to it: the person already
-// has a login, sitting in the store the sandbox will not open. A login made
+// "Access is denied." — and "log in" is no answer to it: any login the
+// person has sits in the store the sandbox will not open. A login made
 // inside the sandbox can only land in the fallback file, which holds only
 // where the sandbox may write the config directory — and a refresh that
 // cannot save its rotated token loses the login outright.
