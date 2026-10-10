@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -364,6 +365,13 @@ func needsRenewal(creds *Credentials) bool {
 // classification (retryable, rate-limited) the caller can act on.
 func (m *Manager) unreadable(missing, credKey string, err error) error {
 	switch {
+	case storeRefused(err):
+		// Checked first: a refused keyring leaves the store serving an
+		// empty fallback file, so its miss also reads as ErrNoCredential —
+		// but the credential is not missing, only out of reach.
+		e := output.ErrAuth(fmt.Sprintf("%s %s: the system credential store refused access: %v", missing, credKey, err))
+		e.Hint = CredentialStoreRefusedHint
+		return e
 	case errors.Is(err, ErrNoCredential), errors.Is(err, ErrInvalidCredentials):
 		// The store spoke: nothing is stored, or nothing readable is.
 		// That IS "not authenticated", and a login is the remedy.
@@ -382,6 +390,35 @@ func (m *Manager) unreadable(missing, credKey string, err error) error {
 	}
 	return m.errAuth(fmt.Sprintf("%s %s: %v", missing, credKey, err))
 }
+
+// storeRefused reports that the operating system refused this process
+// access to the credential store: a keyring probe answered with a
+// permission error (which credstore carries in the miss it reports from its
+// fallback file), or the credentials file itself unreadable for want of
+// permission. On Windows, syscall.Errno maps ERROR_ACCESS_DENIED — the
+// "Access is denied." Credential Manager gives a sandboxed process — to
+// fs.ErrPermission; EACCES and EPERM do the same on Unix.
+//
+// An error already classified as something other than an auth failure
+// keeps its class, as unreadable keeps it for every other cause.
+func storeRefused(err error) bool {
+	var e *output.Error
+	if errors.As(err, &e) && e.Code != output.CodeAuth {
+		return false
+	}
+	return errors.Is(err, fs.ErrPermission)
+}
+
+// CredentialStoreRefusedHint is the remedy when the operating system
+// refused this process access to the credential store. That is what an AI
+// agent's sandbox does — Codex on Windows answers Credential Manager with
+// "Access is denied." — and a login is no answer to it: the person already
+// has one, sitting in the store the sandbox will not open, and a new one
+// would be refused or stored where the next sandboxed run cannot read it
+// either. BASECAMP_TOKEN is read before the store is ever opened.
+const CredentialStoreRefusedHint = "The system credential store refused this process access, as AI agent sandboxes do. " +
+	"Set BASECAMP_TOKEN to a personal access token (https://app.basecamp.com/my/access_tokens), " +
+	"or run the CLI outside the sandbox"
 
 // servableToken is creds' access token, or the auth error for a credential
 // that holds none.
@@ -430,6 +467,10 @@ func (m *Manager) CheckAuthenticated(ctx context.Context) (bool, error) {
 
 	creds, err := m.store.LoadContext(ctx, m.credentialKey())
 	switch {
+	case storeRefused(err):
+		// The OS would not let the store be read. Not "nothing stored":
+		// a login is no remedy, and the caller must not go and get one.
+		return false, m.unreadable("Not authenticated for", m.credentialKey(), err)
 	case errors.Is(err, ErrNoCredential), errors.Is(err, ErrInvalidCredentials):
 		// The store spoke: there is nothing stored, or nothing readable.
 		// A login is the answer, and the caller may go and get one.
