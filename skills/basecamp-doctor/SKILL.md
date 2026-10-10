@@ -39,10 +39,11 @@ Report failures and warnings with their `hint` fields. Also inspect the top-leve
 - A refused credential store: if an `auth_required` error says "the system
   credential store refused access", your sandbox is keeping the CLI away from
   the OS keyring. The login is still there, and running `basecamp auth login`
-  again will not help. Tell the user to set `BASECAMP_TOKEN` to a personal
-  access token from https://app.basecamp.com/my/access_tokens and restart the
-  agent. They can also run the command outside the sandbox. Never ask for the
-  token's value in chat.
+  again will not help. Relay the error's `hint`. It lists running the command
+  outside the sandbox, a file-stored login in a directory the sandbox can
+  write, and Basecamp's hosted MCP server (https://basecamp.com/ai). Don't send
+  the user to create a personal access token, because not every account can.
+  Never ask for a token's value in chat.
 - Agent plugin installation or version: `basecamp setup agents` (honors `BASECAMP_SETUP_AGENT`)
 - Codex plugin specifically: `basecamp setup codex`
 - Claude Code plugin specifically: `basecamp setup claude`
