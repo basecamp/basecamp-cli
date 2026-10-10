@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -364,6 +365,13 @@ func needsRenewal(creds *Credentials) bool {
 // classification (retryable, rate-limited) the caller can act on.
 func (m *Manager) unreadable(missing, credKey string, err error) error {
 	switch {
+	case storeRefused(err):
+		// Checked first: a refused keyring leaves the store serving an
+		// empty fallback file, so its miss also reads as ErrNoCredential —
+		// but the credential is not missing, only out of reach.
+		e := output.ErrAuth(fmt.Sprintf("%s %s: the system credential store refused access: %v", missing, credKey, err))
+		e.Hint = CredentialStoreRefusedHint
+		return e
 	case errors.Is(err, ErrNoCredential), errors.Is(err, ErrInvalidCredentials):
 		// The store spoke: nothing is stored, or nothing readable is.
 		// That IS "not authenticated", and a login is the remedy.
@@ -382,6 +390,46 @@ func (m *Manager) unreadable(missing, credKey string, err error) error {
 	}
 	return m.errAuth(fmt.Sprintf("%s %s: %v", missing, credKey, err))
 }
+
+// storeRefused reports that the operating system refused this process
+// access to the credential store: a keyring probe answered with a
+// permission error (which credstore carries in the miss it reports from its
+// fallback file), or the credentials file itself unreadable for want of
+// permission. On Windows, syscall.Errno maps ERROR_ACCESS_DENIED — the
+// "Access is denied." Credential Manager gives a sandboxed process — to
+// fs.ErrPermission; EACCES and EPERM do the same on Unix.
+//
+// An error already classified as something other than an auth failure
+// keeps its class, as unreadable keeps it for every other cause.
+func storeRefused(err error) bool {
+	var e *output.Error
+	if errors.As(err, &e) && e.Code != output.CodeAuth {
+		return false
+	}
+	return errors.Is(err, fs.ErrPermission)
+}
+
+// CredentialStoreRefusedHint is the remedy when the operating system
+// refused this process access to the credential store. That is what an AI
+// agent's sandbox does — Codex on Windows answers Credential Manager with
+// "Access is denied." — and "log in" is no answer to it: any login the
+// person has sits in the store the sandbox will not open. A login made
+// inside the sandbox can only land in the fallback file, which holds only
+// where the sandbox may write the config directory — and a refresh that
+// cannot save its rotated token loses the login outright.
+//
+// So the remedies are the ones that work for anyone: run outside the
+// sandbox; keep the login in a file in a directory the sandbox can write;
+// or reach Basecamp through its hosted MCP server, which the agent connects
+// to itself. BASECAMP_TOKEN is read before the store is ever opened, but
+// is named only for a token the person already holds: personal access
+// tokens are not issued to every account, and a hint must not send people
+// to a page they cannot open.
+const CredentialStoreRefusedHint = "The system credential store refused this process access, as AI agent sandboxes do. " +
+	"Run the CLI outside the sandbox; or log in outside it with BASECAMP_NO_KEYRING=1 and XDG_CONFIG_HOME set to a directory " +
+	"the sandbox can read and write, and give the agent the same two settings; " +
+	"or connect the agent to Basecamp's hosted MCP server (https://basecamp.com/ai). " +
+	"A token you already have also works in BASECAMP_TOKEN"
 
 // servableToken is creds' access token, or the auth error for a credential
 // that holds none.
@@ -430,6 +478,10 @@ func (m *Manager) CheckAuthenticated(ctx context.Context) (bool, error) {
 
 	creds, err := m.store.LoadContext(ctx, m.credentialKey())
 	switch {
+	case storeRefused(err):
+		// The OS would not let the store be read. Not "nothing stored":
+		// a login is no remedy, and the caller must not go and get one.
+		return false, m.unreadable("Not authenticated for", m.credentialKey(), err)
 	case errors.Is(err, ErrNoCredential), errors.Is(err, ErrInvalidCredentials):
 		// The store spoke: there is nothing stored, or nothing readable.
 		// A login is the answer, and the caller may go and get one.

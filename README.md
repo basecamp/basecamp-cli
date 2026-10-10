@@ -206,7 +206,9 @@ never authenticates on its own; ignored by Launchpad).
 
 A [personal access token](https://app.basecamp.com/my/access_tokens) can be
 imported instead of running OAuth — the shape for bots, CI, and any machine
-that should never sign in interactively. The token is read from stdin (never
+that should never sign in interactively. Personal access tokens are not
+available on every Basecamp account; if that page does not open for you, use
+the OAuth login above. The token is read from stdin (never
 an argument), verified against the server — who it authenticates as, and that
 it can reach the profile's account — and only then stored under a named
 profile, with whatever expiry the server reports for it:
@@ -276,6 +278,68 @@ while. The CLI then waits out the block instead of retrying on every run
 (`basecamp auth status` shows the wait), and forgets a revoked login after
 its first refusal; sign in again once whatever was using the old copy has
 stopped.
+
+### AI agent sandboxes
+
+Coding agents such as Codex, Claude Code and Grok Build can run commands in
+a sandbox, and a sandbox may refuse access to the OS credential store
+(Windows Credential Manager, the macOS Keychain, the Secret Service on
+Linux). Codex's Windows sandbox, for one, answers Credential Manager with
+"Access is denied." A login stored there is then out of reach, even though
+it works in your own terminal. The CLI reports this as `auth_required` and
+names the refused store. Its hint lists the remedies below rather than
+"log in", because a login stored in the keyring is the one thing the
+sandbox can't reach.
+
+Pick one:
+
+- **Run the CLI outside the sandbox.** Most agents can ask before running
+  a command unsandboxed. In Codex, that is an approval prompt, unless
+  approvals are set to be rejected automatically, or a rule that allows
+  `basecamp`. The command then runs as you and uses your normal login.
+- **Basecamp's hosted MCP server.** Agents that can connect to a remote MCP
+  server can use `https://mcp.basecamp.com/mcp` and sign in through the
+  browser. Nothing runs inside the sandbox, and this CLI stores nothing.
+  [basecamp.com/ai](https://basecamp.com/ai) has setup steps for each
+  client. This is also the route for hosted agents that can't run the CLI
+  at all, such as ChatGPT, Claude and Grok on the web.
+- **Keep the login in a file the sandbox can write.** The CLI doesn't read
+  the keyring from a process the keyring refused, so a login from your own
+  terminal reaches the sandbox only through file storage. Choose a
+  directory the sandbox may write to, such as one of its writable roots.
+  Log in outside the sandbox with both settings:
+
+  ```bash
+  BASECAMP_NO_KEYRING=1 XDG_CONFIG_HOME=/path/the/sandbox/can/write basecamp auth login
+  ```
+
+  In PowerShell:
+
+  ```powershell
+  $env:BASECAMP_NO_KEYRING = "1"; $env:XDG_CONFIG_HOME = "C:\path\the\sandbox\can\write"; basecamp auth login
+  ```
+
+  Then give the agent the same `BASECAMP_NO_KEYRING=1` and
+  `XDG_CONFIG_HOME`. The directory has to be writable, not just readable.
+  Each refresh replaces the refresh token, and a refresh that can't save
+  the new one loses the login. The credential is stored in plaintext. Keep
+  the directory out of any repository: a writable root inside a project is
+  exactly where `git add .` would pick it up.
+- **A token you already have.** `BASECAMP_TOKEN` is read before the
+  credential store is opened, so a token issued to you (see
+  [Personal access tokens](#personal-access-tokens)) works in a sandbox
+  unchanged.
+
+Sandboxes and hosted machines often send their traffic through an egress
+proxy. API requests follow `HTTPS_PROXY`. Login and token refresh follow it
+only with `BASECAMP_OAUTH_USE_PROXY=1`, and the value must be exactly `1`.
+Without that setting they refuse addresses outside the public internet,
+including the placeholder addresses that fake-IP DNS hands out
+([#849](https://github.com/basecamp/basecamp-cli/issues/849)). A proxy that
+intercepts TLS also needs its CA certificate in `SSL_CERT_FILE`.
+
+`BASECAMP_NO_KEYRING=1` also fixes a keyring that hangs instead of refusing
+([#800](https://github.com/basecamp/basecamp-cli/issues/800)).
 
 ### Multiple Identities
 
