@@ -37,9 +37,11 @@ Report failures and warnings with their `hint` fields. Also inspect the top-leve
   the client id filled in — prefer it verbatim over reconstructing one, and
   follow it rather than choosing for yourself whenever `oauth_type` is absent.
 - A refused credential store: if an `auth_required` error says "the system
-  credential store refused access", your sandbox is keeping the CLI away from
-  the OS keyring. The login is still there, and running `basecamp auth login`
-  again will not help. Relay the error's `hint`. It lists running the command
+  credential store refused access", the operating system denied the CLI its
+  credential store (the OS keyring, or the credentials file). A sandbox is the
+  usual cause. Any login stored there is out of reach, and running
+  `basecamp auth login` inside the sandbox will not fix it. Relay the error's
+  `hint`. It lists running the command
   outside the sandbox, a file-stored login in a directory the sandbox can
   write, and Basecamp's hosted MCP server (https://basecamp.com/ai). Don't send
   the user to create a personal access token, because not every account can.

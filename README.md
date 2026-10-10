@@ -313,6 +313,12 @@ Pick one:
   BASECAMP_NO_KEYRING=1 XDG_CONFIG_HOME=/path/the/sandbox/can/write basecamp auth login
   ```
 
+  In PowerShell:
+
+  ```powershell
+  $env:BASECAMP_NO_KEYRING = "1"; $env:XDG_CONFIG_HOME = "C:\path\the\sandbox\can\write"; basecamp auth login
+  ```
+
   Then give the agent the same `BASECAMP_NO_KEYRING=1` and
   `XDG_CONFIG_HOME`. The directory has to be writable, not just readable.
   Each refresh replaces the refresh token, and a refresh that can't save
