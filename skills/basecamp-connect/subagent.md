@@ -128,8 +128,9 @@ basecamp chat post - --project <bucket_id> --room <reply_to.recording_id> --prof
 - **Success**: the results, where the request was written.
 - **Failure**: what broke and what you tried, in a few lines, and **mention the
   requester**: `[@<requester_name>](person:<requester_id>)`. Without a name,
-  look it up with the person's own login (`basecamp people show <requester_id>
-  --json`, no `-P`).
+  look it up with the person's own login in the account the handoff names
+  (`basecamp people show <requester_id> --account <account> --json`, no `-P`):
+  a Person id belongs to one account.
   Basecamp may refuse an agent's comment that mentions someone ("Basecamp
   doesn't let agents do this"). If it does, post the same reply without the
   mention, and tell the main session so it can tell the person directly. The

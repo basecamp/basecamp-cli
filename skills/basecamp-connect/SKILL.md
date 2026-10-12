@@ -231,7 +231,8 @@ If more than one document has that title, ask which governs rather than choosing
 one arbitrarily. If no such document exists,
 or it declares no applicable mapping, work out the repo from:
 
-1. `repos` in `last.json`, if this project is there.
+1. `repos` in `~/.config/basecamp-connect/last.json`, if this project is
+   there: it maps a project id to `{"name", "path"}`.
 2. A repo the request itself names (a pull request, a repo, a path), only
    when its `role` is `operator`. A participant's request never chooses a
    local repo: with no mapping above, ask the person.
@@ -276,7 +277,7 @@ to finish without this session:
 - the full content of the project's AGENTS.md document and any repo mapping used,
   or the explicit
   result "AGENTS.md checked: none found";
-- the path of `subagent.md` in this skill's base directory, with the
+- the path of `subagent.md`, `${CLAUDE_SKILL_DIR}/subagent.md`, with the
   instruction to read it in full before anything else and follow it: it is
   the subagent's instructions, kept out of this file so they cost nothing
   here and survive a compaction.

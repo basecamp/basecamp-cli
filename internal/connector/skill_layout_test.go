@@ -42,16 +42,21 @@ func TestTheConnectSkillKeepsEachRequestsStepsInsideTheCompactionCut(t *testing.
 	require.GreaterOrEqual(t, end, 0, "a section follows the handoff")
 	end += dispatch
 
+	previous := -1
 	for _, step := range []string{
 		"### 1. Start it, and watch its output",
 		"### 2. The request line",
 		"## For each request: acknowledge, choose the repo, hand off",
 		"### a. Acknowledge, within seconds",
 		"### b. Choose the repo",
+		"### c. Dispatch one background subagent",
 	} {
 		at := strings.Index(body, step)
-		assert.True(t, at >= 0 && at < dispatch, "%q comes before the handoff", step)
+		assert.Greater(t, at, previous, "%q comes after the step before it", step)
+		previous = at
 	}
+	assert.Contains(t, body[:dispatch], "~/.config/basecamp-connect/last.json",
+		"choosing the repo names the file of confirmed mappings it reads")
 	assert.LessOrEqual(t, end, perRequestBudget,
 		"the per-request steps end at character %d of the skill's body; keep them within %d, moving setup and reference material after them",
 		end, perRequestBudget)
@@ -66,7 +71,7 @@ func TestTheSubagentReadsItsInstructionsFromTheirOwnFile(t *testing.T) {
 	require.GreaterOrEqual(t, dispatch, 0)
 	handoff := skill[dispatch:]
 	handoff = handoff[:strings.Index(handoff, "\n## ")]
-	assert.Contains(t, handoff, "the path of `subagent.md`", "the handoff passes the file the subagent reads")
+	assert.Contains(t, handoff, "`${CLAUDE_SKILL_DIR}/subagent.md`", "the handoff passes the file's path, which Claude Code expands")
 	assert.Contains(t, handoff, "read it in full before anything else", "the handoff tells the subagent to read it first")
 
 	// An acknowledgement such as "I'm on it" breaks a single-quoted command
