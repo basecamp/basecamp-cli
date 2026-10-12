@@ -303,7 +303,37 @@ func TestCheckClaudePluginVersion_Outdated(t *testing.T) {
 	assert.Equal(t, "warn", check.Status)
 	assert.Contains(t, check.Message, "0.1.0")
 	assert.Contains(t, check.Message, "2.0.0")
+	assert.Contains(t, check.Hint, "Run: claude plugin update basecamp-cli@37signals, then restart Claude Code")
 	assert.Contains(t, check.Hint, "auto-update")
+}
+
+func TestCheckClaudePluginVersion_CLIOlderThanPlugin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	origVersion := version.Version
+	version.Version = "0.11.0"
+	defer func() { version.Version = origVersion }()
+
+	pluginsDir := filepath.Join(home, ".claude", "plugins")
+	require.NoError(t, os.MkdirAll(pluginsDir, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(pluginsDir, "installed_plugins.json"),
+		[]byte(`{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"0.13.0"}]}}`),
+		0o644,
+	))
+
+	check := CheckClaudePluginVersion()
+	assert.Equal(t, "warn", check.Status)
+	assert.Equal(t, "Run: basecamp upgrade", check.Hint)
+}
+
+func TestPluginVersionMismatchHint(t *testing.T) {
+	update := "Run: claude plugin update basecamp-cli@37signals, then restart Claude Code. To keep it current: " + AutoUpdateHint
+	assert.Equal(t, update, PluginVersionMismatchHint("0.7.2", "0.13.0"))
+	assert.Equal(t, update, PluginVersionMismatchHint("v0.12.9", "0.13.0"))
+	assert.Equal(t, "Run: basecamp upgrade", PluginVersionMismatchHint("0.13.0", "0.11.0"))
+	assert.Equal(t, AutoUpdateHint, PluginVersionMismatchHint("not-a-version", "0.13.0"))
 }
 
 func TestCheckClaudePluginVersion_DevBuild(t *testing.T) {

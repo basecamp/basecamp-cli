@@ -82,6 +82,7 @@ Each becomes a flag on setup (*First-time setup*, step 4):
 
 Then:
 
+0. **Versions and leftovers**, once per session (*Before anything*).
 1. **Which agent.** Use the profile they name. With none, read
    `~/.config/basecamp-connect/last.json` (below) and confirm it. With neither,
    list profiles (`basecamp profile list --json`) and ask.
@@ -93,6 +94,20 @@ Then:
 
 Trust and served projects are read when the connector starts. After any setup
 change while it runs, stop it and start it again.
+
+### Before anything
+
+- **The CLI.** `basecamp --version` must say 0.13.0 or later: older versions
+  have neither `basecamp auth agent connect` nor `basecamp connect`. Run
+  `basecamp upgrade`, tell the person, and check again. If it refuses because a
+  package manager installed the CLI, give them the command its hint names, and
+  stop until it's done.
+- **The legacy skill.** A `basecamp-connect` skill from
+  `basecamp-local-agent-connector` (a symlink into that checkout, or a SKILL.md
+  describing `bin/connect`) in `~/.claude/skills` or a project's
+  `.claude/skills` is the retired connector's. This skill is installed, so
+  remove that copy now and tell the person. Never remove the one in this
+  plugin.
 
 ### Remembered settings
 
@@ -122,7 +137,9 @@ mappings and ask before starting. Never start silently from the store.
 - Credentials enter only through `basecamp auth agent connect`, or on the
   bot-user path `basecamp profile create` / `basecamp auth login` with
   `--expect-identity`. If a hint suggests `--with-token` or
-  `--with-client-credentials`, don't follow it.
+  `--with-client-credentials`, don't follow it. The one exception is
+  importing a connection Basecamp's instructions page already made (*First-time
+  setup*, step 1), piped straight from its file and never printed.
 - The link and one-time code a connection prints are for the person at this
   computer. Show them here only, never in Basecamp or a file.
 - Setup and the connector refuse to run while `BASECAMP_TOKEN` is set. Ask the
@@ -163,12 +180,20 @@ Ask only what you can't find out.
 `_`), for example the agent's name. Check it: `basecamp auth status -P
 '<profile>' --json`.
 
-- `unknown profile`: it doesn't exist. Connect the agent with
+- `unknown profile`, or an error saying no profiles are configured (a
+  computer with none yet): it doesn't exist. Never run `basecamp profile
+  create` for an agent: that signs in a person. Connect the agent with
   `basecamp auth agent connect -P '<profile>'` (add `--no-browser` if the person
   is on another device). Show the link and code. They open the link, check the
   code, choose the agent (or create one) and approve.
 - `oauth_type` `agent`: already connected. Don't connect again: that rotates
   the agent's secret and disconnects any other computer using it.
+- It doesn't exist, but Basecamp's instructions page already connected this
+  agent over HTTP and left `~/.basecamp-agent/credentials.json`: import that
+  connection instead of connecting again, which would replace it and ask the
+  person to approve once more. Pipe the secret, never print it:
+  `jq -r .client_secret ~/.basecamp-agent/credentials.json | basecamp auth login --with-client-credentials --client-id "$(jq -r .client_id ~/.basecamp-agent/credentials.json)" -P '<profile>' --account "$(jq -r .account_id ~/.basecamp-agent/credentials.json)"`.
+  If it's refused, the secret was replaced since: connect.
 - Anything else: a person's login is stored. Ask; never connect an agent over
   it.
 
@@ -199,7 +224,8 @@ count only from the operator, in every mode, unless they ask for the people
 named with `--allow` to assign work too: `--allow-assignments-from-authorized`
 (and `=false` to undo it), which covers everyone on the allowlist. For a personal agent pass no operator flag: setup
 takes its owner. For any other agent, name the operator by their own CLI
-profile with `--operator-profile '<profile>'`. For allowlist, or operators
+profile with `--operator-profile '<profile>'`, or by person id with
+`--operator <id>` when they have no profile on this computer. For allowlist, or operators
 beside project trust, look up each person's id with
 `basecamp people list --json`,
 and pass `--allow <id>` for each.
@@ -223,6 +249,10 @@ basecamp connect setup -P '<profile>' --serve <project-id> --serve <project-id> 
 adding `--trust`, `--allow`, `--allow-assignments-from-authorized` or
 `--operator-profile` as chosen, and on the bot-user path
 `--expect-identity <bot-identity-id>`.
+
+**5. Start the connector** right away (*Running the connector*), unless the
+person said not to. Connecting, setup and the watcher are one flow: don't stop
+after setup to ask whether to start it.
 
 ### Reading setup's result
 
