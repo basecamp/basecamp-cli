@@ -32,6 +32,7 @@ var connectorSkillPrefilter = []byte(skillLoadPrefix)
 // transcriptRecord is the part of a transcript line a skill load lives in.
 type transcriptRecord struct {
 	Type    string `json:"type"`
+	IsMeta  bool   `json:"isMeta"`
 	Message struct {
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
@@ -100,7 +101,7 @@ func lastConnectorSkillDir(path string) string {
 // result or a message that quotes a skill load is not one.
 func connectorSkillDirIn(line []byte) string {
 	var record transcriptRecord
-	if json.Unmarshal(line, &record) != nil || record.Type != "user" {
+	if json.Unmarshal(line, &record) != nil || record.Type != "user" || !record.IsMeta {
 		return ""
 	}
 	var blocks []struct {

@@ -15,7 +15,8 @@ import (
 func skillLoadLine(t *testing.T, dir string) string {
 	t.Helper()
 	line, err := json.Marshal(map[string]any{
-		"type": "user",
+		"type":   "user",
+		"isMeta": true,
 		"message": map[string]any{"role": "user", "content": []map[string]string{
 			{"type": "text", "text": "Base directory for this skill: " + dir + "\n\n# /basecamp-connect"},
 		}},
@@ -127,5 +128,10 @@ func TestAgentHookConnectorSkillDirIgnoresQuotedLoads(t *testing.T) {
 	}}})
 	require.NoError(t, err)
 	assert.Empty(t, connectorSkillDirIn(assistant), "an assistant message quoting a load")
+	pasted, err := json.Marshal(map[string]any{"type": "user", "message": map[string]any{"content": []map[string]string{
+		{"type": "text", "text": "Base directory for this skill: " + dir + "\n"},
+	}}})
+	require.NoError(t, err)
+	assert.Empty(t, connectorSkillDirIn(pasted), "a person's message quoting a load")
 	assert.Equal(t, dir, connectorSkillDirIn([]byte(skillLoadLine(t, dir))))
 }
