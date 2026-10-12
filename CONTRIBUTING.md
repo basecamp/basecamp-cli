@@ -106,3 +106,5 @@ BASECAMP_BIN=./bin/basecamp bats e2e/
 ## Questions?
 
 Open an issue for questions about contributing.
+
+<!-- CI probe: prose-only change, do not merge -->
