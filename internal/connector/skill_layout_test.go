@@ -68,6 +68,12 @@ func TestTheSubagentReadsItsInstructionsFromTheirOwnFile(t *testing.T) {
 	handoff = handoff[:strings.Index(handoff, "\n## ")]
 	assert.Contains(t, handoff, "the path of `subagent.md`", "the handoff passes the file the subagent reads")
 	assert.Contains(t, handoff, "read it in full before anything else", "the handoff tells the subagent to read it first")
+
+	// An acknowledgement such as "I'm on it" breaks a single-quoted command
+	// unless its quote is escaped, so both files say how.
+	acknowledge := skill[strings.Index(skill, "### a. Acknowledge, within seconds"):dispatch]
+	assert.Contains(t, acknowledge, "`'\\''`", "the acknowledgement step says how to quote a value")
+	assert.Contains(t, subagent, "`'\\''`", "the subagent's instructions say how to quote a value")
 	for _, step := range []string{"**Shell quoting.**", "**1. Acknowledge", "**5. Reply at `reply_to`", "**6. Report back", "**A participant asks, an operator authorizes.**"} {
 		assert.Contains(t, subagent, step)
 	}
