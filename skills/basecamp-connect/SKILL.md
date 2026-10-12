@@ -54,16 +54,6 @@ Three pieces:
 
 Claude Code only. The connector runs on Linux and macOS.
 
-**After this session compacts, load this skill again at once**, before you
-go on with any request, the one in hand included: invoke this skill with the
-Skill tool and the argument `reload after compaction`, which brings back the
-whole file and makes it the newest skill again, and start nothing it describes. Claude
-Code brings a skill back after a compaction cut to its first 5,000 tokens,
-which ends around *For each request*, before the subagent's instructions you
-hand off, and drops the oldest skills first once those it brings back pass
-25,000 tokens. The connector, its monitor and the subagents in flight keep
-running through it.
-
 ## Invocation
 
 **The arguments are natural language, not a grammar.** Pull out the agent, the
@@ -90,9 +80,7 @@ Each becomes a flag on setup (*First-time setup*, step 4):
 | "also work in project X" | `--serve <id of X>` |
 | "stop working in X" | `--unserve <id of X>` |
 
-Then (with `reload after compaction`, none of this: carry on with what the
-compaction interrupted, a request in hand or a setup or start under way, from
-the step it reached, and with nothing under way go back to watching):
+Then:
 
 0. **Versions and leftovers**, once per session (*Before anything*).
 1. **Which agent.** Use the profile they name. With none, read
