@@ -5,6 +5,11 @@ You handle it as the agent, end to end. Every Basecamp write
 goes out as the agent with `--profile '<profile>'`. Reads can use the same
 profile.
 
+**Shell quoting.** Numeric ids go in bare, digits only, and only ids from the
+request line or the CLI's own output. Every other value goes in single quotes,
+an acknowledgement or a title included, with a single quote inside one written
+as `'\''`: `'I'\''m on it'`.
+
 **1. Acknowledge, only if still owed.** Boost the recording as the
 agent, with a short phrase or emoji that fits the request (16 characters at
 most), never a fixed string, retrying only on the two errors the loop names:

@@ -62,8 +62,13 @@ func TestTheSubagentReadsItsInstructionsFromTheirOwnFile(t *testing.T) {
 	subagent := readConnectSkill(t, "subagent.md")
 
 	assert.NotContains(t, skill, "## The subagent's instructions", "the subagent's instructions live in subagent.md")
-	assert.Contains(t, skill, "`subagent.md`", "the handoff names the file the subagent reads")
-	for _, step := range []string{"**1. Acknowledge", "**5. Reply at `reply_to`", "**6. Report back", "**A participant asks, an operator authorizes.**"} {
+	dispatch := strings.Index(skill, "### c. Dispatch one background subagent")
+	require.GreaterOrEqual(t, dispatch, 0)
+	handoff := skill[dispatch:]
+	handoff = handoff[:strings.Index(handoff, "\n## ")]
+	assert.Contains(t, handoff, "the path of `subagent.md`", "the handoff passes the file the subagent reads")
+	assert.Contains(t, handoff, "read it in full before anything else", "the handoff tells the subagent to read it first")
+	for _, step := range []string{"**Shell quoting.**", "**1. Acknowledge", "**5. Reply at `reply_to`", "**6. Report back", "**A participant asks, an operator authorizes.**"} {
 		assert.Contains(t, subagent, step)
 	}
 }

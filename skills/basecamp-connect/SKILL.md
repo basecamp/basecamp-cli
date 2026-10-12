@@ -192,6 +192,8 @@ done
 [ "$landed" = true ] || { echo "boost did not verifiably land: $out" >&2; false; }
 ```
 
+Values go in single quotes, the acknowledgement included, with a single quote
+inside one written as `'\''`: `'I'\''m on it'`. Numeric ids go in bare.
 Retry only those two failures: they happen before any request is sent. Any
 other failure may have landed the boost, and a retry would post it twice. If it
 didn't verifiably land, say so in the handoff, and the subagent boosts as a
