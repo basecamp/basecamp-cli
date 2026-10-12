@@ -19,6 +19,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
 	"github.com/basecamp/cli/pkce"
+	surfguard "github.com/basecamp/surfguard/go"
 
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
@@ -107,6 +108,12 @@ type Manager struct {
 	// clock is the time a remembered mint verdict is read and written
 	// against (renewal_hold.go). Test seam; nil means time.Now.
 	clock func() time.Time
+
+	// firstPartyPolicy is the address policy the lanes' first-party
+	// transport enforces (client.go). Test seam, so a test can reach a
+	// loopback server through that transport; nil means
+	// firstPartyOAuthPolicy.
+	firstPartyPolicy func() surfguard.Policy
 
 	mu sync.Mutex
 

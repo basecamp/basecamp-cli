@@ -113,6 +113,15 @@ func firstPartyOAuthPolicy() surfguard.Policy {
 	return surfguard.Policy{}.Allow(fakeIPRange).AllowPorts(443)
 }
 
+// firstPartyOAuthPolicy is the Manager's first-party policy: the
+// firstPartyPolicy field when a test set one.
+func (m *Manager) firstPartyOAuthPolicy() surfguard.Policy {
+	if m.firstPartyPolicy != nil {
+		return m.firstPartyPolicy()
+	}
+	return firstPartyOAuthPolicy()
+}
+
 // isFirstPartyOAuthURL reports whether u is an HTTPS request on the default
 // port to one of firstPartyOAuthHosts. Plain HTTP (no certificate vouches for
 // the answer), an explicit non-default port, and near-miss spellings such as a
@@ -347,7 +356,7 @@ func (m *Manager) buildLaneClient(anchorURL, label string) (*http.Client, error)
 	st := m.proxyState()
 	tr := &oauthTransport{
 		guarded:    policy.RoundTripper(),
-		firstParty: firstPartyOAuthPolicy().RoundTripper(),
+		firstParty: m.firstPartyOAuthPolicy().RoundTripper(),
 		resolve:    st.resolve,
 		optOut:     st.optOut,
 		warnf:      m.warnf,
