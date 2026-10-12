@@ -63,7 +63,8 @@ type Snapshot struct {
 	// Owner says the operator connect.json names asked, in words they wrote:
 	// they mentioned the agent, or assigned it a recording they wrote. A
 	// comment on a followed thread, a completion and a boost are never the
-	// owner's word. Someone named with --allow is an operator but never the
+	// owner's word; an operator's go on a declared ask is a separate
+	// approval (AskRecordingID) and does not make one. Someone named with --allow is an operator but never the
 	// owner, and neither is the owner bringing in someone else's words: an
 	// allowlisted person's to-do the owner moves in is that person's.
 	Owner bool `json:"owner,omitempty"`
@@ -467,9 +468,11 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		Role:      v.Role,
 		// Only a request the owner made, in words the owner wrote: a mention,
 		// or an assignment of a recording they wrote. A comment on a thread
-		// the agent follows asks it nothing, a completion is context, a boost
-		// answers the agent and names nothing it approves, and an assigned
-		// recording someone else wrote is that person's words.
+		// the agent follows asks it nothing, a completion is context, and an
+		// assigned recording someone else wrote is that person's words. A
+		// boost is never Owner either, even the operator's go on a declared
+		// ask (AskRecordingID): Owner is the owner's word on the connector
+		// itself, and a go approves only what its ask names, never that.
 		Owner: v.Role == RoleOperator && ev.Performer() == policy.Trust.OperatorID &&
 			(rule.Trigger == TriggerMentioned || rule.Trigger == TriggerAssigned) &&
 			summary.Creator.ID == policy.Trust.OperatorID,
