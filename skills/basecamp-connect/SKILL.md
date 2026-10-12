@@ -90,7 +90,9 @@ Each becomes a flag on setup (*First-time setup*, step 4):
 | "also work in project X" | `--serve <id of X>` |
 | "stop working in X" | `--unserve <id of X>` |
 
-Then (with `reload after compaction`, none of this: go back to watching):
+Then (with `reload after compaction`, none of this: carry on with what the
+compaction interrupted, a request in hand or a setup or start under way, from
+the step it reached, and with nothing under way go back to watching):
 
 1. **Which agent.** Use the profile they name. With none, read
    `~/.config/basecamp-connect/last.json` (below) and confirm it. With neither,
