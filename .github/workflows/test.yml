@@ -16,9 +16,11 @@ on:
   workflow_dispatch:
 
 # A new push to a pull request supersedes the run in flight. Pushes to main,
-# the schedule and dispatches never cancel: each of those keeps its full result.
+# the schedule and dispatches never cancel, and each gets a group of its own:
+# a group holds one running and one pending run, so a shared one would let a
+# newer main push replace a queued nightly run even with cancel-in-progress off.
 concurrency:
-  group: test-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.event_name == 'pull_request' && format('test-pr-{0}', github.event.pull_request.number) || format('test-run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions: {}
