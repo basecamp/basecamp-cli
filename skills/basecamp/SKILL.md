@@ -207,6 +207,24 @@ A pipe is never consumed implicitly. Only one input may read stdin in an
 invocation. Do not use shell-specific ANSI-C quoting such as `$'line 1\nline 2'`
 in portable commands.
 
+Rich-text fields support [Mermaid](https://mermaid.js.org) diagrams. Put the
+source in a fenced code block with the language `mermaid`, and Basecamp shows
+the diagram to people reading the post. Previews, emails, and exports show the
+source, and so does a post whose source does not parse. Use a diagram for a
+flow, sequence, timeline, or structure that is easier to follow as a picture
+than as prose. Diagram source spans several lines, so pass it on stdin:
+
+````bash
+basecamp messages create "Release flow" - --in "<project>" --json <<'EOF'
+How a release reaches production:
+
+```mermaid
+flowchart LR
+  Merge --> CI --> Staging --> Production
+```
+EOF
+````
+
 For deterministic mentions, prefer the machine-provided mention syntax from
 people or comment results, for example `[@Name](mention:SGID)`. Mention support
 varies by field; leaf help is authoritative.

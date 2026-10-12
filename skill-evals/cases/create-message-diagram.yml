@@ -1,0 +1,11 @@
+task: Post a message titled "Release flow" in project 55555 with a diagram showing that a release goes from merge to CI to staging to production
+tags: [domain, create]
+accept:
+  - 'message(s create)? .*Release flow'
+  - '--(in|project) 55555'
+  - '```mermaid'
+  - '(?mi)merge.*?ci.*?staging.*?production'
+reject:
+  - '--subject'
+  - '--body'
+  - '--content'
