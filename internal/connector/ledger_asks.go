@@ -16,8 +16,11 @@ import (
 // The operator's boost on a declared ask is the go. It is decided in the
 // verdict's own transaction (Admission.commit), so the boost that takes an
 // ask is the one whose verdict committed first, and no other: one ask gets
-// one go. A go nobody was handed (its record closed unwritten, as from before
-// this run) is given back (releaseGo). Another boost on it afterwards — the operator's second, or one
+// one go. A go taken stays taken, even when its record is closed unwritten
+// (before_this_run): a connector that printed the line and stopped before
+// closing the record looks the same on restart, and giving that go back would
+// let the next boost approve twice. Losing a go costs the operator a mention;
+// a second go costs a second action. Another boost on it afterwards — the operator's second, or one
 // removed and given again, which Basecamp records as a new boost and a new
 // event — is an ordinary boosted reply. The event that took the go keeps it
 // when it is decided again (a redispatch), because go_event_id names it.
@@ -103,21 +106,6 @@ func takeGo(ctx context.Context, tx *sql.Tx, recordingID, eventID int64) (bool, 
 		return false, fmt.Errorf("connector: take the go on %d for %d: %w", recordingID, eventID, err)
 	}
 	return n == 1, nil
-}
-
-// releaseGo gives back a go eventID took and nobody will be handed: a record
-// closed unwritten, because it was made before this run started or had
-// nothing to hand off. The ask is open again, so the operator's next boost
-// on it is the go, not a reply to one nobody saw. Released before the record
-// is closed, so a crash between the two leaves the record to be closed again
-// and the release a no-op.
-func (l *Ledger) releaseGo(ctx context.Context, eventID int64) error {
-	return retryBusy(func() error {
-		if _, err := l.db.ExecContext(ctx, `UPDATE asks SET go_event_id = NULL WHERE go_event_id = ?`, eventID); err != nil {
-			return fmt.Errorf("connector: release the go for %d: %w", eventID, err)
-		}
-		return nil
-	})
 }
 
 // isGo reports whether eventID took an ask's go.

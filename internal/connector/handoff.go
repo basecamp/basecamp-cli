@@ -189,9 +189,6 @@ func handOffReady(ctx context.Context, opts HandoffOptions) error {
 func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 	if record.CreatedAt.Before(opts.Started.Add(-HandoffGrace)) {
 		opts.log().Info("connector: a request from before this run started is not handed off", "event_id", record.ID, "created_at", record.CreatedAt)
-		if err := opts.Ledger.releaseGo(ctx, record.ID); err != nil {
-			return err
-		}
 		return opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonBeforeThisRun)
 	}
 	goes, err := opts.Ledger.isGo(ctx, record.ID)
@@ -204,9 +201,6 @@ func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 		// Returning the error instead would stop the connector on every
 		// start, for one record.
 		opts.log().Warn("connector: a request could not be handed off", "event_id", record.ID, "error", err)
-		if err := opts.Ledger.releaseGo(ctx, record.ID); err != nil {
-			return err
-		}
 		return opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonUnreadable)
 	}
 	if err := opts.Lines.WriteLine(line); err != nil {

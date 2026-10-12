@@ -64,7 +64,7 @@ release. Linux and macOS only.
   basecamp connect status             what it heard and holds
   basecamp connect doctor             what it needs to run
   basecamp connect discard <id>       close a record without running it
-  basecamp connect ask <url>          declare the agent's post an ask for a go
+  basecamp connect ask <url|id>       declare the agent's post an ask for a go
   basecamp connect release            clear the hold
   basecamp connect shadow promote     make the shadow ledger the connector's, held
   basecamp connect import <file>      apply a cutover reconciliation file`,

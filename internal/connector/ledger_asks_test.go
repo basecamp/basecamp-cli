@@ -154,14 +154,14 @@ func TestOnlyABoostedLineSaysGo(t *testing.T) {
 	assert.False(t, line.Go)
 }
 
-// A go nobody was handed does not use up the ask: the operator's boost made
-// while no connector ran is closed unwritten, and their next boost is the go.
-func TestAGoNobodyWasHandedIsGivenBack(t *testing.T) {
+// A go taken stays taken, even when its record is closed unwritten: on
+// restart that looks the same as a line printed just before a crash, and
+// giving the go back would let the next boost approve twice.
+func TestAGoClosedUnwrittenIsNotGivenBack(t *testing.T) {
 	ledger := newTestLedger(t)
 	_, err := ledger.DeclareAsk(context.Background(), askRecordingID, "local:agent")
 	require.NoError(t, err)
 	commitBoost(t, ledger, 1, true)
-	require.True(t, goes(t, ledger, 1))
 
 	var out bytes.Buffer
 	opts := handoffOptions(ledger, &out)
@@ -169,8 +169,8 @@ func TestAGoNobodyWasHandedIsGivenBack(t *testing.T) {
 	require.NoError(t, handOffReady(context.Background(), opts))
 	assert.Empty(t, out.String())
 	assert.Equal(t, ReasonBeforeThisRun, getRecord(t, ledger, 1).Reason)
-	assert.False(t, goes(t, ledger, 1))
 
 	commitBoost(t, ledger, 2, true)
-	assert.True(t, goes(t, ledger, 2), "the ask is open again")
+	assert.True(t, goes(t, ledger, 1), "the go stays with the event that took it")
+	assert.False(t, goes(t, ledger, 2), "the next boost is a reply, never a second go")
 }
