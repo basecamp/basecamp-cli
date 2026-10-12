@@ -7,56 +7,174 @@ on:
   # request opened against its parent branch is exactly the one that
   # most needs checking, and it was getting none.
   pull_request:
+  # The full suite every night, whatever changed. Pull requests run only what
+  # their change can affect (see `changes` below), and the vulnerability
+  # database moves without any commit: govulncheck lives in this workflow, so
+  # without a schedule a new advisory surfaced only when someone next pushed.
+  schedule:
+    - cron: '23 5 * * *'
   workflow_dispatch:
+
+# A new push to a pull request supersedes the run in flight. Pushes to main,
+# the schedule and dispatches never cancel: each of those keeps its full result.
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions: {}
 
 jobs:
+  # What this run has to check. Only a pull request is ever narrowed: a push
+  # to main, the nightly schedule and a dispatch always answer "everything".
+  #
+  #   go     anything outside the two lists below: the whole suite.
+  #   tests  only skill or eval files: Tests and Integration Tests, which read
+  #          the embedded skill, its drift fixtures and the eval patterns. Lint,
+  #          Security, CLI Surface Check and the race shards cannot see a
+  #          Markdown or YAML change, so they skip.
+  #   (neither) only prose that nothing builds, embeds or tests: Tests runs its
+  #          naming check and nothing else.
+  #
+  # Fail-safe by construction. A path narrows the run only if it is listed
+  # here, so a file nobody thought about runs everything, and this file is on
+  # neither list, so a change to the gating runs everything too.
+  #
+  # Required checks keep reporting. The gated jobs below skip with a job-level
+  # `if`, and GitHub counts a job skipped by its condition as a passing check.
+  # A workflow-level `paths` filter would not run the workflow at all and would
+  # leave every required check pending forever. And a classifier that fails or
+  # answers nothing narrows nothing: the gates test `!= 'false'`, under
+  # `!cancelled()`, so an empty answer runs the job.
+  changes:
+    name: Classify changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read  # dorny/paths-filter enumerates PR files via the REST API
+    outputs:
+      go: ${{ steps.decide.outputs.go }}
+      tests: ${{ steps.decide.outputs.tests }}
+    steps:
+      - name: Classify the changed files
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          # `every`: a file counts for a filter only if it matches all of that
+          # filter's patterns, so '**' plus negations reads "any file outside
+          # these lists".
+          predicate-quantifier: every
+          filters: |
+            go:
+              - '**'
+              - '!*.md'
+              - '!.github/*.md'
+              - '!skills/**/*.md'
+              - '!skill-evals/**'
+            tests:
+              - '**'
+              - '!*.md'
+              - '!.github/*.md'
+
+      - name: Decide what runs
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          GO: ${{ steps.filter.outputs.go }}
+          TESTS: ${{ steps.filter.outputs.tests }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            echo "tests=true" >> "$GITHUB_OUTPUT"
+            echo "Full run: $EVENT events are never narrowed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # A classifier that cannot tell must not be allowed to say "skip".
+          for answer in "$GO" "$TESTS"; do
+            case "$answer" in
+              true|false) ;;
+              *)
+                echo "::error::the paths filter did not answer (go='$GO', tests='$TESTS'), so nothing can be skipped"
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "go=$GO" >> "$GITHUB_OUTPUT"
+          echo "tests=$TESTS" >> "$GITHUB_OUTPUT"
+          if [ "$GO" = "true" ]; then
+            echo "Full run: this pull request changes files outside the docs and skill lists." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$TESTS" = "true" ]; then
+            echo "Skill or eval files only: Tests and Integration Tests run; Lint, Security, CLI Surface Check and the race shards skip." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Prose only: Tests runs the naming check; the Go jobs skip." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   test:
     name: Tests
     runs-on: ubuntu-latest
+    needs: changes
+    # Always runs: the naming check covers Markdown, so a prose-only change
+    # still has something here to answer for. Only the Go steps are gated.
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
     env:
       BASECAMP_NO_KEYRING: "1"
+      RUN_GO: ${{ needs.changes.outputs.tests != 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Go
+        if: env.RUN_GO == 'true'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: 'go.mod'
 
       - name: Check SDK provenance
+        if: env.RUN_GO == 'true'
         run: make provenance-check
 
       - name: Check module tidiness
+        if: env.RUN_GO == 'true'
         run: make tidy-check
 
       - name: Check naming (no stale legacy references)
         run: make check-naming
 
       - name: Run unit tests
+        if: env.RUN_GO == 'true'
         run: go test -tags dev -v ./...
 
       - name: Build binary
+        if: env.RUN_GO == 'true'
         run: go build -tags dev -o bin/basecamp ./cmd/basecamp
 
       - name: Smoke test
+        if: env.RUN_GO == 'true'
         run: |
           ./bin/basecamp --version
           ./bin/basecamp --help | head -5
 
       - name: Validate release build (no dev tag)
+        if: env.RUN_GO == 'true'
         run: |
           go build -o bin/basecamp-release ./cmd/basecamp
           go test -v ./internal/commands/ -run TestStub
 
+      - name: Say what did not run
+        if: env.RUN_GO != 'true'
+        run: |
+          echo "Prose-only change: the naming check ran; the Go tests, build and smoke test did not." >> "$GITHUB_STEP_SUMMARY"
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.go != 'false' }}
     permissions:
       contents: read
     steps:
@@ -107,6 +225,8 @@ jobs:
   security:
     name: Security
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.go != 'false' }}
     permissions:
       contents: read
     steps:
@@ -132,6 +252,8 @@ jobs:
   race-shard:
     name: Race Detection (shard ${{ matrix.shard }} of 4)
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.go != 'false' }}
     permissions:
       contents: read
     strategy:
@@ -179,10 +301,11 @@ jobs:
   race-check:
     name: Race Detection
     runs-on: ubuntu-latest
-    needs: [race-shard]
+    needs: [changes, race-shard]
     # always(), or a failed shard would skip this job — and a skipped required
-    # check is not a failed one.
-    if: always()
+    # check is not a failed one. The one skip that is meant: a pull request
+    # whose change the shards cannot see, where they skipped by design too.
+    if: ${{ always() && needs.changes.outputs.go != 'false' }}
     permissions:
       contents: read
     steps:
@@ -217,6 +340,8 @@ jobs:
   integration:
     name: Integration Tests
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.tests != 'false' }}
     permissions:
       contents: read
     env:
@@ -270,6 +395,8 @@ jobs:
   cli-surface:
     name: CLI Surface Check
     runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.go != 'false' }}
     permissions:
       contents: read
     env:
