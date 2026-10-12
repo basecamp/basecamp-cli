@@ -77,9 +77,12 @@ func lastConnectorSkillDir(path string) string {
 	for {
 		line, err := r.ReadSlice('\n')
 		if err == bufio.ErrBufferFull {
-			// A line longer than the buffer: read the rest of it whole.
+			// A line longer than the buffer: read the rest of it whole. The
+			// fragment is a view into the reader's buffer, which the next
+			// read reuses, so it is copied first.
+			head := append([]byte(nil), line...)
 			rest, err2 := r.ReadBytes('\n')
-			line = append(append([]byte(nil), line...), rest...)
+			line = append(head, rest...)
 			err = err2
 		}
 		if bytes.Contains(line, connectorSkillPrefilter) {
