@@ -215,7 +215,7 @@ flow, sequence, timeline, or structure that is easier to follow as a picture
 than as prose. Diagram source spans several lines, so pass it on stdin:
 
 ````bash
-basecamp messages create "Release flow" - --in <project> --json <<'EOF'
+basecamp messages create "Release flow" - --in "<project>" --json <<'EOF'
 How a release reaches production:
 
 ```mermaid

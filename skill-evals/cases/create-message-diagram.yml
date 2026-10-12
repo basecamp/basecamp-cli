@@ -4,6 +4,7 @@ accept:
   - 'message(s create)? .*Release flow'
   - '--(in|project) 55555'
   - '```mermaid'
+  - '(?mi)merge.*?ci.*?staging.*?production'
 reject:
   - '--subject'
   - '--body'
