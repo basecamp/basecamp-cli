@@ -54,6 +54,12 @@ Three pieces:
 
 Claude Code only. The connector runs on Linux and macOS.
 
+**After this session compacts, read this file again in full** before you
+handle the next request. Claude Code brings a skill back after a compaction
+cut to its first 5,000 tokens, which ends around *For each request*, before
+the subagent's instructions you hand off. The connector, its monitor and the
+subagents in flight keep running through it.
+
 ## Invocation
 
 **The arguments are natural language, not a grammar.** Pull out the agent, the
