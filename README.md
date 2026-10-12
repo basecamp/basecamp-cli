@@ -242,6 +242,44 @@ yet. `basecamp auth logout` forgets the credential; there is no useful
 revocation, since the same client would mint another — rotate the client
 secret in Basecamp to end an agent's access.
 
+### Connecting an agent to this computer
+
+You don't paste an agent's secret anywhere: you approve the connection in your
+browser and the CLI keeps the credential. It needs CLI 0.13.0 or later; check
+with `basecamp --version` and run `basecamp upgrade` first if it's older.
+
+In a terminal, one command does it all:
+
+```bash
+basecamp connect setup
+```
+
+It connects this computer to your agent (one approval in the browser), records
+you as the agent's operator, asks which projects it serves, and offers to keep
+the connector running. The same steps, scriptable:
+
+```bash
+basecamp auth agent connect -P my-agent                 # one approval
+basecamp connect setup -P my-agent --serve 12345        # who may give it work, which projects
+basecamp connect -P my-agent                            # the watcher
+```
+
+Connect each agent once. Every connection rotates the agent's secret, so a
+second one, from this CLI or from the HTTP handshake on Basecamp's instructions
+page, disconnects the first and asks you to approve again.
+
+In Claude Code, the `/basecamp-connect` skill runs the watcher and hands each
+request to a subagent. It ships in the `basecamp-cli` plugin from 0.12.0 on, and
+an older plugin doesn't have it. Update the plugin and restart Claude Code
+before you remove any older copy of the skill:
+
+```bash
+claude plugin update basecamp-cli@37signals   # or basecamp@37signals, if installed under the old name
+```
+
+Pasting the line from My › Agent in Basecamp into Claude Code runs all of this
+for you: upgrade, plugin, one connection, setup and the watcher.
+
 ### Containers, CI and scheduled jobs
 
 An OAuth login refreshes by rotation: each refresh replaces its refresh token,

@@ -7,6 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
@@ -243,8 +246,33 @@ func CheckClaudePluginVersion() *StatusCheck {
 		Name:    "Claude Code Plugin Version",
 		Status:  "warn",
 		Message: fmt.Sprintf("Mismatched (plugin %s, CLI %s)", installed, cliVersion),
-		Hint:    AutoUpdateHint,
+		Hint:    PluginVersionMismatchHint(installed, cliVersion),
 	}
+}
+
+// PluginVersionMismatchHint says which side of a plugin/CLI mismatch to
+// bring forward. A plugin behind the CLI is missing skills the CLI's
+// commands expect (basecamp-connect arrived after 0.7), and only takes
+// effect after a restart, so the hint names the update and the restart. A
+// CLI behind the plugin lacks commands the plugin's skills run, so the hint
+// is the upgrade. Versions that don't parse get the auto-update advice.
+func PluginVersionMismatchHint(installed, cli string) string {
+	plugin, current := normalizeSemver(installed), normalizeSemver(cli)
+	if !semver.IsValid(plugin) || !semver.IsValid(current) {
+		return AutoUpdateHint
+	}
+	if semver.Compare(current, plugin) < 0 {
+		return "Run: basecamp upgrade"
+	}
+	return "Run: claude plugin update " + ClaudeExpectedPluginKey + ", then restart Claude Code. To keep it current: " + AutoUpdateHint
+}
+
+func normalizeSemver(v string) string {
+	v = strings.TrimSpace(v)
+	if v != "" && !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	return v
 }
 
 // InstalledPluginVersion reads the installed plugin version from
