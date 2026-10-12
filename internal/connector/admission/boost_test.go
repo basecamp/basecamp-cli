@@ -267,7 +267,9 @@ func TestABoostSettledFromItsPointerCostsNoRead(t *testing.T) {
 	for name, details := range map[string]json.RawMessage{
 		"without details":    nil,
 		"without a boost id": json.RawMessage(`{"boosted_event_id":null}`),
-		"unreadable details": json.RawMessage(`{"boost_id":"x"`),
+		// Not the same as null: nothing says the boost is on the recording.
+		"without boosted_event_id": json.RawMessage(`{"boost_id":31337}`),
+		"unreadable details":       json.RawMessage(`{"boost_id":"x"`),
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFakeReads()

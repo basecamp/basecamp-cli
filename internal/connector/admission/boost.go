@@ -13,10 +13,11 @@ const eventBoostCreated = "boost.created"
 
 // boostDetails is the part of boost.created's details admission reads. The
 // feed publishes boosted_event_id as null for a boost on the recording itself
-// and as the event's id for a boost on one of the recording's events.
+// and as the event's id for a boost on one of the recording's events. It is
+// kept raw so that a missing key, which says neither, is told from null.
 type boostDetails struct {
-	BoostID        int64  `json:"boost_id"`
-	BoostedEventID *int64 `json:"boosted_event_id"`
+	BoostID        int64           `json:"boost_id"`
+	BoostedEventID json.RawMessage `json:"boosted_event_id"`
 }
 
 // opens reports whether the gate left trigger open.
@@ -38,14 +39,16 @@ func opens(gate GateResult, trigger Trigger) bool {
 // the agent's own comment, line or post. Whether the agent performed a given
 // event is not something this rule reads.
 //
-// Details without a boost id are not a boost.created Basecamp writes, and are
-// discarded as an invalid pointer: there is no boost to read.
+// Details without a boost id, or without boosted_event_id, are not a
+// boost.created Basecamp writes, and are discarded as an invalid pointer:
+// there is no boost to read, or nothing says whether it landed on the
+// recording. A missing key is never read as null.
 func boostOnRecording(ev Event) (int64, Reason) {
 	var d boostDetails
-	if len(ev.Details) == 0 || json.Unmarshal(ev.Details, &d) != nil || d.BoostID <= 0 {
+	if len(ev.Details) == 0 || json.Unmarshal(ev.Details, &d) != nil || d.BoostID <= 0 || len(d.BoostedEventID) == 0 {
 		return 0, ReasonInvalidPointer
 	}
-	if d.BoostedEventID != nil {
+	if string(d.BoostedEventID) != "null" {
 		return 0, ReasonNotAddressed
 	}
 	return d.BoostID, ""
