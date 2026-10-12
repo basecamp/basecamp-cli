@@ -195,6 +195,44 @@ func TestConnectAskDeclaresTheCommentTheURLNames(t *testing.T) {
 	_, err = f.run(t, output.FormatJSON, "ask", "nope")
 	require.Error(t, err)
 	assert.Equal(t, output.CodeUsage, usageError(t, err).Code)
+
+	// A chat line, in the web's @ form, is the line and not its Campfire.
+	out, err = f.run(t, output.FormatJSON, "ask", "https://3.basecamp.com/999/buckets/456/chats/789@1213")
+	require.NoError(t, err, out)
+	var line struct {
+		Data connector.AskResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &line), out)
+	assert.Equal(t, int64(1213), line.Data.RecordingID)
+}
+
+// A URL that does not plainly name one post in the agent's account is
+// refused, and declares nothing: a wrong declaration would only fail later,
+// silently, when the operator's boost on the real post came as a reply.
+func TestConnectAskRefusesAURLThatIsNotOnePost(t *testing.T) {
+	f := newOperatorFixture(t)
+	require.NoError(t, f.ledger(t, false).Close())
+
+	for name, url := range map[string]string{
+		"another account":   "https://3.basecamp.com/1000/buckets/456/todos/789#__recording_1011",
+		"an untrusted host": "https://3.basecamp.example.com/999/buckets/456/todos/789",
+		"a listing":         "https://3.basecamp.com/999/buckets/456/chats/789/lines",
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, err := f.run(t, output.FormatJSON, "ask", url)
+			require.Error(t, err, out)
+			assert.Equal(t, output.CodeUsage, usageError(t, err).Code)
+		})
+	}
+
+	dir, err := connectStatePath(f.file, false)
+	require.NoError(t, err)
+	db, err := sql.Open("sqlite", filepath.Join(dir, connector.LedgerFile))
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	var n int
+	require.NoError(t, db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM asks`).Scan(&n))
+	assert.Zero(t, n, "nothing was declared")
 }
 
 func TestConnectShadowPromoteAndImport(t *testing.T) {

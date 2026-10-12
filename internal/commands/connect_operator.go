@@ -20,8 +20,10 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // The operator's commands on a connector's ledger: status, discard, release,
@@ -469,12 +471,11 @@ text to decide it is an ask: this declaration is the only way to make one.`,
 		Example: `  basecamp connect ask -P agent 'https://3.basecamp.com/999/buckets/456/todos/789#__recording_1011'`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, _ := extractCommentWithProject(args[0])
-			id, err := strconv.ParseInt(raw, 10, 64)
-			if err != nil || id <= 0 {
-				return output.ErrUsage(fmt.Sprintf("No recording id in %q", args[0]))
-			}
 			p, err := loadConnectProfile(cmd)
+			if err != nil {
+				return err
+			}
+			id, err := askRecordingID(args[0], p)
 			if err != nil {
 				return err
 			}
@@ -497,6 +498,39 @@ text to decide it is an ask: this declaration is the only way to make one.`,
 			return p.app.OK(res, output.WithSummary(summary))
 		},
 	}
+}
+
+// askRecordingID is the recording an ask argument names: a bare id, or a URL
+// for one post in the agent's own account. A declaration that names the wrong
+// recording fails silently later — the operator's boost on the real post is
+// then only a reply — so a URL is refused unless it plainly names one post:
+// a trusted host, the profile's account, and a single recording (the comment
+// a #__recording_ fragment names), never a listing whose id is its parent's.
+func askRecordingID(arg string, p connectProfile) (int64, error) {
+	raw := strings.TrimSpace(arg)
+	if urlarg.IsURL(raw) {
+		if !hostutil.IsTrustedBasecampHost(raw, p.app.Config.BaseURL) {
+			return 0, output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
+		}
+		parsed := urlarg.Parse(raw)
+		switch {
+		case parsed == nil:
+			return 0, output.ErrUsage(fmt.Sprintf("No recording in %q", arg))
+		case parsed.AccountID != "" && parsed.AccountID != p.file.AccountID:
+			return 0, output.ErrUsage(fmt.Sprintf("URL is for account %s, but this agent is in account %s", parsed.AccountID, p.file.AccountID))
+		case parsed.CommentID != "":
+			raw = parsed.CommentID
+		case parsed.IsCollection || parsed.RecordingID == "":
+			return 0, output.ErrUsage("URL names a listing, not the one post the ask is")
+		default:
+			raw = parsed.RecordingID
+		}
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, output.ErrUsage(fmt.Sprintf("No recording id in %q", arg))
+	}
+	return id, nil
 }
 
 // --- release --------------------------------------------------------------
