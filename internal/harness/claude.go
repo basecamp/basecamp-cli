@@ -252,7 +252,7 @@ func CheckClaudePluginVersion() *StatusCheck {
 
 // PluginVersionMismatchHint says which side of a plugin/CLI mismatch to
 // bring forward. A plugin behind the CLI is missing skills the CLI's
-// commands expect (basecamp-connect arrived after 0.7), and only takes
+// commands expect (basecamp-connect arrived in 0.12), and only takes
 // effect after a restart, so the hint names the update and the restart. A
 // CLI behind the plugin lacks commands the plugin's skills run, so the hint
 // is the upgrade. Versions that don't parse get the auto-update advice.
