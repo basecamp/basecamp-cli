@@ -14,14 +14,18 @@
 //     as a non-client member of the project. That is a read, cached per
 //     project, and it is the one trust decision the pointer alone cannot make.
 //  3. The RecordingSummary read (the SDK's step-10 helper) resolves the
-//     recording through the typed read its event type names. A recording
-//     still drafted or since trashed is stale.
+//     recording through the typed read its event type names. A boost's type
+//     names no recording, so a boost is read first, for the boosted
+//     recording's type and for the boost itself. A recording still drafted or
+//     since trashed is stale.
 //  4. The trigger rules decide what the event is to the agent: mentioned (the
 //     agent's Person id is among the mention attachments — never a name),
 //     subscribed (a subscription read on the commented recording), assigned
 //     (the recording's events, at most five pages, for details.added_person_ids)
-//     or completed (trusted completer and a stake: the served project's
-//     watch_completions flag, an assignment, or a subscription).
+//     completed (trusted completer and a stake: the served project's
+//     watch_completions flag, an assignment, or a subscription), or boosted
+//     (a boost on the recording itself, which the agent wrote, given by the
+//     trusted performer; a boost on one of a recording's events is not).
 //  5. Whether the project is served, its class, the reply destination, the
 //     conversation key and the content snapshot come from the policy and the
 //     summary, never from the pointer.
@@ -48,8 +52,10 @@
 // Trust has two roles. Operators are the operator and the people the
 // allowlist names, in allowlist or project mode; their word authorizes the
 // agent. Participants are the members project mode admits besides them:
-// they reach the agent by mention, by comment on a thread it follows, and by
-// a completion it has a stake in, never by assignment. Every admitted
+// they reach the agent by mention, by comment on a thread it follows, by a
+// completion it has a stake in, and by boosting something it wrote, never by
+// assignment. A boost's content is the boost, which its booster wrote, so the
+// booster is held to the performer's trust and there is no other author. Every admitted
 // verdict carries its Role, the lesser of the performer's and, for mentioned
 // and subscribed, the author's, so words a participant wrote stay a
 // participant's request whoever brought them in.
@@ -109,7 +115,7 @@
 //
 // Tasks, attempts, the outbox, acknowledgements, and the holding reply a
 // blocked(no_route) record receives are dispatch and lifecycle (plan steps 17
-// to 20). The boosted and queued triggers are step 25 and edited is step 28:
-// each is a row added to the Matrix plus its rule, and the gate does not
-// change.
+// to 20). The queued trigger is the rest of step 25, whose boosted trigger is
+// built, and edited is step 28: each is a row added to the Matrix plus its
+// rule, and the gate does not change.
 package admission

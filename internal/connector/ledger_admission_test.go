@@ -649,7 +649,7 @@ func TestRunAdmissionDecidesWhatIntakeHandsOver(t *testing.T) {
 		AgentID:  adapterAgentID,
 		Trust:    admission.Trust{Mode: admission.TrustOperator, OperatorID: adapterOperatorID},
 		Projects: map[int64]admission.Project{adapterBucketID: {Class: "internal"}},
-	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads})
+	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads, Boosts: reads})
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -699,11 +699,81 @@ func TestRunAdmissionDecidesWhatIntakeHandsOver(t *testing.T) {
 	}, states, "the line reports what the ledger wrote")
 }
 
+// A boost on the agent's comment, end to end: its details survive the ledger,
+// admission reads the boost and the comment, and the session gets a boosted
+// request whose content is the boost, answered in the comment's thread, that
+// asks for no acknowledgement and is never the owner's word.
+func TestABoostOnTheAgentsCommentIsHandedOffAsAReply(t *testing.T) {
+	ledger := newTestLedger(t)
+	queue, err := NewQueue(10, 100)
+	require.NoError(t, err)
+	var out bytes.Buffer
+
+	const commentID, cardID, boostID int64 = 601, 600, 31337
+	reads := &adapterReads{
+		summaries: map[int64]*basecamp.RecordingSummary{commentID: {
+			ID: commentID, Status: "active", Type: "Comment", Title: "Shall I ship it?",
+			AppURL:             "https://app.basecamp.com/2914079/buckets/48699913/recordings/601",
+			Bucket:             &basecamp.Bucket{ID: adapterBucketID},
+			Parent:             &basecamp.Parent{ID: cardID},
+			Creator:            &basecamp.Person{ID: adapterAgentID},
+			Content:            "<div>Shall I ship it?</div>",
+			MentionedPersonIDs: []int64{},
+		}},
+		boosts: map[int64]*basecamp.Boost{boostID: {
+			ID: boostID, Content: "yes, go", CreatedAt: time.Date(2026, 9, 16, 10, 0, 5, 0, time.UTC),
+			Booster:   &basecamp.Person{ID: adapterOperatorID, Name: "The Operator"},
+			Recording: &basecamp.Parent{ID: commentID, Type: "Comment"},
+		}},
+	}
+	admitter, err := admission.NewAdmitter(admission.Policy{
+		AgentID:  adapterAgentID,
+		Trust:    admission.Trust{Mode: admission.TrustOperator, OperatorID: adapterOperatorID},
+		Projects: map[int64]admission.Project{adapterBucketID: {Class: "internal"}},
+	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads, Boosts: reads})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- RunAdmission(ctx, AdmissionOptions{Ledger: ledger, Queue: queue, Admitter: admitter, Workers: 1, Lines: ndjson.NewWriter(&bytes.Buffer{})})
+	}()
+	ev := testEvent(1)
+	ev.EventType, ev.Kind, ev.Action, ev.RecordingID = "boost.created", "comment_boosted", "boosted", commentID
+	ev.Details = json.RawMessage(`{"boost_id":31337,"boosted_event_id":null,"boosted_event_type":null}`)
+	_, err = ledger.RecordSeen(ctx, ev, LanePoll)
+	require.NoError(t, err)
+	require.NoError(t, queue.Offer(ctx, ev.ID))
+	require.Eventually(t, func() bool { return getRecord(t, ledger, ev.ID).State != StateSeen }, 5*time.Second, 10*time.Millisecond)
+	cancel()
+	require.NoError(t, <-done)
+	require.Equal(t, StateAdmitted, getRecord(t, ledger, ev.ID).State, "reason %q", getRecord(t, ledger, ev.ID).Reason)
+
+	opts := handoffOptions(ledger, &out)
+	opts.AgentID = adapterAgentID
+	require.NoError(t, handOffReady(context.Background(), opts))
+	lines := handedOffLines(t, &out)
+	require.Len(t, lines, 1)
+	line := lines[0]
+	assert.Equal(t, "boost.created", line.EventType)
+	assert.Equal(t, "boosted", line.Trigger)
+	assert.False(t, line.Acknowledge)
+	assert.False(t, line.Owner)
+	assert.Equal(t, "operator", line.Role)
+	assert.Equal(t, adapterOperatorID, line.RequesterID)
+	assert.Equal(t, "The Operator", line.RequesterName)
+	assert.Equal(t, "yes, go", line.Content)
+	assert.Equal(t, commentID, line.Recording.RecordingID)
+	assert.Equal(t, "Comment", line.Recording.Type)
+	assert.Equal(t, InstructionReply{Kind: "comment", RecordingID: cardID}, line.ReplyTo)
+}
+
 func TestRunAdmissionNeedsTheLedgerAndQueue(t *testing.T) {
 	admitter, err := admission.NewAdmitter(admission.Policy{
 		AgentID: adapterAgentID,
 		Trust:   admission.Trust{Mode: admission.TrustOperator, OperatorID: adapterOperatorID},
-	}, admission.Reads{Summaries: &adapterReads{}, Subscriptions: &adapterReads{}, Assignments: &adapterReads{}})
+	}, admission.Reads{Summaries: &adapterReads{}, Subscriptions: &adapterReads{}, Assignments: &adapterReads{}, Boosts: &adapterReads{}})
 	require.NoError(t, err)
 	queue, err := NewQueue(1, 1)
 	require.NoError(t, err)
@@ -725,6 +795,7 @@ func TestRunAdmissionNeedsTheLedgerAndQueue(t *testing.T) {
 // adapterReads answers admission's reads for the handoff test.
 type adapterReads struct {
 	summaries map[int64]*basecamp.RecordingSummary
+	boosts    map[int64]*basecamp.Boost
 }
 
 func (r *adapterReads) Summarize(_ context.Context, ref basecamp.RecordingRef) (*basecamp.RecordingSummary, error) {
@@ -740,6 +811,15 @@ func (r *adapterReads) Subscribed(context.Context, int64) (bool, error) { return
 
 func (r *adapterReads) AddedPersonIDs(context.Context, int64, int64) ([]int64, bool, error) {
 	return nil, false, nil
+}
+
+func (r *adapterReads) Get(_ context.Context, boostID int64) (*basecamp.Boost, error) {
+	b, ok := r.boosts[boostID]
+	if !ok {
+		return nil, &basecamp.Error{Code: basecamp.CodeNotFound, Message: "not found"}
+	}
+	copied := *b
+	return &copied, nil
 }
 
 // mentionMarkup is a mention attachment naming id only inside its sgid, the
@@ -787,7 +867,7 @@ func TestAnUnreadableConfigHoldsItsRecordsUntilTheFileAndAPersonAreBack(t *testi
 	admitter, err := admission.NewAdmitter(admission.Policy{
 		AgentID: adapterAgentID,
 		Trust:   admission.Trust{Mode: admission.TrustOperator, OperatorID: adapterOperatorID},
-	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads},
+	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads, Boosts: reads},
 		admission.WithServed(func() (map[int64]admission.Project, error) {
 			if broken.Load() {
 				return nil, errors.New("connect.json cannot be read")

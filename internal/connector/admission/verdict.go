@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
@@ -61,8 +62,8 @@ type Snapshot struct {
 	Role Role `json:"role,omitempty"`
 	// Owner says the operator connect.json names asked, in words they wrote:
 	// they mentioned the agent, or assigned it a recording they wrote. A
-	// comment on a followed thread and a completion are never the owner's
-	// word. Someone named with --allow is an operator but never the
+	// comment on a followed thread, a completion and a boost are never the
+	// owner's word. Someone named with --allow is an operator but never the
 	// owner, and neither is the owner bringing in someone else's words: an
 	// allowlisted person's to-do the owner moves in is that person's.
 	Owner bool `json:"owner,omitempty"`
@@ -95,7 +96,7 @@ type Verdict struct {
 	// none of it.
 	Trigger Trigger
 	// Acknowledge says the worker acknowledges and the guard arms. False for
-	// completed and subscribed.
+	// completed, subscribed and boosted.
 	Acknowledge bool
 	// ConversationKey groups events into one task: the commented recording
 	// for a comment, the Campfire for a chat line, the recording otherwise.
@@ -242,8 +243,8 @@ func NewAdmitter(policy Policy, reads Reads, opts ...Option) (*Admitter, error) 
 		return nil, err
 	}
 	switch {
-	case reads.Summaries == nil || reads.Subscriptions == nil || reads.Assignments == nil:
-		return nil, errors.New("admission: the summary, subscription and assignment reads are required")
+	case reads.Summaries == nil || reads.Subscriptions == nil || reads.Assignments == nil || reads.Boosts == nil:
+		return nil, errors.New("admission: the summary, subscription, assignment and boost reads are required")
 	case policy.Trust.Mode == TrustProject && reads.Members == nil:
 		return nil, errors.New("admission: project trust mode needs a membership read")
 	}
@@ -325,6 +326,16 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		return v.end(StateBlocked, ReasonConfigUnreadable), nil
 	}
 
+	// A boost names its boost in the pointer's details. What the details
+	// alone can settle is settled before any read.
+	var boostID int64
+	if opens(gate, TriggerBoosted) {
+		var reason Reason
+		if boostID, reason = boostOnRecording(ev); reason != "" {
+			return v.end(StateDiscarded, reason), nil
+		}
+	}
+
 	if gate.ConfirmMembership {
 		member, reason, err := d.memberOf(ctx, ev.BucketID, ev.Performer(), ev.SeenAt)
 		if err != nil {
@@ -338,8 +349,27 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		}
 	}
 
-	var summary *basecamp.RecordingSummary
+	var (
+		summary *basecamp.RecordingSummary
+		boost   *basecamp.Boost
+	)
 	ref := basecamp.RecordingRef{BucketID: ev.BucketID, RecordingID: ev.RecordingID, EventType: ev.EventType}
+	if boostID > 0 {
+		var (
+			state  State
+			reason Reason
+		)
+		boost, state, reason, err = d.readBoost(ctx, ev, boostID)
+		if err != nil {
+			return Verdict{}, err
+		}
+		if state != "" {
+			return v.end(state, reason), nil
+		}
+		// The boost names the boosted recording's type, which the pointer
+		// does not: the summary read routes by it.
+		ref.RecordingType = boost.Recording.Type
+	}
 	err = d.retry(ctx, func() error {
 		var err error
 		summary, err = a.reads.Summaries.Summarize(ctx, ref)
@@ -363,9 +393,10 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	// A read that answered without what admission decides from is a read
 	// that failed: an author to trust, the recording a comment hangs off, the
 	// Campfire a line was found in. None of them is evidence of anything.
+	shape := shapeOf(ev.EventType, summary)
 	if summary.Creator == nil || summary.Creator.ID <= 0 ||
-		(ev.EventType == "comment.created" && (summary.Parent == nil || summary.Parent.ID <= 0)) ||
-		(ev.EventType == "chat.line.created" && summary.CampfireID <= 0) {
+		(shape == shapeComment && (summary.Parent == nil || summary.Parent.ID <= 0)) ||
+		(shape == shapeChatLine && summary.CampfireID <= 0) {
 		return v.end(StateBlocked, ReasonReadFailed), nil
 	}
 
@@ -396,7 +427,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 			v.RequesterID = summary.Creator.ID
 		}
 	}
-	v.address(summary)
+	v.address(summary, shape)
 	if gate.Agent {
 		v.agentCaps = &agentCaps{
 			agentID: ev.Performer(),
@@ -425,8 +456,9 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		Role:      v.Role,
 		// Only a request the owner made, in words the owner wrote: a mention,
 		// or an assignment of a recording they wrote. A comment on a thread
-		// the agent follows asks it nothing, a completion is context, and an
-		// assigned recording someone else wrote is that person's words.
+		// the agent follows asks it nothing, a completion is context, a boost
+		// answers the agent and names nothing it approves, and an assigned
+		// recording someone else wrote is that person's words.
 		Owner: v.Role == RoleOperator && ev.Performer() == policy.Trust.OperatorID &&
 			(rule.Trigger == TriggerMentioned || rule.Trigger == TriggerAssigned) &&
 			summary.Creator.ID == policy.Trust.OperatorID,
@@ -434,7 +466,15 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	if summary.Bucket != nil {
 		v.Snapshot.ProjectName = summary.Bucket.Name
 	}
-	if summary.Creator != nil && summary.Creator.ID == v.RequesterID {
+	switch {
+	case boost != nil:
+		// The boost is what was said, and its booster said it: the boosted
+		// recording is the agent's own, which the worker reads by its URL.
+		v.Snapshot.Content, v.Snapshot.UpdatedAt = boost.Content, boost.CreatedAt
+		if boost.Booster.ID == v.RequesterID {
+			v.Snapshot.RequesterName = boost.Booster.Name
+		}
+	case summary.Creator != nil && summary.Creator.ID == v.RequesterID:
 		v.Snapshot.RequesterName = summary.Creator.Name
 	}
 	return v, nil
@@ -519,6 +559,17 @@ func (a *decision) match(ctx context.Context, ev Event, policy Policy, gate Gate
 				return rule, "", "", "", nil
 			}
 
+		case TriggerBoosted:
+			// Basecamp addresses a boost on a recording to whoever published
+			// it (bc3 Boostable#boostee: published_by, else edited_by), and
+			// the recording's creator stands for them here: they differ only
+			// for a draft someone else published. The booster was trusted at
+			// the gate and wrote the boost (readBoost); the boosted words are
+			// the agent's own, so there is no author to trust.
+			if summary.Creator.ID == agent {
+				return rule, "", "", "", nil
+			}
+
 		case TriggerCompleted:
 			project, served := policy.served(ev.BucketID)
 			if served && project.WatchCompletions {
@@ -588,15 +639,39 @@ func (a *decision) authorTrusted(ctx context.Context, ev Event, summary *basecam
 	return "", StateDiscarded, ReasonUntrustedAuthor, nil
 }
 
+// shape is how a recording is answered: a comment on the recording it hangs
+// off, a chat line in its Campfire, anything else on itself.
+type shape int
+
+const (
+	shapeRecording shape = iota
+	shapeComment
+	shapeChatLine
+)
+
+// shapeOf reads the shape from the event type, except for a boost, which
+// takes the shape of the recording it is on: a boost on the agent's comment
+// is answered in that comment's thread, and joins its conversation.
+func shapeOf(eventType string, summary *basecamp.RecordingSummary) shape {
+	boost := eventType == eventBoostCreated
+	switch {
+	case eventType == "comment.created", boost && summary.Type == "Comment":
+		return shapeComment
+	case eventType == "chat.line.created", boost && strings.HasPrefix(summary.Type, "Chat::Lines::"):
+		return shapeChatLine
+	}
+	return shapeRecording
+}
+
 // address sets the conversation key and reply destination. Decide has
 // already refused a comment without its recording and a line without its
 // Campfire.
-func (v *Verdict) address(summary *basecamp.RecordingSummary) {
-	switch v.EventType {
-	case "chat.line.created":
+func (v *Verdict) address(summary *basecamp.RecordingSummary, shape shape) {
+	switch shape {
+	case shapeChatLine:
 		v.ConversationKey = "campfire:" + strconv.FormatInt(summary.CampfireID, 10)
 		v.Reply = &ReplyDestination{Kind: ReplyChatLine, RecordingID: summary.CampfireID}
-	case "comment.created":
+	case shapeComment:
 		v.ConversationKey = "recording:" + strconv.FormatInt(summary.Parent.ID, 10)
 		v.Reply = &ReplyDestination{Kind: ReplyComment, RecordingID: summary.Parent.ID}
 	default:

@@ -462,3 +462,28 @@ func TestNotSubscribedTakesNoCacheSlot(t *testing.T) {
 	defer subs.cache.mu.Unlock()
 	assert.Empty(t, subs.cache.entries, "a stream of unsubscribed recordings must not evict the subscribed ones")
 }
+
+// The boost read is the one that names a boosted recording's type, and the
+// summary read routes by it: the SDK's read must carry it through.
+func TestTheBoostReadNamesTheBoostedRecordingsType(t *testing.T) {
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":31337,"content":"yes, go","created_at":"2026-10-12T09:30:00Z",
+			"booster":{"id":26909558,"name":"Op"},
+			"recording":{"id":9001,"title":"Shall I?","type":"Comment","url":"https://example.test/c.json","app_url":"https://example.test/c"}}`))
+	}))
+	t.Cleanup(srv.Close)
+	reads := NewSDKReads(&basecamp.Config{BaseURL: srv.URL}, staticToken{}, "999")
+
+	boost, err := reads.Boosts.Get(context.Background(), 31337)
+	require.NoError(t, err)
+	assert.Equal(t, "/999/boosts/31337", path)
+	assert.Equal(t, "yes, go", boost.Content)
+	require.NotNil(t, boost.Booster)
+	assert.EqualValues(t, 26909558, boost.Booster.ID)
+	require.NotNil(t, boost.Recording)
+	assert.EqualValues(t, 9001, boost.Recording.ID)
+	assert.Equal(t, "Comment", boost.Recording.Type)
+}

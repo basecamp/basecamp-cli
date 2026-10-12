@@ -34,6 +34,7 @@ func NewSDKReads(cfg *basecamp.Config, tokens basecamp.TokenProvider, accountID 
 		Summaries:     client.Recordings(),
 		Subscriptions: NewSubscriptions(client, time.Now),
 		Assignments:   &Assignments{client: client},
+		Boosts:        client.Boosts(),
 		Members:       NewMembers(client, time.Now),
 	}
 }

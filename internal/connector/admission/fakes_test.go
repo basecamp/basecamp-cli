@@ -51,11 +51,15 @@ type fakeReads struct {
 	members       map[int64]map[int64]bool
 	memberErr     error
 	memberAsOf    []time.Time
+	boosts        map[int64]*basecamp.Boost // boost id → boost
+	boostErr      error
 
 	summaryCalls int
+	summaryRefs  []basecamp.RecordingRef
 	subCalls     []int64
 	assignCalls  int
 	memberCalls  int
+	boostCalls   int
 }
 
 func newFakeReads() *fakeReads {
@@ -64,17 +68,19 @@ func newFakeReads() *fakeReads {
 		subscriptions: map[int64]bool{},
 		assignments:   map[int64][]int64{},
 		members:       map[int64]map[int64]bool{},
+		boosts:        map[int64]*basecamp.Boost{},
 	}
 }
 
 func (f *fakeReads) reads() Reads {
-	return Reads{Summaries: f, Subscriptions: f, Assignments: f, Members: f}
+	return Reads{Summaries: f, Subscriptions: f, Assignments: f, Boosts: f, Members: f}
 }
 
 func (f *fakeReads) Summarize(_ context.Context, ref basecamp.RecordingRef) (*basecamp.RecordingSummary, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.summaryCalls++
+	f.summaryRefs = append(f.summaryRefs, ref)
 	if len(f.summaryErrs) > 0 {
 		err := f.summaryErrs[0]
 		f.summaryErrs = f.summaryErrs[1:]
@@ -122,10 +128,25 @@ func (f *fakeReads) NonClientMember(_ context.Context, bucketID, personID int64,
 	return f.members[bucketID][personID], nil
 }
 
+func (f *fakeReads) Get(_ context.Context, boostID int64) (*basecamp.Boost, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.boostCalls++
+	if f.boostErr != nil {
+		return nil, f.boostErr
+	}
+	b, ok := f.boosts[boostID]
+	if !ok {
+		return nil, &basecamp.Error{Code: basecamp.CodeNotFound, Message: "not found"}
+	}
+	copied := *b
+	return &copied, nil
+}
+
 func (f *fakeReads) totalReads() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.summaryCalls + len(f.subCalls) + f.assignCalls + f.memberCalls
+	return f.summaryCalls + len(f.subCalls) + f.assignCalls + f.memberCalls + f.boostCalls
 }
 
 var errTransport = errors.New("connection reset")

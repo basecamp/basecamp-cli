@@ -27,6 +27,15 @@ type AssignmentReader interface {
 	AddedPersonIDs(ctx context.Context, recordingID, eventID int64) (added []int64, found bool, err error)
 }
 
+// BoostReader reads one boost: who gave it, what it says, and the recording
+// it is on, with that recording's type. A boost.created pointer names the
+// boosted recording but not its type, and the summary read routes by type
+// (basecamp.ErrNoRecordingType), so the boost is read first.
+// *basecamp.BoostsService satisfies it.
+type BoostReader interface {
+	Get(ctx context.Context, boostID int64) (*basecamp.Boost, error)
+}
+
 // MemberReader answers whether a person is a non-client member of a project.
 // Only project trust mode consults it.
 //
@@ -48,5 +57,6 @@ type Reads struct {
 	Summaries     SummaryReader
 	Subscriptions SubscriptionReader
 	Assignments   AssignmentReader
+	Boosts        BoostReader
 	Members       MemberReader
 }
