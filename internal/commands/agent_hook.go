@@ -41,6 +41,10 @@ type agentHookInput struct {
 	ToolUseID     string          `json:"tool_use_id"`
 	HookEventName string          `json:"hook_event_name"`
 	ToolInput     json.RawMessage `json:"tool_input"`
+	// Source and TranscriptPath come with SessionStart: Claude Code sends
+	// source "compact" when a session starts again after a compaction.
+	Source         string `json:"source"`
+	TranscriptPath string `json:"transcript_path"`
 }
 
 // NewAgentHookCmd creates the hidden command group used by the plugin hooks
@@ -171,7 +175,7 @@ func newAgentHookPreCommitSnapshotCmd() *cobra.Command {
 			// newer than the CLI stays silent instead of failing every
 			// session start with "unknown command".
 			if ok && input.HookEventName == "SessionStart" {
-				emitPluginRenameNotice(cmd)
+				emitSessionStartNotices(cmd, input)
 				return nil
 			}
 			if !ok || !agentHookHasSnapshotKey(input) ||

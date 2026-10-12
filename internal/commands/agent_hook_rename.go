@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -14,7 +15,7 @@ import (
 // plugin install, so it appears once rather than every session.
 const pluginRenameNoticeMarker = "plugin-rename-notice-shown"
 
-// emitPluginRenameNotice tells someone still running this plugin under its
+// pluginRenameNotice tells someone still running this plugin under its
 // pre-rename id that it is now basecamp-cli. During the deprecation window the
 // marketplace keeps "basecamp" as an alias with the same source, so the plugin
 // keeps working; this nudges toward `basecamp setup`, once.
@@ -23,29 +24,51 @@ const pluginRenameNoticeMarker = "plugin-rename-notice-shown"
 // tell them apart. The plugin root can: agents cache each install under
 // <marketplace>/<plugin id>/<version>. Anything other than an install as
 // basecamp@37signals stays silent, so the hook injects nothing into normal
-// sessions.
-func emitPluginRenameNotice(cmd *cobra.Command) {
+// sessions. It returns the notice, or "" when there is none to show.
+func pluginRenameNotice(cmd *cobra.Command) string {
 	root := agentPluginRoot()
 	if !isLegacyPluginRoot(root) {
-		return
+		return ""
 	}
 	dir := agentPluginDataDir()
 	if dir == "" {
 		dir = agentHookStateDir(cmd.Context())
 	}
 	if dir == "" || !claimOnce(filepath.Join(dir, pluginRenameNoticeMarker)) {
-		return
+		return ""
 	}
-	message := "The Basecamp plugin is now `" + harness.ClaudePluginName + "`. " +
+	return "The Basecamp plugin is now `" + harness.ClaudePluginName + "`. " +
 		"This copy still runs under its old name `" + harness.ClaudeLegacyPluginKey + "`, which keeps working for now. " +
 		"Run `" + legacyPluginSetupCommand(root) + "` to switch."
-	_ = json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{
-		"systemMessage": message,
+}
+
+// emitSessionStartNotices writes the SessionStart hook's one JSON reply: the
+// rename notice, shown to the user and to the model, and after a compaction
+// the connector's reload instruction, to the model only. Nothing to say
+// writes nothing.
+func emitSessionStartNotices(cmd *cobra.Command, input agentHookInput) {
+	rename := pluginRenameNotice(cmd)
+	reload := connectorReloadNotice(input)
+	var contexts []string
+	if rename != "" {
+		contexts = append(contexts, "Mention this to the user once: "+rename)
+	}
+	if reload != "" {
+		contexts = append(contexts, reload)
+	}
+	if len(contexts) == 0 {
+		return
+	}
+	reply := map[string]any{
 		"hookSpecificOutput": map[string]string{
 			"hookEventName":     "SessionStart",
-			"additionalContext": "Mention this to the user once: " + message,
+			"additionalContext": strings.Join(contexts, "\n\n"),
 		},
-	})
+	}
+	if rename != "" {
+		reply["systemMessage"] = rename
+	}
+	_ = json.NewEncoder(cmd.OutOrStdout()).Encode(reply)
 }
 
 // agentPluginRoot is the plugin's install directory as the agent reports it:
