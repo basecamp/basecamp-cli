@@ -103,9 +103,10 @@ var fakeIPRange = netip.MustParsePrefix("198.18.0.0/15")
 // firstPartyOAuthHosts: surfguard's default deny tables (private, loopback,
 // link-local and cloud metadata, CGNAT, multicast) with the fake-IP range
 // admitted, on port 443 only. It leaves out IANASpecialUse because surfguard's
-// Allow cannot override that table, and the only other blocks that table adds
-// to the default ones are globally reachable anycast services (AS112, AMT),
-// so the fake-IP range is the one meaningful admission. TLS still verifies the certificate
+// Allow cannot override that table. Leaving it out also admits globally
+// reachable anycast services (AS112, AMT), and NAT64 addresses whose embedded
+// IPv4 is itself admitted, which is how an IPv6-only network with DNS64
+// reaches a public host. TLS still verifies the certificate
 // against the first-party name, so a connection that lands anywhere else fails
 // its handshake before a credential is sent.
 func firstPartyOAuthPolicy() surfguard.Policy {

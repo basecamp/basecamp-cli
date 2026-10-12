@@ -648,12 +648,13 @@ func TestWarnf_SanitizesRenderedMessage(t *testing.T) {
 	}
 }
 
-// TestFirstPartyOAuthPolicy_AdmitsTheFakeIPRangeAndNoInternalSpace walks one
-// address from every block in surfguard's IANA special-purpose snapshot (the
-// table DefaultIssuerPolicy applies and firstPartyOAuthPolicy leaves out). The
-// strict policy must refuse every one. The first-party policy may admit only
-// the fake-IP range and the globally reachable anycast service blocks, which
-// pins exactly what dropping the table opens up.
+// TestFirstPartyOAuthPolicy_AdmitsTheFakeIPRangeAndNoInternalSpace takes the
+// first address of every block in surfguard's IANA special-purpose snapshot
+// (the table DefaultIssuerPolicy applies and firstPartyOAuthPolicy leaves
+// out). The strict policy must refuse every one. The first-party policy may
+// admit only the fake-IP range and the globally reachable anycast service
+// blocks. The NAT64 prefix, whose meaning is the IPv4 address it embeds, is
+// covered by TestFirstPartyOAuthPolicy_JudgesTranslatedIPv4ByItsEmbeddedAddress.
 func TestFirstPartyOAuthPolicy_AdmitsTheFakeIPRangeAndNoInternalSpace(t *testing.T) {
 	ianaSpecialUse := []string{
 		"0.0.0.0/8", "0.0.0.0/32", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
@@ -705,6 +706,35 @@ func TestFirstPartyOAuthPolicy_StillRefusesInternalTargets(t *testing.T) {
 	}
 	for _, a := range []string{"198.18.0.0", "198.18.0.1", "198.19.255.255"} {
 		assert.False(t, firstParty.Blocked(netip.MustParseAddr(a)), "first-party policy must admit %s", a)
+	}
+}
+
+// TestFirstPartyOAuthPolicy_JudgesTranslatedIPv4ByItsEmbeddedAddress: the
+// strict policy refuses the NAT64 well-known prefix whole, because it is in
+// the IANA table. Without that table, surfguard decodes the embedded IPv4
+// address and judges that instead, as both policies already do for SIIT. So a
+// first-party host on an IPv6-only network with DNS64 is reachable through
+// NAT64 at its real public address or a fake-IP one, while an embedded private
+// address is still refused.
+func TestFirstPartyOAuthPolicy_JudgesTranslatedIPv4ByItsEmbeddedAddress(t *testing.T) {
+	strict := oauth.DefaultIssuerPolicy()
+	firstParty := firstPartyOAuthPolicy()
+	cases := []struct {
+		addr     string
+		admitted bool
+	}{
+		{"64:ff9b::808:808", true},    // NAT64 of 8.8.8.8
+		{"64:ff9b::c612:1", true},     // NAT64 of 198.18.0.1
+		{"64:ff9b::a00:1", false},     // NAT64 of 10.0.0.1
+		{"64:ff9b::a9fe:a9fe", false}, // NAT64 of 169.254.169.254
+		{"64:ff9b::7f00:1", false},    // NAT64 of 127.0.0.1
+		{"::ffff:0:a00:1", false},     // SIIT of 10.0.0.1
+		{"64:ff9b:1::808:808", false}, // local-use NAT64, refused whole
+	}
+	for _, tc := range cases {
+		addr := netip.MustParseAddr(tc.addr)
+		assert.True(t, strict.Blocked(addr), "strict policy must refuse %s", tc.addr)
+		assert.Equal(t, !tc.admitted, firstParty.Blocked(addr), "first-party policy on %s", tc.addr)
 	}
 }
 
@@ -845,16 +875,48 @@ func TestFirstPartyRedirectToAForeignHostIsJudgedByTheLanePolicy(t *testing.T) {
 	assert.Equal(t, int32(1), firstParty.calls.Load(), "only the first-party hop rides the first-party transport")
 }
 
-// TestLaunchpadLane_WiresTheFirstPartyTransport: the Launchpad lane carries
-// the web-flow code exchange and Launchpad refreshes, which #849 shows failing
-// the same way, so it needs the same transport as the BC5 lane.
-func TestLaunchpadLane_WiresTheFirstPartyTransport(t *testing.T) {
+// TestLanes_InstallTheFirstPartyPolicy drives the first-party transport each
+// lane actually builds, not the policy helper, so wiring the wrong policy into
+// buildLaneClient fails here. Every case is decided by surfguard's dial-time
+// check before connect, so nothing touches the network: a fake-IP address on
+// port 80 is refused for its port, which means its address was admitted, and
+// loopback and private targets are refused for their address. The local-anchor
+// case shows a local base URL's loopback allowance does not reach the
+// first-party transport.
+func TestLanes_InstallTheFirstPartyPolicy(t *testing.T) {
 	clearProxyEnv(t)
 
-	m := laneManager(t, "https://3.basecampapi.com")
-	client, err := m.launchpadClient()
-	require.NoError(t, err)
-	tr, ok := client.Transport.(*oauthTransport)
-	require.True(t, ok)
-	assert.NotNil(t, tr.firstParty)
+	refusal := func(t *testing.T, rt http.RoundTripper, rawURL string) surfguard.Reason {
+		t.Helper()
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, rawURL, nil)
+		require.NoError(t, err)
+		resp, err := rt.RoundTrip(req)
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		var violation *surfguard.Violation
+		require.ErrorAs(t, err, &violation, "%s must be refused by the address policy", rawURL)
+		return violation.Reason
+	}
+	check := func(t *testing.T, client *http.Client) {
+		t.Helper()
+		tr, ok := client.Transport.(*oauthTransport)
+		require.True(t, ok)
+		assert.Equal(t, surfguard.ReasonPort, refusal(t, tr.firstParty, "https://198.18.0.1:80/oauth/tokens"))
+		assert.Equal(t, surfguard.ReasonBlockedAddr, refusal(t, tr.firstParty, "https://127.0.0.1:80/oauth/tokens"))
+		assert.Equal(t, surfguard.ReasonBlockedAddr, refusal(t, tr.firstParty, "https://10.0.0.1/oauth/tokens"))
+		assert.Equal(t, surfguard.ReasonBlockedAddr, refusal(t, tr.firstParty, "https://169.254.169.254/oauth/tokens"))
+	}
+
+	for _, baseURL := range []string{"https://3.basecampapi.com", "http://3.basecamp.localhost:3001"} {
+		t.Run(baseURL, func(t *testing.T) {
+			m := laneManager(t, baseURL)
+			bc5, err := m.bc5Client()
+			require.NoError(t, err)
+			check(t, bc5)
+			lp, err := m.launchpadClient()
+			require.NoError(t, err)
+			check(t, lp)
+		})
+	}
 }
