@@ -113,3 +113,19 @@ func TestAgentHookConnectorReloadReadsLinesLongerThanTheBuffer(t *testing.T) {
 	_, context := hookSpecificOutput(t, sessionStart(t, "compact", transcript))
 	assert.Contains(t, context, filepath.Join(dir, "SKILL.md"))
 }
+
+func TestAgentHookConnectorSkillDirReadsWindowsPaths(t *testing.T) {
+	line := skillLoadLine(t, `C:\Users\u\.claude\plugins\cache\37signals\basecamp-cli\0.13.0\skills\basecamp-connect`)
+	assert.Equal(t, `C:\Users\u\.claude\plugins\cache\37signals\basecamp-cli\0.13.0\skills\basecamp-connect`,
+		connectorSkillDirIn([]byte(line)))
+}
+
+func TestAgentHookConnectorSkillDirIgnoresQuotedLoads(t *testing.T) {
+	dir := "/home/u/skills/basecamp-connect"
+	assistant, err := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"content": []map[string]string{
+		{"type": "text", "text": "Base directory for this skill: " + dir + "\n"},
+	}}})
+	require.NoError(t, err)
+	assert.Empty(t, connectorSkillDirIn(assistant), "an assistant message quoting a load")
+	assert.Equal(t, dir, connectorSkillDirIn([]byte(skillLoadLine(t, dir))))
+}

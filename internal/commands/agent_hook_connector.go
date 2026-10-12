@@ -3,10 +3,10 @@ package commands
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -20,14 +20,22 @@ import (
 // read instead. It runs on every compaction, so unlike a reminder written
 // into the skill it can't be dropped with it.
 
-// connectorSkillLoad matches the line Claude Code writes into the transcript
-// when a skill loads, as a text block of its own (a tool result quoting the
-// line escapes its quotes and never matches). The path is the skill's own
-// directory, whichever copy of basecamp-connect the session ran.
-var connectorSkillLoad = regexp.MustCompile(`"text":"Base directory for this skill: ([^"\\]+/basecamp-connect)\\n`)
+// skillLoadPrefix opens the text block Claude Code writes into the
+// transcript when a skill loads; the rest of its first line is the skill's
+// own directory, whichever copy of basecamp-connect the session ran.
+const skillLoadPrefix = "Base directory for this skill: "
 
-// connectorSkillPrefilter skips the regexp on transcript lines that can't match.
-var connectorSkillPrefilter = []byte(`Base directory for this skill: `)
+// connectorSkillPrefilter skips decoding transcript lines that can't hold a
+// skill load.
+var connectorSkillPrefilter = []byte(skillLoadPrefix)
+
+// transcriptRecord is the part of a transcript line a skill load lives in.
+type transcriptRecord struct {
+	Type    string `json:"type"`
+	Message struct {
+		Content json.RawMessage `json:"content"`
+	} `json:"message"`
+}
 
 // connectorReloadNotice tells a session that ran basecamp-connect, right after
 // it compacts, to read the skill again in full. Any other session, a
@@ -74,8 +82,8 @@ func lastConnectorSkillDir(path string) string {
 			err = err2
 		}
 		if bytes.Contains(line, connectorSkillPrefilter) {
-			for _, m := range connectorSkillLoad.FindAllSubmatch(line, -1) {
-				dir = strings.TrimSpace(string(m[1]))
+			if found := connectorSkillDirIn(line); found != "" {
+				dir = found
 			}
 		}
 		if err == io.EOF {
@@ -85,4 +93,36 @@ func lastConnectorSkillDir(path string) string {
 			return ""
 		}
 	}
+}
+
+// connectorSkillDirIn returns the basecamp-connect directory a transcript
+// line loads, or "". Only a user record's own text block counts: a tool
+// result or a message that quotes a skill load is not one.
+func connectorSkillDirIn(line []byte) string {
+	var record transcriptRecord
+	if json.Unmarshal(line, &record) != nil || record.Type != "user" {
+		return ""
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(record.Message.Content, &blocks) != nil {
+		return ""
+	}
+	var dir string
+	for _, block := range blocks {
+		rest, ok := strings.CutPrefix(block.Text, skillLoadPrefix)
+		if block.Type != "text" || !ok {
+			continue
+		}
+		first, _, _ := strings.Cut(rest, "\n")
+		first = strings.TrimSpace(first)
+		// Both separators: the transcript holds the path native to the
+		// machine that wrote it.
+		if strings.HasSuffix(first, "/basecamp-connect") || strings.HasSuffix(first, `\basecamp-connect`) {
+			dir = first
+		}
+	}
+	return dir
 }
