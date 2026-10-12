@@ -112,6 +112,14 @@ type Verdict struct {
 	// Snapshot is set on an admitted verdict only.
 	Snapshot *Snapshot
 
+	// AskRecordingID is set on an admitted boost the operator gave, on the
+	// agent's own recording: the ask that boost would be the go for, if the
+	// agent declared that recording an ask. Admission cannot see asks; the
+	// ledger decides in the verdict's own transaction, so one ask gets one go.
+	// Only the operator's boost carries it, in every trust mode: as with an
+	// assignment, an allowlist or a broader trust mode never extends it.
+	AskRecordingID int64
+
 	// agentCaps is set on a verdict admitting an allowed agent's mention:
 	// the committer counts it against the caps before writing it.
 	agentCaps *agentCaps
@@ -447,6 +455,9 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		return v.end(StateBlocked, ReasonNoRoute), nil
 	}
 	v.State = StateAdmitted
+	if rule.Trigger == TriggerBoosted && ev.PerformedByID == nil && ev.Performer() == policy.Trust.OperatorID {
+		v.AskRecordingID = ev.RecordingID
+	}
 	v.Snapshot = &Snapshot{
 		Type:      summary.Type,
 		Title:     summary.Title,

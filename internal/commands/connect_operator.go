@@ -451,6 +451,54 @@ outcome is unknown. A lifecycle message still pending for it is not sent.`,
 	}
 }
 
+// --- ask ------------------------------------------------------------------
+
+func newConnectAskCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "ask <url|recording_id>",
+		Short: "Declare a post of the agent's as asking the operator for a go",
+		Long: `Declare a comment, line or post the agent just wrote as an ask: a request for
+the operator's go on exactly what it names. The operator's boost on it is then
+handed off with "go": true, once. Any other boost on it, and the operator's
+second, is an ordinary boosted reply. Only the operator's boost counts, in
+every trust mode.
+
+Run it right after posting the ask, with the URL or id the post returned. A
+boost decided before the declaration is not a go. Nothing reads the post's
+text to decide it is an ask: this declaration is the only way to make one.`,
+		Example: `  basecamp connect ask -P agent 'https://3.basecamp.com/999/buckets/456/todos/789#__recording_1011'`,
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, _ := extractCommentWithProject(args[0])
+			id, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || id <= 0 {
+				return output.ErrUsage(fmt.Sprintf("No recording id in %q", args[0]))
+			}
+			p, err := loadConnectProfile(cmd)
+			if err != nil {
+				return err
+			}
+			ledger, done, err := openConnectLedger(cmd.Context(), p, false)
+			if err != nil {
+				return err
+			}
+			defer done()
+			res, err := ledger.DeclareAsk(cmd.Context(), id, operatorName())
+			if err != nil {
+				return err
+			}
+			summary := fmt.Sprintf("Recording %d is an ask: the operator's boost on it is the go", id)
+			switch {
+			case res.GoEventID > 0:
+				summary = fmt.Sprintf("Recording %d was already an ask, and event %d took its go", id, res.GoEventID)
+			case res.Already:
+				summary = fmt.Sprintf("Recording %d was already an ask", id)
+			}
+			return p.app.OK(res, output.WithSummary(summary))
+		},
+	}
+}
+
 // --- release --------------------------------------------------------------
 
 func newConnectReleaseCmd() *cobra.Command {

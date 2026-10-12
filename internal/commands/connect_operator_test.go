@@ -169,6 +169,34 @@ func TestConnectDiscardAndRelease(t *testing.T) {
 	assert.Equal(t, connector.ReasonByOperator, two.Reason)
 }
 
+// connect ask declares the comment a URL names, not the recording it hangs
+// off, and declaring it again leaves the first declaration standing.
+func TestConnectAskDeclaresTheCommentTheURLNames(t *testing.T) {
+	f := newOperatorFixture(t)
+	require.NoError(t, f.ledger(t, false).Close())
+
+	out, err := f.run(t, output.FormatJSON, "ask", "https://3.basecamp.com/999/buckets/456/todos/789#__recording_1011")
+	require.NoError(t, err, out)
+	var first struct {
+		Data connector.AskResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &first), out)
+	assert.Equal(t, int64(1011), first.Data.RecordingID)
+	assert.False(t, first.Data.Already)
+
+	out, err = f.run(t, output.FormatJSON, "ask", "1011")
+	require.NoError(t, err, out)
+	var again struct {
+		Data connector.AskResult `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &again), out)
+	assert.True(t, again.Data.Already)
+
+	_, err = f.run(t, output.FormatJSON, "ask", "nope")
+	require.Error(t, err)
+	assert.Equal(t, output.CodeUsage, usageError(t, err).Code)
+}
+
 func TestConnectShadowPromoteAndImport(t *testing.T) {
 	f := newOperatorFixture(t)
 	require.NoError(t, f.ledger(t, true).Close())

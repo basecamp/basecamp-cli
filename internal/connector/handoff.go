@@ -54,6 +54,12 @@ type HandoffLine struct {
 	// Acknowledge says a person asked for something. A comment on a thread
 	// the agent follows, or a completion, is context and is not acknowledged.
 	Acknowledge bool `json:"acknowledge"`
+	// Go says this boosted request is the operator's go: their boost on a
+	// post the agent declared an ask (`basecamp connect ask`), and the first
+	// boost to take that ask. The ask is Recording. It approves what the ask
+	// names and nothing more. False on every other request, a boost on an
+	// ask from anyone else and the operator's second boost included.
+	Go bool `json:"go"`
 
 	Content          string    `json:"content"`
 	ContentUpdatedAt time.Time `json:"content_updated_at"`
@@ -183,14 +189,24 @@ func handOffReady(ctx context.Context, opts HandoffOptions) error {
 func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 	if record.CreatedAt.Before(opts.Started.Add(-HandoffGrace)) {
 		opts.log().Info("connector: a request from before this run started is not handed off", "event_id", record.ID, "created_at", record.CreatedAt)
+		if err := opts.Ledger.releaseGo(ctx, record.ID); err != nil {
+			return err
+		}
 		return opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonBeforeThisRun)
 	}
-	line, err := handoffLine(record, opts.AgentID)
+	goes, err := opts.Ledger.isGo(ctx, record.ID)
+	if err != nil {
+		return err
+	}
+	line, err := handoffLine(record, opts.AgentID, goes)
 	if err != nil {
 		// Closed under its own reason, not handed_off: nothing was written.
 		// Returning the error instead would stop the connector on every
 		// start, for one record.
 		opts.log().Warn("connector: a request could not be handed off", "event_id", record.ID, "error", err)
+		if err := opts.Ledger.releaseGo(ctx, record.ID); err != nil {
+			return err
+		}
 		return opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonUnreadable)
 	}
 	if err := opts.Lines.WriteLine(line); err != nil {
@@ -200,7 +216,7 @@ func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 }
 
 // handoffLine is a record as the reader gets it.
-func handoffLine(record Record, agentID int64) (HandoffLine, error) {
+func handoffLine(record Record, agentID int64, goes bool) (HandoffLine, error) {
 	var snapshot struct {
 		Type          string    `json:"type"`
 		Title         string    `json:"title"`
@@ -237,6 +253,9 @@ func handoffLine(record Record, agentID int64) (HandoffLine, error) {
 		Role:          handoffRole(snapshot.Role),
 		Owner:         snapshot.Owner && handoffRole(snapshot.Role) == string(admission.RoleOperator),
 		Acknowledge:   record.Decision.Acknowledge,
+		// Only a boosted record can hold a go; the trigger is checked here
+		// too, so no other line ever says go.
+		Go: goes && record.Decision.Trigger == string(admission.TriggerBoosted),
 		// The line is read in a terminal as often as by a program: no
 		// control sequences from Basecamp's text reach it.
 		Content:          richtext.SanitizeTerminal(StripMentionsOf(snapshot.Content, agentID)),
