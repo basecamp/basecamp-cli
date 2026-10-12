@@ -477,3 +477,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 ## License
 
 [MIT](MIT-LICENSE)
+
+<!-- CI probe: README-only change, will be closed -->
