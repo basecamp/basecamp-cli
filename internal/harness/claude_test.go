@@ -405,3 +405,47 @@ func TestCheckClaudePlugin_BothInstalledWarns(t *testing.T) {
 	assert.Equal(t, "warn", check.Status)
 	assert.Contains(t, check.Message, "old basecamp@37signals copy")
 }
+
+func withInstalledPlugins(t *testing.T, body string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeInstalledPlugins(t, home, body)
+}
+
+func TestPluginUpdateNotice_LegacyKeyBehindCLI(t *testing.T) {
+	withInstalledPlugins(t, `{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"0.7.2"}]}}`)
+
+	notice := PluginUpdateNotice("0.13.0")
+	assert.Contains(t, notice, "plugin 0.7.2, CLI 0.13.0")
+	assert.Contains(t, notice, "Run: basecamp setup claude")
+}
+
+func TestPluginUpdateNotice_PluginBehindCLI(t *testing.T) {
+	withInstalledPlugins(t, `{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"0.12.0"}]}}`)
+
+	assert.Contains(t, PluginUpdateNotice("0.13.0"), "claude plugin update basecamp-cli@37signals, then restart Claude Code")
+}
+
+func TestPluginUpdateNotice_SameVersionSpelledDifferently(t *testing.T) {
+	withInstalledPlugins(t, `{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"v0.13.0"}]}}`)
+
+	assert.Empty(t, PluginUpdateNotice("0.13.0"))
+}
+
+func TestPluginUpdateNotice_DevBuildAndNoPlugin(t *testing.T) {
+	withInstalledPlugins(t, `{"version":2,"plugins":{}}`)
+	assert.Empty(t, PluginUpdateNotice("0.13.0"))
+
+	withInstalledPlugins(t, `{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"0.1.0"}]}}`)
+	assert.Empty(t, PluginUpdateNotice("dev"))
+}
+
+func TestCheckClaudePluginVersion_SameVersionSpelledDifferently(t *testing.T) {
+	withInstalledPlugins(t, `{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"v1.5.0"}]}}`)
+	origVersion := version.Version
+	version.Version = "1.5.0"
+	defer func() { version.Version = origVersion }()
+
+	assert.Equal(t, "pass", CheckClaudePluginVersion().Status)
+}

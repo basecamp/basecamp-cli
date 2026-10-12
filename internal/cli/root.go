@@ -218,8 +218,8 @@ func NewRootCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "Agent skill updated to match CLI %s\n", version.Version)
 
 				// One-time hint: if plugin/CLI version mismatch after upgrade, nudge the user
-				if pv := harness.InstalledPluginVersion(); pv != "" && pv != version.Version && !version.IsDev() {
-					fmt.Fprintf(os.Stderr, "Basecamp plugin version mismatch (plugin %s, CLI %s) — %s\n", pv, version.Version, harness.PluginVersionMismatchHint(pv, version.Version))
+				if notice := harness.PluginUpdateNotice(version.Version); notice != "" && !version.IsDev() {
+					fmt.Fprintln(os.Stderr, notice)
 				}
 			}
 		}
