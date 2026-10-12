@@ -647,3 +647,214 @@ func TestWarnf_SanitizesRenderedMessage(t *testing.T) {
 		assert.Contains(t, w, "evil31m.example", "C1 control stripped, host otherwise intact")
 	}
 }
+
+// TestFirstPartyOAuthPolicy_AdmitsTheFakeIPRangeAndNoInternalSpace walks one
+// address from every block in surfguard's IANA special-purpose snapshot (the
+// table DefaultIssuerPolicy applies and firstPartyOAuthPolicy leaves out). The
+// strict policy must refuse every one. The first-party policy may admit only
+// the fake-IP range and the globally reachable anycast service blocks, which
+// pins exactly what dropping the table opens up.
+func TestFirstPartyOAuthPolicy_AdmitsTheFakeIPRangeAndNoInternalSpace(t *testing.T) {
+	ianaSpecialUse := []string{
+		"0.0.0.0/8", "0.0.0.0/32", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
+		"169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.0.0/29",
+		"192.0.0.8/32", "192.0.0.9/32", "192.0.0.10/32", "192.0.0.170/32",
+		"192.0.0.171/32", "192.0.2.0/24", "192.31.196.0/24", "192.52.193.0/24",
+		"192.88.99.0/24", "192.88.99.2/32", "192.168.0.0/16", "192.175.48.0/24",
+		"198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4",
+		"255.255.255.255/32",
+		"::1/128", "::/128", "::ffff:0:0/96", "64:ff9b::/96", "64:ff9b:1::/48",
+		"100::/64", "100:0:0:1::/64", "2001::/23", "2001::/32", "2001:1::1/128",
+		"2001:1::2/128", "2001:1::3/128", "2001:2::/48", "2001:3::/32",
+		"2001:4:112::/48", "2001:10::/28", "2001:20::/28", "2001:30::/28",
+		"2001:db8::/32", "2002::/16", "2620:4f:8000::/48", "3fff::/20",
+		"5f00::/16", "fc00::/7", "fe80::/10",
+	}
+	admitted := map[string]bool{
+		"198.18.0.0/15": true,
+		// AS112 and AMT: anycast services on the public internet.
+		"192.31.196.0/24":   true,
+		"192.52.193.0/24":   true,
+		"192.175.48.0/24":   true,
+		"2001:3::/32":       true,
+		"2001:4:112::/48":   true,
+		"2620:4f:8000::/48": true,
+	}
+
+	strict := oauth.DefaultIssuerPolicy()
+	firstParty := firstPartyOAuthPolicy()
+	for _, block := range ianaSpecialUse {
+		addr := netip.MustParsePrefix(block).Addr()
+		assert.True(t, strict.Blocked(addr), "strict policy must refuse %s (%s)", addr, block)
+		assert.Equal(t, !admitted[block], firstParty.Blocked(addr), "first-party policy on %s (%s)", addr, block)
+	}
+}
+
+// TestFirstPartyOAuthPolicy_StillRefusesInternalTargets names the targets an
+// SSRF is after, including their IPv6 and NAT64 spellings, and checks both
+// ends of the fake-IP range are admitted.
+func TestFirstPartyOAuthPolicy_StillRefusesInternalTargets(t *testing.T) {
+	firstParty := firstPartyOAuthPolicy()
+	for _, a := range []string{
+		"10.0.0.1", "172.16.0.1", "192.168.1.1", "127.0.0.1", "100.64.0.1",
+		"169.254.169.254", "168.63.129.16", "0.0.0.0", "224.0.0.1", "255.255.255.255",
+		"::1", "fe80::1", "fc00::1", "fd00:ec2::254",
+		"::ffff:10.0.0.1", "64:ff9b::a00:1",
+	} {
+		assert.True(t, firstParty.Blocked(netip.MustParseAddr(a)), "first-party policy must refuse %s", a)
+	}
+	for _, a := range []string{"198.18.0.0", "198.18.0.1", "198.19.255.255"} {
+		assert.False(t, firstParty.Blocked(netip.MustParseAddr(a)), "first-party policy must admit %s", a)
+	}
+}
+
+// TestFirstPartyOAuthPolicy_DialGate drives the check surfguard runs as the
+// socket connects: the fake-IP address is reachable on 443 only under the
+// first-party policy, and the strict policy still refuses it, which is the
+// failure #849 reports.
+func TestFirstPartyOAuthPolicy_DialGate(t *testing.T) {
+	firstParty := firstPartyOAuthPolicy()
+	require.NoError(t, firstParty.Control("tcp4", "198.18.0.1:443", nil))
+	assert.ErrorIs(t, firstParty.Control("tcp4", "198.18.0.1:80", nil), surfguard.ErrBlocked, "443 only")
+	assert.ErrorIs(t, firstParty.Control("tcp4", "10.0.0.1:443", nil), surfguard.ErrBlocked)
+	assert.ErrorIs(t, firstParty.Control("tcp4", "169.254.169.254:443", nil), surfguard.ErrBlocked)
+
+	assert.ErrorIs(t, oauth.DefaultIssuerPolicy().Control("tcp4", "198.18.0.1:443", nil), surfguard.ErrBlocked)
+}
+
+func TestIsFirstPartyOAuthURL(t *testing.T) {
+	cases := []struct {
+		url  string
+		want bool
+	}{
+		{"https://app.basecamp.com/oauth/tokens", true},
+		{"https://3.basecamp.com/oauth/tokens", true},
+		{"https://3.basecampapi.com/.well-known/oauth-protected-resource", true},
+		{"https://api.basecamp.com/.well-known/oauth-protected-resource", true},
+		{"https://launchpad.37signals.com/authorization/token", true},
+		{"https://APP.Basecamp.com/oauth/tokens", true},
+		{"https://app.basecamp.com:443/oauth/tokens", true},
+
+		{"http://app.basecamp.com/oauth/tokens", false},
+		{"https://app.basecamp.com:8443/oauth/tokens", false},
+		{"https://app.basecamp.com./oauth/tokens", false},
+		{"https://evil.app.basecamp.com/oauth/tokens", false},
+		{"https://app.basecamp.com.evil.example/oauth/tokens", false},
+		{"https://basecamp.com/oauth/tokens", false},
+		{"https://3.basecamp.localhost/oauth/tokens", false},
+		{"https://198.18.0.1/oauth/tokens", false},
+		{"https://issuer.example/oauth/tokens", false},
+	}
+	for _, tc := range cases {
+		u, err := url.Parse(tc.url)
+		require.NoError(t, err)
+		assert.Equal(t, tc.want, isFirstPartyOAuthURL(u), tc.url)
+	}
+}
+
+// TestOAuthTransport_PicksTheDirectTransportByRequestHost: the first-party
+// transport carries only first-party URLs, whatever the proxy settings say
+// about other requests. A foreign host, including a fake-IP literal or a
+// look-alike name, stays on the lane's own transport, and opting out to a
+// proxy still sends everything through the proxy.
+func TestOAuthTransport_PicksTheDirectTransportByRequestHost(t *testing.T) {
+	noProxy := func(*url.URL) (*url.URL, error) { return nil, nil }
+	proxy := func(*url.URL) (*url.URL, error) { return url.Parse("http://proxy.corp.example:3128") }
+
+	send := func(t *testing.T, tr *oauthTransport, rawURL string) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, rawURL, nil)
+		require.NoError(t, err)
+		_, _ = tr.RoundTrip(req)
+	}
+	build := func(resolve func(*url.URL) (*url.URL, error), optOut bool) (*oauthTransport, *countingTransport, *countingTransport, *countingTransport) {
+		guarded, firstParty, proxied := &countingTransport{}, &countingTransport{}, &countingTransport{}
+		return &oauthTransport{
+			guarded:    guarded,
+			firstParty: firstParty,
+			proxied:    proxied,
+			resolve:    resolve,
+			optOut:     optOut,
+			warnf:      func(string, ...any) {},
+			warned:     map[string]bool{},
+		}, guarded, firstParty, proxied
+	}
+
+	t.Run("no proxy", func(t *testing.T) {
+		tr, guarded, firstParty, _ := build(noProxy, false)
+		send(t, tr, "https://app.basecamp.com/oauth/tokens")
+		send(t, tr, "https://launchpad.37signals.com/authorization/token")
+		assert.Equal(t, int32(2), firstParty.calls.Load())
+		assert.Zero(t, guarded.calls.Load())
+
+		send(t, tr, "https://issuer.example/oauth/tokens")
+		send(t, tr, "https://198.18.0.1/oauth/tokens")
+		send(t, tr, "https://app.basecamp.com.evil.example/oauth/tokens")
+		send(t, tr, "http://app.basecamp.com/oauth/tokens")
+		assert.Equal(t, int32(4), guarded.calls.Load())
+		assert.Equal(t, int32(2), firstParty.calls.Load())
+	})
+
+	t.Run("proxy ignored in protected mode", func(t *testing.T) {
+		tr, guarded, firstParty, proxied := build(proxy, false)
+		send(t, tr, "https://app.basecamp.com/oauth/tokens")
+		send(t, tr, "https://issuer.example/oauth/tokens")
+		assert.Equal(t, int32(1), firstParty.calls.Load())
+		assert.Equal(t, int32(1), guarded.calls.Load())
+		assert.Zero(t, proxied.calls.Load())
+	})
+
+	t.Run("opt-out sends first-party traffic through the proxy too", func(t *testing.T) {
+		tr, guarded, firstParty, proxied := build(proxy, true)
+		send(t, tr, "https://app.basecamp.com/oauth/tokens")
+		assert.Equal(t, int32(1), proxied.calls.Load())
+		assert.Zero(t, firstParty.calls.Load())
+		assert.Zero(t, guarded.calls.Load())
+	})
+}
+
+// TestFirstPartyRedirectToAForeignHostIsJudgedByTheLanePolicy: a first-party
+// endpoint that redirects elsewhere does not carry its allowance along. The
+// next hop is chosen by its own URL and lands on the production lane's strict
+// transport, which refuses a fake-IP literal with zero dials.
+func TestFirstPartyRedirectToAForeignHostIsJudgedByTheLanePolicy(t *testing.T) {
+	clearProxyEnv(t)
+
+	m := laneManager(t, "https://3.basecampapi.com")
+	client, err := m.bc5Client()
+	require.NoError(t, err)
+	tr, ok := client.Transport.(*oauthTransport)
+	require.True(t, ok)
+	require.NotNil(t, tr.firstParty, "the lane must wire the first-party transport")
+
+	firstParty := &countingTransport{resp: func() (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusFound,
+			Header:     http.Header{"Location": {"https://198.18.0.1/.well-known/oauth-authorization-server"}},
+			Body:       http.NoBody,
+		}, nil
+	}}
+	tr.firstParty = firstParty
+
+	resp, err := doGet(t, client, "https://app.basecamp.com/.well-known/oauth-authorization-server")
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	require.Error(t, err)
+	assert.ErrorIs(t, err, surfguard.ErrBlocked)
+	assert.Equal(t, int32(1), firstParty.calls.Load(), "only the first-party hop rides the first-party transport")
+}
+
+// TestLaunchpadLane_WiresTheFirstPartyTransport: the Launchpad lane carries
+// the web-flow code exchange and Launchpad refreshes, which #849 shows failing
+// the same way, so it needs the same transport as the BC5 lane.
+func TestLaunchpadLane_WiresTheFirstPartyTransport(t *testing.T) {
+	clearProxyEnv(t)
+
+	m := laneManager(t, "https://3.basecampapi.com")
+	client, err := m.launchpadClient()
+	require.NoError(t, err)
+	tr, ok := client.Transport.(*oauthTransport)
+	require.True(t, ok)
+	assert.NotNil(t, tr.firstParty)
+}
