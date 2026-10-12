@@ -57,7 +57,9 @@ func TestTheConnectSkillKeepsEachRequestsStepsInsideTheCompactionCut(t *testing.
 	}
 	assert.Contains(t, body[:dispatch], "~/.config/basecamp-connect/last.json",
 		"choosing the repo names the file of confirmed mappings it reads")
-	assert.Contains(t, body[:dispatch], "stops it and starts it again",
+	assert.Contains(t, body[:dispatch], "read `${CLAUDE_SKILL_DIR}/SKILL.md` in full",
+		"a connector change the owner asks for mid-run reads the setup steps past the cut first")
+	assert.Contains(t, body[:dispatch], "after a change it restarts",
 		"a setup change the owner asks for mid-run says the connector restarts to take it")
 	assert.LessOrEqual(t, end, perRequestBudget,
 		"the per-request steps end at character %d of the skill's body; keep them within %d, moving setup and reference material after them",
