@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/http"
@@ -764,9 +765,17 @@ func TestIsFirstPartyOAuthURL(t *testing.T) {
 		{"https://launchpad.37signals.com/authorization/token", true},
 		{"https://APP.Basecamp.com/oauth/tokens", true},
 		{"https://app.basecamp.com:443/oauth/tokens", true},
+		{"https://app.basecamp.com:/oauth/tokens", true},
+		{"https://user@app.basecamp.com/oauth/tokens", true},
 
 		{"http://app.basecamp.com/oauth/tokens", false},
 		{"https://app.basecamp.com:8443/oauth/tokens", false},
+		{"https://app.basecamp.com:0443/oauth/tokens", false},
+		{"https://app.basecamp.com@issuer.example/oauth/tokens", false},
+		{"https://аpp.basecamp.com/oauth/tokens", false},
+		{"https://xn--pp-6kc.basecamp.com/oauth/tokens", false},
+		{"https://[::ffff:198.18.0.1]/oauth/tokens", false},
+		{"https://[64:ff9b::c612:1]/oauth/tokens", false},
 		{"https://app.basecamp.com./oauth/tokens", false},
 		{"https://evil.app.basecamp.com/oauth/tokens", false},
 		{"https://app.basecamp.com.evil.example/oauth/tokens", false},
@@ -919,4 +928,49 @@ func TestLanes_InstallTheFirstPartyPolicy(t *testing.T) {
 			check(t, lp)
 		})
 	}
+}
+
+// TestLanes_FirstPartyTransportVerifiesCertificates pins the premise the
+// first-party policy rests on: a connection that lands anywhere but the real
+// host fails its TLS handshake before a credential is sent. It drives the
+// first-party transport each lane builds against a local server presenting a
+// certificate no system root trusts, so a TLSClientConfig that skips
+// verification, on that transport or under it, fails here. The policy seam
+// admits loopback only so the dial can reach that server. Everything else is
+// the lane as buildLaneClient wires it.
+func TestLanes_FirstPartyTransportVerifiesCertificates(t *testing.T) {
+	clearProxyEnv(t)
+
+	var reached atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached.Add(1)
+	}))
+	t.Cleanup(srv.Close)
+
+	m := laneManager(t, "https://3.basecampapi.com")
+	m.firstPartyPolicy = func() surfguard.Policy { return firstPartyOAuthPolicy().AllowLoopback() }
+
+	check := func(t *testing.T, client *http.Client) {
+		t.Helper()
+		tr, ok := client.Transport.(*oauthTransport)
+		require.True(t, ok)
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL+"/oauth/tokens",
+			strings.NewReader("grant_type=refresh_token&refresh_token=secret"))
+		require.NoError(t, err)
+		resp, err := tr.firstParty.RoundTrip(req)
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		var unverified *tls.CertificateVerificationError
+		require.ErrorAs(t, err, &unverified, "the handshake must fail on the certificate, not before the dial")
+	}
+
+	bc5, err := m.bc5Client()
+	require.NoError(t, err)
+	check(t, bc5)
+	lp, err := m.launchpadClient()
+	require.NoError(t, err)
+	check(t, lp)
+
+	assert.Zero(t, reached.Load(), "no request may reach a server whose certificate failed verification")
 }
