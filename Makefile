@@ -487,6 +487,7 @@ check-skill-drift:
 	@scripts/check-skill-drift.sh
 	@scripts/check-skill-drift.sh skills/basecamp-doctor/SKILL.md
 	@scripts/check-skill-drift.sh skills/basecamp-connect/SKILL.md
+	@scripts/check-skill-drift.sh skills/basecamp-connect/subagent.md
 
 # Verify the skill drift check itself: what it accepts, and what it refuses
 .PHONY: test-skill-drift

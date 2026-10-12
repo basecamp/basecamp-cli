@@ -103,6 +103,7 @@ func TestCodexManifestReferencesExistingPaths(t *testing.T) {
 		filepath.Join("skills", "basecamp", "SKILL.md"),
 		filepath.Join("skills", "basecamp-doctor", "SKILL.md"),
 		filepath.Join("skills", "basecamp-connect", "SKILL.md"),
+		filepath.Join("skills", "basecamp-connect", "subagent.md"),
 	} {
 		_, err := os.Stat(filepath.Join(root, skill))
 		assert.NoError(t, err, skill)
