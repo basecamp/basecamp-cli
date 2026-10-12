@@ -234,7 +234,7 @@ func CheckClaudePluginVersion() *StatusCheck {
 		}
 	}
 
-	if installed == cliVersion {
+	if SameVersion(installed, cliVersion) {
 		return &StatusCheck{
 			Name:    "Claude Code Plugin Version",
 			Status:  "pass",
@@ -265,6 +265,75 @@ func PluginVersionMismatchHint(installed, cli string) string {
 		return "Run: basecamp upgrade"
 	}
 	return "Run: claude plugin update " + ClaudeExpectedPluginKey + ", then restart Claude Code. To keep it current: " + AutoUpdateHint
+}
+
+// SameVersion reports whether two version strings name the same release,
+// however they are spelled ("v0.13.0" and "0.13.0" are one release).
+// Strings that don't parse as versions are compared as written.
+func SameVersion(a, b string) bool {
+	na, nb := normalizeSemver(a), normalizeSemver(b)
+	if semver.IsValid(na) && semver.IsValid(nb) {
+		return semver.Compare(na, nb) == 0
+	}
+	return a == b
+}
+
+// LegacyPluginUpdateHint is the remedy for a plugin still installed under
+// its pre-rename key: setup reinstalls it as basecamp-cli, at its newest.
+const LegacyPluginUpdateHint = "Run: basecamp setup claude (reinstalls it as " + ClaudeExpectedPluginKey + "), then restart Claude Code"
+
+// PluginUpdateNotice is the one-line notice shown after the CLI changes
+// version, or "" when the Claude Code plugin matches it, isn't installed,
+// or this is a dev build. It reads the pre-rename key too: that is where a
+// plugin old enough to lack the connect skill is installed.
+func PluginUpdateNotice(cli string) string {
+	if cli == "dev" {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(filepath.Clean(home), ".claude", "plugins", "installed_plugins.json")) //nolint:gosec // G304: trusted path
+	if err != nil {
+		return ""
+	}
+	if pv := installedPluginVersion(data); pv != "" {
+		if SameVersion(pv, cli) {
+			return ""
+		}
+		return fmt.Sprintf("Basecamp plugin version mismatch (plugin %s, CLI %s) — %s", pv, cli, PluginVersionMismatchHint(pv, cli))
+	}
+	if pv := installedPluginVersionUnder(data, ClaudeLegacyPluginKey); pv != "" && !SameVersion(pv, cli) {
+		return fmt.Sprintf("Basecamp plugin version mismatch (plugin %s, CLI %s) — %s", pv, cli, LegacyPluginUpdateHint)
+	}
+	return ""
+}
+
+// installedPluginVersionUnder reads the version installed under exactly one
+// plugin key, in the v2 or v1 map format.
+func installedPluginVersionUnder(data []byte, key string) string {
+	var pluginMap map[string]any
+	if err := json.Unmarshal(data, &pluginMap); err != nil {
+		return ""
+	}
+	if inner, ok := pluginMap["plugins"].(map[string]any); ok {
+		if arr, ok := inner[key].([]any); ok {
+			for _, entry := range arr {
+				if obj, ok := entry.(map[string]any); ok {
+					if v, ok := obj["version"].(string); ok {
+						return v
+					}
+				}
+			}
+		}
+	}
+	if obj, ok := pluginMap[key].(map[string]any); ok {
+		if v, ok := obj["version"].(string); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 func normalizeSemver(v string) string {

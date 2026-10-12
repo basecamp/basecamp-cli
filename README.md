@@ -255,8 +255,9 @@ basecamp connect setup
 ```
 
 It connects this computer to your agent (one approval in the browser), records
-you as the agent's operator, asks which projects it serves, and offers to keep
-the connector running. The same steps, scriptable:
+who may give it work (for your personal agent, you) and which projects it
+serves, and ends by telling you how to start the connector. The same steps,
+scriptable:
 
 ```bash
 basecamp auth agent connect -P my-agent                 # one approval
@@ -269,16 +270,14 @@ second one, from this CLI or from the HTTP handshake on Basecamp's instructions
 page, disconnects the first and asks you to approve again.
 
 In Claude Code, the `/basecamp-connect` skill runs the watcher and hands each
-request to a subagent. It ships in the `basecamp-cli` plugin from 0.12.0 on, and
-an older plugin doesn't have it. Update the plugin and restart Claude Code
-before you remove any older copy of the skill:
+request to a subagent. It ships in this CLI's plugin from 0.12.0 on, and an
+older plugin doesn't have it. Update the plugin, restart Claude Code, and only
+then remove any older copy of the skill:
 
 ```bash
-claude plugin update basecamp-cli@37signals   # or basecamp@37signals, if installed under the old name
+claude plugin update basecamp-cli@37signals   # installed as basecamp-cli
+basecamp setup claude                         # installed under the old name, basecamp@37signals
 ```
-
-Pasting the line from My › Agent in Basecamp into Claude Code runs all of this
-for you: upgrade, plugin, one connection, setup and the watcher.
 
 ### Containers, CI and scheduled jobs
 
