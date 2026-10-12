@@ -59,6 +59,8 @@ func TestTheConnectSkillKeepsEachRequestsStepsInsideTheCompactionCut(t *testing.
 		"choosing the repo names the file of confirmed mappings it reads")
 	assert.Contains(t, body[:dispatch], "read `${CLAUDE_SKILL_DIR}/SKILL.md` in full",
 		"a connector change the owner asks for mid-run reads the setup steps past the cut first")
+	assert.Contains(t, body[:dispatch], "goes out as the agent,\nwith `--profile '<profile>'`",
+		"the orchestrator's own replies say to post as the agent")
 	assert.Contains(t, body[:dispatch], "after a change it restarts",
 		"a setup change the owner asks for mid-run says the connector restarts to take it")
 	assert.LessOrEqual(t, end, perRequestBudget,
