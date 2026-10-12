@@ -49,3 +49,5 @@ choose each default. Suggest either to a human at a terminal if useful, but
 never run them yourself — use the subcommands above.
 
 Do not read, print, or request credential files. If every check passes, say that Basecamp and its agent integration are ready.
+
+<!-- CI probe: skill-only change, do not merge -->
