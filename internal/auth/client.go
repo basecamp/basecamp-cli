@@ -3,6 +3,7 @@ package auth
 import (
 	"fmt"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -76,6 +77,52 @@ func oauthEndpointPolicy(anchorURL, label string) (surfguard.Policy, error) {
 	return policy, nil
 }
 
+// firstPartyOAuthHosts are the hosts 37signals operates that the OAuth flows
+// reach: the BC5 API and its issuer under both the original and the current
+// domains (credentials stored before the move name
+// https://3.basecamp.com/oauth/tokens), and Launchpad. The set is fixed at
+// build time. Neither a configured base URL nor anything a discovery document
+// names can add to it, which is what keeps firstPartyOAuthPolicy from ever
+// reaching an endpoint a remote peer chose.
+var firstPartyOAuthHosts = map[string]bool{
+	"3.basecampapi.com":       true,
+	"api.basecamp.com":        true,
+	"3.basecamp.com":          true,
+	"app.basecamp.com":        true,
+	"launchpad.37signals.com": true,
+}
+
+// fakeIPRange is 198.18.0.0/15, the RFC 2544 benchmarking block. Fake-IP DNS
+// (mihomo/Clash Meta and sing-box in fake-ip mode, and the egress of hosted
+// agent machines such as Grok's) answers every name from it and carries the
+// connection on to the real host, so on those networks app.basecamp.com
+// resolves here.
+var fakeIPRange = netip.MustParsePrefix("198.18.0.0/15")
+
+// firstPartyOAuthPolicy is the address policy for requests to
+// firstPartyOAuthHosts: surfguard's default deny tables (private, loopback,
+// link-local and cloud metadata, CGNAT, multicast) with the fake-IP range
+// admitted, on port 443 only. It leaves out IANASpecialUse because surfguard's
+// Allow cannot override that table, and the only other blocks that table adds
+// to the default ones are globally reachable anycast services (AS112, AMT),
+// so the fake-IP range is the one meaningful admission. TLS still verifies the certificate
+// against the first-party name, so a connection that lands anywhere else fails
+// its handshake before a credential is sent.
+func firstPartyOAuthPolicy() surfguard.Policy {
+	return surfguard.Policy{}.Allow(fakeIPRange).AllowPorts(443)
+}
+
+// isFirstPartyOAuthURL reports whether u is an HTTPS request on the default
+// port to one of firstPartyOAuthHosts. Plain HTTP (no certificate vouches for
+// the answer), an explicit non-default port, and near-miss spellings such as a
+// trailing dot all keep the lane's own policy.
+func isFirstPartyOAuthURL(u *url.URL) bool {
+	if u.Scheme != "https" || (u.Port() != "" && u.Port() != "443") {
+		return false
+	}
+	return firstPartyOAuthHosts[strings.ToLower(u.Hostname())]
+}
+
 // proxyEnvState is the Manager's one construction-time snapshot of the proxy
 // environment: the resolver both lanes route and warn against, and whether
 // the operator opted OAuth traffic out of address enforcement when a proxy
@@ -127,10 +174,14 @@ func (m *Manager) warnf(format string, args ...any) {
 }
 
 // oauthTransport is the per-lane egress RoundTripper for OAuth traffic. It
-// owns two sub-transports: the lane's address-policed direct transport
-// (surfguard dial-time enforcement; Proxy nil by construction), and — only
-// when the operator set BASECAMP_OAUTH_USE_PROXY=1 — a proxying clone of
-// http.DefaultTransport.
+// owns two address-policed direct transports (surfguard dial-time
+// enforcement; Proxy nil by construction): the lane's own, and one under
+// firstPartyOAuthPolicy for firstPartyOAuthHosts. Only when the operator set
+// BASECAMP_OAUTH_USE_PROXY=1 does it also own a proxying clone of
+// http.DefaultTransport. Which direct transport carries a request is decided
+// from that request's URL, so every redirect hop is judged afresh, and a
+// lane's anchor never lends the first-party allowance to an endpoint a
+// discovery document named.
 //
 // Routing is per-request and fail-closed:
 //
@@ -155,11 +206,12 @@ func (m *Manager) warnf(format string, args ...any) {
 // rebuilt per call; idle connections are bounded by each sub-transport's
 // IdleConnTimeout, so a process-lifetime CLI Manager needs no explicit Close.
 type oauthTransport struct {
-	guarded http.RoundTripper
-	proxied http.RoundTripper
-	resolve func(*url.URL) (*url.URL, error)
-	optOut  bool
-	warnf   func(format string, args ...any)
+	guarded    http.RoundTripper
+	firstParty http.RoundTripper
+	proxied    http.RoundTripper
+	resolve    func(*url.URL) (*url.URL, error)
+	optOut     bool
+	warnf      func(format string, args ...any)
 
 	mu     sync.Mutex
 	warned map[string]bool
@@ -172,7 +224,7 @@ func (t *oauthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	switch {
 	case proxyURL == nil:
-		return t.guarded.RoundTrip(req)
+		return t.direct(req.URL).RoundTrip(req)
 	case t.optOut:
 		// Deduplicated per endpoint: the device poll re-POSTs the same URL
 		// every few seconds, and one downgrade notice per endpoint records
@@ -183,8 +235,17 @@ func (t *oauthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	default:
 		t.warnOnce(req.URL, "warning: ignoring proxy %s for OAuth request to %s: the SSRF address policy requires direct egress; set %s=1 to route OAuth through the proxy without address enforcement",
 			redactedProxy(proxyURL), redactedEndpoint(req.URL), oauthUseProxyEnv)
-		return t.guarded.RoundTrip(req)
+		return t.direct(req.URL).RoundTrip(req)
 	}
+}
+
+// direct picks the address-policed transport for a request that is not going
+// through a proxy.
+func (t *oauthTransport) direct(u *url.URL) http.RoundTripper {
+	if isFirstPartyOAuthURL(u) {
+		return t.firstParty
+	}
+	return t.guarded
 }
 
 func (t *oauthTransport) warnOnce(u *url.URL, format string, args ...any) {
@@ -284,11 +345,12 @@ func (m *Manager) buildLaneClient(anchorURL, label string) (*http.Client, error)
 	}
 	st := m.proxyState()
 	tr := &oauthTransport{
-		guarded: policy.RoundTripper(),
-		resolve: st.resolve,
-		optOut:  st.optOut,
-		warnf:   m.warnf,
-		warned:  map[string]bool{},
+		guarded:    policy.RoundTripper(),
+		firstParty: firstPartyOAuthPolicy().RoundTripper(),
+		resolve:    st.resolve,
+		optOut:     st.optOut,
+		warnf:      m.warnf,
+		warned:     map[string]bool{},
 	}
 	if st.optOut {
 		tr.proxied = proxiedTransport(st.resolve)
