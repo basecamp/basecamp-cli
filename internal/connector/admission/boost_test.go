@@ -335,3 +335,19 @@ func TestABoostOnATrashedPostIsStale(t *testing.T) {
 	assert.Equal(t, StateDiscarded, v.State)
 	assert.Equal(t, ReasonStale, v.Reason)
 }
+
+// On the poll lane no actor type shows an agent; an Agent person the operator
+// wrongly allowlisted passes the gate, and the boost read is where it shows.
+func TestAnAllowlistedAgentsBoostIsRefusedByTheBoostRead(t *testing.T) {
+	p := basePolicy()
+	p.Trust = Trust{Mode: TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{allowedID}}
+	f := newFakeReads()
+	boostOn(f, "Comment", agentID, allowedID)
+	f.boosts[boostID].Booster.PersonableType = personableAgent
+
+	v := decide(t, newAdmitter(t, p, f), boostEvent(allowedID))
+	assert.Equal(t, StateDiscarded, v.State)
+	assert.Equal(t, ReasonAgentAuthored, v.Reason)
+	assert.Nil(t, v.Snapshot)
+	assert.Zero(t, f.summaryCalls, "refused before the boosted recording is read")
+}

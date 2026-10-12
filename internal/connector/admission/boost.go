@@ -61,7 +61,10 @@ func boostOnRecording(ev Event) (int64, Reason) {
 // The boost must be on the pointer's recording, and its booster must be the
 // performer the gate trusted: the boost is the words handed off, so whoever
 // wrote them is held to the trust the performer was. A read that answered
-// without either is a read that failed.
+// without either is a read that failed. An Agent booster is refused here as
+// agent_authored: the poll lane carries no actor type, so an Agent person the
+// operator wrongly put in the allowlist passes the gate, and this read is
+// where it shows, as an author's type shows in authorTrusted.
 func (a *decision) readBoost(ctx context.Context, ev Event, boostID int64) (*basecamp.Boost, State, Reason, error) {
 	var boost *basecamp.Boost
 	err := a.retry(ctx, func() error {
@@ -82,6 +85,8 @@ func (a *decision) readBoost(ctx context.Context, ev Event, boostID int64) (*bas
 		return nil, StateBlocked, ReasonReadFailed, nil
 	case boost.Booster.ID != ev.Performer():
 		return nil, StateDiscarded, ReasonUntrustedAuthor, nil
+	case boost.Booster.PersonableType == personableAgent:
+		return nil, StateDiscarded, ReasonAgentAuthored, nil
 	}
 	return boost, "", "", nil
 }
