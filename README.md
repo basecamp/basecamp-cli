@@ -256,8 +256,10 @@ basecamp connect setup
 
 It connects this computer to your agent (one approval in the browser), records
 who may give it work (for your personal agent, you) and which projects it
-serves, and ends by telling you how to start the connector. The same steps,
-scriptable:
+serves, and ends by telling you how to start the connector. If the agent is
+already connected on this computer under a profile, name it
+(`basecamp connect setup -P <profile>`), or setup may connect it again under
+another. The same steps, scriptable:
 
 ```bash
 basecamp auth agent connect -P my-agent                 # one approval
