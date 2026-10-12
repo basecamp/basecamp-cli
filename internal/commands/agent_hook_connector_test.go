@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,4 +135,26 @@ func TestAgentHookConnectorSkillDirIgnoresQuotedLoads(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, connectorSkillDirIn(pasted), "a person's message quoting a load")
 	assert.Equal(t, dir, connectorSkillDirIn([]byte(skillLoadLine(t, dir))))
+}
+
+// A skill load longer than the reader's buffer: the record carries the
+// whole skill text after the base-directory line, so its head, which holds
+// the directory, must survive the read of its tail.
+func TestAgentHookConnectorReloadReadsALoadLongerThanTheBuffer(t *testing.T) {
+	dir := connectorSkillDir(t)
+	var body strings.Builder
+	for i := 0; body.Len() < 3<<20; i++ {
+		fmt.Fprintf(&body, "line %d of the skill\n", i)
+	}
+	line, err := json.Marshal(map[string]any{
+		"type": "user", "isMeta": true,
+		"message": map[string]any{"role": "user", "content": []map[string]string{
+			{"type": "text", "text": "Base directory for this skill: " + dir + "\n\n" + body.String()},
+		}},
+	})
+	require.NoError(t, err)
+	transcript := writeTranscript(t, string(line))
+
+	_, context := hookSpecificOutput(t, sessionStart(t, "compact", transcript))
+	assert.Contains(t, context, filepath.Join(dir, "SKILL.md"))
 }
