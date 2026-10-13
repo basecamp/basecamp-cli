@@ -81,15 +81,30 @@ func connectStateDir(profile string, file setup.File, shadow bool) (string, erro
 		return "", err
 	}
 	parts := connectStateParts(profile, file, shadow)
-	parent, err := ensurePrivateChain(stateHome, parts[:len(parts)-1]...)
+	if _, err := ensurePrivateChain(stateHome, parts[:len(parts)-1]...); err != nil {
+		return "", err
+	}
+	dir, err := connectAdoptedStatePath(profile, file, shadow)
 	if err != nil {
 		return "", err
 	}
-	if _, err := connector.AdoptLegacyStateDir(parent, file.AccountID, file.Agent.PersonID, profile); err != nil {
+	if err := setup.EnsurePrivateDir(dir); err != nil {
 		return "", err
 	}
-	dir := filepath.Join(parent, parts[len(parts)-1])
-	if err := setup.EnsurePrivateDir(dir); err != nil {
+	return dir, nil
+}
+
+func connectAdoptedStatePath(profile string, file setup.File, shadow bool) (string, error) {
+	stateHome, err := connectStateHome()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(append([]string{stateHome}, connectStateParts(profile, file, shadow)...)...)
+	parent := filepath.Dir(dir)
+	if _, err := os.Lstat(parent); errors.Is(err, os.ErrNotExist) {
+		return dir, nil
+	}
+	if _, err := connector.AdoptLegacyStateDir(parent, file.AccountID, file.Agent.PersonID, profile); err != nil {
 		return "", err
 	}
 	return dir, nil

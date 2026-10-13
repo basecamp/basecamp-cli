@@ -254,3 +254,107 @@ func TestAProfileThatCannotProveItIsTheAgentLeavesTheLegacyDirectory(t *testing.
 	_, err = os.Lstat(filepath.Join(connectStateRoot(t), connector.StateDirName(f.file.AccountID, f.file.Agent.PersonID, "agent")))
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
+
+func openLegacyLedger(t *testing.T, file setup.File, group string) (string, *connector.Ledger) {
+	t.Helper()
+	stateHome, err := connectStateHome()
+	require.NoError(t, err)
+	legacy, err := ensurePrivateChain(stateHome, "basecamp", group, connector.LegacyStateDirName(file.AccountID, file.Agent.PersonID))
+	require.NoError(t, err)
+	l, err := connector.OpenLedger(filepath.Join(legacy, connector.LedgerFile))
+	require.NoError(t, err)
+	return legacy, l
+}
+
+func heldLegacyLedger(t *testing.T, file setup.File) string {
+	t.Helper()
+	legacy, l := openLegacyLedger(t, file, "connect")
+	_, err := l.SetHold(context.Background(), "local:tester", connector.HoldByOperator)
+	require.NoError(t, err)
+	require.NoError(t, l.Close())
+	return legacy
+}
+
+func assertNotHeld(t *testing.T, dir string) {
+	t.Helper()
+	l, err := connector.OpenLedgerReadOnly(context.Background(), filepath.Join(dir, connector.LedgerFile))
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+	_, held, err := l.HoldMarker(context.Background())
+	require.NoError(t, err)
+	assert.False(t, held, "the release reached this ledger")
+}
+
+func TestADecisionAdoptsTheLegacyDirectoryBeforeItActs(t *testing.T) {
+	f := newOperatorFixture(t)
+	legacy := heldLegacyLedger(t, f.file)
+
+	out, err := f.run(t, output.FormatJSON, "release")
+	require.NoError(t, err, out)
+
+	dir := filepath.Join(connectStateRoot(t), connector.StateDirName(f.file.AccountID, f.file.Agent.PersonID, "agent"))
+	assertNotHeld(t, dir)
+	_, err = os.Lstat(legacy)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestADecisionBesideAnOlderConnectorActsOnItsLedger(t *testing.T) {
+	f := newOperatorFixture(t)
+	legacy := heldLegacyLedger(t, f.file)
+	lock, err := connector.AcquireInstanceLock(legacy, f.file.AccountID, f.file.Agent.PersonID, time.Now())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lock.Release() })
+
+	out, err := f.run(t, output.FormatJSON, "release")
+	require.NoError(t, err, out)
+
+	assertNotHeld(t, legacy)
+	_, err = os.Lstat(filepath.Join(connectStateRoot(t), connector.StateDirName(f.file.AccountID, f.file.Agent.PersonID, "agent")))
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestAnImportBesideAnOlderConnectorIsRefused(t *testing.T) {
+	f := newOperatorFixture(t)
+	legacy := heldLegacyLedger(t, f.file)
+	lock, err := connector.AcquireInstanceLock(legacy, f.file.AccountID, f.file.Agent.PersonID, time.Now())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lock.Release() })
+	file := filepath.Join(t.TempDir(), "reconciliation.json")
+	require.NoError(t, os.WriteFile(file, []byte(`{"version":1,"entries":[{"event_id":2,"decision":"done"}]}`), 0o600))
+
+	_, err = f.run(t, output.FormatJSON, "import", file)
+	require.Error(t, err)
+	assert.Equal(t, output.CodeLockUnavailable, usageError(t, err).Code)
+}
+
+func TestPromoteAdoptsTheLegacyShadowAndPromotesIntoTheProfile(t *testing.T) {
+	f := newOperatorFixture(t)
+	legacyShadow, l := openLegacyLedger(t, f.file, "connect-shadow")
+	require.NoError(t, l.Close())
+
+	out, err := f.run(t, output.FormatJSON, "shadow", "promote")
+	require.NoError(t, err, out)
+
+	root := connectStateRoot(t)
+	_, err = os.Lstat(filepath.Join(root, connector.StateDirName(f.file.AccountID, f.file.Agent.PersonID, "agent"), connector.LedgerFile))
+	require.NoError(t, err, "the shadow ledger is the profile's connector ledger now")
+	_, err = os.Lstat(legacyShadow)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Lstat(filepath.Join(root, connector.LegacyStateDirName(f.file.AccountID, f.file.Agent.PersonID)))
+	assert.ErrorIs(t, err, os.ErrNotExist, "nothing is promoted into the old layout")
+}
+
+func TestPromoteBesideAnOlderShadowIsRefused(t *testing.T) {
+	f := newOperatorFixture(t)
+	legacyShadow, l := openLegacyLedger(t, f.file, "connect-shadow")
+	require.NoError(t, l.Close())
+	lock, err := connector.AcquireInstanceLock(legacyShadow, f.file.AccountID, f.file.Agent.PersonID, time.Now())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lock.Release() })
+
+	_, err = f.run(t, output.FormatJSON, "shadow", "promote")
+	require.Error(t, err)
+	assert.Equal(t, output.CodeLockUnavailable, usageError(t, err).Code)
+	_, err = os.Lstat(filepath.Join(legacyShadow, connector.LedgerFile))
+	require.NoError(t, err)
+}

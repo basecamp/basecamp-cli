@@ -97,7 +97,10 @@ func parseEventIDArg(raw string) (int64, error) {
 // metadata beside it is written best-effort and says nothing on its own.
 func openConnectLedger(ctx context.Context, p connectProfile, requireStopped bool) (*connector.Ledger, func(), error) {
 	done := func() {}
-	dir, err := connectStatePath(p.name, p.file, false)
+	dir, err := connectAdoptedStatePath(p.name, p.file, false)
+	if errors.Is(err, connector.ErrAlreadyRunning) {
+		dir, err = connectStatePath(p.name, p.file, false)
+	}
 	if err != nil {
 		return nil, done, err
 	}
@@ -517,10 +520,6 @@ to be discarded.`,
 			if err != nil {
 				return err
 			}
-			shadowDir, err := connectStatePath(p.name, p.file, true)
-			if err != nil {
-				return err
-			}
 			stateHome, err := connectStateHome()
 			if err != nil {
 				return err
@@ -528,17 +527,21 @@ to be discarded.`,
 			if _, err := ensurePrivateChain(stateHome, "basecamp", "connect"); err != nil {
 				return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
 			}
-			stateDir, err := connectStatePath(p.name, p.file, false)
-			if err != nil {
-				return err
+			var res connector.PromoteResult
+			shadowDir, err := connectAdoptedStatePath(p.name, p.file, true)
+			var stateDir string
+			if err == nil {
+				stateDir, err = connectAdoptedStatePath(p.name, p.file, false)
 			}
-			res, err := connector.PromoteShadow(cmd.Context(), connector.PromoteOptions{
-				ShadowDir: shadowDir,
-				StateDir:  stateDir,
-				AccountID: p.file.AccountID,
-				AgentID:   p.file.Agent.PersonID,
-				By:        operatorName(),
-			})
+			if err == nil {
+				res, err = connector.PromoteShadow(cmd.Context(), connector.PromoteOptions{
+					ShadowDir: shadowDir,
+					StateDir:  stateDir,
+					AccountID: p.file.AccountID,
+					AgentID:   p.file.Agent.PersonID,
+					By:        operatorName(),
+				})
+			}
 			switch {
 			case errors.Is(err, connector.ErrAlreadyRunning):
 				return &output.Error{Code: output.CodeLockUnavailable, Message: err.Error(),
