@@ -76,12 +76,13 @@ Then start the watcher, also with `run_in_background: true`:
 bash '${CLAUDE_SKILL_DIR}/watch-requests.sh' '<connector-output-file>' ~/.config/basecamp-connect/'handled-<profile>'
 ```
 
-It exits, notifying you, with the request lines whose `event_id` the handled
-file lacks. Record each (`echo <event_id> >> ~/.config/basecamp-connect/'handled-<profile>'`),
-start the watcher again, then handle each line with *For each request*. Keep
-one watcher running. Not the Monitor tool: its watches expire, and a `grep -v`
-in one holds a line back until the next. A request that arrives while you're
-waiting on the person is not their reply.
+It exits once request lines arrive whose `event_id` the handled file lacks.
+Read them in full from its output file, record each
+(`echo <event_id> >> ~/.config/basecamp-connect/'handled-<profile>'`), start
+the watcher again, then handle each with *For each request*. Keep one running.
+Not the Monitor tool: its watches expire, and a `grep -v` in one holds a line
+back until the next. A request that arrives while you're waiting on the person
+is not their reply.
 
 ### 2. The request line
 
@@ -652,8 +653,15 @@ output and tell the person what it means:
 
 Requests that arrive while it's stopped are not picked up later.
 
-Each start writes a new output file. Stop the watcher (TaskStop), and start it
-again on the new file once the connector is running.
+Each start writes a new output file. Stop the watcher (TaskStop), then check
+the old file once, so a request printed just before the exit isn't left there:
+
+```bash
+bash '${CLAUDE_SKILL_DIR}/watch-requests.sh' --once '<old-output-file>' ~/.config/basecamp-connect/'handled-<profile>'
+```
+
+Handle any line it prints as usual. Start the watcher on the new file once the
+connector is running.
 
 ## Checking on it
 
