@@ -534,17 +534,18 @@ to be discarded.`,
 			if err != nil {
 				return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
 			}
-			legacy := filepath.Join(parent, connector.LegacyStateDirName(p.file.AccountID, p.file.Agent.PersonID), connector.LedgerFile)
-			if _, err := os.Lstat(legacy); err == nil {
-				return output.ErrUsage(fmt.Sprintf("%s: %s", legacy, connector.ErrLedgerExists))
+			var res connector.PromoteResult
+			release, err := lockLegacyStateWithoutLedger(filepath.Join(parent, connector.LegacyStateDirName(p.file.AccountID, p.file.Agent.PersonID)), p.file)
+			if err == nil {
+				defer release()
+				res, err = connector.PromoteShadow(cmd.Context(), connector.PromoteOptions{
+					ShadowDir: shadowDir,
+					StateDir:  filepath.Join(parent, connector.StateDirName(p.file.AccountID, p.file.Agent.PersonID, p.name)),
+					AccountID: p.file.AccountID,
+					AgentID:   p.file.Agent.PersonID,
+					By:        operatorName(),
+				})
 			}
-			res, err := connector.PromoteShadow(cmd.Context(), connector.PromoteOptions{
-				ShadowDir: shadowDir,
-				StateDir:  filepath.Join(parent, connector.StateDirName(p.file.AccountID, p.file.Agent.PersonID, p.name)),
-				AccountID: p.file.AccountID,
-				AgentID:   p.file.Agent.PersonID,
-				By:        operatorName(),
-			})
 			switch {
 			case errors.Is(err, connector.ErrAlreadyRunning):
 				return &output.Error{Code: output.CodeLockUnavailable, Message: err.Error(),
@@ -562,6 +563,30 @@ to be discarded.`,
 		},
 	})
 	return cmd
+}
+
+func lockLegacyStateWithoutLedger(legacy string, file setup.File) (func(), error) {
+	switch _, err := os.Lstat(legacy); {
+	case errors.Is(err, os.ErrNotExist):
+		return func() {}, nil
+	case err != nil:
+		return nil, err
+	}
+	lock, err := connector.AcquireInstanceLock(legacy, file.AccountID, file.Agent.PersonID, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	ledger := filepath.Join(legacy, connector.LedgerFile)
+	switch _, err := os.Lstat(ledger); {
+	case err == nil:
+		err = fmt.Errorf("connector: %s: %w", ledger, connector.ErrLedgerExists)
+		_ = lock.Release()
+		return nil, err
+	case !errors.Is(err, os.ErrNotExist):
+		_ = lock.Release()
+		return nil, err
+	}
+	return func() { _ = lock.Release() }, nil
 }
 
 // --- import ---------------------------------------------------------------

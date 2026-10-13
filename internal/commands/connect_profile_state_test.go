@@ -371,3 +371,37 @@ func TestPromoteBesideAnOlderShadowIsRefused(t *testing.T) {
 	_, err = os.Lstat(filepath.Join(legacyShadow, connector.LedgerFile))
 	require.NoError(t, err)
 }
+
+func TestPromoteRefusesWhileAnOlderConnectorHoldsTheOldFolder(t *testing.T) {
+	f := newOperatorFixture(t)
+	require.NoError(t, f.ledger(t, true).Close())
+	stateHome, err := connectStateHome()
+	require.NoError(t, err)
+	legacy, err := ensurePrivateChain(stateHome, "basecamp", "connect", connector.LegacyStateDirName(f.file.AccountID, f.file.Agent.PersonID))
+	require.NoError(t, err)
+	lock, err := connector.AcquireInstanceLock(legacy, f.file.AccountID, f.file.Agent.PersonID, time.Now())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lock.Release() })
+
+	_, err = f.run(t, output.FormatJSON, "shadow", "promote")
+	require.Error(t, err)
+	assert.Equal(t, output.CodeLockUnavailable, usageError(t, err).Code)
+	_, err = os.Lstat(filepath.Join(connectStateRoot(t), connector.StateDirName(f.file.AccountID, f.file.Agent.PersonID, "agent"), connector.LedgerFile))
+	assert.ErrorIs(t, err, os.ErrNotExist, "nothing was promoted beside a connector that is starting")
+}
+
+func TestPromoteRefusesAnOldFolderItCannotInspect(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a directory whatever its mode")
+	}
+	f := newOperatorFixture(t)
+	require.NoError(t, f.ledger(t, true).Close())
+	legacy := seedLegacyLedger(t, f.s, f.file)
+	require.NoError(t, os.Chmod(legacy, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(legacy, 0o700) })
+
+	_, err := f.run(t, output.FormatJSON, "shadow", "promote")
+	require.Error(t, err)
+	_, err = os.Lstat(filepath.Join(connectStateRoot(t), connector.StateDirName(f.file.AccountID, f.file.Agent.PersonID, "agent"), connector.LedgerFile))
+	assert.ErrorIs(t, err, os.ErrNotExist, "an old ledger that cannot be seen is not taken for none")
+}
