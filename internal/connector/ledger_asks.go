@@ -26,7 +26,7 @@ import (
 // when it is decided again (a redispatch), because go_event_id names it.
 //
 // An ask is declared with a fingerprint of its content, read when it is
-// declared (admission.AskContentHash), and the go is given only while the
+// declared (admission.AskFingerprint), and the go is given only while the
 // content the boost's own decision read still matches it. An ask edited after
 // it was declared is void: its boosts are ordinary replies, and the ask is not
 // used up by them. Declaring it again does not take the edit in — the first

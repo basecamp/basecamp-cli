@@ -15,8 +15,11 @@ import (
 
 const askRecordingID int64 = 10304028972
 
-// askHash is the declared ask's content hash, as admission computes it.
-var askHash = admission.AskContentHash("<div>Shall I push abc123 to fix-date-picker?</div>")
+// askText is the declared ask, a comment; askHash its fingerprint, as
+// admission computes it.
+const askText = "<div>Shall I push abc123 to fix-date-picker?</div>"
+
+var askHash = admission.AskFingerprint("Comment", "", askText)
 
 // boostVerdict is an admitted boost on askRecordingID; operator says it is
 // the operator's, which is when admission names the ask it would answer.
@@ -26,6 +29,7 @@ func boostVerdict(id int64, operator bool) admission.Verdict {
 	v.Snapshot.Content = "yes, go"
 	if operator {
 		v.AskRecordingID, v.AskContentHash = askRecordingID, askHash
+		v.Snapshot.Ask = &admission.AskCopy{Content: askText}
 	}
 	return v
 }
@@ -140,6 +144,8 @@ func TestTheGoIsHandedOffAsSuch(t *testing.T) {
 		byID[l.EventID] = l
 	}
 	assert.True(t, byID[1].Go)
+	assert.Equal(t, HandoffAsk{Content: askText}, byID[1].Ask, "the go carries the words it approves")
+	assert.Empty(t, byID[2].Ask, "a reply carries none")
 	assert.Equal(t, "boosted", byID[1].Trigger)
 	assert.Equal(t, askRecordingID, byID[1].Recording.RecordingID, "the ask is the line's recording")
 	assert.Equal(t, "yes, go", byID[1].Content)
@@ -188,7 +194,7 @@ func TestAnAskEditedSinceItWasDeclaredGivesNoGo(t *testing.T) {
 	require.NoError(t, err)
 
 	edited := boostVerdict(1, true)
-	edited.AskContentHash = admission.AskContentHash("<div>Shall I push abc123 and deploy production?</div>")
+	edited.AskContentHash = admission.AskFingerprint("Comment", "", "<div>Shall I push abc123 and deploy production?</div>")
 	seenRecord(t, ledger, 1)
 	_, err = ledger.Admission().Commit(ctx, edited)
 	require.NoError(t, err)
@@ -219,7 +225,7 @@ func TestAnEditedAsksBoostIsHandedOffAsAReply(t *testing.T) {
 	_, err := ledger.DeclareAsk(context.Background(), askRecordingID, askHash, "local:agent")
 	require.NoError(t, err)
 	edited := boostVerdict(1, true)
-	edited.AskContentHash = admission.AskContentHash("<div>something else</div>")
+	edited.AskContentHash = admission.AskFingerprint("Comment", "", "<div>something else</div>")
 	seenRecord(t, ledger, 1)
 	_, err = ledger.Admission().Commit(context.Background(), edited)
 	require.NoError(t, err)

@@ -224,7 +224,7 @@ func TestConnectAskFingerprintsTheCommentTheURLNames(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(out), &first), out)
 	assert.Equal(t, int64(1011), first.Data.RecordingID)
 	assert.False(t, first.Data.Already)
-	assert.Equal(t, admission.AskContentHash(content), askHashIn(t, f, 1011), "the hash is of the content as read")
+	assert.Equal(t, admission.AskFingerprint("Comment", "", content), askHashIn(t, f, 1011), "the hash is of the content as read")
 
 	// The same post, read again: the same hash, so nothing is edited.
 	out, err = f.run(t, output.FormatJSON, "ask", url)
@@ -240,7 +240,7 @@ func TestConnectAskFingerprintsTheCommentTheURLNames(t *testing.T) {
 	var edited askOut
 	require.NoError(t, json.Unmarshal([]byte(out), &edited), out)
 	assert.True(t, edited.Data.Edited)
-	assert.Equal(t, admission.AskContentHash(content), askHashIn(t, f, 1011), "the first declaration stands")
+	assert.Equal(t, admission.AskFingerprint("Comment", "", content), askHashIn(t, f, 1011), "the first declaration stands")
 }
 
 // Only a post the agent wrote, named by a URL that plainly names one post in

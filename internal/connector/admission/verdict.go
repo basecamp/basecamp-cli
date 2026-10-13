@@ -68,6 +68,18 @@ type Snapshot struct {
 	// owner, and neither is the owner bringing in someone else's words: an
 	// allowlisted person's to-do the owner moves in is that person's.
 	Owner bool `json:"owner,omitempty"`
+	// Ask is the boosted post as this decision read it, on an operator's
+	// boost that may be a declared ask's go: the exact words the fingerprint
+	// was taken over. A go approves these words, not the post as it is
+	// later, so the handoff gives them to the worker to act on.
+	Ask *AskCopy `json:"ask,omitempty"`
+}
+
+// AskCopy is an ask's own words, as one read returned them. Title is empty
+// for a comment or a chat line, whose title is not their own.
+type AskCopy struct {
+	Title   string `json:"title"`
+	Content string `json:"content"`
 }
 
 // Verdict is admission's decision about one event.
@@ -120,8 +132,8 @@ type Verdict struct {
 	// Only the operator's boost carries it, in every trust mode: as with an
 	// assignment, an allowlist or a broader trust mode never extends it.
 	AskRecordingID int64
-	// AskContentHash is AskContentHash of the boosted recording's content as
-	// this decision read it. The ledger gives the go only when it equals the
+	// AskContentHash is AskFingerprint of the boosted recording's title and
+	// content as this decision read it. The ledger gives the go only when it equals the
 	// hash the ask was declared with: an ask edited since it was declared is
 	// void, and its boost is an ordinary reply.
 	AskContentHash string
@@ -462,7 +474,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	}
 	v.State = StateAdmitted
 	if rule.Trigger == TriggerBoosted && ev.PerformedByID == nil && ev.Performer() == policy.Trust.OperatorID {
-		v.AskRecordingID, v.AskContentHash = ev.RecordingID, AskContentHash(summary.Content)
+		v.AskRecordingID, v.AskContentHash = ev.RecordingID, AskFingerprint(summary.Type, summary.Title, summary.Content)
 	}
 	v.Snapshot = &Snapshot{
 		Type:      summary.Type,
@@ -495,6 +507,11 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		}
 	case summary.Creator != nil && summary.Creator.ID == v.RequesterID:
 		v.Snapshot.RequesterName = summary.Creator.Name
+	}
+	if v.AskRecordingID > 0 {
+		// The same read the fingerprint was taken over, so the words handed
+		// off are exactly the ones the ledger matches against the declaration.
+		v.Snapshot.Ask = &AskCopy{Title: AskTitle(summary.Type, summary.Title), Content: summary.Content}
 	}
 	return v, nil
 }

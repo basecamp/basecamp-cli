@@ -505,7 +505,7 @@ only way to make one.`,
 				return err
 			}
 			defer done()
-			res, err := ledger.DeclareAsk(cmd.Context(), ref.RecordingID, admission.AskContentHash(post.Content), operatorName())
+			res, err := ledger.DeclareAsk(cmd.Context(), ref.RecordingID, admission.AskFingerprint(post.Type, post.Title, post.Content), operatorName())
 			if err != nil {
 				return err
 			}

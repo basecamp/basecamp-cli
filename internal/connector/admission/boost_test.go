@@ -405,3 +405,18 @@ func TestOnlyTheOperatorsBoostMayBeAGo(t *testing.T) {
 		assert.Zero(t, v.AskRecordingID)
 	})
 }
+
+// The fingerprint covers a titled post's title and content, length-prefixed so
+// the fields cannot run together, and a comment's or line's content alone.
+func TestAskFingerprint(t *testing.T) {
+	const content = "<div>push abc123</div>"
+	assert.Equal(t, AskFingerprint("Comment", "Re: a card", content), AskFingerprint("Comment", "Re: renamed card", content),
+		"a comment's title is its parent's, and is not the ask's")
+	assert.Equal(t, AskFingerprint("Chat::Lines::RichText", "", content), AskFingerprint("Comment", "", content))
+	assert.NotEqual(t, AskFingerprint("Message", "Push abc123?", content), AskFingerprint("Message", "Deploy production?", content),
+		"a message's subject is part of what it asks")
+	assert.NotEqual(t, AskFingerprint("Message", "ab", "c"), AskFingerprint("Message", "a", "bc"),
+		"the fields cannot run together")
+	assert.Equal(t, AskFingerprint("Kanban::Card", "Push abc123?", content), AskFingerprint("Kanban::Card", "Push abc123?", content),
+		"an unedited post read twice fingerprints the same")
+}

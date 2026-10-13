@@ -60,9 +60,21 @@ type HandoffLine struct {
 	// names and nothing more. False on every other request, a boost on an
 	// ask from anyone else and the operator's second boost included.
 	Go bool `json:"go"`
+	// Ask is the declared ask's own words as admission read them and matched
+	// them against the declaration, set only on a go: the text the go
+	// approves. The worker acts on these words, never on a fresh read of
+	// Recording, which may have been edited since. Empty on every other line.
+	Ask HandoffAsk `json:"ask"`
 
 	Content          string    `json:"content"`
 	ContentUpdatedAt time.Time `json:"content_updated_at"`
+}
+
+// HandoffAsk is an ask's title and content. Title is empty for a comment or a
+// chat line.
+type HandoffAsk struct {
+	Title   string `json:"title"`
+	Content string `json:"content"`
 }
 
 // HandoffRecording points at the recording the request is about.
@@ -221,12 +233,27 @@ func handoffLine(record Record, agentID int64, goes bool) (HandoffLine, error) {
 		RequesterName string    `json:"requester_name"`
 		Role          string    `json:"role"`
 		Owner         bool      `json:"owner"`
+		Ask           *struct {
+			Title   string `json:"title"`
+			Content string `json:"content"`
+		} `json:"ask"`
 	}
 	if record.ContentDropped || len(record.Decision.Snapshot) == 0 {
 		return HandoffLine{}, errors.New("the record has no content")
 	}
 	if err := json.Unmarshal(record.Decision.Snapshot, &snapshot); err != nil {
 		return HandoffLine{}, fmt.Errorf("snapshot: %w", err)
+	}
+	// Only a boosted record can hold a go; the trigger is checked here too,
+	// so no other line ever says go. A go without the words it approves is
+	// not handed off as one.
+	isGo := goes && record.Decision.Trigger == string(admission.TriggerBoosted) && snapshot.Ask != nil
+	var ask HandoffAsk
+	if isGo {
+		ask = HandoffAsk{
+			Title:   richtext.SanitizeTerminal(snapshot.Ask.Title),
+			Content: richtext.SanitizeTerminal(snapshot.Ask.Content),
+		}
 	}
 	return HandoffLine{
 		Type:      "request",
@@ -247,9 +274,8 @@ func handoffLine(record Record, agentID int64, goes bool) (HandoffLine, error) {
 		Role:          handoffRole(snapshot.Role),
 		Owner:         snapshot.Owner && handoffRole(snapshot.Role) == string(admission.RoleOperator),
 		Acknowledge:   record.Decision.Acknowledge,
-		// Only a boosted record can hold a go; the trigger is checked here
-		// too, so no other line ever says go.
-		Go: goes && record.Decision.Trigger == string(admission.TriggerBoosted),
+		Go:            isGo,
+		Ask:           ask,
 		// The line is read in a terminal as often as by a program: no
 		// control sequences from Basecamp's text reach it.
 		Content:          richtext.SanitizeTerminal(StripMentionsOf(snapshot.Content, agentID)),

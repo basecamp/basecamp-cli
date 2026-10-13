@@ -917,14 +917,14 @@ func TestAnUnreadableConfigHoldsItsRecordsUntilTheFileAndAPersonAreBack(t *testi
 func TestAGoIsOnlyForTheAskAsDeclared(t *testing.T) {
 	const commentID, cardID int64 = 601, 600
 	const declared = "<div>Shall I push abc123 to fix-date-picker?</div>"
-	run := func(t *testing.T, content string) (*Ledger, HandoffLine) {
+	run := func(t *testing.T, typ, declaredTitle, title, content string) (*Ledger, HandoffLine) {
 		t.Helper()
 		ledger := newTestLedger(t)
 		queue, err := NewQueue(10, 100)
 		require.NoError(t, err)
 		reads := &adapterReads{
 			summaries: map[int64]*basecamp.RecordingSummary{commentID: {
-				ID: commentID, Status: "active", Type: "Comment", Title: "Shall I?",
+				ID: commentID, Status: "active", Type: typ, Title: title,
 				AppURL:  "https://app.basecamp.com/2914079/buckets/48699913/recordings/601",
 				Bucket:  &basecamp.Bucket{ID: adapterBucketID},
 				Parent:  &basecamp.Parent{ID: cardID},
@@ -934,7 +934,7 @@ func TestAGoIsOnlyForTheAskAsDeclared(t *testing.T) {
 			boosts: map[int64]*basecamp.Boost{31337: {
 				ID: 31337, Content: "👍", CreatedAt: time.Date(2026, 9, 16, 10, 0, 5, 0, time.UTC),
 				Booster:   &basecamp.Person{ID: adapterOperatorID, Name: "The Operator"},
-				Recording: &basecamp.Parent{ID: commentID, Type: "Comment"},
+				Recording: &basecamp.Parent{ID: commentID, Type: typ},
 			}},
 		}
 		admitter, err := admission.NewAdmitter(admission.Policy{
@@ -943,7 +943,7 @@ func TestAGoIsOnlyForTheAskAsDeclared(t *testing.T) {
 			Projects: map[int64]admission.Project{adapterBucketID: {Class: "internal"}},
 		}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads, Boosts: reads})
 		require.NoError(t, err)
-		_, err = ledger.DeclareAsk(context.Background(), commentID, admission.AskContentHash(declared), "local:agent")
+		_, err = ledger.DeclareAsk(context.Background(), commentID, admission.AskFingerprint(typ, declaredTitle, declared), "local:agent")
 		require.NoError(t, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -971,17 +971,31 @@ func TestAGoIsOnlyForTheAskAsDeclared(t *testing.T) {
 		return ledger, lines[0]
 	}
 
-	t.Run("unedited: the go", func(t *testing.T) {
-		_, line := run(t, declared)
+	t.Run("unedited: the go, carrying the words it approves", func(t *testing.T) {
+		_, line := run(t, "Comment", "", "Re: Shall I?", declared)
 		assert.Equal(t, "boosted", line.Trigger)
 		assert.True(t, line.Go)
 		assert.Equal(t, commentID, line.Recording.RecordingID)
+		assert.Equal(t, HandoffAsk{Content: declared}, line.Ask, "a comment's words are its content; its title is its parent's")
+	})
+
+	t.Run("a titled ask, unedited: the go carries its title too", func(t *testing.T) {
+		_, line := run(t, "Message", "Push abc123?", "Push abc123?", declared)
+		assert.True(t, line.Go)
+		assert.Equal(t, HandoffAsk{Title: "Push abc123?", Content: declared}, line.Ask)
+	})
+
+	t.Run("a titled ask whose title was edited: a reply", func(t *testing.T) {
+		_, line := run(t, "Message", "Push abc123?", "Deploy production?", declared)
+		assert.False(t, line.Go)
+		assert.Empty(t, line.Ask)
 	})
 
 	t.Run("edited since it was declared: a reply, and the ask stays open", func(t *testing.T) {
-		ledger, line := run(t, "<div>Shall I push abc123 and deploy production?</div>")
+		ledger, line := run(t, "Comment", "", "Re: Shall I?", "<div>Shall I push abc123 and deploy production?</div>")
 		assert.Equal(t, "boosted", line.Trigger)
 		assert.False(t, line.Go)
+		assert.Empty(t, line.Ask, "a reply carries no ask")
 		var goEvent sql.NullInt64
 		require.NoError(t, ledger.db.QueryRowContext(context.Background(), `SELECT go_event_id FROM asks WHERE recording_id = ?`, commentID).Scan(&goEvent))
 		assert.False(t, goEvent.Valid)

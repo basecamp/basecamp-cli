@@ -21,6 +21,8 @@ import (
 // change made on purpose, here, or not at all. Adding a key is not.
 var requestLineContract = []string{
 	"acknowledge",
+	"ask.content",
+	"ask.title",
 	"content",
 	"content_updated_at",
 	"event_id",
