@@ -18,7 +18,7 @@ if [ ! -f "$out" ]; then
   echo "watch-requests: no connector output at $out" >&2
   exit 2
 fi
-if ! { mkdir -p "$(dirname "$handled")" && touch "$handled" && [ -r "$handled" ]; }; then
+if ! { mkdir -p "$(dirname "$handled")" && touch "$handled" && [ -f "$handled" ] && [ -r "$handled" ] && [ -w "$handled" ]; }; then
   echo "watch-requests: can't use the handled file $handled" >&2
   exit 2
 fi
