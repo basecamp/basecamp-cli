@@ -70,6 +70,8 @@ type connectSetupServer struct {
 	duringMint func()
 	// mintFailure, when set, answers the stream ticket mint.
 	mintFailure func(w http.ResponseWriter)
+	// bodies answers a GET of a path not otherwise served, by path.
+	bodies map[string]any
 	// boss is who the agent works for, in its own profile; nil for a plain
 	// agent, or a Basecamp that does not say.
 	boss map[string]any
@@ -234,7 +236,12 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		s.paths = append(s.paths, r.Method+" "+r.URL.Path)
+		body, ok := s.bodies[r.URL.Path]
 		s.mu.Unlock()
+		if ok && r.Method == http.MethodGet {
+			writeJSON(w, body)
+			return
+		}
 		http.NotFound(w, r)
 	})
 

@@ -25,6 +25,13 @@ import (
 // event — is an ordinary boosted reply. The event that took the go keeps it
 // when it is decided again (a redispatch), because go_event_id names it.
 //
+// An ask is declared with a fingerprint of its content, read when it is
+// declared (admission.AskContentHash), and the go is given only while the
+// content the boost's own decision read still matches it. An ask edited after
+// it was declared is void: its boosts are ordinary replies, and the ask is not
+// used up by them. Declaring it again does not take the edit in — the first
+// declaration stands — so an edited ask stays void; the agent posts a new one.
+//
 // An ask does not expire. The go is the operator's deliberate boost on the
 // post itself, and what it approves is what the post names, which a worker
 // checks is still current before acting (a branch still at the commit the
@@ -36,6 +43,7 @@ CREATE TABLE asks (
   recording_id INTEGER PRIMARY KEY CHECK (recording_id > 0),
   declared_at  TEXT    NOT NULL,
   declared_by  TEXT    NOT NULL CHECK (declared_by <> ''),
+  content_hash TEXT    NOT NULL CHECK (content_hash <> ''),
   go_event_id  INTEGER UNIQUE REFERENCES events (id)
 );
 `
@@ -46,18 +54,24 @@ type AskResult struct {
 	// Already says the recording was declared an ask before; the first
 	// declaration stands.
 	Already bool `json:"already"`
+	// Edited says the post no longer matches the content it was first
+	// declared with: the ask is void, and only a new ask can be a go.
+	Edited bool `json:"edited,omitempty"`
 	// GoEventID is the event whose boost took the ask's go, zero while none
 	// has.
 	GoEventID int64 `json:"go_event_id,omitempty"`
 }
 
 // DeclareAsk records a recording the agent posted as an ask for the
-// operator's go. Declaring one twice is not an error, and does not reopen an
-// ask whose go was taken.
-func (l *Ledger) DeclareAsk(ctx context.Context, recordingID int64, by string) (AskResult, error) {
+// operator's go, with the hash of its content as read now. Declaring one
+// twice is not an error, and changes nothing: not an ask whose go was taken,
+// and not the hash of one edited since.
+func (l *Ledger) DeclareAsk(ctx context.Context, recordingID int64, contentHash, by string) (AskResult, error) {
 	switch {
 	case recordingID <= 0:
 		return AskResult{}, errors.New("connector: an ask names a recording")
+	case contentHash == "":
+		return AskResult{}, errors.New("connector: an ask records its content's hash")
 	case strings.TrimSpace(by) == "":
 		return AskResult{}, errors.New("connector: an ask records who declared it")
 	}
@@ -69,8 +83,8 @@ func (l *Ledger) DeclareAsk(ctx context.Context, recordingID int64, by string) (
 		}
 		defer func() { _ = tx.Rollback() }()
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO asks (recording_id, declared_at, declared_by) VALUES (?, ?, ?) ON CONFLICT (recording_id) DO NOTHING`,
-			recordingID, l.timestamp(), by)
+			`INSERT INTO asks (recording_id, declared_at, declared_by, content_hash) VALUES (?, ?, ?, ?) ON CONFLICT (recording_id) DO NOTHING`,
+			recordingID, l.timestamp(), by, contentHash)
 		if err != nil {
 			return fmt.Errorf("connector: declare ask on %d: %w", recordingID, err)
 		}
@@ -78,14 +92,17 @@ func (l *Ledger) DeclareAsk(ctx context.Context, recordingID int64, by string) (
 		if err != nil {
 			return fmt.Errorf("connector: declare ask on %d: %w", recordingID, err)
 		}
-		var goEvent sql.NullInt64
-		if err := tx.QueryRowContext(ctx, `SELECT go_event_id FROM asks WHERE recording_id = ?`, recordingID).Scan(&goEvent); err != nil {
+		var (
+			goEvent  sql.NullInt64
+			declared string
+		)
+		if err := tx.QueryRowContext(ctx, `SELECT go_event_id, content_hash FROM asks WHERE recording_id = ?`, recordingID).Scan(&goEvent, &declared); err != nil {
 			return fmt.Errorf("connector: read ask on %d: %w", recordingID, err)
 		}
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("connector: commit ask on %d: %w", recordingID, err)
 		}
-		out = AskResult{RecordingID: recordingID, Already: n == 0, GoEventID: goEvent.Int64}
+		out = AskResult{RecordingID: recordingID, Already: n == 0, Edited: declared != contentHash, GoEventID: goEvent.Int64}
 		return nil
 	})
 	return out, err
@@ -93,11 +110,12 @@ func (l *Ledger) DeclareAsk(ctx context.Context, recordingID int64, by string) (
 
 // takeGo gives a declared ask's go to eventID, inside the verdict's
 // transaction, and reports whether eventID holds it. An ask nobody declared,
-// or one another event already took, gives nothing.
-func takeGo(ctx context.Context, tx *sql.Tx, recordingID, eventID int64) (bool, error) {
+// one another event already took, and one whose content no longer hashes to
+// what it was declared with give nothing, and the last is left as it was.
+func takeGo(ctx context.Context, tx *sql.Tx, recordingID int64, contentHash string, eventID int64) (bool, error) {
 	res, err := tx.ExecContext(ctx,
-		`UPDATE asks SET go_event_id = ? WHERE recording_id = ? AND (go_event_id IS NULL OR go_event_id = ?)`,
-		eventID, recordingID, eventID)
+		`UPDATE asks SET go_event_id = ? WHERE recording_id = ? AND content_hash = ? AND (go_event_id IS NULL OR go_event_id = ?)`,
+		eventID, recordingID, contentHash, eventID)
 	if err != nil {
 		return false, fmt.Errorf("connector: take the go on %d for %d: %w", recordingID, eventID, err)
 	}

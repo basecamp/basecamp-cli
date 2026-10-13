@@ -19,6 +19,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
+	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -457,7 +458,7 @@ outcome is unknown. A lifecycle message still pending for it is not sent.`,
 
 func newConnectAskCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "ask <url|recording_id>",
+		Use:   "ask <url>",
 		Short: "Declare a post of the agent's as asking the operator for a go",
 		Long: `Declare a comment, line or post the agent just wrote as an ask: a request for
 the operator's go on exactly what it names. The operator's boost on it is then
@@ -465,9 +466,13 @@ handed off with "go": true, once. Any other boost on it, and the operator's
 second, is an ordinary boosted reply. Only the operator's boost counts, in
 every trust mode.
 
-Run it right after posting the ask, with the URL or id the post returned. A
-boost decided before the declaration is not a go. Nothing reads the post's
-text to decide it is an ask: this declaration is the only way to make one.`,
+Run it right after posting the ask, with the app_url the post returned
+(--json). It reads the post once, as the agent, and refuses one the agent did
+not write. The post's content is fingerprinted then: if the post is edited
+afterwards, the ask is void and its boosts are only replies. Post a new ask
+instead of editing one. A boost decided before the declaration is not a go.
+Nothing reads the post's text to decide it is an ask: this declaration is the
+only way to make one.`,
 		Example: `  basecamp connect ask -P agent 'https://3.basecamp.com/999/buckets/456/todos/789#__recording_1011'`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -475,62 +480,101 @@ text to decide it is an ask: this declaration is the only way to make one.`,
 			if err != nil {
 				return err
 			}
-			id, err := askRecordingID(args[0], p)
+			ref, err := askRef(args[0], p)
 			if err != nil {
 				return err
+			}
+			agent, err := verifiedConnectAgent(cmd.Context(), p)
+			if err != nil {
+				return err
+			}
+			// The same read admission makes of the boosted recording, so an
+			// unedited post fingerprints the same at both ends.
+			post, err := agent.client.ForAccount(agent.account).Recordings().Summarize(cmd.Context(), ref)
+			if err != nil {
+				return fmt.Errorf("could not read the ask: %w", err)
+			}
+			switch {
+			case post.Creator == nil || post.Creator.ID != agent.personID:
+				return output.ErrUsage(fmt.Sprintf("Recording %d is not the agent's own post; only a post the agent wrote can be an ask", ref.RecordingID))
+			case post.Status != "active":
+				return output.ErrUsage(fmt.Sprintf("Recording %d is %s; only a published post can be an ask", ref.RecordingID, post.Status))
 			}
 			ledger, done, err := openConnectLedger(cmd.Context(), p, false)
 			if err != nil {
 				return err
 			}
 			defer done()
-			res, err := ledger.DeclareAsk(cmd.Context(), id, operatorName())
+			res, err := ledger.DeclareAsk(cmd.Context(), ref.RecordingID, admission.AskContentHash(post.Content), operatorName())
 			if err != nil {
 				return err
 			}
-			summary := fmt.Sprintf("Recording %d is an ask: the operator's boost on it is the go", id)
+			summary := fmt.Sprintf("Recording %d is an ask: the operator's boost on it is the go", ref.RecordingID)
 			switch {
 			case res.GoEventID > 0:
-				summary = fmt.Sprintf("Recording %d was already an ask, and event %d took its go", id, res.GoEventID)
+				summary = fmt.Sprintf("Recording %d was already an ask, and event %d took its go", ref.RecordingID, res.GoEventID)
+			case res.Edited:
+				summary = fmt.Sprintf("Recording %d was edited since it was declared: the ask is void. Post a new ask", ref.RecordingID)
 			case res.Already:
-				summary = fmt.Sprintf("Recording %d was already an ask", id)
+				summary = fmt.Sprintf("Recording %d was already an ask", ref.RecordingID)
 			}
 			return p.app.OK(res, output.WithSummary(summary))
 		},
 	}
 }
 
-// askRecordingID is the recording an ask argument names: a bare id, or a URL
-// for one post in the agent's own account. A declaration that names the wrong
+// askRecordingTypes are the posts an ask can be, by the URL's path type, as
+// the summary read names them. A chat line's subtype does not matter to the
+// read: every Chat::Lines:: type routes to the same one.
+var askRecordingTypes = map[string]string{
+	"lines":            "Chat::Lines::Text",
+	"messages":         "Message",
+	"todos":            "Todo",
+	"cards":            "Kanban::Card",
+	"documents":        "Document",
+	"question_answers": "Question::Answer",
+}
+
+// askRef is the post an ask URL names. A declaration that names the wrong
 // recording fails silently later — the operator's boost on the real post is
 // then only a reply — so a URL is refused unless it plainly names one post:
 // a trusted host, the profile's account, and a single recording (the comment
 // a #__recording_ fragment names), never a listing whose id is its parent's.
-func askRecordingID(arg string, p connectProfile) (int64, error) {
+// A URL, not a bare id: the read routes by the type the URL names.
+func askRef(arg string, p connectProfile) (basecamp.RecordingRef, error) {
 	raw := strings.TrimSpace(arg)
-	if urlarg.IsURL(raw) {
-		if !hostutil.IsTrustedBasecampHost(raw, p.app.Config.BaseURL) {
-			return 0, output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
-		}
-		parsed := urlarg.Parse(raw)
-		switch {
-		case parsed == nil:
-			return 0, output.ErrUsage(fmt.Sprintf("No recording in %q", arg))
-		case parsed.AccountID != "" && parsed.AccountID != p.file.AccountID:
-			return 0, output.ErrUsage(fmt.Sprintf("URL is for account %s, but this agent is in account %s", parsed.AccountID, p.file.AccountID))
-		case parsed.CommentID != "":
-			raw = parsed.CommentID
-		case parsed.IsCollection || parsed.RecordingID == "":
-			return 0, output.ErrUsage("URL names a listing, not the one post the ask is")
-		default:
-			raw = parsed.RecordingID
-		}
+	if !urlarg.IsURL(raw) {
+		return basecamp.RecordingRef{}, output.ErrUsageHint(fmt.Sprintf("No post URL in %q", arg), "Pass the app_url the post returned with --json")
 	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || id <= 0 {
-		return 0, output.ErrUsage(fmt.Sprintf("No recording id in %q", arg))
+	if !hostutil.IsTrustedBasecampHost(raw, p.app.Config.BaseURL) {
+		return basecamp.RecordingRef{}, output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
 	}
-	return id, nil
+	parsed := urlarg.Parse(raw)
+	var ref basecamp.RecordingRef
+	var id string
+	switch {
+	case parsed == nil:
+		return ref, output.ErrUsage(fmt.Sprintf("No recording in %q", arg))
+	case parsed.AccountID != "" && parsed.AccountID != p.file.AccountID:
+		return ref, output.ErrUsage(fmt.Sprintf("URL is for account %s, but this agent is in account %s", parsed.AccountID, p.file.AccountID))
+	case parsed.CommentID != "":
+		id, ref.RecordingType = parsed.CommentID, "Comment"
+	case parsed.IsCollection || parsed.RecordingID == "":
+		return ref, output.ErrUsage("URL names a listing, not the one post the ask is")
+	default:
+		typ, ok := askRecordingTypes[parsed.Type]
+		if !ok {
+			return ref, output.ErrUsage(fmt.Sprintf("URL names a %s, which cannot be an ask: declare a comment, line, message, to-do, card, document or check-in answer", parsed.Type))
+		}
+		id, ref.RecordingType = parsed.RecordingID, typ
+	}
+	recording, err := strconv.ParseInt(id, 10, 64)
+	bucket, bucketErr := strconv.ParseInt(parsed.ProjectID, 10, 64)
+	if err != nil || recording <= 0 || bucketErr != nil || bucket <= 0 {
+		return ref, output.ErrUsage(fmt.Sprintf("No project and recording in %q", arg))
+	}
+	ref.BucketID, ref.RecordingID = bucket, recording
+	return ref, nil
 }
 
 // --- release --------------------------------------------------------------

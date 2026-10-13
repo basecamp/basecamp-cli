@@ -3,6 +3,7 @@ package connector
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -908,4 +909,81 @@ func TestAnUnreadableConfigHoldsItsRecordsUntilTheFileAndAPersonAreBack(t *testi
 	require.Eventually(t, func() bool {
 		return getRecord(t, ledger, ev.ID).State == StateAdmitted
 	}, 5*time.Second, 10*time.Millisecond, "and the work that was held runs")
+}
+
+// The go end to end, through a real admitter: the ask declared with the hash
+// of its content as read, an unedited ask read again at admission hashes the
+// same and gets its go, and an ask edited since gets none and stays open.
+func TestAGoIsOnlyForTheAskAsDeclared(t *testing.T) {
+	const commentID, cardID int64 = 601, 600
+	const declared = "<div>Shall I push abc123 to fix-date-picker?</div>"
+	run := func(t *testing.T, content string) (*Ledger, HandoffLine) {
+		t.Helper()
+		ledger := newTestLedger(t)
+		queue, err := NewQueue(10, 100)
+		require.NoError(t, err)
+		reads := &adapterReads{
+			summaries: map[int64]*basecamp.RecordingSummary{commentID: {
+				ID: commentID, Status: "active", Type: "Comment", Title: "Shall I?",
+				AppURL:  "https://app.basecamp.com/2914079/buckets/48699913/recordings/601",
+				Bucket:  &basecamp.Bucket{ID: adapterBucketID},
+				Parent:  &basecamp.Parent{ID: cardID},
+				Creator: &basecamp.Person{ID: adapterAgentID},
+				Content: content, MentionedPersonIDs: []int64{},
+			}},
+			boosts: map[int64]*basecamp.Boost{31337: {
+				ID: 31337, Content: "👍", CreatedAt: time.Date(2026, 9, 16, 10, 0, 5, 0, time.UTC),
+				Booster:   &basecamp.Person{ID: adapterOperatorID, Name: "The Operator"},
+				Recording: &basecamp.Parent{ID: commentID, Type: "Comment"},
+			}},
+		}
+		admitter, err := admission.NewAdmitter(admission.Policy{
+			AgentID:  adapterAgentID,
+			Trust:    admission.Trust{Mode: admission.TrustOperator, OperatorID: adapterOperatorID},
+			Projects: map[int64]admission.Project{adapterBucketID: {Class: "internal"}},
+		}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads, Boosts: reads})
+		require.NoError(t, err)
+		_, err = ledger.DeclareAsk(context.Background(), commentID, admission.AskContentHash(declared), "local:agent")
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			done <- RunAdmission(ctx, AdmissionOptions{Ledger: ledger, Queue: queue, Admitter: admitter, Workers: 1, Lines: ndjson.NewWriter(&bytes.Buffer{})})
+		}()
+		ev := testEvent(1)
+		ev.EventType, ev.Kind, ev.Action, ev.RecordingID = "boost.created", "comment_boosted", "boosted", commentID
+		ev.Details = json.RawMessage(`{"boost_id":31337,"boosted_event_id":null,"boosted_event_type":null}`)
+		_, err = ledger.RecordSeen(ctx, ev, LanePoll)
+		require.NoError(t, err)
+		require.NoError(t, queue.Offer(ctx, ev.ID))
+		require.Eventually(t, func() bool { return getRecord(t, ledger, ev.ID).State != StateSeen }, 5*time.Second, 10*time.Millisecond)
+		cancel()
+		require.NoError(t, <-done)
+
+		var out bytes.Buffer
+		opts := handoffOptions(ledger, &out)
+		opts.AgentID = adapterAgentID
+		require.NoError(t, handOffReady(context.Background(), opts))
+		lines := handedOffLines(t, &out)
+		require.Len(t, lines, 1)
+		return ledger, lines[0]
+	}
+
+	t.Run("unedited: the go", func(t *testing.T) {
+		_, line := run(t, declared)
+		assert.Equal(t, "boosted", line.Trigger)
+		assert.True(t, line.Go)
+		assert.Equal(t, commentID, line.Recording.RecordingID)
+	})
+
+	t.Run("edited since it was declared: a reply, and the ask stays open", func(t *testing.T) {
+		ledger, line := run(t, "<div>Shall I push abc123 and deploy production?</div>")
+		assert.Equal(t, "boosted", line.Trigger)
+		assert.False(t, line.Go)
+		var goEvent sql.NullInt64
+		require.NoError(t, ledger.db.QueryRowContext(context.Background(), `SELECT go_event_id FROM asks WHERE recording_id = ?`, commentID).Scan(&goEvent))
+		assert.False(t, goEvent.Valid)
+	})
 }

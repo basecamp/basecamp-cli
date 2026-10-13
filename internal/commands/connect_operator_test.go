@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -169,70 +170,101 @@ func TestConnectDiscardAndRelease(t *testing.T) {
 	assert.Equal(t, connector.ReasonByOperator, two.Reason)
 }
 
-// connect ask declares the comment a URL names, not the recording it hangs
-// off, and declaring it again leaves the first declaration standing.
-func TestConnectAskDeclaresTheCommentTheURLNames(t *testing.T) {
-	f := newOperatorFixture(t)
-	require.NoError(t, f.ledger(t, false).Close())
-
-	out, err := f.run(t, output.FormatJSON, "ask", "https://3.basecamp.com/999/buckets/456/todos/789#__recording_1011")
-	require.NoError(t, err, out)
-	var first struct {
-		Data connector.AskResult `json:"data"`
+// askComment is a comment the fake Basecamp serves at /999/comments/<id>.
+func (f operatorFixture) askComment(id, creator int64, content string) {
+	f.s.mu.Lock()
+	defer f.s.mu.Unlock()
+	if f.s.bodies == nil {
+		f.s.bodies = map[string]any{}
 	}
-	require.NoError(t, json.Unmarshal([]byte(out), &first), out)
-	assert.Equal(t, int64(1011), first.Data.RecordingID)
-	assert.False(t, first.Data.Already)
-
-	out, err = f.run(t, output.FormatJSON, "ask", "1011")
-	require.NoError(t, err, out)
-	var again struct {
-		Data connector.AskResult `json:"data"`
+	f.s.bodies[fmt.Sprintf("/999/comments/%d", id)] = map[string]any{
+		"id": id, "status": "active", "type": "Comment", "title": "Re: a card",
+		"app_url": fmt.Sprintf("https://3.basecamp.com/999/buckets/456/todos/789#__recording_%d", id),
+		"bucket":  map[string]any{"id": 456, "name": "Connector", "type": "Project"},
+		"parent":  map[string]any{"id": 789, "title": "a card", "type": "Todo"},
+		"creator": map[string]any{"id": creator, "name": "Marie Chef"},
+		"content": content,
 	}
-	require.NoError(t, json.Unmarshal([]byte(out), &again), out)
-	assert.True(t, again.Data.Already)
-
-	_, err = f.run(t, output.FormatJSON, "ask", "nope")
-	require.Error(t, err)
-	assert.Equal(t, output.CodeUsage, usageError(t, err).Code)
-
-	// A chat line, in the web's @ form, is the line and not its Campfire.
-	out, err = f.run(t, output.FormatJSON, "ask", "https://3.basecamp.com/999/buckets/456/chats/789@1213")
-	require.NoError(t, err, out)
-	var line struct {
-		Data connector.AskResult `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &line), out)
-	assert.Equal(t, int64(1213), line.Data.RecordingID)
 }
 
-// A URL that does not plainly name one post in the agent's account is
-// refused, and declares nothing: a wrong declaration would only fail later,
-// silently, when the operator's boost on the real post came as a reply.
-func TestConnectAskRefusesAURLThatIsNotOnePost(t *testing.T) {
-	f := newOperatorFixture(t)
-	require.NoError(t, f.ledger(t, false).Close())
-
-	for name, url := range map[string]string{
-		"another account":   "https://3.basecamp.com/1000/buckets/456/todos/789#__recording_1011",
-		"an untrusted host": "https://3.basecamp.example.com/999/buckets/456/todos/789",
-		"a listing":         "https://3.basecamp.com/999/buckets/456/chats/789/lines",
-	} {
-		t.Run(name, func(t *testing.T) {
-			out, err := f.run(t, output.FormatJSON, "ask", url)
-			require.Error(t, err, out)
-			assert.Equal(t, output.CodeUsage, usageError(t, err).Code)
-		})
-	}
-
+func askHashIn(t *testing.T, f operatorFixture, id int64) string {
+	t.Helper()
 	dir, err := connectStatePath(f.file, false)
 	require.NoError(t, err)
 	db, err := sql.Open("sqlite", filepath.Join(dir, connector.LedgerFile))
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	var n int
-	require.NoError(t, db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM asks`).Scan(&n))
-	assert.Zero(t, n, "nothing was declared")
+	var hash string
+	err = db.QueryRowContext(context.Background(), `SELECT content_hash FROM asks WHERE recording_id = ?`, id).Scan(&hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ""
+	}
+	require.NoError(t, err)
+	return hash
+}
+
+type askOut struct {
+	Data connector.AskResult `json:"data"`
+}
+
+// connect ask reads the comment a URL names, not the recording it hangs
+// off, and records the hash of its content exactly as the read returned it.
+// Read again unedited, it hashes the same; edited, declaring it again says
+// the ask is void and keeps the first hash.
+func TestConnectAskFingerprintsTheCommentTheURLNames(t *testing.T) {
+	f := newOperatorFixture(t)
+	require.NoError(t, f.ledger(t, false).Close())
+	const content = "<div>Shall I push abc123 to fix-date-picker?</div>"
+	f.askComment(1011, setupAgentPerson, content)
+	url := "https://3.basecamp.com/999/buckets/456/todos/789#__recording_1011"
+
+	out, err := f.run(t, output.FormatJSON, "ask", url)
+	require.NoError(t, err, out)
+	var first askOut
+	require.NoError(t, json.Unmarshal([]byte(out), &first), out)
+	assert.Equal(t, int64(1011), first.Data.RecordingID)
+	assert.False(t, first.Data.Already)
+	assert.Equal(t, admission.AskContentHash(content), askHashIn(t, f, 1011), "the hash is of the content as read")
+
+	// The same post, read again: the same hash, so nothing is edited.
+	out, err = f.run(t, output.FormatJSON, "ask", url)
+	require.NoError(t, err, out)
+	var again askOut
+	require.NoError(t, json.Unmarshal([]byte(out), &again), out)
+	assert.True(t, again.Data.Already)
+	assert.False(t, again.Data.Edited)
+
+	f.askComment(1011, setupAgentPerson, "<div>Shall I push abc123 and deploy production?</div>")
+	out, err = f.run(t, output.FormatJSON, "ask", url)
+	require.NoError(t, err, out)
+	var edited askOut
+	require.NoError(t, json.Unmarshal([]byte(out), &edited), out)
+	assert.True(t, edited.Data.Edited)
+	assert.Equal(t, admission.AskContentHash(content), askHashIn(t, f, 1011), "the first declaration stands")
+}
+
+// Only a post the agent wrote, named by a URL that plainly names one post in
+// the agent's account, is declared; anything else declares nothing.
+func TestConnectAskRefusesWhatIsNotTheAgentsOnePost(t *testing.T) {
+	f := newOperatorFixture(t)
+	require.NoError(t, f.ledger(t, false).Close())
+	f.askComment(1011, setupOperatorPerson, "<div>the operator's comment</div>")
+
+	for name, arg := range map[string]string{
+		"someone else's post": "https://3.basecamp.com/999/buckets/456/todos/789#__recording_1011",
+		"a bare id":           "1011",
+		"another account":     "https://3.basecamp.com/1000/buckets/456/todos/789#__recording_1011",
+		"an untrusted host":   "https://3.basecamp.example.com/999/buckets/456/todos/789#__recording_1011",
+		"a listing":           "https://3.basecamp.com/999/buckets/456/chats/789/lines",
+		"not a post":          "https://3.basecamp.com/999/buckets/456/vaults/789",
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, err := f.run(t, output.FormatJSON, "ask", arg)
+			require.Error(t, err, out)
+			assert.Equal(t, output.CodeUsage, usageError(t, err).Code)
+		})
+	}
+	assert.Empty(t, askHashIn(t, f, 1011), "nothing was declared")
 }
 
 func TestConnectShadowPromoteAndImport(t *testing.T) {

@@ -120,6 +120,11 @@ type Verdict struct {
 	// Only the operator's boost carries it, in every trust mode: as with an
 	// assignment, an allowlist or a broader trust mode never extends it.
 	AskRecordingID int64
+	// AskContentHash is AskContentHash of the boosted recording's content as
+	// this decision read it. The ledger gives the go only when it equals the
+	// hash the ask was declared with: an ask edited since it was declared is
+	// void, and its boost is an ordinary reply.
+	AskContentHash string
 
 	// agentCaps is set on a verdict admitting an allowed agent's mention:
 	// the committer counts it against the caps before writing it.
@@ -457,7 +462,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	}
 	v.State = StateAdmitted
 	if rule.Trigger == TriggerBoosted && ev.PerformedByID == nil && ev.Performer() == policy.Trust.OperatorID {
-		v.AskRecordingID = ev.RecordingID
+		v.AskRecordingID, v.AskContentHash = ev.RecordingID, AskContentHash(summary.Content)
 	}
 	v.Snapshot = &Snapshot{
 		Type:      summary.Type,

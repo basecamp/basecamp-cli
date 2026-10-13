@@ -194,7 +194,7 @@ func (a Admission) commit(ctx context.Context, v admission.Verdict, state Record
 			// on one ask commit one after the other, and only the first
 			// finds it open. The record keeps it under any of the three
 			// states, since each still hands off.
-			if _, err := takeGo(ctx, tx, v.AskRecordingID, v.EventID); err != nil {
+			if _, err := takeGo(ctx, tx, v.AskRecordingID, v.AskContentHash, v.EventID); err != nil {
 				return "", err
 			}
 		}
