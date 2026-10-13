@@ -137,6 +137,10 @@ type Verdict struct {
 	// hash the ask was declared with: an ask edited since it was declared is
 	// void, and its boost is an ordinary reply.
 	AskContentHash string
+	// AskBoostID is the boost's own id. Basecamp's boost ids only grow, so the
+	// ledger orders it against the boosts already on the ask when it was
+	// declared, on Basecamp's clock and no other.
+	AskBoostID int64
 
 	// agentCaps is set on a verdict admitting an allowed agent's mention:
 	// the committer counts it against the caps before writing it.
@@ -475,6 +479,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 	v.State = StateAdmitted
 	if rule.Trigger == TriggerBoosted && ev.PerformedByID == nil && ev.Performer() == policy.Trust.OperatorID {
 		v.AskRecordingID, v.AskContentHash = ev.RecordingID, AskFingerprint(summary.Type, summary.Title, summary.Content)
+		v.AskBoostID = boost.ID
 	}
 	v.Snapshot = &Snapshot{
 		Type:      summary.Type,

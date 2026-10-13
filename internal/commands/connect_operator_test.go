@@ -185,6 +185,9 @@ func (f operatorFixture) askComment(id, creator int64, content string) {
 		"creator": map[string]any{"id": creator, "name": "Marie Chef"},
 		"content": content,
 	}
+	if _, ok := f.s.bodies[fmt.Sprintf("/999/recordings/%d/boosts.json", id)]; !ok {
+		f.s.bodies[fmt.Sprintf("/999/recordings/%d/boosts.json", id)] = []any{}
+	}
 }
 
 func askHashIn(t *testing.T, f operatorFixture, id int64) string {
@@ -201,6 +204,35 @@ func askHashIn(t *testing.T, f operatorFixture, id int64) string {
 	}
 	require.NoError(t, err)
 	return hash
+}
+
+func askFloorIn(t *testing.T, f operatorFixture, id int64) int64 {
+	t.Helper()
+	dir, err := connectStatePath(f.file, false)
+	require.NoError(t, err)
+	db, err := sql.Open("sqlite", filepath.Join(dir, connector.LedgerFile))
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	var floor int64
+	require.NoError(t, db.QueryRowContext(context.Background(), `SELECT boost_floor FROM asks WHERE recording_id = ?`, id).Scan(&floor))
+	return floor
+}
+
+// The boosts already on the post set the floor a go's boost must be above.
+func TestConnectAskRecordsTheBoostsAlreadyOnThePost(t *testing.T) {
+	f := newOperatorFixture(t)
+	require.NoError(t, f.ledger(t, false).Close())
+	f.askComment(1011, setupAgentPerson, "<div>Shall I?</div>")
+	f.s.mu.Lock()
+	f.s.bodies["/999/recordings/1011/boosts.json"] = []any{
+		map[string]any{"id": 42, "content": "👍", "booster": map[string]any{"id": setupOperatorPerson, "name": "Operator"}},
+		map[string]any{"id": 7, "content": "🎉", "booster": map[string]any{"id": setupOperatorPerson, "name": "Operator"}},
+	}
+	f.s.mu.Unlock()
+
+	out, err := f.run(t, output.FormatJSON, "ask", "https://3.basecamp.com/999/buckets/456/todos/789#__recording_1011")
+	require.NoError(t, err, out)
+	assert.Equal(t, int64(42), askFloorIn(t, f, 1011))
 }
 
 type askOut struct {
@@ -225,6 +257,7 @@ func TestConnectAskFingerprintsTheCommentTheURLNames(t *testing.T) {
 	assert.Equal(t, int64(1011), first.Data.RecordingID)
 	assert.False(t, first.Data.Already)
 	assert.Equal(t, admission.AskFingerprint("Comment", "", content), askHashIn(t, f, 1011), "the hash is of the content as read")
+	assert.Zero(t, askFloorIn(t, f, 1011), "no boost was on the post")
 
 	// The same post, read again: the same hash, so nothing is edited.
 	out, err = f.run(t, output.FormatJSON, "ask", url)

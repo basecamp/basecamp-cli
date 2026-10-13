@@ -44,6 +44,7 @@ CREATE TABLE asks (
   declared_at  TEXT    NOT NULL,
   declared_by  TEXT    NOT NULL CHECK (declared_by <> ''),
   content_hash TEXT    NOT NULL CHECK (content_hash <> ''),
+  boost_floor  INTEGER NOT NULL CHECK (boost_floor >= 0),
   go_event_id  INTEGER UNIQUE REFERENCES events (id)
 );
 `
@@ -66,12 +67,18 @@ type AskResult struct {
 // operator's go, with the hash of its content as read now. Declaring one
 // twice is not an error, and changes nothing: not an ask whose go was taken,
 // and not the hash of one edited since.
-func (l *Ledger) DeclareAsk(ctx context.Context, recordingID int64, contentHash, by string) (AskResult, error) {
+//
+// boostFloor is the highest id of a boost already on the post when it was
+// declared, zero for none: only a boost with a higher id, which Basecamp gave
+// after that, can be the go.
+func (l *Ledger) DeclareAsk(ctx context.Context, recordingID int64, contentHash string, boostFloor int64, by string) (AskResult, error) {
 	switch {
 	case recordingID <= 0:
 		return AskResult{}, errors.New("connector: an ask names a recording")
 	case contentHash == "":
 		return AskResult{}, errors.New("connector: an ask records its content's hash")
+	case boostFloor < 0:
+		return AskResult{}, errors.New("connector: an ask's boost floor is a boost id or zero")
 	case strings.TrimSpace(by) == "":
 		return AskResult{}, errors.New("connector: an ask records who declared it")
 	}
@@ -83,8 +90,8 @@ func (l *Ledger) DeclareAsk(ctx context.Context, recordingID int64, contentHash,
 		}
 		defer func() { _ = tx.Rollback() }()
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO asks (recording_id, declared_at, declared_by, content_hash) VALUES (?, ?, ?, ?) ON CONFLICT (recording_id) DO NOTHING`,
-			recordingID, l.timestamp(), by, contentHash)
+			`INSERT INTO asks (recording_id, declared_at, declared_by, content_hash, boost_floor) VALUES (?, ?, ?, ?, ?) ON CONFLICT (recording_id) DO NOTHING`,
+			recordingID, l.timestamp(), by, contentHash, boostFloor)
 		if err != nil {
 			return fmt.Errorf("connector: declare ask on %d: %w", recordingID, err)
 		}
@@ -113,18 +120,18 @@ func (l *Ledger) DeclareAsk(ctx context.Context, recordingID int64, contentHash,
 // one another event already took, and one whose content no longer hashes to
 // what it was declared with give nothing, and the last is left as it was.
 //
-// Nor does a boost Basecamp made before the ask was declared. A boost the
+// Nor does a boost Basecamp gave before the ask was declared. A boost the
 // connector saw first and decides later — held blocked for a retry, or seen
 // while no connector ran — would otherwise find the declaration waiting when
-// it commits and take a go nobody gave. The event's own time is Basecamp's and
-// the declaration's this machine's, so clock skew between them can only turn
-// a boost given in the seconds after a declaration into a reply, never the
-// other way round.
-func takeGo(ctx context.Context, tx *sql.Tx, recordingID int64, contentHash string, eventID int64) (bool, error) {
+// it commits and take a go nobody gave. Which came first is settled on one
+// clock, Basecamp's: boost ids only grow, and the declaration recorded the
+// highest one already on the post (boost_floor). No wall clock is compared,
+// so no skew between this machine and Basecamp can reorder them.
+func takeGo(ctx context.Context, tx *sql.Tx, recordingID int64, contentHash string, boostID, eventID int64) (bool, error) {
 	res, err := tx.ExecContext(ctx,
 		`UPDATE asks SET go_event_id = ? WHERE recording_id = ? AND content_hash = ? AND (go_event_id IS NULL OR go_event_id = ?)
-  AND declared_at < (SELECT created_at FROM events WHERE id = ?)`,
-		eventID, recordingID, contentHash, eventID, eventID)
+  AND boost_floor < ?`,
+		eventID, recordingID, contentHash, eventID, boostID)
 	if err != nil {
 		return false, fmt.Errorf("connector: take the go on %d for %d: %w", recordingID, eventID, err)
 	}

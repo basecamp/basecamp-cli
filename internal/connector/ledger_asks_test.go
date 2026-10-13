@@ -23,21 +23,12 @@ var askHash = admission.AskFingerprint("Comment", "", askText)
 
 // boostVerdict is an admitted boost on askRecordingID; operator says it is
 // the operator's, which is when admission names the ask it would answer.
-// askLedger is a test ledger whose clock declares asks a minute before
-// testEvent's boosts were made, as an agent declares right after posting.
-func askLedger(t *testing.T) *Ledger {
-	t.Helper()
-	ledger := newTestLedger(t)
-	ledger.now = func() time.Time { return time.Date(2026, 9, 16, 9, 59, 0, 0, time.UTC) }
-	return ledger
-}
-
 func boostVerdict(id int64, operator bool) admission.Verdict {
 	v := admittedVerdict(id, 0, "recording:10304028989")
 	v.EventType, v.Trigger, v.Acknowledge = "boost.created", admission.TriggerBoosted, false
 	v.Snapshot.Content = "yes, go"
 	if operator {
-		v.AskRecordingID, v.AskContentHash = askRecordingID, askHash
+		v.AskRecordingID, v.AskContentHash, v.AskBoostID = askRecordingID, askHash, 1000+id
 		v.Snapshot.Ask = &admission.AskCopy{Content: askText}
 	}
 	return v
@@ -61,9 +52,9 @@ func goes(t *testing.T, ledger *Ledger, id int64) bool {
 // and every boost after it is an ordinary reply — the operator's second, and
 // one removed and given again, which Basecamp delivers as a new event.
 func TestOneAskGetsOneGo(t *testing.T) {
-	ledger := askLedger(t)
+	ledger := newTestLedger(t)
 	ctx := context.Background()
-	declared, err := ledger.DeclareAsk(ctx, askRecordingID, askHash, "local:agent")
+	declared, err := ledger.DeclareAsk(ctx, askRecordingID, askHash, 0, "local:agent")
 	require.NoError(t, err)
 	assert.False(t, declared.Already)
 
@@ -75,7 +66,7 @@ func TestOneAskGetsOneGo(t *testing.T) {
 	assert.False(t, goes(t, ledger, 2), "a second boost is a reply")
 	assert.False(t, goes(t, ledger, 3), "a boost given again is a reply")
 
-	again, err := ledger.DeclareAsk(ctx, askRecordingID, askHash, "local:agent")
+	again, err := ledger.DeclareAsk(ctx, askRecordingID, askHash, 0, "local:agent")
 	require.NoError(t, err)
 	assert.True(t, again.Already)
 	assert.Equal(t, int64(1), again.GoEventID, "declaring it again does not reopen the ask")
@@ -85,37 +76,37 @@ func TestOneAskGetsOneGo(t *testing.T) {
 
 // The event that took the go keeps it when it is decided again.
 func TestTheGoIsTheEventsToKeep(t *testing.T) {
-	ledger := askLedger(t)
+	ledger := newTestLedger(t)
 	ctx := context.Background()
-	_, err := ledger.DeclareAsk(ctx, askRecordingID, askHash, "local:agent")
+	_, err := ledger.DeclareAsk(ctx, askRecordingID, askHash, 0, "local:agent")
 	require.NoError(t, err)
 	commitBoost(t, ledger, 1, true)
 
 	tx, err := ledger.db.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
-	again, err := takeGo(ctx, tx, askRecordingID, askHash, 1)
+	again, err := takeGo(ctx, tx, askRecordingID, askHash, 1001, 1)
 	require.NoError(t, err)
 	assert.True(t, again, "the same event takes the same go")
-	other, err := takeGo(ctx, tx, askRecordingID, askHash, 2)
+	other, err := takeGo(ctx, tx, askRecordingID, askHash, 1002, 2)
 	require.NoError(t, err)
 	assert.False(t, other)
 }
 
 func TestNoGoWithoutADeclaredAskOrTheOperator(t *testing.T) {
 	t.Run("a boost on a post nobody declared an ask", func(t *testing.T) {
-		ledger := askLedger(t)
+		ledger := newTestLedger(t)
 		commitBoost(t, ledger, 1, true)
 		assert.False(t, goes(t, ledger, 1))
 		// Declared after the boost was decided: not retroactive.
-		_, err := ledger.DeclareAsk(context.Background(), askRecordingID, askHash, "local:agent")
+		_, err := ledger.DeclareAsk(context.Background(), askRecordingID, askHash, 0, "local:agent")
 		require.NoError(t, err)
 		assert.False(t, goes(t, ledger, 1))
 	})
 
 	t.Run("someone else's boost leaves the ask open for the operator's", func(t *testing.T) {
-		ledger := askLedger(t)
-		_, err := ledger.DeclareAsk(context.Background(), askRecordingID, askHash, "local:agent")
+		ledger := newTestLedger(t)
+		_, err := ledger.DeclareAsk(context.Background(), askRecordingID, askHash, 0, "local:agent")
 		require.NoError(t, err)
 		commitBoost(t, ledger, 1, false)
 		commitBoost(t, ledger, 2, true)
@@ -124,18 +115,18 @@ func TestNoGoWithoutADeclaredAskOrTheOperator(t *testing.T) {
 	})
 
 	t.Run("an ask names a recording and who declared it", func(t *testing.T) {
-		ledger := askLedger(t)
-		_, err := ledger.DeclareAsk(context.Background(), 0, askHash, "local:agent")
+		ledger := newTestLedger(t)
+		_, err := ledger.DeclareAsk(context.Background(), 0, askHash, 0, "local:agent")
 		require.Error(t, err)
-		_, err = ledger.DeclareAsk(context.Background(), askRecordingID, askHash, " ")
+		_, err = ledger.DeclareAsk(context.Background(), askRecordingID, askHash, 0, " ")
 		require.Error(t, err)
 	})
 }
 
 // The session tells the go from a thumbs-up by the line alone.
 func TestTheGoIsHandedOffAsSuch(t *testing.T) {
-	ledger := askLedger(t)
-	_, err := ledger.DeclareAsk(context.Background(), askRecordingID, askHash, "local:agent")
+	ledger := newTestLedger(t)
+	_, err := ledger.DeclareAsk(context.Background(), askRecordingID, askHash, 0, "local:agent")
 	require.NoError(t, err)
 	commitBoost(t, ledger, 1, true)
 	commitBoost(t, ledger, 2, true)
@@ -165,7 +156,7 @@ func TestTheGoIsHandedOffAsSuch(t *testing.T) {
 // Only a boosted record's line can say go, whatever the asks table holds.
 func TestOnlyABoostedLineSaysGo(t *testing.T) {
 	line, err := handoffLine(func() Record {
-		ledger := askLedger(t)
+		ledger := newTestLedger(t)
 		admitOn(t, ledger, 1, "recording:1")
 		return getRecord(t, ledger, 1)
 	}(), 999, true)
@@ -177,8 +168,8 @@ func TestOnlyABoostedLineSaysGo(t *testing.T) {
 // restart that looks the same as a line printed just before a crash, and
 // giving the go back would let the next boost approve twice.
 func TestAGoClosedUnwrittenIsNotGivenBack(t *testing.T) {
-	ledger := askLedger(t)
-	_, err := ledger.DeclareAsk(context.Background(), askRecordingID, askHash, "local:agent")
+	ledger := newTestLedger(t)
+	_, err := ledger.DeclareAsk(context.Background(), askRecordingID, askHash, 0, "local:agent")
 	require.NoError(t, err)
 	commitBoost(t, ledger, 1, true)
 
@@ -197,9 +188,9 @@ func TestAGoClosedUnwrittenIsNotGivenBack(t *testing.T) {
 // An ask edited after it was declared is void: the operator's boost on it is
 // an ordinary reply, and the ask is not used up by it.
 func TestAnAskEditedSinceItWasDeclaredGivesNoGo(t *testing.T) {
-	ledger := askLedger(t)
+	ledger := newTestLedger(t)
 	ctx := context.Background()
-	_, err := ledger.DeclareAsk(ctx, askRecordingID, askHash, "local:agent")
+	_, err := ledger.DeclareAsk(ctx, askRecordingID, askHash, 0, "local:agent")
 	require.NoError(t, err)
 
 	edited := boostVerdict(1, true)
@@ -215,7 +206,7 @@ func TestAnAskEditedSinceItWasDeclaredGivesNoGo(t *testing.T) {
 	assert.False(t, goEvent.Valid, "the ask is not used up")
 
 	// Declaring the edited post again does not take the edit in.
-	again, err := ledger.DeclareAsk(ctx, askRecordingID, edited.AskContentHash, "local:agent")
+	again, err := ledger.DeclareAsk(ctx, askRecordingID, edited.AskContentHash, 0, "local:agent")
 	require.NoError(t, err)
 	assert.True(t, again.Already)
 	assert.True(t, again.Edited)
@@ -223,15 +214,15 @@ func TestAnAskEditedSinceItWasDeclaredGivesNoGo(t *testing.T) {
 	tx, err := ledger.db.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
-	took, err := takeGo(ctx, tx, askRecordingID, edited.AskContentHash, 3)
+	took, err := takeGo(ctx, tx, askRecordingID, edited.AskContentHash, 1003, 3)
 	require.NoError(t, err)
 	assert.False(t, took, "the edited content never matches the declaration")
 }
 
 // The handed-off line says so: the edited ask's boost is a reply.
 func TestAnEditedAsksBoostIsHandedOffAsAReply(t *testing.T) {
-	ledger := askLedger(t)
-	_, err := ledger.DeclareAsk(context.Background(), askRecordingID, askHash, "local:agent")
+	ledger := newTestLedger(t)
+	_, err := ledger.DeclareAsk(context.Background(), askRecordingID, askHash, 0, "local:agent")
 	require.NoError(t, err)
 	edited := boostVerdict(1, true)
 	edited.AskContentHash = admission.AskFingerprint("Comment", "", "<div>something else</div>")
@@ -247,25 +238,19 @@ func TestAnEditedAsksBoostIsHandedOffAsAReply(t *testing.T) {
 	assert.False(t, lines[0].Go)
 }
 
-// A boost Basecamp made before the ask was declared is no go, even when the
+// A boost Basecamp gave before the ask was declared is no go, even when the
 // connector decides it after the declaration — held blocked for a retry, or
-// seen late — and it does not use the ask up.
+// seen late — and it does not use the ask up. Which came first is read from
+// boost ids, Basecamp's own order, whatever either wall clock says.
 func TestABoostFromBeforeTheDeclarationIsNoGo(t *testing.T) {
 	ledger := newTestLedger(t)
 	ctx := context.Background()
-	seenRecord(t, ledger, 1) // made at 10:00, seen, not yet decided
-	ledger.now = func() time.Time { return time.Date(2026, 9, 16, 10, 1, 0, 0, time.UTC) }
-	_, err := ledger.DeclareAsk(ctx, askRecordingID, askHash, "local:agent")
+	// Boost 1001 was already on the post when it was declared.
+	_, err := ledger.DeclareAsk(ctx, askRecordingID, askHash, 1001, "local:agent")
 	require.NoError(t, err)
-	_, err = ledger.Admission().Commit(ctx, boostVerdict(1, true))
-	require.NoError(t, err)
-	assert.False(t, goes(t, ledger, 1), "a boost made before the declaration is a reply")
+	commitBoost(t, ledger, 1, true) // boost 1001
+	assert.False(t, goes(t, ledger, 1), "a boost from before the declaration is a reply")
 
-	later := testEvent(2)
-	later.CreatedAt = time.Date(2026, 9, 16, 10, 2, 0, 0, time.UTC)
-	_, err = ledger.RecordSeen(ctx, later, LanePoll)
-	require.NoError(t, err)
-	_, err = ledger.Admission().Commit(ctx, boostVerdict(2, true))
-	require.NoError(t, err)
-	assert.True(t, goes(t, ledger, 2), "the ask was left open for a boost made after it")
+	commitBoost(t, ledger, 2, true) // boost 1002, given after
+	assert.True(t, goes(t, ledger, 2), "the ask was left open for a boost given after it")
 }

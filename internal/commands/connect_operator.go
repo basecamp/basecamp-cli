@@ -500,12 +500,23 @@ only way to make one.`,
 			case post.Status != "active":
 				return output.ErrUsage(fmt.Sprintf("Recording %d is %s; only a published post can be an ask", ref.RecordingID, post.Status))
 			}
+			// The boosts already on the post: only one Basecamp gives after
+			// these, which has a higher id, can be the go. Ids, not times, so
+			// no clock on this machine is compared with Basecamp's.
+			boosts, err := agent.client.ForAccount(agent.account).Boosts().ListRecording(cmd.Context(), ref.RecordingID, &basecamp.BoostListOptions{Limit: -1})
+			if err != nil {
+				return fmt.Errorf("could not read the ask's boosts: %w", err)
+			}
+			var floor int64
+			for _, b := range boosts.Boosts {
+				floor = max(floor, b.ID)
+			}
 			ledger, done, err := openConnectLedger(cmd.Context(), p, false)
 			if err != nil {
 				return err
 			}
 			defer done()
-			res, err := ledger.DeclareAsk(cmd.Context(), ref.RecordingID, admission.AskFingerprint(post.Type, post.Title, post.Content), operatorName())
+			res, err := ledger.DeclareAsk(cmd.Context(), ref.RecordingID, admission.AskFingerprint(post.Type, post.Title, post.Content), floor, operatorName())
 			if err != nil {
 				return err
 			}
