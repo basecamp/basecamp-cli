@@ -272,8 +272,8 @@ Each approval adds a connection with its own secret, named after the computer
 or several, and connecting another, from this CLI or from the HTTP handshake on
 Basecamp's instructions page, leaves the others working. Disconnecting one in
 Basecamp stops only that one. Each connection serves the projects its own setup
-names; when two serve the same project, a request both admit is answered by
-each, so serve each project from one. A shared agent keeps a single
+names; when two serve the same project, a request both admit can be answered
+twice, so serve each project from one. A shared agent keeps a single
 connection: connecting it again disconnects the first and asks you to approve
 again.
 

@@ -64,7 +64,7 @@ release. Linux and macOS only.
 Each basecamp auth agent connect adds a connection with its own secret, so a
 personal agent can run a connector on several computers at once. Each one
 serves the projects its own setup names; when two serve the same project, a
-request both admit is answered by each.
+request both admit can be answered twice.
 
   basecamp connect status             what it heard and holds
   basecamp connect doctor             what it needs to run
@@ -364,8 +364,8 @@ makes the agent hear every trusted completion in that project without being
 assigned.
 
 The list is this profile's own. When two connections of one agent serve the
-same project, a request both admit there is answered by each, so serve each
-project from one of them.
+same project, a request both admit there can be answered twice, so serve
+each project from one of them.
 
 No directory is associated with a project here: the session handling the
 requests chooses the repo for each one.
