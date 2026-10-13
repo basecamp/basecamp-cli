@@ -488,7 +488,7 @@ func TestAnOversizedServerFaultIsWaitedOut(t *testing.T) {
 // before the start waits for a token, not after.
 func TestASecondConnectorIsRefusedBeforeItWaitsForAToken(t *testing.T) {
 	f := newOperatorFixture(t)
-	dir, err := connectStateDir(f.file, false)
+	dir, err := connectStateDir("agent", f.file, false)
 	require.NoError(t, err)
 	lock, err := connector.AcquireInstanceLock(dir, f.file.AccountID, f.file.Agent.PersonID, time.Now())
 	require.NoError(t, err)
@@ -594,7 +594,7 @@ func TestAStartWaitingForItsTokenHoldsNoLock(t *testing.T) {
 
 	require.Eventually(t, func() bool { return strings.Contains(out.String(), "could not get the agent's token yet") },
 		10*time.Second, 20*time.Millisecond, "the start never waited: %s", out.String())
-	dir, err := connectStateDir(f.file, false)
+	dir, err := connectStateDir("agent", f.file, false)
 	require.NoError(t, err)
 	lock, err := connector.AcquireInstanceLock(dir, f.file.AccountID, f.file.Agent.PersonID, time.Now())
 	require.NoError(t, err, "a waiting start held the agent's lock")

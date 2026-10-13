@@ -97,7 +97,7 @@ func parseEventIDArg(raw string) (int64, error) {
 // metadata beside it is written best-effort and says nothing on its own.
 func openConnectLedger(ctx context.Context, p connectProfile, requireStopped bool) (*connector.Ledger, func(), error) {
 	done := func() {}
-	dir, err := connectStatePath(p.file, false)
+	dir, err := connectStatePath(p.name, p.file, false)
 	if err != nil {
 		return nil, done, err
 	}
@@ -205,7 +205,7 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	if err != nil {
 		return err
 	}
-	dir, err := connectStatePath(p.file, shadow)
+	dir, err := connectStatePath(p.name, p.file, shadow)
 	if err != nil {
 		return err
 	}
@@ -513,7 +513,7 @@ to be discarded.`,
 			if err != nil {
 				return err
 			}
-			shadowDir, err := connectStatePath(p.file, true)
+			shadowDir, err := connectStatePath(p.name, p.file, true)
 			if err != nil {
 				return err
 			}
@@ -521,13 +521,16 @@ to be discarded.`,
 			if err != nil {
 				return err
 			}
-			parent, err := ensurePrivateChain(stateHome, "basecamp", "connect")
-			if err != nil {
+			if _, err := ensurePrivateChain(stateHome, "basecamp", "connect"); err != nil {
 				return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
+			}
+			stateDir, err := connectStatePath(p.name, p.file, false)
+			if err != nil {
+				return err
 			}
 			res, err := connector.PromoteShadow(cmd.Context(), connector.PromoteOptions{
 				ShadowDir: shadowDir,
-				StateDir:  filepath.Join(parent, connector.StateDirName(p.file.AccountID, p.file.Agent.PersonID)),
+				StateDir:  stateDir,
 				AccountID: p.file.AccountID,
 				AgentID:   p.file.Agent.PersonID,
 				By:        operatorName(),
@@ -583,7 +586,7 @@ The file is JSON:
 			if err != nil {
 				return output.ErrUsage(strings.TrimPrefix(err.Error(), "connector: "))
 			}
-			dir, err := connectStatePath(p.file, false)
+			dir, err := connectStatePath(p.name, p.file, false)
 			if err != nil {
 				return err
 			}

@@ -12,17 +12,8 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 )
 
-// ErrAlreadyRunning reports a second connector for the same agent.
-var ErrAlreadyRunning = errors.New("connector: another connector already holds this account and agent")
+var ErrAlreadyRunning = errors.New("connector: another connector already runs for this profile")
 
-// InstanceLock is the refusal of a second connector on one agent identity.
-//
-// It is keyed on the ACCOUNT and the agent's Person id, not on the profile
-// name. Two profiles can hold credentials for the same agent, and the failure
-// this prevents is not "the same configuration twice" — it is one agent's
-// mentions being dispatched twice, which is a property of the identity, not of
-// the file that names it.
-//
 // The kernel drops a flock when the holding descriptor closes, process death
 // included, so a crashed connector cannot wedge the lock and there is no
 // stale-lock reaping to get wrong. The metadata written beside it is
