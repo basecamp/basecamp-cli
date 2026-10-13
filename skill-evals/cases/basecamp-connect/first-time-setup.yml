@@ -32,7 +32,8 @@ mocks:
 expect_sequence:
   - match: 'auth agent connect .*(-P|--profile)[ =]''?helper\b'
   - match: '^me .*(-P|--profile)[ =]''?helper\b'
-  - match: 'connect setup'
+  # The setup that succeeds: the mock refuses one without --serve.
+  - match: 'connect setup .*--serve[ =]'
   # Connecting, setup and the watcher are one flow: the connector starts
   # right after setup, without asking again.
   - match: '^connect\s+(-P|--profile)[ =]''?helper\b'

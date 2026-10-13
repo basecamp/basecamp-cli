@@ -313,14 +313,6 @@ func PluginUpdateNotice(cli string) string {
 	return ""
 }
 
-func normalizeSemver(v string) string {
-	v = strings.TrimSpace(v)
-	if v != "" && !strings.HasPrefix(v, "v") {
-		v = "v" + v
-	}
-	return v
-}
-
 // InstalledPluginVersion reads the installed plugin version from
 // ~/.claude/plugins/installed_plugins.json. Returns "" if unreadable.
 func InstalledPluginVersion() string {
@@ -396,6 +388,14 @@ func installedPluginVersionMatching(data []byte, match func(string) bool) string
 	}
 
 	return ""
+}
+
+func normalizeSemver(v string) string {
+	v = strings.TrimSpace(v)
+	if v != "" && !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	return v
 }
 
 // pluginInstalled checks if "basecamp" appears as an installed plugin.
