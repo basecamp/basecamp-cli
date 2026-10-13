@@ -161,8 +161,10 @@ flag_exists() {
 }
 
 # Strip YAML frontmatter — trigger keywords (e.g. "basecamp project") are
-# natural-language match phrases, not CLI command references.
-skill_body=$(awk '/^---$/{n++; next} n>=2' "$SKILL")
+# natural-language match phrases, not CLI command references. Only a file
+# that opens with "---" has any: a supporting file such as
+# basecamp-connect/subagent.md has none, and is read whole.
+skill_body=$(awk 'NR==1 && /^---$/ {fm=1; next} fm && /^---$/ {fm=0; next} !fm' "$SKILL")
 
 # --- Phase 1: Command references ---
 # Extract "basecamp <subcommand>..." patterns and verify each resolves.

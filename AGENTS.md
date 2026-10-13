@@ -82,7 +82,8 @@ pushing. If you're about to `git push` and haven't run `bin/ci` in this
 session, stop and run it first.
 
 **Skill drift**: `make check-skill-drift` runs over `skills/basecamp/SKILL.md`,
-`skills/basecamp-doctor/SKILL.md` and `skills/basecamp-connect/SKILL.md`, checking that the commands and flags each one
+`skills/basecamp-doctor/SKILL.md`, `skills/basecamp-connect/SKILL.md` and its
+`skills/basecamp-connect/subagent.md`, checking that the commands and flags each one
 *references* still exist in the `.surface` snapshot. It catches stale references, not
 missing coverage, so adding a command breaks none of them.
 

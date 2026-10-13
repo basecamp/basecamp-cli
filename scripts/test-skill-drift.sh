@@ -199,6 +199,19 @@ else
   not_ok "a command that fails is not also reported once per flag — ${count} DRIFT lines: ${out}"
 fi
 
+# --- A supporting file with no frontmatter is read whole ---
+# The check used to drop everything before a second "---", which skipped a
+# file without frontmatter entirely, or everything up to a later thematic
+# break in it.
+
+printf '%s\n' 'Run `basecamp profile set agent`.' '' '---' '' 'Then `basecamp profile list`.' > "${work}/no_frontmatter.md"
+assert_fails no_frontmatter 'cannot verify' \
+  'a command in a file without frontmatter is checked'
+
+printf '%s\n' 'Run `basecamp profile list`.' '' '---' '' 'Then `basecamp profile set agent`.' > "${work}/after_break.md"
+assert_fails after_break 'cannot verify' \
+  'a command after a thematic break in a file without frontmatter is checked'
+
 echo
 if [ "$failures" -gt 0 ]; then
   echo "${failures} failure(s)"
