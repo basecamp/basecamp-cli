@@ -246,17 +246,29 @@ func TestConnectAskFingerprintsTheCommentTheURLNames(t *testing.T) {
 // Only a post the agent wrote, named by a URL that plainly names one post in
 // the agent's account, is declared; anything else declares nothing.
 func TestConnectAskRefusesWhatIsNotTheAgentsOnePost(t *testing.T) {
+	t.Run("someone else's post", func(t *testing.T) {
+		f := newOperatorFixture(t)
+		require.NoError(t, f.ledger(t, false).Close())
+		f.askComment(1011, setupOperatorPerson, "<div>the operator's comment</div>")
+		out, err := f.run(t, output.FormatJSON, "ask", "https://3.basecamp.com/999/buckets/456/todos/789#__recording_1011")
+		require.Error(t, err, out)
+		assert.Equal(t, output.CodeUsage, usageError(t, err).Code)
+		assert.Empty(t, askHashIn(t, f, 1011), "nothing was declared")
+	})
+
+	// The agent's own post is served for every id these URLs could resolve
+	// to, so each is refused by the URL's own check, never by the creator's.
 	f := newOperatorFixture(t)
 	require.NoError(t, f.ledger(t, false).Close())
-	f.askComment(1011, setupOperatorPerson, "<div>the operator's comment</div>")
-
+	for _, id := range []int64{789, 1011} {
+		f.askComment(id, setupAgentPerson, "<div>the agent's comment</div>")
+	}
 	for name, arg := range map[string]string{
-		"someone else's post": "https://3.basecamp.com/999/buckets/456/todos/789#__recording_1011",
-		"a bare id":           "1011",
-		"another account":     "https://3.basecamp.com/1000/buckets/456/todos/789#__recording_1011",
-		"an untrusted host":   "https://3.basecamp.example.com/999/buckets/456/todos/789#__recording_1011",
-		"a listing":           "https://3.basecamp.com/999/buckets/456/chats/789/lines",
-		"not a post":          "https://3.basecamp.com/999/buckets/456/vaults/789",
+		"a bare id":         "1011",
+		"another account":   "https://3.basecamp.com/1000/buckets/456/todos/789#__recording_1011",
+		"an untrusted host": "https://3.basecamp.example.com/999/buckets/456/todos/789#__recording_1011",
+		"a listing":         "https://3.basecamp.com/999/buckets/456/chats/789/lines",
+		"not a post":        "https://3.basecamp.com/999/buckets/456/vaults/789",
 	} {
 		t.Run(name, func(t *testing.T) {
 			out, err := f.run(t, output.FormatJSON, "ask", arg)
@@ -264,6 +276,7 @@ func TestConnectAskRefusesWhatIsNotTheAgentsOnePost(t *testing.T) {
 			assert.Equal(t, output.CodeUsage, usageError(t, err).Code)
 		})
 	}
+	assert.Empty(t, askHashIn(t, f, 789))
 	assert.Empty(t, askHashIn(t, f, 1011), "nothing was declared")
 }
 
