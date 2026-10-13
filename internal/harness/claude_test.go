@@ -421,6 +421,32 @@ func TestPluginUpdateNotice_LegacyKeyBehindCLI(t *testing.T) {
 	assert.Contains(t, notice, "Run: basecamp setup claude")
 }
 
+func TestPluginUpdateNotice_LegacyKeyInEveryFormat(t *testing.T) {
+	for name, body := range map[string]string{
+		"array":   `[{"name":"basecamp@37signals","version":"0.7.2"}]`,
+		"v1 map":  `{"basecamp@37signals":{"version":"0.7.2"}}`,
+		"package": `[{"package":"basecamp@37signals","scope":"user","version":"0.7.2"}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			withInstalledPlugins(t, body)
+			assert.Contains(t, PluginUpdateNotice("0.13.0"), "Run: basecamp setup claude")
+		})
+	}
+}
+
+func TestPluginUpdateNotice_LegacyKeyAtAnyVersion(t *testing.T) {
+	for name, body := range map[string]string{
+		"legacy only, current version": `{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user","version":"0.13.0"}]}}`,
+		"both keys, current matches":   `{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"0.13.0"}],"basecamp@37signals":[{"scope":"user","version":"0.7.2"}]}}`,
+		"legacy without a version":     `{"version":2,"plugins":{"basecamp@37signals":[{"scope":"user"}]}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			withInstalledPlugins(t, body)
+			assert.Contains(t, PluginUpdateNotice("0.13.0"), "Run: basecamp setup claude")
+		})
+	}
+}
+
 func TestPluginUpdateNotice_PluginBehindCLI(t *testing.T) {
 	withInstalledPlugins(t, `{"version":2,"plugins":{"basecamp-cli@37signals":[{"scope":"user","version":"0.12.0"}]}}`)
 

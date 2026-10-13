@@ -87,8 +87,9 @@ Then:
    `~/.config/basecamp-connect/last.json` (below) and confirm it. With neither,
    list profiles (`basecamp profile list --json`) and ask.
 2. **Set up, if needed.** `basecamp connect show -P '<profile>' --json`. A
-   `not_found` or `unknown profile` error means it isn't set up: follow
-   *First-time setup*. If they asked for a change, run setup with it.
+   `not_found` or `unknown profile` error, or one saying no profiles are
+   configured, means it isn't set up: follow *First-time setup*, whatever
+   the error's hint says. If they asked for a change, run setup with it.
 3. **Start the connector** (*Running the connector*) and watch it.
 4. **Handle each request** (*For each request*), until they ask you to stop.
 
@@ -177,7 +178,7 @@ so you can show the link and code while they wait.
 Ask only what you can't find out.
 
 **1. Profile and credential.** Agree a profile name (letters, digits, `-` and
-`_`), for example the agent's name. Check it: `basecamp auth status -P
+`_`, starting with a letter or digit), for example the agent's name. Check it: `basecamp auth status -P
 '<profile>' --json`.
 
 - `unknown profile`, or an error saying no profiles are configured (a
@@ -244,8 +245,8 @@ each project by name. Then:
 basecamp connect setup -P '<profile>' --serve <project-id> --serve <project-id> --json
 ```
 
-adding `--trust`, `--allow`, `--allow-assignments-from-authorized` or
-`--operator-profile` as chosen, and on the bot-user path
+adding `--trust`, `--allow`, `--allow-assignments-from-authorized`,
+`--operator-profile` or `--operator` as chosen, and on the bot-user path
 `--expect-identity <bot-identity-id>`.
 
 **5. Start the connector** right away (*Running the connector*), unless the
