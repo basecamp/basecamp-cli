@@ -58,8 +58,9 @@ func connectorReloadNotice(input agentHookInput) string {
 		"finished cut that skill to its first 5,000 tokens, which drops the handoff steps and the subagent's " +
 		"instructions. If this session is still the connector's orchestrator, read " + skill + " in full with " +
 		"the Read tool now, before you go on with anything, a request in hand included, then carry on from the " +
-		"step you were on. The connector, its request watcher and any subagents in flight kept running through the " +
-		"compaction: don't start them again."
+		"step you were on. The connector and any subagents in flight kept running through the compaction: don't " +
+		"start them again. The request watcher exits on each request, so check whether it is still running; if it " +
+		"has exited, read its output and start it again as the skill says."
 }
 
 // lastConnectorSkillDir returns the directory of the last basecamp-connect
