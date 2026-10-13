@@ -132,6 +132,10 @@ func openConnectLedger(ctx context.Context, p connectProfile, requireStopped boo
 			return nil, done, lockErr
 		}
 		done = func() { _ = lock.Release() }
+		if _, err := os.Lstat(path); err != nil {
+			done()
+			return nil, func() {}, output.ErrUsageHint(fmt.Sprintf("Profile %q's connector state moved while this command started", p.name), "Run the command again.")
+		}
 	}
 	ledger, err := connector.OpenLedger(path) //nolint:contextcheck // OpenLedger migrates on its own context
 	if err != nil {
