@@ -58,9 +58,9 @@ Claude Code only. The connector runs on Linux and macOS.
 
 ### 1. Start it, and watch its output
 
-Only one connector per agent can run at a time. If it's already running
-elsewhere, it refuses to start and says so: tell the person, and don't start a
-second.
+Only one connector per agent can run at a time on this computer. If one is
+already running here, it refuses to start and says so: tell the person, and
+don't start a second.
 
 Start it in the background with the Bash tool (`run_in_background: true`), and
 note the output file the harness reports:
