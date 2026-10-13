@@ -413,6 +413,9 @@ func TestAskFingerprint(t *testing.T) {
 	assert.Equal(t, AskFingerprint("Comment", "Re: a card", content), AskFingerprint("Comment", "Re: renamed card", content),
 		"a comment's title is its parent's, and is not the ask's")
 	assert.Equal(t, AskFingerprint("Chat::Lines::RichText", "", content), AskFingerprint("Comment", "", content))
+	assert.Equal(t, AskFingerprint("Question::Answer", "What did you work on?", content), AskFingerprint("Question::Answer", "Renamed question", content),
+		"a check-in answer's title is its question's, and is not the ask's")
+	assert.Empty(t, AskTitle("Question::Answer", "What did you work on?"), "nor is it handed off as the ask's words")
 	assert.NotEqual(t, AskFingerprint("Message", "Push abc123?", content), AskFingerprint("Message", "Deploy production?", content),
 		"a message's subject is part of what it asks")
 	assert.NotEqual(t, AskFingerprint("Message", "ab", "c"), AskFingerprint("Message", "a", "bc"),

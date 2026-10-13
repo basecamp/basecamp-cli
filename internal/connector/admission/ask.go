@@ -19,9 +19,10 @@ import (
 // title, a document's — is approved by its title as much as its content, so
 // both are hashed, each prefixed with its length in bytes and a colon
 // ("<len>:<title><len>:<content>"), so no split of one string into the two
-// fields reads as another. A comment or a chat line has no title of its own
-// (a comment's title is its parent's, which a rename of the card would
-// change), so its content alone is hashed, bare.
+// fields reads as another. A comment, a chat line and a check-in answer have
+// no title of their own — a comment's title is its parent's, an answer's is
+// its question's, and someone else's rename would change either — so their
+// content alone is hashed, bare.
 func AskFingerprint(recordingType, title, content string) string {
 	var data string
 	if askHasTitle(recordingType) {
@@ -35,11 +36,17 @@ func AskFingerprint(recordingType, title, content string) string {
 
 // askHasTitle says a recording type's title is its own words.
 func askHasTitle(recordingType string) bool {
-	return recordingType != "Comment" && !strings.HasPrefix(recordingType, "Chat::Lines::")
+	switch {
+	case recordingType == "Comment", recordingType == "Question::Answer":
+		return false
+	case strings.HasPrefix(recordingType, "Chat::Lines::"):
+		return false
+	}
+	return true
 }
 
 // AskTitle is the title an ask is approved by: its own, or none for a
-// comment or a chat line.
+// comment, a chat line or a check-in answer.
 func AskTitle(recordingType, title string) string {
 	if askHasTitle(recordingType) {
 		return title
