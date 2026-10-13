@@ -25,6 +25,10 @@ fi
 
 unhandled() {
   local lines
+  if [ ! -r "$out" ]; then
+    echo "watch-requests: can't read the connector output at $out" >&2
+    exit 2
+  fi
   lines=$(($(wc -l < "$out")))
   [ "$lines" -gt 0 ] || return 1
   head -n "$lines" "$out" | HANDLED=$handled awk '
