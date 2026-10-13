@@ -97,10 +97,7 @@ func parseEventIDArg(raw string) (int64, error) {
 // metadata beside it is written best-effort and says nothing on its own.
 func openConnectLedger(ctx context.Context, p connectProfile, requireStopped bool) (*connector.Ledger, func(), error) {
 	done := func() {}
-	dir, err := connectAdoptedStatePath(p.name, p.file, false)
-	if errors.Is(err, connector.ErrAlreadyRunning) {
-		dir, err = connectStatePath(p.name, p.file, false)
-	}
+	dir, err := connectStatePath(p.name, p.file, false)
 	if err != nil {
 		return nil, done, err
 	}
@@ -140,7 +137,12 @@ func openConnectLedger(ctx context.Context, p connectProfile, requireStopped boo
 			return nil, func() {}, output.ErrUsageHint(fmt.Sprintf("Profile %q's connector state moved while this command started", p.name), "Run the command again.")
 		}
 	}
-	ledger, err := connector.OpenLedger(path) //nolint:contextcheck // OpenLedger migrates on its own context
+	var ledger *connector.Ledger
+	if requireStopped || outOfDate {
+		ledger, err = connector.OpenLedger(path) //nolint:contextcheck // OpenLedger migrates on its own context
+	} else {
+		ledger, err = connector.OpenExistingLedger(ctx, path)
+	}
 	if err != nil {
 		done()
 		return nil, func() {}, err
@@ -524,24 +526,25 @@ to be discarded.`,
 			if err != nil {
 				return err
 			}
-			if _, err := ensurePrivateChain(stateHome, "basecamp", "connect"); err != nil {
+			shadowDir, err := connectStatePath(p.name, p.file, true)
+			if err != nil {
+				return err
+			}
+			parent, err := ensurePrivateChain(stateHome, "basecamp", "connect")
+			if err != nil {
 				return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
 			}
-			var res connector.PromoteResult
-			shadowDir, err := connectAdoptedStatePath(p.name, p.file, true)
-			var stateDir string
-			if err == nil {
-				stateDir, err = connectAdoptedStatePath(p.name, p.file, false)
+			legacy := filepath.Join(parent, connector.LegacyStateDirName(p.file.AccountID, p.file.Agent.PersonID), connector.LedgerFile)
+			if _, err := os.Lstat(legacy); err == nil {
+				return output.ErrUsage(fmt.Sprintf("%s: %s", legacy, connector.ErrLedgerExists))
 			}
-			if err == nil {
-				res, err = connector.PromoteShadow(cmd.Context(), connector.PromoteOptions{
-					ShadowDir: shadowDir,
-					StateDir:  stateDir,
-					AccountID: p.file.AccountID,
-					AgentID:   p.file.Agent.PersonID,
-					By:        operatorName(),
-				})
-			}
+			res, err := connector.PromoteShadow(cmd.Context(), connector.PromoteOptions{
+				ShadowDir: shadowDir,
+				StateDir:  filepath.Join(parent, connector.StateDirName(p.file.AccountID, p.file.Agent.PersonID, p.name)),
+				AccountID: p.file.AccountID,
+				AgentID:   p.file.Agent.PersonID,
+				By:        operatorName(),
+			})
 			switch {
 			case errors.Is(err, connector.ErrAlreadyRunning):
 				return &output.Error{Code: output.CodeLockUnavailable, Message: err.Error(),

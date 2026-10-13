@@ -285,17 +285,16 @@ func assertNotHeld(t *testing.T, dir string) {
 	assert.False(t, held, "the release reached this ledger")
 }
 
-func TestADecisionAdoptsTheLegacyDirectoryBeforeItActs(t *testing.T) {
+func TestADecisionActsOnTheLegacyLedgerWithoutMovingIt(t *testing.T) {
 	f := newOperatorFixture(t)
 	legacy := heldLegacyLedger(t, f.file)
 
 	out, err := f.run(t, output.FormatJSON, "release")
 	require.NoError(t, err, out)
 
-	dir := filepath.Join(connectStateRoot(t), connector.StateDirName(f.file.AccountID, f.file.Agent.PersonID, "agent"))
-	assertNotHeld(t, dir)
-	_, err = os.Lstat(legacy)
-	assert.ErrorIs(t, err, os.ErrNotExist)
+	assertNotHeld(t, legacy)
+	_, err = os.Lstat(filepath.Join(connectStateRoot(t), connector.StateDirName(f.file.AccountID, f.file.Agent.PersonID, "agent")))
+	assert.ErrorIs(t, err, os.ErrNotExist, "only a run that proves it is the agent moves the old folder")
 }
 
 func TestADecisionBesideAnOlderConnectorActsOnItsLedger(t *testing.T) {
@@ -327,7 +326,7 @@ func TestAnImportBesideAnOlderConnectorIsRefused(t *testing.T) {
 	assert.Equal(t, output.CodeLockUnavailable, usageError(t, err).Code)
 }
 
-func TestPromoteAdoptsTheLegacyShadowAndPromotesIntoTheProfile(t *testing.T) {
+func TestPromoteMovesALegacyShadowLedgerIntoTheProfile(t *testing.T) {
 	f := newOperatorFixture(t)
 	legacyShadow, l := openLegacyLedger(t, f.file, "connect-shadow")
 	require.NoError(t, l.Close())
@@ -338,10 +337,24 @@ func TestPromoteAdoptsTheLegacyShadowAndPromotesIntoTheProfile(t *testing.T) {
 	root := connectStateRoot(t)
 	_, err = os.Lstat(filepath.Join(root, connector.StateDirName(f.file.AccountID, f.file.Agent.PersonID, "agent"), connector.LedgerFile))
 	require.NoError(t, err, "the shadow ledger is the profile's connector ledger now")
-	_, err = os.Lstat(legacyShadow)
+	_, err = os.Lstat(filepath.Join(legacyShadow, connector.LedgerFile))
 	assert.ErrorIs(t, err, os.ErrNotExist)
 	_, err = os.Lstat(filepath.Join(root, connector.LegacyStateDirName(f.file.AccountID, f.file.Agent.PersonID)))
 	assert.ErrorIs(t, err, os.ErrNotExist, "nothing is promoted into the old layout")
+}
+
+func TestPromoteRefusesWhileTheOldFolderHoldsTheConnectorsLedger(t *testing.T) {
+	f := newOperatorFixture(t)
+	legacy := seedLegacyLedger(t, f.s, f.file)
+	require.NoError(t, f.ledger(t, true).Close())
+
+	_, err := f.run(t, output.FormatJSON, "shadow", "promote")
+	require.Error(t, err)
+	assert.Equal(t, output.CodeUsage, usageError(t, err).Code)
+	assert.Contains(t, err.Error(), "already has a ledger")
+	assertLegacyLedgerKept(t, legacy, f.s, f.file)
+	_, err = os.Lstat(filepath.Join(connectStateRoot(t), connector.StateDirName(f.file.AccountID, f.file.Agent.PersonID, "agent")))
+	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestPromoteBesideAnOlderShadowIsRefused(t *testing.T) {
