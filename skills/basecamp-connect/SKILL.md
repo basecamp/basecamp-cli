@@ -429,14 +429,17 @@ Ask only what you can't find out.
   computer with none yet): it doesn't exist. Never run `basecamp profile
   create` for an agent: that signs in a person. If Basecamp's instructions
   page connected this agent over HTTP before (a
-  `~/.basecamp-agent/credentials.json`; never read it), say first that
-  connecting replaces that connection, so they approve once more and the
-  file stops working. Then connect the agent with
+  `~/.basecamp-agent/credentials.json`; never read it), connecting adds a
+  connection beside that one, and both keep working; for a shared agent,
+  say first that connecting replaces that connection, so the file stops
+  working. Then connect the agent with
   `basecamp auth agent connect -P '<profile>'` (add `--no-browser` if the person
   is on another device). Show the link and code. They open the link, check the
   code, choose the agent (or create one) and approve.
-- `oauth_type` `agent`: already connected. Don't connect again: that rotates
-  the agent's secret and disconnects any other computer using it.
+- `oauth_type` `agent`: already connected. Don't connect again: for a
+  personal agent that adds another connection and leaves the one this
+  profile held unused in Basecamp; for a shared agent it disconnects any
+  other computer using it.
 - Anything else: a person's login is stored. Ask; never connect an agent over
   it.
 
@@ -527,7 +530,9 @@ Failed checks worth knowing:
 - **Stream ticket refused.** The account event feed isn't enabled for this
   account or agent. That's a Basecamp setting the person has to ask for.
 - **Scope: not full access.** The agent couldn't reply. Connect again with full
-  access, with the person's consent, since it rotates the secret.
+  access, with the person's consent: for a personal agent that adds a
+  connection, and the read-only one stays in Basecamp until they disconnect it
+  there; for a shared agent it replaces the connection.
 
 **Never edit connect.json by hand**, and never read it directly: use
 `basecamp connect show -P '<profile>' --json`, which checks the file is safe
@@ -538,7 +543,7 @@ first. Every change goes through setup, which keeps whatever you don't pass.
 The background task notifies you when the connector exits. Read the end of its
 output and tell the person what it means:
 
-- **"was disconnected in Basecamp, or connected on another computer"**: run
+- **"connection to … was disconnected in Basecamp"**: run
   `basecamp connect setup -P '<profile>'` (it reconnects with one approval),
   then start it again.
 - **Already running**: another connector for this agent holds its lock, on

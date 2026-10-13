@@ -344,14 +344,14 @@ func reconnectRemedy(err error) error {
 		return err
 	}
 	hinted := *e
-	hinted.Hint = "Disconnect the agent in Basecamp and run the connect command again; the secret this connection was handed is gone."
+	hinted.Hint = "Disconnect the new connection in Basecamp and run the connect command again; the secret it was handed is gone."
 	return &hinted
 }
 
 // warnHandoverLost says what a failure after the handover costs, in the
 // one line an operator has to act on.
 func warnHandoverLost(log func(string)) {
-	log("warning: the connection was approved and the agent's client secret was handed over once, but keeping it failed. Disconnect the agent in Basecamp and connect again.")
+	log("warning: the connection was approved and its client secret was handed over once, but keeping it failed. Disconnect the new connection in Basecamp and connect again.")
 }
 
 // spentHandoverError marks an error raised once the poll had already been

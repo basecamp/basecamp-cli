@@ -478,9 +478,9 @@ func feedAuthorizationFailed(err error) bool {
 func errAgentDisconnected(agent, profile string) *output.Error {
 	who := richtext.SanitizeSingleLine(agent)
 	if who == "" {
-		who = "Your agent"
+		who = "your agent"
 	}
-	e := output.ErrAuth(who + " was disconnected in Basecamp, or connected on another computer")
+	e := output.ErrAuth("This computer's connection to " + who + " was disconnected in Basecamp")
 	e.Hint = "Reconnect it: basecamp connect setup -P " + richtext.ShellQuote(profile)
 	return e
 }

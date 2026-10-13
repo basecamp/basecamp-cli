@@ -52,6 +52,14 @@ the agent's own OAuth client: this CLI mints an access token from it
 whenever it needs one, so there is no token to paste and none to renew by
 hand.
 
+Each approval adds a connection with a secret of its own, named after this
+computer unless --device-name names it. A personal agent's other
+connections, on this computer or another, keep working. A shared agent
+keeps a single connection: connecting it replaces the one it had, wherever
+that was. Connecting a profile again stores the new connection in place of
+the one it held; for a personal agent, the old one stays in Basecamp until
+you disconnect it there.
+
 The account comes from the agent you approve — pass --account only to
 insist on one, and the connection is refused if the agent belongs to
 another.
@@ -65,8 +73,9 @@ Over SSH, in CI, or on a host with no display the browser is skipped and
 the link is yours to open on any device; --local forces a launch anyway,
 --no-browser skips it. Ctrl-C cancels the wait and stores nothing.
 
-Disconnecting is done in Basecamp: disconnecting the agent there kills the
-client secret this holds. Drop the local copy with ` + "`basecamp auth logout -P <profile>`" + `.`,
+Disconnecting is done in Basecamp: disconnecting this connection there kills
+the secret this holds, and the agent's other connections keep working. Drop
+the local copy with ` + "`basecamp auth logout -P <profile>`" + `.`,
 		Annotations: map[string]string{AnnotationProfileMayCreate: "true"},
 		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -94,7 +103,7 @@ client secret this holds. Drop the local copy with ` + "`basecamp auth logout -P
 		},
 	}
 
-	cmd.Flags().StringVar(&deviceName, "device-name", "", "Name this computer on the approval page (default: this host's name)")
+	cmd.Flags().StringVar(&deviceName, "device-name", "", "Name this connection on the approval page and in Basecamp (default: this host's name)")
 	cmd.Flags().StringVar(&softwareName, "software-name", "", "Name the software this CLI runs inside, shown as \"Connected to\"")
 	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope to ask for: 'read' or 'full' (default full; the approval page can downgrade it)")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Print the link instead of opening a browser")

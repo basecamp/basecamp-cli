@@ -387,7 +387,7 @@ func TestConnectAgentRefusesATokenWiderThanTheApproval(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "wider than the scope")
 	assertNoAgentCredential(t, m)
-	assert.Contains(t, cl.joined(), "Disconnect the agent in Basecamp and connect again")
+	assert.Contains(t, cl.joined(), "Disconnect the new connection in Basecamp and connect again")
 	assert.NotContains(t, cl.joined(), "minted", "no token from a refused mint is kept")
 }
 
@@ -535,7 +535,7 @@ func TestConnectAgentRefusesAScopeItCannotStore(t *testing.T) {
 	assertNoAgentCredential(t, m)
 	// The poll was answered, so the code is burned and the secret minted
 	// whatever this process made of the answer.
-	assert.Contains(t, cl.joined(), "Disconnect the agent in Basecamp and connect again")
+	assert.Contains(t, cl.joined(), "Disconnect the new connection in Basecamp and connect again")
 	var e *output.Error
 	assert.ErrorAs(t, err, &e, "the refusal keeps its own class through the spent-handover marker")
 }
@@ -701,7 +701,7 @@ func TestConnectAgentStoresNothingWhenTheProfileCannotBeCommitted(t *testing.T) 
 	// failure leaves the agent connected to nothing. Saying "nothing was
 	// stored" alone would send the operator looking for a credential that
 	// no longer exists anywhere.
-	assert.Contains(t, cl.joined(), "Disconnect the agent in Basecamp and connect again")
+	assert.Contains(t, cl.joined(), "Disconnect the new connection in Basecamp and connect again")
 }
 
 // TestConnectAgentRefusesTheLaunchpadFallback: Launchpad has no agent
@@ -842,7 +842,7 @@ func TestConnectAgentRefusesAHandoverWiderThanTheRequest(t *testing.T) {
 	assert.Contains(t, err.Error(), "read-only")
 	assert.Empty(t, as.calls(&as.tokenForms), "a handover wider than the request is never minted with")
 	assertNoAgentCredential(t, m)
-	assert.Contains(t, cl.joined(), "Disconnect the agent in Basecamp and connect again")
+	assert.Contains(t, cl.joined(), "Disconnect the new connection in Basecamp and connect again")
 }
 
 // TestConnectAgentHonorsASlowRetryAfter: a Retry-After longer than a
@@ -880,7 +880,7 @@ func TestConnectAgentHandsBackARemedyTheOperatorCanFollow(t *testing.T) {
 	require.Error(t, err)
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
-	assert.Contains(t, e.Hint, "Disconnect the agent in Basecamp")
+	assert.Contains(t, e.Hint, "Disconnect the new connection in Basecamp")
 	assert.NotContains(t, e.Hint, "--with-client-credentials")
 }
 
@@ -939,7 +939,7 @@ func TestConnectAgentTreatsAnInterruptedHandoverAsSpent(t *testing.T) {
 	cl := &collectLogger{}
 	_, err := m.ConnectAgent(context.Background(), connectOptions(cl, newTestClock()))
 	require.Error(t, err)
-	assert.Contains(t, cl.joined(), "Disconnect the agent in Basecamp and connect again")
+	assert.Contains(t, cl.joined(), "Disconnect the new connection in Basecamp and connect again")
 	assertNoAgentCredential(t, m)
 	assert.Empty(t, as.calls(&as.tokenForms), "nothing was minted with a credential that never arrived")
 }
