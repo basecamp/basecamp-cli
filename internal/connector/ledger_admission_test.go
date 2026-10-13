@@ -943,6 +943,8 @@ func TestAGoIsOnlyForTheAskAsDeclared(t *testing.T) {
 			Projects: map[int64]admission.Project{adapterBucketID: {Class: "internal"}},
 		}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads, Boosts: reads})
 		require.NoError(t, err)
+		// Declared a minute before the boost testEvent makes.
+		ledger.now = func() time.Time { return time.Date(2026, 9, 16, 9, 59, 0, 0, time.UTC) }
 		_, err = ledger.DeclareAsk(context.Background(), commentID, admission.AskFingerprint(typ, declaredTitle, declared), "local:agent")
 		require.NoError(t, err)
 

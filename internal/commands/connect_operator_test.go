@@ -234,6 +234,10 @@ func TestConnectAskFingerprintsTheCommentTheURLNames(t *testing.T) {
 	assert.True(t, again.Data.Already)
 	assert.False(t, again.Data.Edited)
 
+	// The same account spelled with a leading zero is the same account.
+	out, err = f.run(t, output.FormatJSON, "ask", "https://3.basecamp.com/0999/buckets/456/todos/789#__recording_1011")
+	require.NoError(t, err, out)
+
 	f.askComment(1011, setupAgentPerson, "<div>Shall I push abc123 and deploy production?</div>")
 	out, err = f.run(t, output.FormatJSON, "ask", url)
 	require.NoError(t, err, out)

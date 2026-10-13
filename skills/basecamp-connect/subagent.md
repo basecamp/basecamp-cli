@@ -193,8 +193,9 @@ detail, load the `basecamp` skill.
   basecamp connect ask '<posted app_url>' -P '<profile>'
   ```
 
-  It reads the post once and fingerprints its words. A boost decided before
-  the declaration is only a reply, so declare at once. Never edit a post once
+  It reads the post once and fingerprints its words. A boost given before
+  the declaration is only a reply, however late it is handed off, so declare
+  at once. Never edit a post once
   it is declared an ask: an edit voids it, and the operator's boost on it then
   arrives as an ordinary `boosted` reply with `go` false. Declaring it again
   doesn't revive it. To change an ask, post a new one and declare that.

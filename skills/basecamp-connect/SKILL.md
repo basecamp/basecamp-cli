@@ -116,7 +116,7 @@ thing to check.
   - `completed`: something completed in a project it watches.
   - `boosted`: a boost on the agent's own post.
 - **`acknowledge`**: true when a person asked for something. False for
-  `subscribed`, `completed` and `boosted`, which are context, not instructions.
+  `subscribed`, `completed` and `boosted`, context unless a `go`.
 - **`recording`**: what the event is about. `bucket_id` is the project,
   `project_name` its name. `url` works with every command below.
 - **`reply_to`**: where the answer goes. `kind` `comment` means a comment on

@@ -112,10 +112,19 @@ func (l *Ledger) DeclareAsk(ctx context.Context, recordingID int64, contentHash,
 // transaction, and reports whether eventID holds it. An ask nobody declared,
 // one another event already took, and one whose content no longer hashes to
 // what it was declared with give nothing, and the last is left as it was.
+//
+// Nor does a boost Basecamp made before the ask was declared. A boost the
+// connector saw first and decides later — held blocked for a retry, or seen
+// while no connector ran — would otherwise find the declaration waiting when
+// it commits and take a go nobody gave. The event's own time is Basecamp's and
+// the declaration's this machine's, so clock skew between them can only turn
+// a boost given in the seconds after a declaration into a reply, never the
+// other way round.
 func takeGo(ctx context.Context, tx *sql.Tx, recordingID int64, contentHash string, eventID int64) (bool, error) {
 	res, err := tx.ExecContext(ctx,
-		`UPDATE asks SET go_event_id = ? WHERE recording_id = ? AND content_hash = ? AND (go_event_id IS NULL OR go_event_id = ?)`,
-		eventID, recordingID, contentHash, eventID)
+		`UPDATE asks SET go_event_id = ? WHERE recording_id = ? AND content_hash = ? AND (go_event_id IS NULL OR go_event_id = ?)
+  AND declared_at < (SELECT created_at FROM events WHERE id = ?)`,
+		eventID, recordingID, contentHash, eventID, eventID)
 	if err != nil {
 		return false, fmt.Errorf("connector: take the go on %d for %d: %w", recordingID, eventID, err)
 	}

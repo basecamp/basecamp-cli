@@ -555,7 +555,7 @@ func askRef(arg string, p connectProfile) (basecamp.RecordingRef, error) {
 	switch {
 	case parsed == nil:
 		return ref, output.ErrUsage(fmt.Sprintf("No recording in %q", arg))
-	case parsed.AccountID != "" && parsed.AccountID != p.file.AccountID:
+	case parsed.AccountID != "" && !accountIDsEqual(parsed.AccountID, p.file.AccountID):
 		return ref, output.ErrUsage(fmt.Sprintf("URL is for account %s, but this agent is in account %s", parsed.AccountID, p.file.AccountID))
 	case parsed.CommentID != "":
 		id, ref.RecordingType = parsed.CommentID, "Comment"
