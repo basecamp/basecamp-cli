@@ -33,6 +33,9 @@ expect_sequence:
   - match: 'auth agent connect .*(-P|--profile)[ =]''?helper\b'
   - match: '^me .*(-P|--profile)[ =]''?helper\b'
   - match: 'connect setup'
+  # Connecting, setup and the watcher are one flow: the connector starts
+  # right after setup, without asking again.
+  - match: '^connect\s+(-P|--profile)[ =]''?helper\b'
 accept:
   - 'connect setup .*(-P|--profile)[ =]''?helper\b'
   - 'connect setup .*--operator-profile[ =]''?jorge\b'
@@ -94,5 +97,3 @@ reject:
   - 'connect setup .*--(trust[ =]''?(allowlist|project)|allow[ =])'
   - '--expect-identity'
   - 'connect (run|start|service)'
-accept_response:
-  - '(?i)(not|n.t)\b[^.]{0,60}\b(yet|available|part of|built)'

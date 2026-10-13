@@ -284,8 +284,10 @@ const LegacyPluginUpdateHint = "Run: basecamp setup claude (reinstalls it as " +
 
 // PluginUpdateNotice is the one-line notice shown after the CLI changes
 // version, or "" when the Claude Code plugin matches it, isn't installed,
-// or this is a dev build. It reads the pre-rename key too: that is where a
-// plugin old enough to lack the connect skill is installed.
+// or this is a dev build. A copy still under the pre-rename key is named
+// first, whatever its version and whether or not the current key is there
+// too: that copy is where a plugin old enough to lack the connect skill
+// lives, updating it keeps the old name, and setup is what moves it.
 func PluginUpdateNotice(cli string) string {
 	if cli == "dev" {
 		return ""
@@ -298,40 +300,15 @@ func PluginUpdateNotice(cli string) string {
 	if err != nil {
 		return ""
 	}
-	if pv := installedPluginVersion(data); pv != "" {
-		if SameVersion(pv, cli) {
-			return ""
+	if hasLegacyPluginKey(data) {
+		versions := ""
+		if pv := installedPluginVersionMatching(data, isLegacyPluginKey); pv != "" {
+			versions = fmt.Sprintf(" (plugin %s, CLI %s)", pv, cli)
 		}
+		return fmt.Sprintf("Basecamp plugin is installed under its old name %s%s — %s", ClaudeLegacyPluginKey, versions, LegacyPluginUpdateHint)
+	}
+	if pv := installedPluginVersion(data); pv != "" && !SameVersion(pv, cli) {
 		return fmt.Sprintf("Basecamp plugin version mismatch (plugin %s, CLI %s) — %s", pv, cli, PluginVersionMismatchHint(pv, cli))
-	}
-	if pv := installedPluginVersionUnder(data, ClaudeLegacyPluginKey); pv != "" && !SameVersion(pv, cli) {
-		return fmt.Sprintf("Basecamp plugin version mismatch (plugin %s, CLI %s) — %s", pv, cli, LegacyPluginUpdateHint)
-	}
-	return ""
-}
-
-// installedPluginVersionUnder reads the version installed under exactly one
-// plugin key, in the v2 or v1 map format.
-func installedPluginVersionUnder(data []byte, key string) string {
-	var pluginMap map[string]any
-	if err := json.Unmarshal(data, &pluginMap); err != nil {
-		return ""
-	}
-	if inner, ok := pluginMap["plugins"].(map[string]any); ok {
-		if arr, ok := inner[key].([]any); ok {
-			for _, entry := range arr {
-				if obj, ok := entry.(map[string]any); ok {
-					if v, ok := obj["version"].(string); ok {
-						return v
-					}
-				}
-			}
-		}
-	}
-	if obj, ok := pluginMap[key].(map[string]any); ok {
-		if v, ok := obj["version"].(string); ok {
-			return v
-		}
 	}
 	return ""
 }
@@ -361,13 +338,23 @@ func InstalledPluginVersion() string {
 // installedPluginVersion extracts the version of the basecamp plugin from
 // the installed_plugins.json data. Handles v2, v1 flat map, and array formats.
 func installedPluginVersion(data []byte) string {
+	return installedPluginVersionMatching(data, matchesPluginKey)
+}
+
+func isLegacyPluginKey(key string) bool {
+	return key == ClaudeLegacyPluginKey
+}
+
+// installedPluginVersionMatching extracts the version of the first plugin
+// whose key matches, in any of the formats installedPluginVersion reads.
+func installedPluginVersionMatching(data []byte, match func(string) bool) string {
 	// v2 format: {"version": 2, "plugins": {"basecamp@37signals": [{"version": "1.0.0", ...}]}}
 	var pluginMap map[string]any
 	if err := json.Unmarshal(data, &pluginMap); err == nil {
 		if inner, ok := pluginMap["plugins"]; ok {
 			if innerMap, ok := inner.(map[string]any); ok {
 				for key, val := range innerMap {
-					if !matchesPluginKey(key) {
+					if !match(key) {
 						continue
 					}
 					if arr, ok := val.([]any); ok {
@@ -385,7 +372,7 @@ func installedPluginVersion(data []byte) string {
 
 		// v1 flat map: {"basecamp@37signals": {"version": "1.0.0"}}
 		for key, val := range pluginMap {
-			if !matchesPluginKey(key) {
+			if !match(key) {
 				continue
 			}
 			if obj, ok := val.(map[string]any); ok {
@@ -400,7 +387,7 @@ func installedPluginVersion(data []byte) string {
 	var plugins []map[string]any
 	if err := json.Unmarshal(data, &plugins); err == nil {
 		for _, p := range plugins {
-			if matchesBasecamp(p) {
+			if pluginEntryMatches(p, match) {
 				if v, ok := p["version"].(string); ok {
 					return v
 				}
@@ -453,13 +440,15 @@ func pluginInstalled(data []byte) bool {
 }
 
 func matchesBasecamp(p map[string]any) bool {
+	return pluginEntryMatches(p, matchesPluginKey)
+}
+
+// pluginEntryMatches reports whether an array-format entry names a plugin
+// key that match accepts, under any of the fields that format uses.
+func pluginEntryMatches(p map[string]any, match func(string) bool) bool {
 	for _, field := range []string{"name", "package", "id"} {
-		if v, ok := p[field]; ok {
-			if s, ok := v.(string); ok {
-				if matchesPluginKey(s) {
-					return true
-				}
-			}
+		if s, ok := p[field].(string); ok && match(s) {
+			return true
 		}
 	}
 	return false
