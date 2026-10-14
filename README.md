@@ -239,8 +239,11 @@ op read "op://Vault/Item/credential" | basecamp auth login --with-client-credent
 The login mints once, which is what proves the client id and secret: a refused
 mint stores nothing. `--account` is required when the profile does not exist
 yet. `basecamp auth logout` forgets the credential; there is no useful
-revocation, since the same client would mint another — rotate the client
-secret in Basecamp to end an agent's access.
+revocation, since the same client would mint another. To end its access,
+disconnect its connection in Basecamp (on My > Agent for your own agent, in
+Adminland for a shared one), which kills that connection's secret and every
+token minted from it. Where My > Agent lists several connections, disconnect
+the one this profile used: Disconnect all ends every one of them.
 
 ### Connecting an agent to this computer
 
