@@ -58,7 +58,7 @@ Claude Code only. The connector runs on Linux and macOS.
 
 ### 1. Start it, and watch its output
 
-Only one connector per agent can run at a time. If it's already running
+Only one connector per profile can run at a time. If it's already running
 elsewhere, it refuses to start and says so: tell the person, and don't start a
 second.
 
@@ -541,7 +541,7 @@ output and tell the person what it means:
 - **"was disconnected in Basecamp, or connected on another computer"**: run
   `basecamp connect setup -P '<profile>'` (it reconnects with one approval),
   then start it again.
-- **Already running**: another connector for this agent holds its lock, on
+- **Already running**: another connector for this profile holds its lock, on
   this computer or in another session. Don't start a second.
 - **`BASECAMP_TOKEN` is set**: the person unsets it, then you start it again.
 - **Anything else**: show the error, and run `basecamp connect doctor -P

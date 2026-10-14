@@ -97,7 +97,7 @@ func parseEventIDArg(raw string) (int64, error) {
 // metadata beside it is written best-effort and says nothing on its own.
 func openConnectLedger(ctx context.Context, p connectProfile, requireStopped bool) (*connector.Ledger, func(), error) {
 	done := func() {}
-	dir, err := connectStatePath(p.file, false)
+	dir, err := connectStatePath(p.name, p.file, false)
 	if err != nil {
 		return nil, done, err
 	}
@@ -132,8 +132,17 @@ func openConnectLedger(ctx context.Context, p connectProfile, requireStopped boo
 			return nil, done, lockErr
 		}
 		done = func() { _ = lock.Release() }
+		if _, err := os.Lstat(path); err != nil {
+			done()
+			return nil, func() {}, output.ErrUsageHint(fmt.Sprintf("Profile %q's connector state moved while this command started", p.name), "Run the command again.")
+		}
 	}
-	ledger, err := connector.OpenLedger(path) //nolint:contextcheck // OpenLedger migrates on its own context
+	var ledger *connector.Ledger
+	if requireStopped || outOfDate {
+		ledger, err = connector.OpenLedger(path) //nolint:contextcheck // OpenLedger migrates on its own context
+	} else {
+		ledger, err = connector.OpenExistingLedger(ctx, path)
+	}
 	if err != nil {
 		done()
 		return nil, func() {}, err
@@ -205,7 +214,7 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	if err != nil {
 		return err
 	}
-	dir, err := connectStatePath(p.file, shadow)
+	dir, err := connectStatePath(p.name, p.file, shadow)
 	if err != nil {
 		return err
 	}
@@ -457,7 +466,7 @@ func newConnectReleaseCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "release",
 		Short: "Clear the hold: requests are handed off again",
-		Long: `Clear the durable hold that basecamp connect --hold or shadow promote set.
+		Long: `Clear this profile's durable hold that basecamp connect --hold or shadow promote set.
 Records that arrived after the hold are handed off; held records stay held
 until each is discarded.`,
 		Example: `  basecamp connect release -P agent`,
@@ -505,7 +514,10 @@ shadow or a held ledger; run promote again to finish.
 
 Start the connector afterwards: intake continues from the promoted position,
 nothing is handed off until basecamp connect release, and held records wait
-to be discarded.`,
+to be discarded. The hold and records belong to the selected profile.
+
+An old, agent-wide shadow ledger must first be adopted by a verified run:
+basecamp connect --shadow -P <profile>. Stop that run before promoting.`,
 		Example: `  basecamp connect shadow promote -P agent`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -513,25 +525,34 @@ to be discarded.`,
 			if err != nil {
 				return err
 			}
-			shadowDir, err := connectStatePath(p.file, true)
-			if err != nil {
-				return err
-			}
 			stateHome, err := connectStateHome()
 			if err != nil {
 				return err
+			}
+			shadowDir, err := connectStatePath(p.name, p.file, true)
+			if err != nil {
+				return err
+			}
+			if filepath.Base(shadowDir) == connector.LegacyStateDirName(p.file.AccountID, p.file.Agent.PersonID) {
+				return output.ErrUsageHint(fmt.Sprintf("Profile %q has not verified ownership of the legacy shadow ledger", p.name),
+					"Run basecamp connect --shadow -P "+richtext.ShellQuote(p.name)+" first, then stop it before promoting.")
 			}
 			parent, err := ensurePrivateChain(stateHome, "basecamp", "connect")
 			if err != nil {
 				return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
 			}
-			res, err := connector.PromoteShadow(cmd.Context(), connector.PromoteOptions{
-				ShadowDir: shadowDir,
-				StateDir:  filepath.Join(parent, connector.StateDirName(p.file.AccountID, p.file.Agent.PersonID)),
-				AccountID: p.file.AccountID,
-				AgentID:   p.file.Agent.PersonID,
-				By:        operatorName(),
-			})
+			var res connector.PromoteResult
+			release, err := lockLegacyStateWithoutLedger(filepath.Join(parent, connector.LegacyStateDirName(p.file.AccountID, p.file.Agent.PersonID)), p.file)
+			if err == nil {
+				defer release()
+				res, err = connector.PromoteShadow(cmd.Context(), connector.PromoteOptions{
+					ShadowDir: shadowDir,
+					StateDir:  filepath.Join(parent, connector.StateDirName(p.file.AccountID, p.file.Agent.PersonID, p.name)),
+					AccountID: p.file.AccountID,
+					AgentID:   p.file.Agent.PersonID,
+					By:        operatorName(),
+				})
+			}
 			switch {
 			case errors.Is(err, connector.ErrAlreadyRunning):
 				return &output.Error{Code: output.CodeLockUnavailable, Message: err.Error(),
@@ -549,6 +570,30 @@ to be discarded.`,
 		},
 	})
 	return cmd
+}
+
+func lockLegacyStateWithoutLedger(legacy string, file setup.File) (func(), error) {
+	switch _, err := os.Lstat(legacy); {
+	case errors.Is(err, os.ErrNotExist):
+		return func() {}, nil
+	case err != nil:
+		return nil, err
+	}
+	lock, err := connector.AcquireLegacyInstanceLock(legacy, file.AccountID, file.Agent.PersonID)
+	if err != nil {
+		return nil, err
+	}
+	ledger := filepath.Join(legacy, connector.LedgerFile)
+	switch _, err := os.Lstat(ledger); {
+	case err == nil:
+		err = fmt.Errorf("connector: %s: %w", ledger, connector.ErrLedgerExists)
+		_ = lock.Release()
+		return nil, err
+	case !errors.Is(err, os.ErrNotExist):
+		_ = lock.Release()
+		return nil, err
+	}
+	return func() { _ = lock.Release() }, nil
 }
 
 // --- import ---------------------------------------------------------------
@@ -583,7 +628,7 @@ The file is JSON:
 			if err != nil {
 				return output.ErrUsage(strings.TrimPrefix(err.Error(), "connector: "))
 			}
-			dir, err := connectStatePath(p.file, false)
+			dir, err := connectStatePath(p.name, p.file, false)
 			if err != nil {
 				return err
 			}

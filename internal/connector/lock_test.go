@@ -28,8 +28,6 @@ func TestSecondConnectorOnTheSameAgentIsRefused(t *testing.T) {
 	assert.Contains(t, err.Error(), "pid", "the refusal says who is holding it")
 }
 
-// The key is the identity, not the profile that names it: two profiles can
-// hold credentials for one agent, and it is the agent that gets double-served.
 func TestTheLockIsKeyedOnAccountAndAgent(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()

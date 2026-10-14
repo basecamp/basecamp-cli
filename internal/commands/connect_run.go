@@ -46,12 +46,9 @@ func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
 	fl.Var((*repeatedString)(&f.projects), "project", "Only hear events in this project id (repeatable; default every project the agent can see)")
 	fl.BoolVar(&f.shadow, "shadow", false, "Admit and log in an isolated state directory; dispatch and post nothing")
 	fl.Int64Var(&f.since, "since", 0, "Enter the feed just after this event id, whatever the ledger holds")
-	fl.BoolVar(&f.hold, "hold", false, "Set the durable hold: intake and admission run, nothing is dispatched or posted until the hold is released, and earlier records wait for review")
+	fl.BoolVar(&f.hold, "hold", false, "Set this profile's durable hold: intake and admission run, nothing is dispatched or posted until release, and earlier records wait for review")
 }
 
-// connectStateHome is the directory holding the connector's state root, from
-// connector.StateRoot so the connector and the worker's MCP server agree on
-// one place.
 func connectStateHome() (string, error) {
 	root, err := connector.StateRoot()
 	if err != nil {
@@ -78,37 +75,92 @@ func ensurePrivateChain(root string, parts ...string) (string, error) {
 	return dir, nil
 }
 
-// connectStateDir is the connector's state directory for a set-up profile,
-// created owner-only: $XDG_STATE_HOME/basecamp/connect/<account>-<agent>, or
-// connect-shadow for a shadow run. Everything that reads the connector's
-// state (status) resolves it here.
-func connectStateDir(file setup.File, shadow bool) (string, error) {
+func connectStateDir(profile string, file setup.File, shadow bool) (string, error) {
+	dir, _, err := prepareConnectStateDir(profile, file, shadow)
+	return dir, err
+}
+
+// Only a run that verified the credential may call this: adoption assigns the
+// entire legacy ledger (including its hold and every checkpoint) to a profile.
+func prepareConnectStateDir(profile string, file setup.File, shadow bool) (string, bool, error) {
+	if _, err := setup.Path("", profile); err != nil {
+		return "", false, err
+	}
 	stateHome, err := connectStateHome()
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return ensurePrivateChain(stateHome, connectStateParts(file, shadow)...)
+	parts := connectStateParts(profile, file, shadow)
+	parent, err := ensurePrivateChain(stateHome, parts[:len(parts)-1]...)
+	if err != nil {
+		return "", false, err
+	}
+	adopted, err := connector.AdoptLegacyStateDir(parent, file.AccountID, file.Agent.PersonID, profile)
+	if err != nil {
+		return "", false, err
+	}
+	dir := filepath.Join(parent, parts[len(parts)-1])
+	if err := setup.EnsurePrivateDir(dir); err != nil {
+		return "", adopted, err
+	}
+	return dir, adopted, nil
 }
 
 // connectStatePath is connectStateDir's path, created nothing: for commands
 // that only read the connector's state, and must not make a directory to do
 // it.
-func connectStatePath(file setup.File, shadow bool) (string, error) {
+func connectStatePath(profile string, file setup.File, shadow bool) (string, error) {
+	if _, err := setup.Path("", profile); err != nil {
+		return "", err
+	}
 	stateHome, err := connectStateHome()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(append([]string{stateHome}, connectStateParts(file, shadow)...)...), nil
+	parts := connectStateParts(profile, file, shadow)
+	dir := filepath.Join(append([]string{stateHome}, parts...)...)
+	legacy := filepath.Join(filepath.Dir(dir), connector.LegacyStateDirName(file.AccountID, file.Agent.PersonID))
+	if _, err := os.Lstat(dir); errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Lstat(legacy); err == nil {
+			return legacy, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+	} else if err != nil {
+		return "", err
+	}
+	return dir, nil
 }
 
-func connectStateParts(file setup.File, shadow bool) []string {
+// A fresh profile never borrows another profile's ledger. Name where earlier
+// work lives so an upgrade does not silently look like it lost that work.
+func warnConnectSiblingState(logger *slog.Logger, dir string, file setup.File, profile string) {
+	entries, err := os.ReadDir(filepath.Dir(dir))
+	if err != nil {
+		logger.Warn("connector: could not inspect sibling state", "error", err)
+		return
+	}
+	prefix := connector.LegacyStateDirName(file.AccountID, file.Agent.PersonID)
+	for _, entry := range entries {
+		if entry.Name() == filepath.Base(dir) || (entry.Name() != prefix && !strings.HasPrefix(entry.Name(), prefix+"-")) {
+			continue
+		}
+		sibling := filepath.Join(filepath.Dir(dir), entry.Name())
+		if _, err := os.Lstat(filepath.Join(sibling, connector.LedgerFile)); err == nil {
+			logger.Warn("connector: this profile has no ledger; earlier cursor, hold and records remain in sibling state; entering at the present unless --since selects an earlier event",
+				"profile", profile, "sibling", sibling)
+		}
+	}
+}
+
+func connectStateParts(profile string, file setup.File, shadow bool) []string {
 	group := "connect"
 	if shadow {
 		// An isolated ledger, lock and checkpoint: a shadow never shares a
 		// position or a record with the connector it watches beside.
 		group = "connect-shadow"
 	}
-	return []string{"basecamp", group, connector.StateDirName(file.AccountID, file.Agent.PersonID)}
+	return []string{"basecamp", group, connector.StateDirName(file.AccountID, file.Agent.PersonID, profile)}
 }
 
 func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
@@ -175,7 +227,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	// until the credential is proven to be that agent, holding its lock
 	// through the wait could keep the agent's real connector from starting.
 	// The lock is taken for the run once the identity is verified.
-	stateDir, err := connectStateDir(file, f.shadow)
+	stateDir, err := connectStatePath(name, file, f.shadow)
 	if err != nil {
 		return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
 	}
@@ -214,6 +266,17 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return output.ErrAuth(err.Error())
 	}
 	agentID := me.ID
+	stateDir, adopted, err := prepareConnectStateDir(name, file, f.shadow)
+	if adopted {
+		logger.Warn("connector: adopted legacy state; cursor, hold and held records belong to this profile now",
+			"profile", name, "from", filepath.Join(filepath.Dir(stateDir), connector.LegacyStateDirName(account, agentID)), "to", stateDir)
+	}
+	switch {
+	case errors.Is(err, connector.ErrAlreadyRunning):
+		return &output.Error{Code: output.CodeLockUnavailable, Message: err.Error()}
+	case err != nil:
+		return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
+	}
 	lock, err := acquireConnectLock(stateDir, account, agentID)
 	if err != nil {
 		return err
@@ -226,6 +289,9 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	}
 	policy.Buckets = buckets
 
+	if _, err := os.Lstat(filepath.Join(stateDir, connector.LedgerFile)); errors.Is(err, os.ErrNotExist) {
+		warnConnectSiblingState(logger, stateDir, file, name)
+	}
 	ledger, err := connector.OpenLedger(filepath.Join(stateDir, connector.LedgerFile))
 	if err != nil {
 		return err
@@ -401,7 +467,7 @@ func connectorStoppedBy(err error, agent, profile string, refused func() bool) (
 }
 
 // acquireConnectLock takes the connector's instance lock for the run, or
-// says another connector for this agent already holds it.
+// says another connector for this profile already holds it.
 func acquireConnectLock(stateDir, account string, agentID int64) (*connector.InstanceLock, error) {
 	lock, err := connector.AcquireInstanceLock(stateDir, account, agentID, time.Now())
 	if errors.Is(err, connector.ErrAlreadyRunning) {
@@ -413,9 +479,23 @@ func acquireConnectLock(stateDir, account string, agentID int64) (*connector.Ins
 // connectLockFree reports, by taking and at once releasing it, whether the
 // instance lock is free: the start's look before it waits for a token.
 func connectLockFree(stateDir, account string, agentID int64) error {
-	lock, err := acquireConnectLock(stateDir, account, agentID)
-	if err != nil {
+	if _, err := os.Lstat(stateDir); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
 		return err
+	}
+	var lock *connector.InstanceLock
+	var err error
+	if filepath.Base(stateDir) == connector.LegacyStateDirName(account, agentID) {
+		lock, err = connector.AcquireLegacyInstanceLock(stateDir, account, agentID)
+		if err != nil {
+			return &output.Error{Code: output.CodeLockUnavailable, Message: err.Error()}
+		}
+	} else {
+		lock, err = acquireConnectLock(stateDir, account, agentID)
+		if err != nil {
+			return err
+		}
 	}
 	return lock.Release()
 }

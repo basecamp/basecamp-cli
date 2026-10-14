@@ -840,51 +840,12 @@ func entityEncodedSGID(mention string) string {
 	return mention[:i] + fmt.Sprintf("&#x%x;", mention[i]) + mention[i+1:]
 }
 
-func TestResolveStateDirAcceptsOnlyTheCanonicalDirectory(t *testing.T) {
+func TestStateRootFollowsXDGStateHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", home)
 	root, err := StateRoot()
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(home, "basecamp", "connect"), root)
-	canonical := filepath.Join(root, StateDirName("999", adapterAgentID))
-
-	resolved, agentID, err := ResolveStateDir(canonical, "999")
-	require.NoError(t, err)
-	assert.Equal(t, adapterAgentID, agentID)
-	assert.Equal(t, canonical, resolved)
-	resolved, agentID, err = ResolveStateDir(canonical+"/../"+StateDirName("999", adapterAgentID)+"/", "0999")
-	require.NoError(t, err, "accounts compare as numbers, and a trailing slash or a .. is the same directory")
-	assert.Equal(t, adapterAgentID, agentID)
-	assert.Equal(t, canonical, resolved, "the directory every caller goes on to use is the one that was checked")
-
-	for name, dir := range map[string]string{
-		"outside the root":   filepath.Join(t.TempDir(), StateDirName("999", adapterAgentID)),
-		"nested in the root": filepath.Join(root, "x", StateDirName("999", adapterAgentID)),
-		"another account":    filepath.Join(root, StateDirName("1000", adapterAgentID)),
-		"no agent":           filepath.Join(root, "999-"),
-		"no account":         filepath.Join(root, "-52007412"),
-		"not a number":       filepath.Join(root, "999-abc"),
-		"a signed agent":     filepath.Join(root, "999-+52007412"),
-		"a padded agent":     filepath.Join(root, "999-052007412"),
-		"the root itself":    root,
-		"above the root":     filepath.Join(root, "..", StateDirName("999", adapterAgentID)),
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, _, err := ResolveStateDir(dir, "999")
-			assert.ErrorIs(t, err, ErrNotAStateDir)
-			var refusal *StateDirError
-			require.ErrorAs(t, err, &refusal, "the refusal says why in fields, not in a message to be parsed")
-			assert.Equal(t, root, refusal.Root)
-			assert.Equal(t, "999", refusal.Want)
-			if name == "another account" {
-				assert.Equal(t, StateDirOtherAccount, refusal.Why)
-				assert.Equal(t, "1000", refusal.Account)
-			}
-			if name == "outside the root" {
-				assert.Equal(t, StateDirElsewhere, refusal.Why)
-			}
-		})
-	}
 
 	t.Setenv("XDG_STATE_HOME", "relative/state")
 	root, err = StateRoot()

@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -1287,56 +1286,6 @@ func scanAttributes(text string, pos int) (sgid string, end int, ok bool) {
 	return sgid, pos, false
 }
 
-// StateDirName is the connector's state directory for one account and agent,
-// "<account>-<agent person id>", inside StateRoot.
-func StateDirName(accountID string, agentID int64) string {
-	return accountID + "-" + strconv.FormatInt(agentID, 10)
-}
-
-// ErrNotAStateDir is a directory that is not a connector state directory for
-// the account asked about. StateDirError carries why.
-var ErrNotAStateDir = errors.New("not the connector's state directory for this account")
-
-// StateDirError says which rule a state directory failed, in fields a caller
-// can build its own message from rather than by reading this one.
-type StateDirError struct {
-	// Dir is the directory as given, made absolute.
-	Dir string
-	// Root is the connector's state root, the only place a state directory
-	// lives.
-	Root string
-	// Account is the account the directory names, empty when it names none;
-	// Want is the account it had to name.
-	Account, Want string
-	// Why is the rule it failed.
-	Why StateDirProblem
-}
-
-// StateDirProblem is why a state directory was refused.
-type StateDirProblem string
-
-const (
-	// StateDirElsewhere is a directory outside the state root.
-	StateDirElsewhere StateDirProblem = "outside the connector's state root"
-	// StateDirMisnamed is a directory not named <account>-<agent person id>.
-	StateDirMisnamed StateDirProblem = "not named <account>-<agent person id>"
-	// StateDirOtherAccount is another account's state directory.
-	StateDirOtherAccount StateDirProblem = "another account's"
-)
-
-func (e *StateDirError) Error() string {
-	switch e.Why {
-	case StateDirElsewhere:
-		return fmt.Sprintf("%s is not inside %s", e.Dir, e.Root)
-	case StateDirOtherAccount:
-		return fmt.Sprintf("%s belongs to account %s, not %s", e.Dir, e.Account, e.Want)
-	default:
-		return fmt.Sprintf("%s is not named <account>-<agent person id>", e.Dir)
-	}
-}
-
-func (e *StateDirError) Unwrap() error { return ErrNotAStateDir }
-
 // StateRoot is where every connector state directory lives:
 // $XDG_STATE_HOME/basecamp/connect, or ~/.local/state/basecamp/connect when
 // XDG_STATE_HOME is unset or not absolute, as the XDG specification says.
@@ -1350,50 +1299,6 @@ func StateRoot() (string, error) {
 		base = filepath.Join(home, ".local", "state")
 	}
 	return filepath.Join(filepath.Clean(base), "basecamp", "connect"), nil
-}
-
-// ResolveStateDir is the one place a state directory is accepted: dir must
-// be exactly StateRoot/<account>-<agent person id>, and its account must be
-// accountID, compared as numbers. It returns the directory made absolute —
-// which is the one every caller should go on to use — and the agent's Person
-// id.
-//
-// The location is part of the check, not only the name. A directory named
-// for this account anywhere else — a copy of another account's ledger renamed
-// to match — is refused, because the name is what binds a ledger to an
-// account and anyone can choose a name.
-func ResolveStateDir(dir, accountID string) (string, int64, error) {
-	root, err := StateRoot()
-	if err != nil {
-		return "", 0, err
-	}
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return "", 0, fmt.Errorf("connector: state directory %q: %w", dir, err)
-	}
-	refuse := func(why StateDirProblem, account string) (string, int64, error) {
-		return "", 0, &StateDirError{Dir: abs, Root: root, Account: account, Want: accountID, Why: why}
-	}
-	if filepath.Dir(abs) != root {
-		return refuse(StateDirElsewhere, "")
-	}
-	account, agent, ok := strings.Cut(filepath.Base(abs), "-")
-	agentID, err := strconv.ParseInt(agent, 10, 64)
-	if !ok || err != nil || agentID <= 0 || agent != strconv.FormatInt(agentID, 10) {
-		// The agent is spelled one way, so one directory answers to one name:
-		// "+52007412" and "052007412" are other directories, not this one.
-		return refuse(StateDirMisnamed, account)
-	}
-	given, errGiven := strconv.ParseUint(account, 10, 64)
-	if errGiven != nil || given == 0 {
-		// Not an account at all: the name is wrong, not another account's.
-		return refuse(StateDirMisnamed, account)
-	}
-	want, errWant := strconv.ParseUint(accountID, 10, 64)
-	if errWant != nil || given != want {
-		return refuse(StateDirOtherAccount, account)
-	}
-	return abs, agentID, nil
 }
 
 // LedgerFile is the ledger's file name inside the state directory.
