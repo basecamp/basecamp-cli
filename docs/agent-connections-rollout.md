@@ -40,7 +40,11 @@ the approval page; do not reconnect merely to upgrade the CLI.
    or cross-profile claim.
 
 State is under `$XDG_STATE_HOME/basecamp/connect` and `connect-shadow` (default
-`~/.local/state/basecamp`). Before adoption, status, doctor and operator commands
+`~/.local/state/basecamp`). New profile directories canonicalize numeric account
+aliases so padded account ids cannot bypass the same-profile lock. Legacy
+lookup preserves the saved account spelling used by older builds; the adoption
+WARN names both paths. On downgrade, restore that saved spelling if padded.
+Before adoption, status, doctor and operator commands
 read the legacy folder without moving it. A working credential that reads back
 as a different person cannot adopt. The first verified profile owns the old
 state, not necessarily the first profile configured locally. A fresh sibling

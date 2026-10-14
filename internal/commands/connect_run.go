@@ -140,9 +140,10 @@ func warnConnectSiblingState(logger *slog.Logger, dir string, file setup.File, p
 		logger.Warn("connector: could not inspect sibling state", "error", err)
 		return
 	}
-	prefix := connector.LegacyStateDirName(file.AccountID, file.Agent.PersonID)
+	prefix := strings.TrimSuffix(connector.StateDirName(file.AccountID, file.Agent.PersonID, ""), "-")
+	legacyName := connector.LegacyStateDirName(file.AccountID, file.Agent.PersonID)
 	for _, entry := range entries {
-		if entry.Name() == filepath.Base(dir) || (entry.Name() != prefix && !strings.HasPrefix(entry.Name(), prefix+"-")) {
+		if entry.Name() == filepath.Base(dir) || (entry.Name() != prefix && entry.Name() != legacyName && !strings.HasPrefix(entry.Name(), prefix+"-")) {
 			continue
 		}
 		sibling := filepath.Join(filepath.Dir(dir), entry.Name())
@@ -231,7 +232,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if err != nil {
 		return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
 	}
-	if err := connectLockFree(stateDir, account, file.Agent.PersonID); err != nil {
+	if err := connectLockFree(stateDir, file.AccountID, file.Agent.PersonID); err != nil {
 		return err
 	}
 
@@ -269,7 +270,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	stateDir, adopted, err := prepareConnectStateDir(name, file, f.shadow)
 	if adopted {
 		logger.Warn("connector: adopted legacy state; cursor, hold and held records belong to this profile now",
-			"profile", name, "from", filepath.Join(filepath.Dir(stateDir), connector.LegacyStateDirName(account, agentID)), "to", stateDir)
+			"profile", name, "from", filepath.Join(filepath.Dir(stateDir), connector.LegacyStateDirName(file.AccountID, agentID)), "to", stateDir)
 	}
 	switch {
 	case errors.Is(err, connector.ErrAlreadyRunning):
