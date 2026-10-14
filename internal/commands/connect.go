@@ -57,9 +57,15 @@ line: events seen, admission's verdicts, and a "type":"request" line for each
 trusted request, which is the one to act on. Logs go to stderr. SIGINT and
 SIGTERM exit 130 and 143. A request made before the connector started is not
 picked up. --shadow admits and logs in an isolated state directory and hands
-off nothing. --hold sets a durable hold: intake and admission run, nothing is
-handed off, and earlier records wait for review, until basecamp connect
-release. Linux and macOS only.
+off nothing. --hold sets this profile's durable hold: intake and admission run,
+nothing is handed off, and earlier records wait for review, until basecamp
+connect release for this profile. Linux and macOS only.
+
+One connector runs per profile in this state directory. Personal agents can
+run several connections when Basecamp enables adding them; otherwise, and for
+shared agents, a new approval replaces the existing connection. Each profile
+serves its own projects and has its own hold. When two connections serve the
+same project, a request both admit can be answered twice.
 
   basecamp connect status             what it heard and holds
   basecamp connect doctor             what it needs to run
@@ -357,6 +363,10 @@ serves: --serve <project-id>, --unserve <project-id>. Nothing in a project it
 does not serve is handed off, and nobody is told. --watch-completions <project-id>
 makes the agent hear every trusted completion in that project without being
 assigned.
+
+The list is this profile's own. When two connections of one agent serve the
+same project, a request both admit there can be answered twice, so serve
+each project from one of them.
 
 No directory is associated with a project here: the session handling the
 requests chooses the repo for each one.

@@ -452,8 +452,8 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 
 // connectorStoppedBy is what the connector exits with when one of its parts
 // stopped it with err, and the connection state status keeps for that. The
-// stop people meet — the agent was disconnected in Basecamp, or connected on
-// another computer — is said in their words; anything else is returned as it
+// stop people meet — the connection was disconnected in Basecamp, or replaced
+// by a newer approval — is said in their words; anything else is returned as it
 // is. The feed's authorization_failed counts forbidden answers too, so it is
 // called a disconnect only when refused, asking Basecamp, confirms it; a
 // refused token renewal is already Basecamp's answer.
@@ -558,9 +558,9 @@ func feedAuthorizationFailed(err error) bool {
 func errAgentDisconnected(agent, profile string) *output.Error {
 	who := richtext.SanitizeSingleLine(agent)
 	if who == "" {
-		who = "Your agent"
+		who = "your agent"
 	}
-	e := output.ErrAuth(who + " was disconnected in Basecamp, or connected on another computer")
+	e := output.ErrAuth(fmt.Sprintf("Profile %q's connection to %s was disconnected in Basecamp, or replaced by a newer connection", richtext.SanitizeSingleLine(profile), who))
 	e.Hint = "Reconnect it: basecamp connect setup -P " + richtext.ShellQuote(profile)
 	return e
 }
@@ -578,7 +578,9 @@ func connectSinceOverride(since int64) (int64, error) {
 	return since, nil
 }
 
-// connectConsumerNamespace names a run's checkpoint lineage. A shadow run
+// connectConsumerNamespace names a run's checkpoint lineage. It stays keyed
+// by agent so adopted checkpoints retain their keys; each profile's separate
+// ledger isolates that lineage. The server never sees this namespace. A shadow run
 // gets its own: it has its own state directory, ledger, lock and checkpoint
 // already (connectStateDir), and intake's contract is that two connectors in
 // one account never share a lineage (connector.Options.ConsumerNamespace) —
