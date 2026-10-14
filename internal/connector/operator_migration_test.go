@@ -34,8 +34,8 @@ const (
 func shadowFixture(t *testing.T) (shadowDir, stateDir string) {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "basecamp")
-	shadowDir = filepath.Join(root, "connect-shadow", StateDirName(opAccount, opAgent))
-	stateDir = filepath.Join(root, "connect", StateDirName(opAccount, opAgent))
+	shadowDir = filepath.Join(root, "connect-shadow", StateDirName(opAccount, opAgent, "agent"))
+	stateDir = filepath.Join(root, "connect", StateDirName(opAccount, opAgent, "agent"))
 	for _, dir := range []string{root, filepath.Dir(shadowDir), filepath.Dir(stateDir)} {
 		require.NoError(t, os.MkdirAll(dir, 0o700))
 		require.NoError(t, os.Chmod(dir, 0o700))
