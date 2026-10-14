@@ -69,7 +69,7 @@ func AcquireLegacyInstanceLock(dir, accountID string, agentID int64) (*InstanceL
 }
 
 func LegacyLockError(dir string, err error) error {
-	return fmt.Errorf("connector: an older connector for this agent holds %s (%v); stop it and restart its existing profile on this build before starting another profile: %w", dir, err, ErrAlreadyRunning)
+	return fmt.Errorf("connector: an older connector for this agent holds %s; stop it and restart its existing profile on this build before starting another profile (%w)", dir, err)
 }
 
 func pathPresent(path string) (bool, error) {

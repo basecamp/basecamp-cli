@@ -488,8 +488,11 @@ func connectLockFree(stateDir, account string, agentID int64) error {
 	var err error
 	if filepath.Base(stateDir) == connector.LegacyStateDirName(account, agentID) {
 		lock, err = connector.AcquireLegacyInstanceLock(stateDir, account, agentID)
-		if err != nil {
+		if errors.Is(err, connector.ErrAlreadyRunning) {
 			return &output.Error{Code: output.CodeLockUnavailable, Message: err.Error()}
+		}
+		if err != nil {
+			return err
 		}
 	} else {
 		lock, err = acquireConnectLock(stateDir, account, agentID)
