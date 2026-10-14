@@ -3,6 +3,7 @@
 package commands
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +60,38 @@ func TestAFreshSiblingNamesWhereTheEarlierHeldStateLives(t *testing.T) {
 	assert.Contains(t, b.out.String(), "this profile has no ledger")
 	assert.Contains(t, b.out.String(), "--since")
 	assert.Contains(t, b.out.String(), "sibling="+filepath.Join(connectStateRoot(t), connector.StateDirName(f.file.AccountID, f.file.Agent.PersonID, "agent")))
+}
+
+func TestMigratedHeldWorkRemainsAddressableByTheOperator(t *testing.T) {
+	f := newOperatorFixture(t)
+	seedLegacyLedger(t, f.s, f.file)
+	r := startProfileConnector(t, f.s, "agent")
+	r.awaitRunning(t)
+	r.cancel()
+	_ = r.awaitExit(t)
+
+	out, err := f.run(t, output.FormatJSON, "release")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, `"still_held": 1`)
+	dir := filepath.Join(connectStateRoot(t), connector.StateDirName(f.file.AccountID, f.file.Agent.PersonID, "agent"))
+	assertNotHeld(t, dir)
+	l, err := connector.OpenLedgerReadOnly(context.Background(), filepath.Join(dir, connector.LedgerFile))
+	require.NoError(t, err)
+	record, found, err := l.Get(context.Background(), 41)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, connector.StateHeld, record.State)
+	require.NoError(t, l.Close())
+
+	out, err = f.run(t, output.FormatJSON, "discard", "41")
+	require.NoError(t, err, out)
+	l, err = connector.OpenLedgerReadOnly(context.Background(), filepath.Join(dir, connector.LedgerFile))
+	require.NoError(t, err)
+	defer func() { _ = l.Close() }()
+	record, found, err = l.Get(context.Background(), 41)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, connector.StateDiscarded, record.State)
 }
 
 func TestStatePathsRefuseInvalidProfilesBeforeCreatingAnything(t *testing.T) {

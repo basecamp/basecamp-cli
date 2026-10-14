@@ -18,6 +18,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/connector"
+	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
@@ -125,6 +126,13 @@ func seedLegacyLedger(t *testing.T, s *connectSetupServer, file setup.File, shad
 	_, err = l.RecordSeen(ctx, eventfeed.Event{ID: 41, Kind: "comment_created", EventType: "comment.created", Action: "created",
 		CreatedAt: time.Now(), BucketID: setupProject, CreatorID: setupOperatorPerson, RecordingID: 77}, connector.LanePoll)
 	require.NoError(t, err)
+	_, err = l.Admission().Commit(ctx, admission.Verdict{
+		EventID: 41, EventType: "comment.created", BucketID: setupProject, RecordingID: 77, RequesterID: setupOperatorPerson,
+		State: admission.StateAdmitted, Trigger: admission.TriggerMentioned, ConversationKey: "recording:77", Served: true,
+		Reply:    &admission.ReplyDestination{Kind: admission.ReplyComment, RecordingID: 77},
+		Snapshot: &admission.Snapshot{Type: "Comment", Content: "synthetic held request", UpdatedAt: time.Now()},
+	})
+	require.NoError(t, err)
 	require.NoError(t, l.Save(ctx, connectRunKey(t, s, file, shadow...), legacyPosition))
 	_, err = l.SetHold(ctx, "local:tester", connector.HoldByOperator)
 	require.NoError(t, err)
@@ -141,9 +149,10 @@ func assertLegacyLedgerKept(t *testing.T, dir string, s *connectSetupServer, fil
 	require.NoError(t, err)
 	require.True(t, ok, "the cursor came with the directory")
 	assert.Equal(t, legacyPosition, position)
-	_, found, err := l.Get(context.Background(), 41)
+	record, found, err := l.Get(context.Background(), 41)
 	require.NoError(t, err)
 	assert.True(t, found, "the ledger's records came with it")
+	assert.Equal(t, connector.StateHeld, record.State, "held work is not orphaned or dispatched on upgrade")
 	_, held, err := l.HoldMarker(context.Background())
 	require.NoError(t, err)
 	assert.True(t, held, "migration must never release the hold")

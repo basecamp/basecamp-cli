@@ -124,6 +124,36 @@ func TestAdoptRefusesWhileAConnectorRunsInTheLegacyDirectory(t *testing.T) {
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
+func TestCanonicalAccountSpellingsMeetTheSameProfileLock(t *testing.T) {
+	parent := stateParent(t)
+	dir := filepath.Join(parent, StateDirName("2914079", 52007412, "agent-a"))
+	lock, err := AcquireInstanceLock(dir, "2914079", 52007412, time.Now())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lock.Release() })
+	alias := filepath.Join(parent, StateDirName("02914079", 52007412, "agent-a"))
+	_, err = AcquireInstanceLock(alias, "02914079", 52007412, time.Now())
+	assert.ErrorIs(t, err, ErrAlreadyRunning)
+}
+
+func TestAdoptionRefusesInvalidStateNamesWithoutTouchingLegacyState(t *testing.T) {
+	parent := stateParent(t)
+	legacy := legacyStateDir(t, parent)
+	for _, profile := range []string{"", "../other", "a/b", "a\\\\b", "a b"} {
+		adopted, err := AdoptLegacyStateDir(parent, "2914079", 52007412, profile)
+		require.Error(t, err)
+		assert.False(t, adopted)
+	}
+	for _, account := range []string{"", "../other", "0", "not-an-account"} {
+		adopted, err := AdoptLegacyStateDir(parent, account, 52007412, "agent-a")
+		require.Error(t, err)
+		assert.False(t, adopted)
+	}
+	entries, err := os.ReadDir(parent)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, filepath.Base(legacy), entries[0].Name())
+}
+
 func TestTwoProfilesHoldTheirLocksAtOnceAndOneProfileOnlyOnce(t *testing.T) {
 	parent := stateParent(t)
 	now := time.Now()
