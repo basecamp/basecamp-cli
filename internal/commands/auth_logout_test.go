@@ -198,7 +198,7 @@ func TestAuthLogoutHumanCopy(t *testing.T) {
 		s := startRevocationServer(t)
 		app, buf := newLogoutTestApp(t, s, output.FormatStyled, agentLogoutCredentials(s))
 		require.NoError(t, runLogout(t, app))
-		assert.Contains(t, buf.String(), "Logged out (forgot the agent credential; this connection stays live until you disconnect it in Basecamp)")
+		assert.Contains(t, buf.String(), "Logged out (forgot the agent credential; disconnect this connection in Basecamp to end its access)")
 		assert.NotContains(t, buf.String(), "rotate", "Basecamp has no rotate-secret control to send anyone to")
 		assert.Empty(t, s.revoked(), "an agent self-token is minted on demand; revoking one ends nothing")
 		assert.False(t, app.Auth.IsAuthenticated())
