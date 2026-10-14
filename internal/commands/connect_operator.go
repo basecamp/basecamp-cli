@@ -467,8 +467,9 @@ func newConnectReleaseCmd() *cobra.Command {
 		Use:   "release",
 		Short: "Clear the hold: requests are handed off again",
 		Long: `Clear this profile's durable hold that basecamp connect --hold or shadow promote set.
-Records that arrived after the hold are handed off; held records stay held
-until each is discarded.`,
+Eligible requests from this run are handed off; held records stay held until
+each is discarded. Restarting does not replay older requests: the existing
+handoff age guard closes them with reason before_this_run.`,
 		Example: `  basecamp connect release -P agent`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

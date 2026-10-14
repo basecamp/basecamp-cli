@@ -22,7 +22,12 @@ the approval page; do not reconnect merely to upgrade the CLI.
 3. Check `basecamp connect status -P <profile>` and `basecamp connect doctor
    -P <profile>`. Only if intended, use `basecamp connect release -P <profile>`;
    release clears this profile's hold, not other profiles' holds. Held records
-   still require individual decisions.
+   still require individual decisions. This does not promise replay: the existing
+   handoff age guard closes eligible requests from before a newly started run
+   as `discarded` / `before_this_run`, retaining their ledger rows. Requests
+   admitted during a hold are not necessarily individually held. Use a fresh
+   trusted event for handoff proof after a restart; inspect historical records
+   rather than assuming release will hand them off.
 4. For a legacy shadow, run `basecamp connect --shadow -P <profile>` first,
    then stop it. Only then may `basecamp connect shadow promote -P <profile>`
    move that profile's shadow ledger into normal state. Offline promotion
