@@ -135,6 +135,23 @@ func TestCanonicalAccountSpellingsMeetTheSameProfileLock(t *testing.T) {
 	assert.ErrorIs(t, err, ErrAlreadyRunning)
 }
 
+func TestAdoptionPreservesAnOlderBuildsPaddedAccountDirectory(t *testing.T) {
+	parent := stateParent(t)
+	legacy := filepath.Join(parent, LegacyStateDirName("02914079", 52007412))
+	require.Equal(t, "02914079-52007412", filepath.Base(legacy))
+	require.NoError(t, os.Mkdir(legacy, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(legacy, LedgerFile), []byte("the held legacy ledger"), 0o600))
+	adopted, err := AdoptLegacyStateDir(parent, "02914079", 52007412, "agent-a")
+	require.NoError(t, err)
+	require.True(t, adopted)
+	dir := filepath.Join(parent, StateDirName("2914079", 52007412, "agent-a"))
+	data, err := os.ReadFile(filepath.Join(dir, LedgerFile))
+	require.NoError(t, err)
+	assert.Equal(t, "the held legacy ledger", string(data))
+	_, err = os.Lstat(legacy)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
 func TestAdoptionRefusesInvalidStateNamesWithoutTouchingLegacyState(t *testing.T) {
 	parent := stateParent(t)
 	legacy := legacyStateDir(t, parent)

@@ -12,13 +12,15 @@ import (
 )
 
 func StateDirName(accountID string, agentID int64, profile string) string {
-	return LegacyStateDirName(accountID, agentID) + "-" + profile
-}
-
-func LegacyStateDirName(accountID string, agentID int64) string {
 	if account, err := strconv.ParseUint(accountID, 10, 64); err == nil {
 		accountID = strconv.FormatUint(account, 10)
 	}
+	return LegacyStateDirName(accountID, agentID) + "-" + profile
+}
+
+// LegacyStateDirName preserves the saved spelling: older builds used it
+// verbatim. Only the new profile directory canonicalizes account aliases.
+func LegacyStateDirName(accountID string, agentID int64) string {
 	return accountID + "-" + strconv.FormatInt(agentID, 10)
 }
 
