@@ -392,9 +392,9 @@ func TestAgentMintRefusesARedirect(t *testing.T) {
 	assert.Zero(t, *sinkCalls, "the client secret followed a redirect")
 }
 
-// TestAgentLogoutSaysRotatingTheSecretIsTheRemedy: revoking one self-token
+// TestAgentLogoutForgetsWithoutRevoking: revoking one self-token
 // accomplishes nothing while the client that minted it can mint another.
-func TestAgentLogoutSaysRotatingTheSecretIsTheRemedy(t *testing.T) {
+func TestAgentLogoutForgetsWithoutRevoking(t *testing.T) {
 	as := startDeviceAS(t)
 	m := newDeviceTestManager(t, as.srv.URL)
 	key := storeAgent(t, m, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(time.Hour)))
@@ -421,7 +421,7 @@ func TestAgentRevokeIsRefusedAndKeepsTheCredential(t *testing.T) {
 	err := m.RevokeStored(context.Background())
 	require.Error(t, err)
 	assert.Equal(t, output.CodeUsage, output.AsError(err).Code)
-	assert.Contains(t, err.Error(), "disconnect the agent in Basecamp")
+	assert.Contains(t, output.AsError(err).Hint, "disconnect this connection in Basecamp")
 	assert.Empty(t, as.revokeCalls(), "a revocation was sent for an agent self-token")
 
 	creds, loadErr := m.store.Load(key)

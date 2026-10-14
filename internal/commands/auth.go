@@ -1607,7 +1607,7 @@ func describeLogout(done string, result *auth.LogoutResult) (summary string, fie
 		summary = done + " (forgot the imported token; it stays valid until revoked in Basecamp)"
 	case result.Skipped == auth.RevokeSkippedAgent:
 		fields["reason"] = result.Skipped
-		summary = done + " (forgot the agent credential; it stays connected until you disconnect the agent in Basecamp)"
+		summary = done + " (forgot the agent credential; this connection stays live until you disconnect it in Basecamp)"
 	case result.Err != nil:
 		fields["reason"] = result.Err.Error()
 		fields["remaining"] = result.Remaining
