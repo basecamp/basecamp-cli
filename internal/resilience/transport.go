@@ -28,6 +28,9 @@ func (t *pacedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	ctx := req.Context()
 	if !spendPrepaidRequest(ctx) {
 		if err := t.rateLimiter.Pace(ctx); err != nil {
+			if req.Body != nil {
+				_ = req.Body.Close()
+			}
 			return nil, err
 		}
 	}
