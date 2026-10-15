@@ -93,6 +93,7 @@ func (h *GatingHooks) OnOperationGate(ctx context.Context, op basecamp.Operation
 		if err := h.rateLimiter.waitSince(ctx, start, deadline); err != nil {
 			return ctx, err
 		}
+		ctx = withPrepaidRequest(ctx)
 	}
 
 	// Acquire bulkhead slot (PID-based, released in OnOperationEnd)
