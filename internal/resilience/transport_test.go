@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -110,6 +112,60 @@ func TestARetrySpendsAToken(t *testing.T) {
 
 	assert.Equal(t, int32(2), hits.Load())
 	assert.InDelta(t, 2, spent, 0.01)
+}
+
+func TestARetriedOperationSpendsATokenPerAttempt(t *testing.T) {
+	srv, hits := recordingsServer(t, 1, 1)
+	account, rl := pacedClient(t, srv.URL, basecamp.WithBaseDelay(time.Millisecond))
+
+	spent := tokensSpent(t, rl, func() {
+		_, err := account.Recordings().List(context.Background(), basecamp.RecordingTypeTodo, nil)
+		require.NoError(t, err)
+	})
+
+	assert.Equal(t, int32(2), hits.Load())
+	assert.InDelta(t, 2, spent, 0.01)
+}
+
+type closeRecorder struct {
+	io.Reader
+	closed atomic.Bool
+}
+
+func (c *closeRecorder) Close() error {
+	c.closed.Store(true)
+	return nil
+}
+
+func TestACanceledPaceClosesTheRequestBodyAndSendsNothing(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) }))
+	t.Cleanup(srv.Close)
+
+	rl := NewRateLimiter(NewStore(t.TempDir()), RateLimiterConfig{MaxTokens: 1, RefillRate: 0.0001, TokensPerRequest: 1})
+	require.NoError(t, rl.Pace(context.Background()))
+	transport := (&GatingHooks{rateLimiter: rl}).Transport(http.DefaultTransport)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	previousPause := pause
+	pause = func(ctx context.Context, d time.Duration) error {
+		cancel()
+		return previousPause(ctx, d)
+	}
+	t.Cleanup(func() { pause = previousPause })
+
+	body := &closeRecorder{Reader: strings.NewReader("{}")}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL, body)
+	require.NoError(t, err)
+
+	resp, err := transport.RoundTrip(req)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.True(t, body.closed.Load())
+	assert.Equal(t, int32(0), hits.Load())
 }
 
 func TestASinglePageOperationSpendsOneToken(t *testing.T) {
