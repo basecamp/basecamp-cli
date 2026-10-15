@@ -3,12 +3,15 @@ package admission
 // Trigger names why an admitted event is the agent's business.
 type Trigger string
 
-// The v1 triggers. boosted and queued are step 25; edited is step 28.
+// The triggers. queued is step 25, still to come; edited is step 28.
 const (
 	TriggerMentioned  Trigger = "mentioned"
 	TriggerSubscribed Trigger = "subscribed"
 	TriggerAssigned   Trigger = "assigned"
 	TriggerCompleted  Trigger = "completed"
+	// TriggerBoosted: someone boosted a recording the agent wrote. The boost
+	// is the content; the boosted recording is what it answers.
+	TriggerBoosted Trigger = "boosted"
 )
 
 // Rule is one row of the trigger matrix: a trigger an event type can admit
@@ -28,8 +31,8 @@ type Rule struct {
 	// read.
 	RequiresServed bool
 	// Acknowledge says a person asked for something, so the worker's
-	// acknowledgement and the thirty-second guard apply. A completion or a
-	// subscription comment is not a request.
+	// acknowledgement and the thirty-second guard apply. A completion, a
+	// subscription comment or a boost is not a request.
 	Acknowledge bool
 }
 
@@ -43,9 +46,15 @@ var (
 	ruleSubscribed = Rule{Trigger: TriggerSubscribed, RequiresServed: true}
 	ruleAssigned   = Rule{Trigger: TriggerAssigned, OperatorOnly: true, Acknowledge: true}
 	ruleCompleted  = Rule{Trigger: TriggerCompleted, RequiresServed: true}
+	// A boost answers something the agent wrote; it asks for nothing, so it
+	// is not acknowledged. It requires a served project because nothing in an
+	// unserved one waits on it: blocked(no_route) would post a holding reply
+	// to a thumbs-up. Who may boost is whoever may mention the agent, in
+	// every trust mode, so it is not OperatorOnly.
+	ruleBoosted = Rule{Trigger: TriggerBoosted, RequiresServed: true}
 )
 
-// V1Matrix returns the version-1 trigger matrix. Every other cataloged type
+// V1Matrix returns the trigger matrix: version 1, plus boosted. Every other cataloged type
 // is discarded as not_in_matrix. A fresh copy each call, so no caller can
 // widen another's.
 func V1Matrix() Matrix {
@@ -64,6 +73,10 @@ func V1Matrix() Matrix {
 
 		"todo.completed": {ruleCompleted},
 		"card.completed": {ruleCompleted},
+
+		// Admitted only for a boost on a recording the agent wrote, never on
+		// one of a recording's events (boostedRecording).
+		"boost.created": {ruleBoosted},
 	}
 }
 

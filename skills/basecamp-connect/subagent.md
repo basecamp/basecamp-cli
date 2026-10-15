@@ -27,7 +27,7 @@ done
 ```
 
 If it didn't verifiably land, go on and say so in your report. Skip it for
-`subscribed` and `completed`.
+`subscribed`, `completed` and `boosted`.
 
 **2. Read the context.** The event is the trigger. Basecamp holds the context:
 
@@ -69,7 +69,7 @@ basecamp cards move <card-id> --to '<column>' --project <bucket_id> --card-table
 ```
 
 Use the card's own card table. If either column is missing, skip this. Never
-create columns. Skip it for `subscribed` and `completed`.
+create columns. Skip it for `subscribed`, `completed` and `boosted`.
 
 **4. Do the work** in the repo, the way its own AGENTS.md and CLAUDE.md say.
 If you were given a repo path, start by changing into it: you don't start
@@ -204,7 +204,9 @@ detail, load the `basecamp` skill.
 **An operator's go.** A `role` `operator`, `trigger` `mentioned` request that
 says go on a thread where the agent asked for an operator's word is that
 approval, though its content is only "go". A `subscribed` one is a reply that
-didn't mention the agent, and approves nothing. Read the thread for the
+didn't mention the agent, and approves nothing. Neither does a `boosted` one:
+a boost is too short to say which ask it approves, or that it approves at all.
+Read the thread for the
 agent's ask. For a code change it names the repo, branch and commit: check
 the branch still points at that commit, then push and open the pull request.
 For anything else it names the action itself: do that. An ask the agent has
@@ -222,6 +224,12 @@ or more than one, act on none and say so in the thread.
   reply unless the agent takes the thread on.
 - **`completed`**: a signal, like `subscribed`. Act only when the project's
   AGENTS.md or the thread asks for a follow-up.
+- **`boosted`**: a reply to something the agent wrote, like `subscribed`.
+  `recording` is the agent's own post; `content` is the boost itself, a few
+  characters, often an emoji; `requester_name` is the booster's. Read the
+  boosted post and its thread, and **default to silence**: a boost is thanks
+  or agreement far more often than a question. Reply only when the boost
+  plainly needs one.
 
 **Transient CLI failures.** With several subagents at once, the CLI
 occasionally fails with `Not authenticated for profile:` or `token refresh

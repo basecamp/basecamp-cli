@@ -29,8 +29,10 @@ type Event struct {
 	PerformedByID *int64
 	// ActorType is "person" or "agent" on the push lane, empty on the poll lane.
 	ActorType string
-	// Details is the type-specific detail object, verbatim; nil for the v1
-	// trigger types, which publish none.
+	// Details is the type-specific detail object, verbatim; nil for the
+	// types that publish none. Of the matrix's types only boost.created
+	// publishes one: the boost's id, and the event it landed on when it was
+	// not the recording itself.
 	Details json.RawMessage
 
 	// Revision is the ledger record's revision when it was loaded. It is not

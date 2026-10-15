@@ -64,6 +64,7 @@ func TestEveryCatalogueTypeHasAVerdict(t *testing.T) {
 		"card.assignment_changed": TriggerAssigned,
 		"todo.completed":          TriggerCompleted,
 		"card.completed":          TriggerCompleted,
+		"boost.created":           TriggerBoosted,
 	}
 	require.Len(t, V1Matrix(), len(admitted), "the matrix and this table must name the same types")
 
@@ -76,10 +77,18 @@ func TestEveryCatalogueTypeHasAVerdict(t *testing.T) {
 			s.Assignees = []basecamp.Person{{ID: agentID}}
 			f.summaries[recordingID] = s
 			f.assignments[eventID] = []int64{agentID}
+			ev := Event{ID: eventID, EventType: eventType, BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID}
+			if eventType == "boost.created" {
+				// The operator boosts the agent's card; the boost is the content.
+				s.Creator = person(agentID)
+				f.boosts[boostID] = &basecamp.Boost{
+					ID: boostID, Content: "please look", Booster: person(operatorID),
+					Recording: &basecamp.Parent{ID: recordingID, Type: "Kanban::Card"},
+				}
+				ev.Details = boostDetailsJSON(boostID, nil)
+			}
 
-			v := decide(t, newAdmitter(t, basePolicy(), f), Event{
-				ID: eventID, EventType: eventType, BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID,
-			})
+			v := decide(t, newAdmitter(t, basePolicy(), f), ev)
 
 			want, inMatrix := admitted[eventType]
 			if !inMatrix {
