@@ -20,8 +20,9 @@ import (
 // the host, so Basecamp cannot tell one sandboxed box from another: every
 // request reads as the agent, from one token. A session mint asks the token
 // endpoint for a token of the session's own instead, carrying a random id
-// the launcher generated and a label it chose, which Basecamp stores on the
-// token and writes beside the agent in its request logs.
+// the launcher generated and an optional label it chose. Basecamp stores
+// both on the token; its request logs carry the id beside the agent, never
+// the label.
 //
 // The CLI calls this a session; on the wire, and in bc3, it is a launch
 // (launch_id, launch_label), because "session" already means the web
