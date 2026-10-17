@@ -54,9 +54,27 @@ type HandoffLine struct {
 	// Acknowledge says a person asked for something. A comment on a thread
 	// the agent follows, or a completion, is context and is not acknowledged.
 	Acknowledge bool `json:"acknowledge"`
+	// Go says this boosted request is the operator's go: their boost on a
+	// post the agent declared an ask (`basecamp connect ask`), and the first
+	// boost to take that ask. The ask is Recording. It approves what the ask
+	// names and nothing more. False on every other request, a boost on an
+	// ask from anyone else and the operator's second boost included.
+	Go bool `json:"go"`
+	// Ask is the declared ask's own words as admission read them and matched
+	// them against the declaration, set only on a go: the text the go
+	// approves. The worker acts on these words, never on a fresh read of
+	// Recording, which may have been edited since. Empty on every other line.
+	Ask HandoffAsk `json:"ask"`
 
 	Content          string    `json:"content"`
 	ContentUpdatedAt time.Time `json:"content_updated_at"`
+}
+
+// HandoffAsk is an ask's title and content. Title is empty for a comment or a
+// chat line.
+type HandoffAsk struct {
+	Title   string `json:"title"`
+	Content string `json:"content"`
 }
 
 // HandoffRecording points at the recording the request is about.
@@ -185,7 +203,11 @@ func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 		opts.log().Info("connector: a request from before this run started is not handed off", "event_id", record.ID, "created_at", record.CreatedAt)
 		return opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonBeforeThisRun)
 	}
-	line, err := handoffLine(record, opts.AgentID)
+	goes, err := opts.Ledger.isGo(ctx, record.ID)
+	if err != nil {
+		return err
+	}
+	line, err := handoffLine(record, opts.AgentID, goes)
 	if err != nil {
 		// Closed under its own reason, not handed_off: nothing was written.
 		// Returning the error instead would stop the connector on every
@@ -200,7 +222,7 @@ func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 }
 
 // handoffLine is a record as the reader gets it.
-func handoffLine(record Record, agentID int64) (HandoffLine, error) {
+func handoffLine(record Record, agentID int64, goes bool) (HandoffLine, error) {
 	var snapshot struct {
 		Type          string    `json:"type"`
 		Title         string    `json:"title"`
@@ -211,12 +233,27 @@ func handoffLine(record Record, agentID int64) (HandoffLine, error) {
 		RequesterName string    `json:"requester_name"`
 		Role          string    `json:"role"`
 		Owner         bool      `json:"owner"`
+		Ask           *struct {
+			Title   string `json:"title"`
+			Content string `json:"content"`
+		} `json:"ask"`
 	}
 	if record.ContentDropped || len(record.Decision.Snapshot) == 0 {
 		return HandoffLine{}, errors.New("the record has no content")
 	}
 	if err := json.Unmarshal(record.Decision.Snapshot, &snapshot); err != nil {
 		return HandoffLine{}, fmt.Errorf("snapshot: %w", err)
+	}
+	// Only a boosted record can hold a go; the trigger is checked here too,
+	// so no other line ever says go. A go without the words it approves is
+	// not handed off as one.
+	isGo := goes && record.Decision.Trigger == string(admission.TriggerBoosted) && snapshot.Ask != nil
+	var ask HandoffAsk
+	if isGo {
+		ask = HandoffAsk{
+			Title:   richtext.SanitizeTerminal(snapshot.Ask.Title),
+			Content: richtext.SanitizeTerminal(snapshot.Ask.Content),
+		}
 	}
 	return HandoffLine{
 		Type:      "request",
@@ -237,6 +274,8 @@ func handoffLine(record Record, agentID int64) (HandoffLine, error) {
 		Role:          handoffRole(snapshot.Role),
 		Owner:         snapshot.Owner && handoffRole(snapshot.Role) == string(admission.RoleOperator),
 		Acknowledge:   record.Decision.Acknowledge,
+		Go:            isGo,
+		Ask:           ask,
 		// The line is read in a terminal as often as by a program: no
 		// control sequences from Basecamp's text reach it.
 		Content:          richtext.SanitizeTerminal(StripMentionsOf(snapshot.Content, agentID)),

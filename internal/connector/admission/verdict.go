@@ -63,10 +63,23 @@ type Snapshot struct {
 	// Owner says the operator connect.json names asked, in words they wrote:
 	// they mentioned the agent, or assigned it a recording they wrote. A
 	// comment on a followed thread, a completion and a boost are never the
-	// owner's word. Someone named with --allow is an operator but never the
+	// owner's word; an operator's go on a declared ask is a separate
+	// approval (AskRecordingID) and does not make one. Someone named with --allow is an operator but never the
 	// owner, and neither is the owner bringing in someone else's words: an
 	// allowlisted person's to-do the owner moves in is that person's.
 	Owner bool `json:"owner,omitempty"`
+	// Ask is the boosted post as this decision read it, on an operator's
+	// boost that may be a declared ask's go: the exact words the fingerprint
+	// was taken over. A go approves these words, not the post as it is
+	// later, so the handoff gives them to the worker to act on.
+	Ask *AskCopy `json:"ask,omitempty"`
+}
+
+// AskCopy is an ask's own words, as one read returned them. Title is empty
+// for a comment or a chat line, whose title is not their own.
+type AskCopy struct {
+	Title   string `json:"title"`
+	Content string `json:"content"`
 }
 
 // Verdict is admission's decision about one event.
@@ -111,6 +124,23 @@ type Verdict struct {
 	RecordingURL string
 	// Snapshot is set on an admitted verdict only.
 	Snapshot *Snapshot
+
+	// AskRecordingID is set on an admitted boost the operator gave, on the
+	// agent's own recording: the ask that boost would be the go for, if the
+	// agent declared that recording an ask. Admission cannot see asks; the
+	// ledger decides in the verdict's own transaction, so one ask gets one go.
+	// Only the operator's boost carries it, in every trust mode: as with an
+	// assignment, an allowlist or a broader trust mode never extends it.
+	AskRecordingID int64
+	// AskContentHash is AskFingerprint of the boosted recording's title and
+	// content as this decision read it. The ledger gives the go only when it equals the
+	// hash the ask was declared with: an ask edited since it was declared is
+	// void, and its boost is an ordinary reply.
+	AskContentHash string
+	// AskBoostID is the boost's own id. Basecamp's boost ids only grow, so the
+	// ledger orders it against the boosts already on the ask when it was
+	// declared, on Basecamp's clock and no other.
+	AskBoostID int64
 
 	// agentCaps is set on a verdict admitting an allowed agent's mention:
 	// the committer counts it against the caps before writing it.
@@ -447,6 +477,10 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		return v.end(StateBlocked, ReasonNoRoute), nil
 	}
 	v.State = StateAdmitted
+	if rule.Trigger == TriggerBoosted && ev.PerformedByID == nil && ev.Performer() == policy.Trust.OperatorID {
+		v.AskRecordingID, v.AskContentHash = ev.RecordingID, AskFingerprint(summary.Type, summary.Title, summary.Content)
+		v.AskBoostID = boost.ID
+	}
 	v.Snapshot = &Snapshot{
 		Type:      summary.Type,
 		Title:     summary.Title,
@@ -456,9 +490,11 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		Role:      v.Role,
 		// Only a request the owner made, in words the owner wrote: a mention,
 		// or an assignment of a recording they wrote. A comment on a thread
-		// the agent follows asks it nothing, a completion is context, a boost
-		// answers the agent and names nothing it approves, and an assigned
-		// recording someone else wrote is that person's words.
+		// the agent follows asks it nothing, a completion is context, and an
+		// assigned recording someone else wrote is that person's words. A
+		// boost is never Owner either, even the operator's go on a declared
+		// ask (AskRecordingID): Owner is the owner's word on the connector
+		// itself, and a go approves only what its ask names, never that.
 		Owner: v.Role == RoleOperator && ev.Performer() == policy.Trust.OperatorID &&
 			(rule.Trigger == TriggerMentioned || rule.Trigger == TriggerAssigned) &&
 			summary.Creator.ID == policy.Trust.OperatorID,
@@ -476,6 +512,11 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		}
 	case summary.Creator != nil && summary.Creator.ID == v.RequesterID:
 		v.Snapshot.RequesterName = summary.Creator.Name
+	}
+	if v.AskRecordingID > 0 {
+		// The same read the fingerprint was taken over, so the words handed
+		// off are exactly the ones the ledger matches against the declaration.
+		v.Snapshot.Ask = &AskCopy{Title: AskTitle(summary.Type, summary.Title), Content: summary.Content}
 	}
 	return v, nil
 }

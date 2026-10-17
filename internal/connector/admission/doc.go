@@ -55,7 +55,11 @@
 // they reach the agent by mention, by comment on a thread it follows, by a
 // completion it has a stake in, and by boosting something it wrote, never by
 // assignment. A boost's content is the boost, which its booster wrote, so the
-// booster is held to the performer's trust and there is no other author. Every admitted
+// booster is held to the performer's trust and there is no other author.
+// The operator's boost alone, in every trust mode, also names the boosted
+// post as the ask it may be the go for (Verdict.AskRecordingID); whether the
+// agent declared that post an ask, and whether its go is still open, is the
+// ledger's to decide in the verdict's transaction. Every admitted
 // verdict carries its Role, the lesser of the performer's and, for mentioned
 // and subscribed, the author's, so words a participant wrote stay a
 // participant's request whoever brought them in.

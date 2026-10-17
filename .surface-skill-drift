@@ -26,6 +26,7 @@ FLAG basecamp --operator-profile
 FLAG basecamp --serve
 FLAG basecamp --shadow
 CMD basecamp connect discard
+CMD basecamp connect ask
 CMD basecamp connect doctor
 CMD basecamp connect import
 CMD basecamp connect release

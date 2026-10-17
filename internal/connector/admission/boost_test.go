@@ -351,3 +351,75 @@ func TestAnAllowlistedAgentsBoostIsRefusedByTheBoostRead(t *testing.T) {
 	assert.Nil(t, v.Snapshot)
 	assert.Zero(t, f.summaryCalls, "refused before the boosted recording is read")
 }
+
+// Only the operator's own boost on the agent's post may be a go, in every
+// trust mode: the verdict names the ask it would answer, and the ledger
+// decides whether the agent declared one. Anyone else's boost names none.
+func TestOnlyTheOperatorsBoostMayBeAGo(t *testing.T) {
+	t.Run("the operator's boost names the post as the ask it would answer", func(t *testing.T) {
+		f := newFakeReads()
+		boostOn(f, "Comment", agentID, operatorID)
+		v := decide(t, newAdmitter(t, basePolicy(), f), boostEvent(operatorID))
+		require.Equal(t, StateAdmitted, v.State, "reason %q", v.Reason)
+		assert.Equal(t, recordingID, v.AskRecordingID)
+	})
+
+	t.Run("an allowlisted operator's, even opted in to assigning, names none", func(t *testing.T) {
+		p := basePolicy()
+		p.Trust = Trust{Mode: TrustAllowlist, OperatorID: operatorID, AllowlistIDs: []int64{allowedID}, AllowAssignments: true}
+		f := newFakeReads()
+		boostOn(f, "Comment", agentID, allowedID)
+		v := decide(t, newAdmitter(t, p, f), boostEvent(allowedID))
+		require.Equal(t, StateAdmitted, v.State, "reason %q", v.Reason)
+		assert.Equal(t, RoleOperator, v.Role)
+		assert.Zero(t, v.AskRecordingID)
+	})
+
+	t.Run("a project member's names none", func(t *testing.T) {
+		p := basePolicy()
+		p.Trust = Trust{Mode: TrustProject, OperatorID: operatorID}
+		f := newFakeReads()
+		f.members[servedProj] = map[int64]bool{memberID: true}
+		boostOn(f, "Comment", agentID, memberID)
+		v := decide(t, newAdmitter(t, p, f), boostEvent(memberID))
+		require.Equal(t, StateAdmitted, v.State, "reason %q", v.Reason)
+		assert.Zero(t, v.AskRecordingID)
+	})
+
+	t.Run("the operator's mention names none", func(t *testing.T) {
+		f := newFakeReads()
+		s := summaryWith(recordingID, servedProj, "Message", operatorID, mentionOf(t, agentID))
+		f.summaries[recordingID] = s
+		v := decide(t, newAdmitter(t, basePolicy(), f), Event{
+			ID: eventID, EventType: "message.created", BucketID: servedProj, RecordingID: recordingID, CreatorID: operatorID,
+		})
+		require.Equal(t, StateAdmitted, v.State)
+		assert.Zero(t, v.AskRecordingID)
+	})
+
+	t.Run("the operator's boost on someone else's post is not admitted at all", func(t *testing.T) {
+		f := newFakeReads()
+		boostOn(f, "Comment", strangerID, operatorID)
+		v := decide(t, newAdmitter(t, basePolicy(), f), boostEvent(operatorID))
+		assert.Equal(t, StateDiscarded, v.State)
+		assert.Zero(t, v.AskRecordingID)
+	})
+}
+
+// The fingerprint covers a titled post's title and content, length-prefixed so
+// the fields cannot run together, and a comment's or line's content alone.
+func TestAskFingerprint(t *testing.T) {
+	const content = "<div>push abc123</div>"
+	assert.Equal(t, AskFingerprint("Comment", "Re: a card", content), AskFingerprint("Comment", "Re: renamed card", content),
+		"a comment's title is its parent's, and is not the ask's")
+	assert.Equal(t, AskFingerprint("Chat::Lines::RichText", "", content), AskFingerprint("Comment", "", content))
+	assert.Equal(t, AskFingerprint("Question::Answer", "What did you work on?", content), AskFingerprint("Question::Answer", "Renamed question", content),
+		"a check-in answer's title is its question's, and is not the ask's")
+	assert.Empty(t, AskTitle("Question::Answer", "What did you work on?"), "nor is it handed off as the ask's words")
+	assert.NotEqual(t, AskFingerprint("Message", "Push abc123?", content), AskFingerprint("Message", "Deploy production?", content),
+		"a message's subject is part of what it asks")
+	assert.NotEqual(t, AskFingerprint("Message", "ab", "c"), AskFingerprint("Message", "a", "bc"),
+		"the fields cannot run together")
+	assert.Equal(t, AskFingerprint("Kanban::Card", "Push abc123?", content), AskFingerprint("Kanban::Card", "Push abc123?", content),
+		"an unedited post read twice fingerprints the same")
+}

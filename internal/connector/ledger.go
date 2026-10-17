@@ -946,6 +946,11 @@ END;
 	// its ALTER TABLE would refuse a second run outright rather than
 	// backfill twice.
 	migrationBlockedRetrySchedule,
+
+	// Migration 15. Asks: the posts the agent declared as asking the
+	// operator for a go, and which event's boost took each one's go. See
+	// ledger_asks.go.
+	migrationAsks,
 }
 
 // migrationBlockedRetrySchedule is migration 14.

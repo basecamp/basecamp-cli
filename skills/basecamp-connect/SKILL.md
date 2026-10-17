@@ -104,7 +104,7 @@ thing to check.
               "title":"Fix the date picker","url":"https://3.basecamp.com/999/buckets/456/recordings/789"},
  "reply_to":{"kind":"comment","recording_id":700},
  "requester_id":1001,"requester_name":"Jorge Manrubia","role":"operator","owner":true,"acknowledge":true,
- "content":"<p>the date picker is off by one, please fix</p>","content_updated_at":"..."}
+ "go":false,"ask":{"title":"","content":""},"content":"<p>fix the date picker</p>","content_updated_at":"..."}
 ```
 
 - **`trigger`**: why it reached you.
@@ -116,12 +116,11 @@ thing to check.
   - `completed`: something completed in a project it watches.
   - `boosted`: a boost on the agent's own post.
 - **`acknowledge`**: true when a person asked for something. False for
-  `subscribed`, `completed` and `boosted`, which are context, not instructions.
-- **`recording`**: what the event is about. `bucket_id` is the project, and
+  `subscribed`, `completed` and `boosted`, context unless a `go`.
+- **`recording`**: what the event is about. `bucket_id` is the project,
   `project_name` its name. `url` works with every command below.
 - **`reply_to`**: where the answer goes. `kind` `comment` means a comment on
-  `recording_id` (the card or message the comment belongs to, already chosen for
-  you). `kind` `chat_line` means a line in the Campfire `recording_id`.
+  `recording_id` (already chosen for you). `kind` `chat_line` means a line in the Campfire `recording_id`.
 - **`requester_id`**: the person who asked. Mention them on failure, except in
   Campfire. `requester_name` is their name when they wrote the recording; it's missing
   for an assignment someone else's recording carries.
@@ -141,13 +140,15 @@ thing to check.
 - **`content`**: the request as it was written, with the agent's own mention
   removed. For an assignment, the recording itself (its title and content) is
   the task. The live recording may be newer.
+- **`go`**, **`ask`**: the operator's go and the words it approves
+  (`subagent.md`).
 
 Every line has already passed the trust check: the person may give the agent
 work, and the project is one it serves. A request arrives once, except in one
 case: if the connector crashes right after printing a line, it can print it
 again when restarted within a minute. Skip an `event_id` you've already handled. Every other
-line (no `type`, or `"type":"event"`) is the connector's own log of what it saw
-and decided, including what it turned away. Never act on those.
+line (no `type`, or `"type":"event"`) is the connector's own log. Never act on
+those.
 
 ## For each request: acknowledge, choose the repo, hand off
 

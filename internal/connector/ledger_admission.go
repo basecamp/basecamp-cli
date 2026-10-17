@@ -189,6 +189,15 @@ func (a Admission) commit(ctx context.Context, v admission.Verdict, state Record
 			return "", fmt.Errorf("connector: read verdict on %d back: %w", v.EventID, err)
 		}
 		state = RecordState(written)
+		if v.AskRecordingID > 0 {
+			// The go is taken with the verdict, or not at all: two boosts
+			// on one ask commit one after the other, and only the first
+			// finds it open. The record keeps it under any of the three
+			// states, since each still hands off.
+			if _, err := takeGo(ctx, tx, v.AskRecordingID, v.AskContentHash, v.AskBoostID, v.EventID); err != nil {
+				return "", err
+			}
+		}
 	}
 	if l.hooks.VerdictCommitted != nil {
 		committed := CommittedVerdict{
