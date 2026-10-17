@@ -347,7 +347,9 @@ away. They are already stripped of control characters, so pass them on as they
 are. Don't scrape the terminal text. It goes to stderr and is the CLI's copy
 for a person at that terminal. The second value is the result envelope: `ok`,
 with `data.profile`, `data.account_id` and `data.scope`, or the error and its
-hint.
+hint. If it fails at once with "Interactive login cannot run under a machine
+output mode", the CLI predates this skill: run `basecamp upgrade`, tell the
+person, and run it again. Don't follow that error's hint.
 
 `basecamp auth login` and `basecamp profile create` refuse `--json`. Run them
 plainly, in the background, and read their output as it arrives, so you can
