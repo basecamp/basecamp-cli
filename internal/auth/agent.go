@@ -525,8 +525,8 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 }
 
 // ErrAgentCredentialRefused is the cause of a mint the token endpoint
-// refused for the credentials themselves: the agent was disconnected in
-// Basecamp, or connected on another computer, which replaced its secret.
+// refused for the credentials themselves: this connection may have been
+// disconnected in Basecamp or replaced by a newer approval.
 var ErrAgentCredentialRefused = errors.New("the agent's credential was refused")
 
 // clientRefusalCodes are the RFC 6749 §5.2 codes that say THE CREDENTIALS

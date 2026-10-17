@@ -76,7 +76,7 @@ type connectSetupServer struct {
 	// agentProjects is what the agent's project list answers.
 	agentProjects []map[string]any
 	// refuseSecret answers every mint with invalid_client, as Basecamp does
-	// for an agent disconnected, or connected on another computer.
+	// for a connection disconnected or replaced by a newer approval.
 	refuseSecret bool
 	// rateLimitMints answers every mint with a 429 asking for an hour.
 	rateLimitMints bool

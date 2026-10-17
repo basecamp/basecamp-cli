@@ -105,9 +105,8 @@ func runGuidedConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupF
 	if os.Getenv("BASECAMP_TOKEN") != "" {
 		return errEnvTokenShadows("connect setup cannot check the agent while BASECAMP_TOKEN is set")
 	}
-	// Before anything is connected: connecting replaces the secret another
-	// computer may be running this agent on, for a connector this one
-	// can't run.
+	// Before any approval: it may replace an existing connection, or add a
+	// live credential, for a connector this platform cannot run.
 	if !connectSupportedOS(connectGOOS) {
 		return connectUnsupportedOSError(connectGOOS)
 	}
@@ -163,7 +162,7 @@ func runGuidedConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupF
 		file = &loaded
 	}
 
-	renderGuidedSummary(w, r, agent, *file, connectorRunning(*file), name)
+	renderGuidedSummary(w, r, agent, *file, connectorRunning(name, *file), name)
 	return nil
 }
 
@@ -261,7 +260,7 @@ func ensureGuidedAgentConnection(cmd *cobra.Command, app *appctx.App, name strin
 	if err != nil || !refused {
 		return false, err
 	}
-	fmt.Fprintln(w, r.Warning.Render("This computer's connection to your agent was disconnected in Basecamp, or it was connected on another computer."))
+	fmt.Fprintln(w, r.Warning.Render(errAgentDisconnected("your agent", name).Message+"."))
 	reconnect, err := connectSetupAsk.Confirm("Connect this computer to it again?", true)
 	if err != nil {
 		return false, err
@@ -507,6 +506,7 @@ func chooseGuidedProjects(w io.Writer, agent guidedAgent) ([]guidedProject, erro
 	if len(names) == 1 {
 		question = fmt.Sprintf("Work in %s's project, %s?", name, names[0])
 	}
+	fmt.Fprintln(w, "When two connections of one agent serve the same project, a request both admit can be answered twice. Serve each project from one connection.")
 	all, err := connectSetupAsk.Confirm(question, true)
 	if err != nil {
 		return nil, err
@@ -543,8 +543,8 @@ func chooseGuidedProjects(w io.Writer, agent guidedAgent) ([]guidedProject, erro
 
 // connectorRunning reports whether a connector for this setup is running:
 // the instance lock's holder, as `connect status` reads it, is alive.
-func connectorRunning(file setup.File) bool {
-	dir, err := connectStatePath(file, false)
+func connectorRunning(profile string, file setup.File) bool {
+	dir, err := connectStatePath(profile, file, false)
 	if err != nil {
 		return false
 	}

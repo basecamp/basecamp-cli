@@ -387,7 +387,7 @@ func TestConnectAgentRefusesATokenWiderThanTheApproval(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "wider than the scope")
 	assertNoAgentCredential(t, m)
-	assert.Contains(t, cl.joined(), "Disconnect the agent in Basecamp and connect again")
+	assertLostHandoverRemedy(t, cl.joined())
 	assert.NotContains(t, cl.joined(), "minted", "no token from a refused mint is kept")
 }
 
@@ -535,7 +535,7 @@ func TestConnectAgentRefusesAScopeItCannotStore(t *testing.T) {
 	assertNoAgentCredential(t, m)
 	// The poll was answered, so the code is burned and the secret minted
 	// whatever this process made of the answer.
-	assert.Contains(t, cl.joined(), "Disconnect the agent in Basecamp and connect again")
+	assertLostHandoverRemedy(t, cl.joined())
 	var e *output.Error
 	assert.ErrorAs(t, err, &e, "the refusal keeps its own class through the spent-handover marker")
 }
@@ -697,11 +697,9 @@ func TestConnectAgentStoresNothingWhenTheProfileCannotBeCommitted(t *testing.T) 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "bound to another account")
 	assertNoAgentCredential(t, m)
-	// The poll burned the code and rotated the agent's secret, so this
-	// failure leaves the agent connected to nothing. Saying "nothing was
-	// stored" alone would send the operator looking for a credential that
-	// no longer exists anywhere.
-	assert.Contains(t, cl.joined(), "Disconnect the agent in Basecamp and connect again")
+	// The poll burned the code and minted this connection's secret. Other
+	// connections may survive, but this one has no retained credential.
+	assertLostHandoverRemedy(t, cl.joined())
 }
 
 // TestConnectAgentRefusesTheLaunchpadFallback: Launchpad has no agent
@@ -842,7 +840,7 @@ func TestConnectAgentRefusesAHandoverWiderThanTheRequest(t *testing.T) {
 	assert.Contains(t, err.Error(), "read-only")
 	assert.Empty(t, as.calls(&as.tokenForms), "a handover wider than the request is never minted with")
 	assertNoAgentCredential(t, m)
-	assert.Contains(t, cl.joined(), "Disconnect the agent in Basecamp and connect again")
+	assertLostHandoverRemedy(t, cl.joined())
 }
 
 // TestConnectAgentHonorsASlowRetryAfter: a Retry-After longer than a
@@ -880,7 +878,7 @@ func TestConnectAgentHandsBackARemedyTheOperatorCanFollow(t *testing.T) {
 	require.Error(t, err)
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
-	assert.Contains(t, e.Hint, "Disconnect the agent in Basecamp")
+	assertLostHandoverRemedy(t, e.Hint)
 	assert.NotContains(t, e.Hint, "--with-client-credentials")
 }
 
@@ -931,6 +929,14 @@ func TestConnectAgentReportsAnAccountLimitFromThePoll(t *testing.T) {
 // what it was going to do when it answered 200 — the code is burned and
 // the secret minted — so a body that never arrives costs exactly what a
 // refused mint costs and has to say the same thing.
+func assertLostHandoverRemedy(t *testing.T, text string) {
+	t.Helper()
+	assert.Contains(t, text, "Disconnect the newest connection in Basecamp")
+	assert.Contains(t, text, "last in the list, where connections are listed")
+	assert.Contains(t, text, "not Disconnect all")
+	assert.Contains(t, text, "cleanup can wait")
+}
+
 func TestConnectAgentTreatsAnInterruptedHandoverAsSpent(t *testing.T) {
 	as := startConnectAS(t)
 	as.pollHijack = true
@@ -939,7 +945,7 @@ func TestConnectAgentTreatsAnInterruptedHandoverAsSpent(t *testing.T) {
 	cl := &collectLogger{}
 	_, err := m.ConnectAgent(context.Background(), connectOptions(cl, newTestClock()))
 	require.Error(t, err)
-	assert.Contains(t, cl.joined(), "Disconnect the agent in Basecamp and connect again")
+	assertLostHandoverRemedy(t, cl.joined())
 	assertNoAgentCredential(t, m)
 	assert.Empty(t, as.calls(&as.tokenForms), "nothing was minted with a credential that never arrived")
 }

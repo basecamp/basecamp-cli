@@ -131,6 +131,7 @@ func TestGuidedConnectSetupFromNothing(t *testing.T) {
 		"Work in all 2 of Marie Chef's projects? Connector, Launch",
 	}, p.asked)
 	assert.Contains(t, out, "✓ Everything checks out")
+	assert.Contains(t, out, "a request both admit can be answered twice")
 	assert.Contains(t, out, "Marie Chef is set up on this computer")
 	assert.Contains(t, out, "Works in:  Connector, Launch")
 	assert.Contains(t, out, "Running:   no")
@@ -314,7 +315,7 @@ func TestGuidedConnectSetupOffersToReconnectARefusedCredential(t *testing.T) {
 	out, err := runConnectSetupCmd(t, app)
 	require.NoError(t, err, out)
 
-	assert.Contains(t, out, "was disconnected in Basecamp, or it was connected on another computer")
+	assert.Contains(t, out, `Profile "agent"'s connection to your agent was disconnected in Basecamp, or replaced by a newer connection.`)
 	assert.Equal(t, "Connect this computer to it again?", p.asked[0])
 	assert.Equal(t, 2, s.intakeCount(), "a second connection ran")
 	_, err = setup.Load(connectSetupPath(t, "agent"))
