@@ -1,15 +1,20 @@
 package auth
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"os"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/cli/credstore"
+
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // swapNewCredStore replaces the credstore constructor seam for the test.
@@ -132,4 +137,94 @@ func TestLoadWarnsOnceWhenKeyringFellBack(t *testing.T) {
 		require.NoError(t, store.Save("profile:work", &Credentials{AccessToken: "tok"}))
 	})
 	assert.Empty(t, write, "a write after the read has already warned stays quiet")
+}
+
+// refusedStore stands in for a credstore.Store whose keyring probe was
+// refused by the OS — Codex's Windows sandbox answers Credential Manager
+// with ERROR_ACCESS_DENIED — and which fell back to a credentials file that
+// holds nothing, because the login went to the keyring. The error is shaped
+// exactly as credstore's Load reports that miss.
+type refusedStore struct{ credStore }
+
+func (refusedStore) Load(key string) ([]byte, error) {
+	return nil, fmt.Errorf("%w: system keyring unavailable (%w), fell back to %s",
+		fmt.Errorf("credentials not found for %s", key), syscall.EACCES, "/home/u/.config/basecamp/credentials.json")
+}
+func (refusedStore) FallbackWarning() string { return "system keyring unavailable (permission denied)" }
+func (refusedStore) UsingKeyring() bool      { return false }
+
+// emptyFileStore is a file store with nothing in it and no keyring behind
+// it: a plain "never logged in".
+type emptyFileStore struct{ credStore }
+
+func (emptyFileStore) Load(key string) ([]byte, error) {
+	return nil, fmt.Errorf("credentials not found for %s", key)
+}
+func (emptyFileStore) FallbackWarning() string { return "" }
+func (emptyFileStore) UsingKeyring() bool      { return false }
+
+func managerWithStore(t *testing.T, inner credStore) *Manager {
+	t.Helper()
+	t.Setenv("BASECAMP_TOKEN", "")
+	m := newDeviceTestManager(t, "https://3.basecampapi.com")
+	m.store = &Store{fallbackDir: t.TempDir(), inner: inner}
+	m.store.initOnce.Do(func() {})
+	m.store.warnOnce.Do(func() {})
+	return m
+}
+
+// Regression: inside an agent's sandbox the OS refuses the keyring, the
+// store falls back to an empty file, and the miss was reported as "not
+// logged in" with "Run: basecamp auth login" — a login the person already
+// has, and no answer to a store the sandbox will not open. The error must
+// name the refusal and remedies that work there.
+func TestAccessTokenWhenTheKeyringRefusesAccessNamesTheRefusal(t *testing.T) {
+	m := managerWithStore(t, refusedStore{})
+
+	_, err := m.AccessToken(context.Background())
+	require.Error(t, err)
+
+	e := output.AsError(err)
+	assert.Equal(t, output.CodeAuth, e.Code)
+	assert.Contains(t, e.Message, "refused access")
+	assert.Contains(t, e.Message, syscall.EACCES.Error(), "the OS's own words stay in the message")
+	assert.Equal(t, CredentialStoreRefusedHint, e.Hint)
+	assert.NotContains(t, e.Hint, "auth login")
+}
+
+// The refused-store remedy is read by customers, and personal access tokens
+// are not issued to every account: the hint must name only remedies anyone
+// can take, and never send people to mint a token.
+func TestCredentialStoreRefusedHintNamesRemediesAnyoneCanTake(t *testing.T) {
+	assert.NotContains(t, CredentialStoreRefusedHint, "access_tokens")
+	assert.NotContains(t, CredentialStoreRefusedHint, "personal access token")
+	assert.Contains(t, CredentialStoreRefusedHint, "outside the sandbox")
+	assert.Contains(t, CredentialStoreRefusedHint, "BASECAMP_NO_KEYRING=1")
+	assert.Contains(t, CredentialStoreRefusedHint, "XDG_CONFIG_HOME")
+	assert.Contains(t, CredentialStoreRefusedHint, "https://basecamp.com/ai")
+}
+
+// A gate that acts on CheckAuthenticated must not read a refused store as
+// "nothing stored" and send the person off to log in again.
+func TestCheckAuthenticatedReportsARefusedStore(t *testing.T) {
+	m := managerWithStore(t, refusedStore{})
+
+	authenticated, err := m.CheckAuthenticated(context.Background())
+	assert.False(t, authenticated)
+	require.Error(t, err)
+	assert.Equal(t, CredentialStoreRefusedHint, output.AsError(err).Hint)
+}
+
+// The refusal is the only miss that changes remedy: a store that simply
+// holds nothing still says to log in.
+func TestAccessTokenWithNothingStoredStillSaysLogin(t *testing.T) {
+	m := managerWithStore(t, emptyFileStore{})
+
+	_, err := m.AccessToken(context.Background())
+	require.Error(t, err)
+	assert.Equal(t, "Run: basecamp auth login", output.AsError(err).Hint)
+
+	authenticated, err := m.CheckAuthenticated(context.Background())
+	assert.False(t, authenticated)
+	assert.NoError(t, err)
 }
