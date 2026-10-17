@@ -84,6 +84,10 @@ type agentMint struct {
 	scope         string
 	resource      string
 	client        *http.Client
+
+	// launch is the session a session mint attributes its token to, or
+	// nil for the profile's shared token (see agent_launch.go).
+	launch *agentLaunch
 }
 
 // prepareAgentMint is the half of a mint that sends nothing: it checks what
@@ -324,6 +328,7 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	if mint.resource != "" {
 		form.Set("resource", mint.resource)
 	}
+	mint.launch.addTo(form)
 
 	reqCtx, cancel := context.WithTimeout(ctx, agentMintTimeout)
 	defer cancel()
@@ -421,6 +426,11 @@ func (m *Manager) mintAgentToken(ctx context.Context, mint *agentMint) (*oauth.T
 	}
 	if err := applyTokenLifetime(&token, body); err != nil {
 		return nil, nil, output.ErrAPI(resp.StatusCode, "minting an agent token: "+err.Error())
+	}
+	// Last, so a token that is not bound to the session it was asked for
+	// never leaves this function, however good it is otherwise.
+	if err := mint.launch.requireEcho(resp.StatusCode, body); err != nil {
+		return nil, nil, err
 	}
 	return &token, nil, nil
 }
