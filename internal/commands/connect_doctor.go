@@ -124,7 +124,7 @@ func feedCheck(ctx context.Context, account *basecamp.AccountClient) setup.Check
 // gaps with their epoch ids, losses, the hold, and lifecycle messages that
 // wait for a decision. It reads the ledger read-only.
 func ledgerChecks(ctx context.Context, p connectProfile) []setup.Check {
-	dir, err := connectStatePath(p.file, false)
+	dir, err := connectStatePath(p.name, p.file, false)
 	if err != nil {
 		return []setup.Check{{Name: "Ledger", Status: setup.StatusFail, Message: errorMessage(err)}}
 	}

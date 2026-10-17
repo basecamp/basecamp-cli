@@ -49,9 +49,6 @@ func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
 	fl.BoolVar(&f.hold, "hold", false, "Set the durable hold: intake and admission run, nothing is dispatched or posted until the hold is released, and earlier records wait for review")
 }
 
-// connectStateHome is the directory holding the connector's state root, from
-// connector.StateRoot so the connector and the worker's MCP server agree on
-// one place.
 func connectStateHome() (string, error) {
 	root, err := connector.StateRoot()
 	if err != nil {
@@ -78,37 +75,53 @@ func ensurePrivateChain(root string, parts ...string) (string, error) {
 	return dir, nil
 }
 
-// connectStateDir is the connector's state directory for a set-up profile,
-// created owner-only: $XDG_STATE_HOME/basecamp/connect/<account>-<agent>, or
-// connect-shadow for a shadow run. Everything that reads the connector's
-// state (status) resolves it here.
-func connectStateDir(file setup.File, shadow bool) (string, error) {
+func connectStateDir(profile string, file setup.File, shadow bool) (string, error) {
 	stateHome, err := connectStateHome()
 	if err != nil {
 		return "", err
 	}
-	return ensurePrivateChain(stateHome, connectStateParts(file, shadow)...)
+	parts := connectStateParts(profile, file, shadow)
+	parent, err := ensurePrivateChain(stateHome, parts[:len(parts)-1]...)
+	if err != nil {
+		return "", err
+	}
+	if _, err := connector.AdoptLegacyStateDir(parent, file.AccountID, file.Agent.PersonID, profile); err != nil {
+		return "", err
+	}
+	dir := filepath.Join(parent, parts[len(parts)-1])
+	if err := setup.EnsurePrivateDir(dir); err != nil {
+		return "", err
+	}
+	return dir, nil
 }
 
 // connectStatePath is connectStateDir's path, created nothing: for commands
 // that only read the connector's state, and must not make a directory to do
 // it.
-func connectStatePath(file setup.File, shadow bool) (string, error) {
+func connectStatePath(profile string, file setup.File, shadow bool) (string, error) {
 	stateHome, err := connectStateHome()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(append([]string{stateHome}, connectStateParts(file, shadow)...)...), nil
+	parts := connectStateParts(profile, file, shadow)
+	dir := filepath.Join(append([]string{stateHome}, parts...)...)
+	legacy := filepath.Join(filepath.Dir(dir), connector.LegacyStateDirName(file.AccountID, file.Agent.PersonID))
+	if _, err := os.Lstat(dir); errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Lstat(legacy); err == nil {
+			return legacy, nil
+		}
+	}
+	return dir, nil
 }
 
-func connectStateParts(file setup.File, shadow bool) []string {
+func connectStateParts(profile string, file setup.File, shadow bool) []string {
 	group := "connect"
 	if shadow {
 		// An isolated ledger, lock and checkpoint: a shadow never shares a
 		// position or a record with the connector it watches beside.
 		group = "connect-shadow"
 	}
-	return []string{"basecamp", group, connector.StateDirName(file.AccountID, file.Agent.PersonID)}
+	return []string{"basecamp", group, connector.StateDirName(file.AccountID, file.Agent.PersonID, profile)}
 }
 
 func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
@@ -175,7 +188,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	// until the credential is proven to be that agent, holding its lock
 	// through the wait could keep the agent's real connector from starting.
 	// The lock is taken for the run once the identity is verified.
-	stateDir, err := connectStateDir(file, f.shadow)
+	stateDir, err := connectStatePath(name, file, f.shadow)
 	if err != nil {
 		return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
 	}
@@ -214,6 +227,13 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return output.ErrAuth(err.Error())
 	}
 	agentID := me.ID
+	stateDir, err = connectStateDir(name, file, f.shadow)
+	switch {
+	case errors.Is(err, connector.ErrAlreadyRunning):
+		return &output.Error{Code: output.CodeLockUnavailable, Message: err.Error()}
+	case err != nil:
+		return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
+	}
 	lock, err := acquireConnectLock(stateDir, account, agentID)
 	if err != nil {
 		return err
@@ -413,6 +433,9 @@ func acquireConnectLock(stateDir, account string, agentID int64) (*connector.Ins
 // connectLockFree reports, by taking and at once releasing it, whether the
 // instance lock is free: the start's look before it waits for a token.
 func connectLockFree(stateDir, account string, agentID int64) error {
+	if _, err := os.Lstat(stateDir); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	lock, err := acquireConnectLock(stateDir, account, agentID)
 	if err != nil {
 		return err

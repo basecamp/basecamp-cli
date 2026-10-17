@@ -163,7 +163,7 @@ func runGuidedConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupF
 		file = &loaded
 	}
 
-	renderGuidedSummary(w, r, agent, *file, connectorRunning(*file), name)
+	renderGuidedSummary(w, r, agent, *file, connectorRunning(name, *file), name)
 	return nil
 }
 
@@ -543,8 +543,8 @@ func chooseGuidedProjects(w io.Writer, agent guidedAgent) ([]guidedProject, erro
 
 // connectorRunning reports whether a connector for this setup is running:
 // the instance lock's holder, as `connect status` reads it, is alive.
-func connectorRunning(file setup.File) bool {
-	dir, err := connectStatePath(file, false)
+func connectorRunning(profile string, file setup.File) bool {
+	dir, err := connectStatePath(profile, file, false)
 	if err != nil {
 		return false
 	}

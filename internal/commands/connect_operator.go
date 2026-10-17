@@ -100,7 +100,7 @@ func parseEventIDArg(raw string) (int64, error) {
 // metadata beside it is written best-effort and says nothing on its own.
 func openConnectLedger(ctx context.Context, p connectProfile, requireStopped bool) (*connector.Ledger, func(), error) {
 	done := func() {}
-	dir, err := connectStatePath(p.file, false)
+	dir, err := connectStatePath(p.name, p.file, false)
 	if err != nil {
 		return nil, done, err
 	}
@@ -135,8 +135,17 @@ func openConnectLedger(ctx context.Context, p connectProfile, requireStopped boo
 			return nil, done, lockErr
 		}
 		done = func() { _ = lock.Release() }
+		if _, err := os.Lstat(path); err != nil {
+			done()
+			return nil, func() {}, output.ErrUsageHint(fmt.Sprintf("Profile %q's connector state moved while this command started", p.name), "Run the command again.")
+		}
 	}
-	ledger, err := connector.OpenLedger(path) //nolint:contextcheck // OpenLedger migrates on its own context
+	var ledger *connector.Ledger
+	if requireStopped || outOfDate {
+		ledger, err = connector.OpenLedger(path) //nolint:contextcheck // OpenLedger migrates on its own context
+	} else {
+		ledger, err = connector.OpenExistingLedger(ctx, path)
+	}
 	if err != nil {
 		done()
 		return nil, func() {}, err
@@ -208,7 +217,7 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	if err != nil {
 		return err
 	}
-	dir, err := connectStatePath(p.file, shadow)
+	dir, err := connectStatePath(p.name, p.file, shadow)
 	if err != nil {
 		return err
 	}
@@ -650,11 +659,11 @@ to be discarded.`,
 			if err != nil {
 				return err
 			}
-			shadowDir, err := connectStatePath(p.file, true)
+			stateHome, err := connectStateHome()
 			if err != nil {
 				return err
 			}
-			stateHome, err := connectStateHome()
+			shadowDir, err := connectStatePath(p.name, p.file, true)
 			if err != nil {
 				return err
 			}
@@ -662,13 +671,18 @@ to be discarded.`,
 			if err != nil {
 				return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
 			}
-			res, err := connector.PromoteShadow(cmd.Context(), connector.PromoteOptions{
-				ShadowDir: shadowDir,
-				StateDir:  filepath.Join(parent, connector.StateDirName(p.file.AccountID, p.file.Agent.PersonID)),
-				AccountID: p.file.AccountID,
-				AgentID:   p.file.Agent.PersonID,
-				By:        operatorName(),
-			})
+			var res connector.PromoteResult
+			release, err := lockLegacyStateWithoutLedger(filepath.Join(parent, connector.LegacyStateDirName(p.file.AccountID, p.file.Agent.PersonID)), p.file)
+			if err == nil {
+				defer release()
+				res, err = connector.PromoteShadow(cmd.Context(), connector.PromoteOptions{
+					ShadowDir: shadowDir,
+					StateDir:  filepath.Join(parent, connector.StateDirName(p.file.AccountID, p.file.Agent.PersonID, p.name)),
+					AccountID: p.file.AccountID,
+					AgentID:   p.file.Agent.PersonID,
+					By:        operatorName(),
+				})
+			}
 			switch {
 			case errors.Is(err, connector.ErrAlreadyRunning):
 				return &output.Error{Code: output.CodeLockUnavailable, Message: err.Error(),
@@ -686,6 +700,30 @@ to be discarded.`,
 		},
 	})
 	return cmd
+}
+
+func lockLegacyStateWithoutLedger(legacy string, file setup.File) (func(), error) {
+	switch _, err := os.Lstat(legacy); {
+	case errors.Is(err, os.ErrNotExist):
+		return func() {}, nil
+	case err != nil:
+		return nil, err
+	}
+	lock, err := connector.AcquireInstanceLock(legacy, file.AccountID, file.Agent.PersonID, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	ledger := filepath.Join(legacy, connector.LedgerFile)
+	switch _, err := os.Lstat(ledger); {
+	case err == nil:
+		err = fmt.Errorf("connector: %s: %w", ledger, connector.ErrLedgerExists)
+		_ = lock.Release()
+		return nil, err
+	case !errors.Is(err, os.ErrNotExist):
+		_ = lock.Release()
+		return nil, err
+	}
+	return func() { _ = lock.Release() }, nil
 }
 
 // --- import ---------------------------------------------------------------
@@ -720,7 +758,7 @@ The file is JSON:
 			if err != nil {
 				return output.ErrUsage(strings.TrimPrefix(err.Error(), "connector: "))
 			}
-			dir, err := connectStatePath(p.file, false)
+			dir, err := connectStatePath(p.name, p.file, false)
 			if err != nil {
 				return err
 			}

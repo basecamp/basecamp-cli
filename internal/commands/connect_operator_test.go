@@ -58,7 +58,7 @@ func newOperatorFixture(t *testing.T) operatorFixture {
 // record 1 and a blocked record 2, and returns it open.
 func (f operatorFixture) ledger(t *testing.T, shadow bool) *connector.Ledger {
 	t.Helper()
-	dir, err := connectStateDir(f.file, shadow)
+	dir, err := connectStateDir("agent", f.file, shadow)
 	require.NoError(t, err)
 	l, err := connector.OpenLedger(filepath.Join(dir, connector.LedgerFile))
 	require.NoError(t, err)
@@ -156,7 +156,7 @@ func TestConnectDiscardAndRelease(t *testing.T) {
 	require.NoError(t, err, out)
 	assert.Contains(t, out, "Released")
 
-	dir, err := connectStatePath(f.file, false)
+	dir, err := connectStatePath("agent", f.file, false)
 	require.NoError(t, err)
 	l, err = connector.OpenLedgerReadOnly(context.Background(), filepath.Join(dir, connector.LedgerFile))
 	require.NoError(t, err)
@@ -337,7 +337,7 @@ func TestConnectShadowPromoteAndImport(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, output.CodeUsage, usageError(t, err).Code)
 
-	dir, err := connectStatePath(f.file, false)
+	dir, err := connectStatePath("agent", f.file, false)
 	require.NoError(t, err)
 	lock, err := connector.AcquireInstanceLock(dir, f.file.AccountID, f.file.Agent.PersonID, time.Now())
 	require.NoError(t, err)
@@ -449,7 +449,7 @@ func TestFakeMCPServer(t *testing.T) {
 func TestOperatorCommandsDoNotMigrateUnderARunningConnector(t *testing.T) {
 	f := newOperatorFixture(t)
 	require.NoError(t, f.ledger(t, false).Close())
-	dir, err := connectStatePath(f.file, false)
+	dir, err := connectStatePath("agent", f.file, false)
 	require.NoError(t, err)
 
 	// A ledger an older binary wrote: its last migration is not recorded.
@@ -473,7 +473,7 @@ func TestOperatorCommandsDoNotMigrateUnderARunningConnector(t *testing.T) {
 func TestTheMigrationGuardIsTheLockNotItsMetadata(t *testing.T) {
 	f := newOperatorFixture(t)
 	require.NoError(t, f.ledger(t, false).Close())
-	dir, err := connectStatePath(f.file, false)
+	dir, err := connectStatePath("agent", f.file, false)
 	require.NoError(t, err)
 	db, err := sql.Open("sqlite", filepath.Join(dir, connector.LedgerFile))
 	require.NoError(t, err)
@@ -496,7 +496,7 @@ func TestTheMigrationGuardIsTheLockNotItsMetadata(t *testing.T) {
 func TestImportRunsOnALedgerOlderThanTheBuild(t *testing.T) {
 	f := newOperatorFixture(t)
 	require.NoError(t, f.ledger(t, false).Close())
-	dir, err := connectStatePath(f.file, false)
+	dir, err := connectStatePath("agent", f.file, false)
 	require.NoError(t, err)
 	db, err := sql.Open("sqlite", filepath.Join(dir, connector.LedgerFile))
 	require.NoError(t, err)
@@ -513,7 +513,7 @@ func TestImportRunsOnALedgerOlderThanTheBuild(t *testing.T) {
 	// itself over the lock it holds.
 	_, err = f.run(t, output.FormatJSON, "import", file)
 	if err != nil {
-		assert.NotContains(t, err.Error(), "already holds this account")
+		assert.NotContains(t, err.Error(), "already runs for this profile")
 		assert.NotContains(t, err.Error(), "Stop the connector")
 		return
 	}
@@ -544,7 +544,7 @@ func TestDoctorRefusesAShadowingToken(t *testing.T) {
 		require.Error(t, err, args[0])
 		assert.Contains(t, err.Error(), "BASECAMP_TOKEN", args[0])
 	}
-	dir, err := connectStatePath(f.file, false)
+	dir, err := connectStatePath("agent", f.file, false)
 	require.NoError(t, err)
 	db, err := sql.Open("sqlite", filepath.Join(dir, connector.LedgerFile))
 	require.NoError(t, err)
