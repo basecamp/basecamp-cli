@@ -1239,7 +1239,12 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "move <id|url>",
 		Short: "Move a card to another column",
-		Long: `Move a card to a different column in the card table.
+		Long: `Move a card to another column in its project.
+
+--to accepts any column in the card's project, including a column on another
+card table in the same project; the card moves there directly, with no wormhole
+needed. Pass a column ID, or a column name with --card-table naming the card
+table that column is on.
 
 You can pass either a card ID or a Basecamp URL:
   basecamp cards move 789 --to "Done" --in my-project
@@ -1247,21 +1252,28 @@ You can pass either a card ID or a Basecamp URL:
   basecamp cards move 789 --to "Done" --position 1 --in my-project
   basecamp cards move 789 --on-hold --in my-project
   basecamp cards move 789 --to 456 --on-hold --in my-project
+  basecamp cards move 789 --to "Backlog" --card-table 1069479999 --in my-project
 
-Move a card to a different project by teleporting it through a wormhole. Pass a
-wormhole ID, or the URL of the destination column it targets:
+--to-wormhole sends a card to another project's card table by teleporting it
+through a wormhole already on the card's card table. Pass a wormhole ID, or the
+URL of the destination column it targets:
   basecamp cards move 789 --to-wormhole 1069480287 --in my-project
   basecamp cards move 789 --to-wormhole https://3.basecamp.com/123/buckets/456/card_tables/columns/999
 This is asynchronous: a new card appears in the destination project and the
-original card 404s once the server finishes filing it away.`,
+original card 404s once the server finishes filing it away. A wormhole is a
+standing shortcut ("cards wormholes"), not a step of each move; a move within
+the project doesn't need one.`,
 		Args:    cobra.ExactArgs(1),
 		Aliases: []string{"mv"},
 		Annotations: map[string]string{
-			"agent_notes": "When --on-hold is used without --to, the card moves to the on-hold section of its current column. " +
+			"agent_notes": "--to accepts any column in the card's project, including a column on another card table there; " +
+				"the move is direct and needs no wormhole. " +
+				"When --on-hold is used without --to, the card moves to the on-hold section of its current column. " +
 				"When --on-hold is used with --to, the card moves to the on-hold section of the target column. " +
 				"--position cannot be combined with --on-hold. " +
-				"--to-wormhole teleports the card to a column on another project's card table; it is mutually exclusive with --to/--on-hold/--position. " +
-				"The teleport is asynchronous and mints a new card id — the original id 404s afterward, so do not reuse it.",
+				"--to-wormhole sends the card to another project's card table through a wormhole already on its card table; it is mutually exclusive with --to/--on-hold/--position. " +
+				"The teleport is asynchronous and mints a new card id — the original id 404s afterward, so do not reuse it. " +
+				"Do not create a wormhole just to move a card, and do not delete one afterward.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			positionSet := cmd.Flags().Changed("position") || cmd.Flags().Changed("pos")
@@ -1427,11 +1439,11 @@ original card 404s once the server finishes filing it away.`,
 		},
 	}
 
-	cmd.Flags().StringVarP(&targetColumn, "to", "t", "", "Target column ID or name (optional with --on-hold)")
+	cmd.Flags().StringVarP(&targetColumn, "to", "t", "", "Target column ID or name: any column in the card's project, on this or another card table (optional with --on-hold)")
 	cmd.Flags().IntVar(&position, "position", 0, "Position in column (1-indexed)")
 	cmd.Flags().IntVar(&position, "pos", 0, "Position in column (alias for --position)")
 	cmd.Flags().BoolVar(&onHold, "on-hold", false, "Move card to the on-hold section of its current (or target) column")
-	cmd.Flags().StringVar(&toWormhole, "to-wormhole", "", "Teleport the card across projects through a wormhole (wormhole ID or destination-column URL)")
+	cmd.Flags().StringVar(&toWormhole, "to-wormhole", "", "Send the card to another project's card table through an existing wormhole (wormhole ID or destination-column URL)")
 
 	return cmd
 }
@@ -2534,18 +2546,24 @@ You can pass either a column ID or a Basecamp URL:
 }
 
 // newCardsWormholesCmd creates the wormhole management group. A wormhole is a
-// portal on a card table that teleports any card dropped into it to a column on
-// another project's card table — the only way to move a card across projects.
+// standing shortcut on a card table that teleports any card dropped into it to a
+// column on another card table, usually in another project — the only way to
+// move a card across projects. Within a project, cards move --to reaches any
+// column directly.
 func newCardsWormholesCmd(project, cardTable *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "wormholes",
 		Short: "Manage card-table wormholes",
-		Long: `Manage wormholes — portals that teleport cards to a column on another project's card table.
+		Long: `Manage wormholes — standing shortcuts that teleport cards to a column on another card table, usually in another project.
 
 A wormhole is the only way to move a card across projects. Drop a card into one
 (with "cards move --to-wormhole") and the server teleports it to the wormhole's
 destination column, minting a new card and deleting the original. A card table
-holds at most four wormholes.`,
+holds at most four wormholes.
+
+A move within a project needs no wormhole: "cards move --to" accepts any column
+in the card's project, including one on another card table. Create a wormhole
+when a card table should keep a shortcut to another project, not for each move.`,
 	}
 
 	cmd.AddCommand(
@@ -2617,7 +2635,10 @@ func newCardsWormholesCreateCmd(project, cardTable *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a wormhole",
-		Long: `Create a wormhole on this project's card table that teleports cards to a column on another project's card table.
+		Long: `Create a wormhole on this project's card table: a standing shortcut that teleports cards to a column on another card table, usually in another project.
+
+Not needed to move a card within its project; "cards move --to" reaches any column
+there directly.
 
 Pass the destination column as an ID or a Basecamp column URL:
   basecamp cards wormholes create --to-column 1069480051 --in my-project
