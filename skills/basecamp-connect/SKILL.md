@@ -76,25 +76,22 @@ see `connector: running` in its log. If it exited instead, explain the error
 (see *When the connector stops*), and stop. If it says `could not get the
 agent's token yet`, Basecamp's token endpoint is rate-limiting it or having
 trouble: it waits as long as it says and tries again on its own. Tell the
-person, leave it running, and arm the monitor as usual. Restarting it doesn't
+person, leave it running, and start the watcher as usual. Restarting it doesn't
 help.
 
-Then arm a persistent monitor on that file with the Monitor tool
-(`persistent: true`), replaying from the start so nothing that arrived between
-the start and the monitor is missed:
+Then start the watcher, also with `run_in_background: true`:
 
 ```bash
-tail -f -n +1 '<connector-output-file>' | grep --line-buffered -F '"type":"request"'
+bash '${CLAUDE_SKILL_DIR}/watch-requests.sh' '<connector-output-file>' ~/.config/basecamp-connect/'handled-<profile>'
 ```
 
-Single-quote the path, as with every other value.
-
-Each notification is one request: handle it with *For each request*. A request
-that arrives while you're waiting on the person is not their reply.
-
-The connector starts from the present. Anything asked more than a minute
-before it started is not picked up. If someone says the agent ignored them, that's the first
-thing to check.
+It exits once request lines arrive whose `event_id` the handled file lacks.
+Read them in full from its output file, record each
+(`echo <event_id> >> ~/.config/basecamp-connect/'handled-<profile>'`), start
+the watcher again, then handle each with *For each request*. Keep one running.
+Not the Monitor tool: its watches expire, and a `grep -v` in one holds a line
+back until the next. A request that arrives while you're waiting on the person
+is not their reply.
 
 ### 2. The request line
 
@@ -567,12 +564,24 @@ output and tell the person what it means:
 
 Requests that arrive while it's stopped are not picked up later.
 
+Each start writes a new output file. Stop the watcher (TaskStop), then check
+the old file once, so a request printed just before the exit isn't left there:
+
+```bash
+bash '${CLAUDE_SKILL_DIR}/watch-requests.sh' --once '<old-output-file>' ~/.config/basecamp-connect/'handled-<profile>'
+```
+
+Handle any line it prints as usual. Start the watcher on the new file once the
+connector is running.
+
 ## Checking on it
 
 - `basecamp connect doctor -P '<profile>'`: the credential, the identity, the
   event feed and the ledger. Start here when something seems wrong. It posts
   nothing.
-- **"Did that mention reach it?"**: search the connector's output file for the
+- **"Did that mention reach it?"**: the connector starts from the present, so
+  anything asked more than a minute before it started is not picked up. Check
+  that first. Then search the connector's output file for the
   recording id. A `"type":"request"` line means it was handed to you. A
   `"type":"event"` line with a `reason` says why it was turned away (for
   example `untrusted_performer`). No line means the feed never delivered it.
@@ -582,7 +591,8 @@ Requests that arrive while it's stopped are not picked up later.
 
 ## Stopping
 
-When the person asks you to stop, or the session is ending, stop the connector
-task (TaskStop, or send it SIGINT). There's nothing else to clean up: no
-webhooks, nothing public. Subagents already running finish their requests and
-reply. Say that new mentions won't be picked up until it's started again.
+When the person asks you to stop, or the session is ending, stop the watcher
+and the connector task (TaskStop, or send it SIGINT). There's nothing else to
+clean up: no webhooks, nothing public. Subagents already running finish their
+requests and reply. Say that new mentions won't be picked up until it's
+started again.
