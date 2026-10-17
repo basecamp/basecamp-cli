@@ -3,9 +3,10 @@
 This CLI can merge and release before the server changes. It stores the
 connection secret as opaque data; no connection API, self-disconnect endpoint,
 or server feature switch is required. A second approval **may replace the
-existing connection**: it does on the current server, for shared agents, and
-for personal agents while adding connections is disabled. Only personal agents
-on a server with adding enabled gain another independent connection. Consult
+existing connection**: it does on the current server, and for any agent whose
+kind (personal or team) doesn't have adding connections enabled. Where
+Basecamp has enabled it for the agent's kind, personal first and team later,
+the approval gains another independent connection instead. Consult
 the approval page; do not reconnect merely to upgrade the CLI.
 
 ## Upgrade one host

@@ -271,8 +271,8 @@ basecamp connect -P my-agent                            # the watcher
 ```
 
 An approval may add a connection or replace an existing one: read the approval
-page before proceeding. Personal agents can have several connections when
-Basecamp enables adding them. Otherwise, and always for shared agents, a new
+page before proceeding. Personal and team agents can have several connections
+where Basecamp enables adding them for that kind of agent. Otherwise a new
 approval replaces the existing connection. This applies to both the CLI and
 Basecamp's HTTP handshake. Do not reconnect just to upgrade the CLI.
 

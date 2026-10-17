@@ -61,9 +61,9 @@ off nothing. --hold sets this profile's durable hold: intake and admission run,
 nothing is handed off, and earlier records wait for review, until basecamp
 connect release for this profile. Linux and macOS only.
 
-One connector runs per profile in this state directory. Personal agents can
-run several connections when Basecamp enables adding them; otherwise, and for
-shared agents, a new approval replaces the existing connection. Each profile
+One connector runs per profile in this state directory. An agent can run
+several connections where Basecamp enables adding them for its kind; otherwise
+a new approval replaces the existing connection. Each profile
 serves its own projects and has its own hold. When two connections serve the
 same project, a request both admit can be answered twice.
 

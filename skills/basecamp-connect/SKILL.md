@@ -429,9 +429,9 @@ Ask only what you can't find out.
   create` for an agent: that signs in a person. If Basecamp's instructions
   page connected this agent over HTTP before (a
   `~/.basecamp-agent/credentials.json`; never read it), ask whether the agent
-  is personal or shared. Warn before approval: shared agents and personal
-  agents without adding enabled replace the existing connection; an
-  add-capable personal agent keeps both live. Read the approval page, never
+  is personal or shared. Warn before approval: an agent whose kind (personal
+  or shared) doesn't have adding enabled replaces the existing connection;
+  one whose kind does keeps both live. Read the approval page, never
   assume adding is enabled. Don't delete credential files. If the owner says
   nothing uses the old file, have them disconnect its connection in Basecamp,
   then remove that unused file themselves. Then connect the agent with
