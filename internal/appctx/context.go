@@ -134,7 +134,7 @@ func NewApp(cfg *config.Config) *App {
 	}
 	sdkOptions := []basecamp.ClientOption{
 		basecamp.WithHooks(hooks),
-		basecamp.WithTransport(transport),
+		basecamp.WithTransport(gatingHooks.Transport(transport)),
 		basecamp.WithUserAgent(version.UserAgent() + " " + basecamp.DefaultUserAgent),
 	}
 	sdkClient := basecamp.NewClient(sdkCfg, &authAdapter{mgr: authMgr}, sdkOptions...)
