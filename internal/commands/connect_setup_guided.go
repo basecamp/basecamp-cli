@@ -261,7 +261,7 @@ func ensureGuidedAgentConnection(cmd *cobra.Command, app *appctx.App, name strin
 	if err != nil || !refused {
 		return false, err
 	}
-	fmt.Fprintln(w, r.Warning.Render("This computer's connection to your agent was disconnected in Basecamp, or it was connected on another computer."))
+	fmt.Fprintln(w, r.Warning.Render("This computer's connection to your agent was disconnected in Basecamp."))
 	reconnect, err := connectSetupAsk.Confirm("Connect this computer to it again?", true)
 	if err != nil {
 		return false, err

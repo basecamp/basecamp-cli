@@ -314,7 +314,7 @@ func TestGuidedConnectSetupOffersToReconnectARefusedCredential(t *testing.T) {
 	out, err := runConnectSetupCmd(t, app)
 	require.NoError(t, err, out)
 
-	assert.Contains(t, out, "was disconnected in Basecamp, or it was connected on another computer")
+	assert.Contains(t, out, "This computer's connection to your agent was disconnected in Basecamp.\n")
 	assert.Equal(t, "Connect this computer to it again?", p.asked[0])
 	assert.Equal(t, 2, s.intakeCount(), "a second connection ran")
 	_, err = setup.Load(connectSetupPath(t, "agent"))

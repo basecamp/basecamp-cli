@@ -33,7 +33,7 @@ func TestTheConnectorSaysPlainlyWhenItsAgentWasDisconnected(t *testing.T) {
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
 	assert.Equal(t, output.CodeAuth, e.Code)
-	assert.Equal(t, "Ryan Singer (agent) was disconnected in Basecamp, or connected on another computer", e.Message)
+	assert.Equal(t, "This computer's connection to Ryan Singer (agent) was disconnected in Basecamp", e.Message)
 	assert.Equal(t, "Reconnect it: basecamp connect setup -P agent", e.Hint)
 	assert.NotContains(t, e.Message+e.Hint, "authorization_failed")
 	assert.Equal(t, connector.ConnectionDisconnected, state)
@@ -55,7 +55,7 @@ func TestARefusedTokenRenewalIsTheSameDisconnect(t *testing.T) {
 		state, _, got := connectorStoppedBy(err, "Ryan Singer (agent)", "agent", mustNotAsk(t))
 		var e *output.Error
 		require.ErrorAs(t, got, &e, reason)
-		assert.Equal(t, "Ryan Singer (agent) was disconnected in Basecamp, or connected on another computer", e.Message, reason)
+		assert.Equal(t, "This computer's connection to Ryan Singer (agent) was disconnected in Basecamp", e.Message, reason)
 		assert.Equal(t, connector.ConnectionDisconnected, state, reason)
 	}
 }
@@ -97,7 +97,7 @@ func TestABotUserIsNeverAskedAboutADisconnect(t *testing.T) {
 // With no name to give, the message still reads as a sentence.
 func TestADisconnectWithoutTheAgentsNameSaysYourAgent(t *testing.T) {
 	e := errAgentDisconnected("", "agent")
-	assert.Equal(t, "Your agent was disconnected in Basecamp, or connected on another computer", e.Message)
+	assert.Equal(t, "This computer's connection to your agent was disconnected in Basecamp", e.Message)
 	assert.Equal(t, "Reconnect it: basecamp connect setup -P agent", e.Hint)
 }
 
@@ -117,7 +117,7 @@ func TestTheConnectorKeepsOtherStopsAsTheyAre(t *testing.T) {
 // Status says the agent was disconnected first, with the command that
 // reconnects it.
 func TestConnectStatusLeadsWithDisconnected(t *testing.T) {
-	detail := "Ryan Singer (agent) was disconnected in Basecamp, or connected on another computer"
+	detail := "This computer's connection to Ryan Singer (agent) was disconnected in Basecamp"
 	report := connectStatusReport{Profile: "agent", Status: connector.Status{Connection: &connector.ConnectionStatus{
 		State: connector.ConnectionDisconnected, PID: 42, ChangedAt: time.Now(), Detail: detail,
 	}}}
