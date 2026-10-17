@@ -1,8 +1,11 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -65,6 +68,21 @@ Over SSH, in CI, or on a host with no display the browser is skipped and
 the link is yours to open on any device; --local forces a launch anyway,
 --no-browser skips it. Ctrl-C cancels the wait and stores nothing.
 
+With --json, the ceremony is data for whatever runs it, and stdout carries
+two JSON values. The first is one line, written as soon as Basecamp
+answers the request:
+
+  {"type":"verification","verification_uri":"…","user_code":"WDJB-MJHT","expires_at":"…","expires_in":600}
+
+The second is the result: the envelope every command prints under --json,
+or its data alone under --agent — the profile, its account, the access
+approved and the agent's client id — or the error, if
+the operator declined, the code expired, or nothing could be stored. The words meant
+for a person go to stderr, and the browser opens as it would without
+--json. Neither line ever carries the client secret or the device code.
+The link and the code are for the person approving at this computer:
+show them there, never anywhere else.
+
 Disconnecting is done in Basecamp: disconnecting the agent there kills the
 client secret this holds. Drop the local copy with ` + "`basecamp auth logout -P <profile>`" + `.`,
 		Annotations: map[string]string{AnnotationProfileMayCreate: "true"},
@@ -75,7 +93,7 @@ client secret this holds. Drop the local copy with ` + "`basecamp auth logout -P
 				return fmt.Errorf("app not initialized")
 			}
 
-			if err := refuseMachineOutputLogin(app, "the agent connection"); err != nil {
+			if err := refuseAgentConnectOutputMode(app); err != nil {
 				return err
 			}
 			if err := refuseNonInteractiveAgentConnect(); err != nil {
@@ -90,6 +108,7 @@ client secret this holds. Drop the local copy with ` + "`basecamp auth logout -P
 
 			return connectAgentProfile(cmd, app, agentConnectFlags{
 				deviceName: deviceName, softwareName: softwareName, scope: scope, noBrowser: noBrowser, local: local,
+				machine: app.Flags.JSON || app.Flags.Agent,
 			})
 		},
 	}
@@ -114,6 +133,58 @@ type agentConnectFlags struct {
 	// quiet leaves out what was stored, for the guided setup, which says
 	// in one line of its own which agent this computer is now connected as.
 	quiet bool
+
+	// machine reads the ceremony out as data: the verification line and
+	// the result envelope on stdout, the operator's words on stderr.
+	machine bool
+}
+
+// refuseAgentConnectOutputMode lets the ceremony run under --json (and
+// --agent, its data-only form), and refuses the output modes that cannot
+// carry it. A --jq filter runs over one envelope, and this writes two
+// lines; --quiet, --ids-only and --count would each throw the verification
+// line away, and with it the only thing the operator needs.
+//
+// --agent is let through as --json is: it prints the result's data alone,
+// after the same verification line.
+func refuseAgentConnectOutputMode(app *appctx.App) error {
+	if app.Flags.JQFilter != "" {
+		return output.ErrJQNotSupported("the agent connection")
+	}
+	if app.Flags.Quiet || app.Flags.IDsOnly || app.Flags.Count {
+		return output.ErrUsageHint("The agent connection cannot run under --quiet, --ids-only or --count",
+			"Run it plainly for a person at a terminal, or with --json to read the link, the code and the result as JSON lines.")
+	}
+	return nil
+}
+
+// agentConnectVerification is the ceremony's first JSON line: what the
+// operator needs to approve the connection, and nothing else.
+type agentConnectVerification struct {
+	Type            string `json:"type"`
+	VerificationURI string `json:"verification_uri"`
+	UserCode        string `json:"user_code"`
+	ExpiresAt       string `json:"expires_at"`
+	ExpiresIn       int    `json:"expires_in"`
+}
+
+// writeAgentConnectVerification writes the verification line, one JSON
+// object terminated by a newline, so a reader can act on it while the
+// ceremony is still waiting. A write that fails ends the ceremony: under
+// --json this line is how the link and the code reach whoever shows them
+// to the person, so nothing should wait on an approval they never saw.
+func writeAgentConnectVerification(w io.Writer, intake auth.AgentConnectIntake) error {
+	line := agentConnectVerification{
+		Type:            "verification",
+		VerificationURI: intake.VerificationURI,
+		UserCode:        intake.UserCode,
+		ExpiresAt:       intake.ExpiresAt.UTC().Format(time.RFC3339),
+		ExpiresIn:       max(0, int(time.Until(intake.ExpiresAt).Round(time.Second).Seconds())),
+	}
+	if err := json.NewEncoder(w).Encode(line); err != nil {
+		return fmt.Errorf("could not write the verification line, so the connection was stopped: %w", err)
+	}
+	return nil
 }
 
 // connectAgentProfile runs the agent-connection handshake for the active
@@ -126,7 +197,15 @@ func connectAgentProfile(cmd *cobra.Command, app *appctx.App, f agentConnectFlag
 	}
 
 	w := cmd.OutOrStdout()
-	r := output.NewRendererWithTheme(w, false, tui.ResolveTheme(tui.DetectDark()))
+	// Under --json stdout is the data, so the operator's half of the
+	// ceremony — the link, the code, the wait line — goes to stderr.
+	human := w
+	var onIntake func(auth.AgentConnectIntake) error
+	if f.machine {
+		human = cmd.ErrOrStderr()
+		onIntake = func(intake auth.AgentConnectIntake) error { return writeAgentConnectVerification(w, intake) }
+	}
+	r := output.NewRendererWithTheme(human, false, tui.ResolveTheme(tui.DetectDark()))
 
 	var isDefault bool
 	ctx, stop := loginContext(cmd)
@@ -136,18 +215,36 @@ func connectAgentProfile(cmd *cobra.Command, app *appctx.App, f agentConnectFlag
 		Scope:        f.scope,
 		NoBrowser:    f.noBrowser,
 		Local:        f.local,
-		Logger:       func(msg string) { fmt.Fprintln(w, msg) },
-		Progress:     w,
+		Logger:       func(msg string) { fmt.Fprintln(human, msg) },
+		Progress:     human,
+		OnIntake:     onIntake,
 		BeforeStore: func(conn *auth.AgentConnection) error {
 			registered, commitErr := target.commit(app, conn)
 			isDefault = registered
 			return commitErr
 		},
 	})
-	err = loginOutcome(ctx, err, w, r)
+	err = loginOutcome(ctx, err, human, r)
 	stop()
 	if err != nil || f.quiet {
 		return err
+	}
+
+	if f.machine {
+		data := map[string]any{
+			"profile":         target.name,
+			"account_id":      result.AccountID,
+			"base_url":        app.Config.BaseURL,
+			"source":          "agent_connection",
+			"oauth_type":      result.OAuthType,
+			"scope":           result.Scope,
+			"client_id":       result.ClientID,
+			"profile_created": target.existing == nil,
+		}
+		if isDefault {
+			data["default"] = true
+		}
+		return app.OK(data, output.WithSummary(fmt.Sprintf("Connected profile %q to a Basecamp agent", target.name)))
 	}
 
 	fmt.Fprintln(w)
