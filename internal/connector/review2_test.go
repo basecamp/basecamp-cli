@@ -244,11 +244,15 @@ func TestQueuePauseTracksEveryBlockedOffer(t *testing.T) {
 		t.Fatal("one offer should have resumed")
 	}
 	assert.True(t, queue.Paused(), "the other offer is still waiting, so the feed is still paused")
-	assert.Zero(t, resumes.Load(), "resume fires when the last waiter stops waiting")
+	assert.Zero(t, resumes.Load(), "no resume while an offer still waits")
 
 	_, err = queue.Take(ctx)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return !queue.Paused() }, time.Second, time.Millisecond)
+	assert.Zero(t, resumes.Load(), "no resume until the backlog drains to its band")
+
+	_, err = queue.Take(ctx)
+	require.NoError(t, err)
 	assert.Equal(t, int32(1), pauses.Load())
 	assert.Equal(t, int32(1), resumes.Load())
 }

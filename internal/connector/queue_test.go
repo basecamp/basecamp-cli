@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -57,9 +58,9 @@ func TestQueuePausesTheCallerAtTheThreshold(t *testing.T) {
 
 	select {
 	case depth := <-paused:
-		// Three: the two in the queue and the one waiting to go in, which is
-		// backlog too.
-		assert.Equal(t, 3, depth)
+		// Two: what the queue holds. The offer waiting to go in is not
+		// counted, so the depth reported is never above the threshold.
+		assert.Equal(t, 2, depth)
 	case <-time.After(2 * time.Second):
 		t.Fatal("the third offer should have waited for room")
 	}
@@ -220,34 +221,45 @@ func TestPauseAndResumeAreObservedInTheOrderTheyHappened(t *testing.T) {
 	waiters.Add(1)
 	go func() {
 		defer waiters.Done()
-		assert.NoError(t, queue.Offer(ctx, 2)) // waits for room, then resumes
+		assert.NoError(t, queue.Offer(ctx, 2)) // waits for room
 	}()
 	require.Eventually(t, queue.Paused, time.Second, time.Millisecond)
 
 	first, err := queue.Take(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), first)
+	waiters.Wait()
+	// The take that drains the queue to its resume band delivers the resume,
+	// and the callback holds it there.
+	drained := make(chan int64, 1)
+	go func() {
+		id, err := queue.Take(ctx)
+		assert.NoError(t, err)
+		drained <- id
+	}()
 	<-resumeStarted // the resume has begun and is not finished
 
+	require.NoError(t, queue.Offer(ctx, 3))
 	waiters.Add(1)
 	go func() {
 		defer waiters.Done()
-		assert.NoError(t, queue.Offer(ctx, 3)) // pauses again, mid-resume
+		assert.NoError(t, queue.Offer(ctx, 4)) // pauses again, mid-resume
 	}()
 	require.Eventually(t, queue.Paused, time.Second, time.Millisecond)
 
 	close(holdResume)
+	assert.Equal(t, int64(2), <-drained)
 	require.Eventually(t, func() bool { return len(observed()) == 3 }, time.Second, time.Millisecond)
 	assert.Equal(t, []string{"paused", "resumed", "paused"}, observed(),
 		"a resume that started first must not be reported after the pause that followed it")
 
-	second, err := queue.Take(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, int64(2), second)
-	waiters.Wait()
 	third, err := queue.Take(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), third)
+	waiters.Wait()
+	fourth, err := queue.Take(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(4), fourth)
 	assert.False(t, queue.Paused())
 }
 
@@ -284,10 +296,12 @@ func TestAPanickingPauseCallbackLeavesNoPhantomBacklog(t *testing.T) {
 	assert.False(t, queue.Paused(), "no phantom pause")
 	assert.Contains(t, logs.String(), "a backlog callback panicked")
 
-	// And the next crossing is still reported, on both sides.
+	// And the next crossing is still reported, on both sides. The resume is
+	// reported once the queue drains to its band, here empty.
 	second, err := queue.Take(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), second)
+	assert.Equal(t, int32(1), resumes.Load())
 	require.NoError(t, queue.Offer(ctx, 3))
 	blocked := make(chan error, 1)
 	go func() { blocked <- queue.Offer(ctx, 4) }()
@@ -295,7 +309,103 @@ func TestAPanickingPauseCallbackLeavesNoPhantomBacklog(t *testing.T) {
 	_, err = queue.Take(ctx)
 	require.NoError(t, err)
 	require.NoError(t, <-blocked)
+	_, err = queue.Take(ctx)
+	require.NoError(t, err)
 	assert.Equal(t, int32(2), pauses.Load())
 	assert.Equal(t, int32(2), resumes.Load())
-	assert.Equal(t, 1, queue.Depth())
+	assert.Zero(t, queue.Depth())
+}
+
+// The report is the queue's, not the callback's: a callback that panics is
+// contained after the edge has already been reported.
+func TestAPanickingCallbackDoesNotSilenceTheReport(t *testing.T) {
+	queue, err := NewQueue(1, 4)
+	require.NoError(t, err)
+	var logs bytes.Buffer
+	queue.SetLogger(slog.New(slog.NewTextHandler(&logs, nil)))
+	queue.OnWarn = func(int) { panic("a warning callback panics") }
+
+	require.NoError(t, queue.Offer(context.Background(), 1))
+
+	assert.Contains(t, logs.String(), "the backlog reached its warning depth")
+	assert.Contains(t, logs.String(), "depth=1 warn_at=1 recover_at=0 pause_at=4")
+	assert.Contains(t, logs.String(), "a backlog callback panicked")
+}
+
+// A backlog that hovers at a threshold is one report each way, not one per
+// event. At capacity each take lets the waiting offer in and the next offer
+// waits again; that is still one pause, and the resume is reported only once
+// the backlog has drained to half the pause depth. The warning clears the
+// same way, at half the warning depth.
+func TestABacklogHoveringAtItsThresholdsIsReportedOnceEachWay(t *testing.T) {
+	queue, err := NewQueue(4, 8)
+	require.NoError(t, err)
+	var logs safeBuffer
+	queue.SetLogger(slog.New(slog.NewTextHandler(&logs, nil)))
+	var mu sync.Mutex
+	var seen []string
+	record := func(what string) func(int) {
+		return func(int) { mu.Lock(); seen = append(seen, what); mu.Unlock() }
+	}
+	queue.OnWarn = record("warn")
+	queue.OnRecover = record("recover")
+	queue.OnPause = record("pause")
+	queue.OnResume = record("resume")
+	observed := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), seen...)
+	}
+	ctx := context.Background()
+	take := func() {
+		t.Helper()
+		_, err := queue.Take(ctx)
+		require.NoError(t, err)
+	}
+
+	// Around the warning depth: 3, 4, 3, 4, ...
+	for i := range 4 {
+		require.NoError(t, queue.Offer(ctx, int64(i)))
+	}
+	for i := range 20 {
+		take()
+		require.NoError(t, queue.Offer(ctx, int64(100+i)))
+	}
+	assert.Equal(t, []string{"warn"}, observed())
+
+	// Around the pause depth: full, one waits, one taken, the next waits.
+	for i := range 4 {
+		require.NoError(t, queue.Offer(ctx, int64(200+i)))
+	}
+	for i := range 20 {
+		waiting := make(chan error, 1)
+		go func() { waiting <- queue.Offer(ctx, int64(300+i)) }()
+		require.Eventually(t, queue.Paused, time.Second, time.Millisecond)
+		take()
+		require.NoError(t, <-waiting)
+	}
+	assert.Equal(t, []string{"warn", "pause"}, observed())
+
+	// Draining: nothing until half the pause depth, then the resume; nothing
+	// more until half the warning depth, then the recovery.
+	for range 3 {
+		take()
+	}
+	assert.Equal(t, []string{"warn", "pause"}, observed(), "depth 5 is above the resume band")
+	take()
+	assert.Equal(t, []string{"warn", "pause", "resume"}, observed())
+	take()
+	assert.Equal(t, []string{"warn", "pause", "resume"}, observed(), "depth 3 is above the recovery band")
+	take()
+	assert.Equal(t, []string{"warn", "pause", "resume", "recover"}, observed())
+	assert.Equal(t, 2, queue.Depth())
+
+	text := logs.String()
+	assert.Equal(t, 1, strings.Count(text, "the backlog reached its warning depth"))
+	assert.Equal(t, 1, strings.Count(text, "the backlog reached its pause depth"))
+	assert.Equal(t, 1, strings.Count(text, "the backlog drained to half its pause depth"))
+	assert.Equal(t, 1, strings.Count(text, "the backlog fell back below its warning depth"))
+	assert.Contains(t, text, "depth=8 pause_at=8 resume_at=4", "the pause reports what the queue holds")
+	assert.Contains(t, text, "depth=4 pause_at=8 resume_at=4")
+	assert.Contains(t, text, "depth=2 warn_at=4 recover_at=2")
 }

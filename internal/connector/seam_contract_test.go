@@ -3,6 +3,7 @@ package connector
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -200,6 +202,94 @@ func TestIntakeGivesTheQueueItsLogger(t *testing.T) {
 	require.NoError(t, queue.Offer(context.Background(), 1))
 
 	assert.Contains(t, logs.String(), "a backlog callback panicked")
+}
+
+// Production builds its queue with no callbacks and hands it to intake with
+// the connector's logger, so the logger is the only place an operator can
+// learn that the backlog is growing or that the feed read is held back. Each
+// edge is reported there, with the depth, the threshold it crossed and the
+// band at which it clears.
+func TestIntakeReportsTheBacklogsEdgesOnItsLogger(t *testing.T) {
+	var logs safeBuffer
+	queue, err := NewQueue(2, 3)
+	require.NoError(t, err)
+	_, err = New(Options{
+		Origin:            "https://3.basecampapi.com",
+		AccountID:         "2914079",
+		ConsumerNamespace: "connector-test",
+		Ledger:            newTestLedger(t),
+		Queue:             queue,
+		Minter:            stubMinter{},
+		Polls:             &scriptedPolls{},
+		Logger:            slog.New(slog.NewJSONHandler(&logs, nil)),
+	})
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	require.NoError(t, queue.Offer(ctx, 1))
+	require.NoError(t, queue.Offer(ctx, 2))
+	require.NoError(t, queue.Offer(ctx, 3))
+	waiting := make(chan error, 1)
+	go func() { waiting <- queue.Offer(ctx, 4) }()
+	require.Eventually(t, func() bool { return len(backlogLines(t, logs.String())) == 2 }, time.Second, time.Millisecond)
+	// One take makes room and the waiting offer goes in, but the backlog is
+	// still at its pause depth, so nothing is reported yet.
+	_, err = queue.Take(ctx)
+	require.NoError(t, err)
+	require.NoError(t, <-waiting)
+	_, err = queue.Take(ctx)
+	require.NoError(t, err)
+	assert.Len(t, backlogLines(t, logs.String()), 2)
+	// The take to depth 1 reaches both bands, and the resume is told first.
+	_, err = queue.Take(ctx)
+	require.NoError(t, err)
+
+	lines := backlogLines(t, logs.String())
+	require.Len(t, lines, 4)
+
+	assert.Equal(t, "WARN", lines[0]["level"])
+	assert.Contains(t, lines[0]["msg"], "warning depth")
+	assert.EqualValues(t, 2, lines[0]["depth"])
+	assert.EqualValues(t, 2, lines[0]["warn_at"])
+	assert.EqualValues(t, 1, lines[0]["recover_at"])
+	assert.EqualValues(t, 3, lines[0]["pause_at"])
+	assert.Contains(t, lines[0]["msg"], "basecamp connect status")
+
+	assert.Equal(t, "WARN", lines[1]["level"])
+	assert.Contains(t, lines[1]["msg"], "pause depth")
+	assert.Contains(t, lines[1]["msg"], "basecamp connect status")
+	assert.EqualValues(t, 3, lines[1]["depth"], "what the queue holds, not the offer waiting")
+	assert.EqualValues(t, 3, lines[1]["pause_at"])
+	assert.EqualValues(t, 1, lines[1]["resume_at"])
+
+	assert.Equal(t, "INFO", lines[2]["level"])
+	assert.Contains(t, lines[2]["msg"], "full speed again")
+	assert.EqualValues(t, 1, lines[2]["depth"])
+	assert.EqualValues(t, 3, lines[2]["pause_at"])
+	assert.EqualValues(t, 1, lines[2]["resume_at"])
+
+	assert.Equal(t, "INFO", lines[3]["level"])
+	assert.Contains(t, lines[3]["msg"], "below its warning depth")
+	assert.EqualValues(t, 1, lines[3]["depth"])
+	assert.EqualValues(t, 2, lines[3]["warn_at"])
+	assert.EqualValues(t, 1, lines[3]["recover_at"])
+}
+
+// backlogLines decodes the JSON log lines that report a backlog edge.
+func backlogLines(t *testing.T, logs string) []map[string]any {
+	t.Helper()
+	var lines []map[string]any
+	for line := range strings.SplitSeq(strings.TrimSpace(logs), "\n") {
+		if line == "" {
+			continue
+		}
+		var record map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &record))
+		if msg, _ := record["msg"].(string); strings.HasPrefix(msg, "the backlog ") {
+			lines = append(lines, record)
+		}
+	}
+	return lines
 }
 
 // A queue can already be in use when intake adopts it — admission takes from
