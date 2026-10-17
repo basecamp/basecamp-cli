@@ -23,16 +23,17 @@ func TestTheSkillDocumentsTheDisconnectLineItGets(t *testing.T) {
 	assert.Contains(t, message, "or replaced")
 }
 
-func TestConnectionHelpIsSafeBeforeServerAddsAndForSharedAgents(t *testing.T) {
+func TestConnectionHelpIsSafeBeforeServerAddsForEitherKindOfAgent(t *testing.T) {
 	help := newAuthAgentConnectCmd().Long
 	assert.Contains(t, help, "approval may add a connection or replace")
-	assert.Contains(t, help, "always for shared")
-	assert.Contains(t, help, "when Basecamp has enabled adding")
+	assert.Contains(t, help, "An agent, personal or team, keeps several")
+	assert.Contains(t, help, "where Basecamp has enabled adding them for its kind")
+	assert.NotContains(t, help, "always for shared")
 	assert.NotContains(t, help, "Each approval adds")
 	assert.Contains(t, help, "old connection stays live")
 	assert.Contains(t, help, "not removed or revoked")
 	help = NewConnectCmd().Long
-	assert.Contains(t, help, "otherwise, and for")
-	assert.Contains(t, help, "shared agents")
+	assert.Contains(t, help, "where Basecamp enables adding them for its kind")
+	assert.NotContains(t, help, "shared agents")
 	assert.Contains(t, help, "own hold")
 }

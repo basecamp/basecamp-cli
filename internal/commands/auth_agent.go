@@ -56,9 +56,9 @@ whenever it needs one, so there is no token to paste and none to renew by
 hand.
 
 An approval may add a connection or replace an existing one; read the
-approval page before proceeding. Personal agents can keep several connections
-when Basecamp has enabled adding them. Otherwise, and always for shared
-agents, connecting replaces the existing connection, wherever it runs.
+approval page before proceeding. An agent, personal or team, keeps several
+connections where Basecamp has enabled adding them for its kind. Otherwise
+connecting replaces the existing connection, wherever it runs.
 
 The device name defaults to this computer's name. Give each profile its own
 --device-name when several on this computer connect the same agent.
