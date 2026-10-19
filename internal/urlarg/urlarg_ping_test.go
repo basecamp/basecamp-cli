@@ -38,6 +38,26 @@ func TestParsePingURLs(t *testing.T) {
 			input: "http://3.basecamp.localhost:3001/123/circles/456@789",
 			want:  Parsed{AccountID: "123", ProjectID: "456", Type: "lines", RecordingID: "789", PingID: "456"},
 		},
+		{
+			name:  "app host sidebar ping",
+			input: "https://app.basecamp.com/123/my/sidebar/circles/456",
+			want:  Parsed{AccountID: "123", Type: "circles", RecordingID: "456", PingID: "456"},
+		},
+		{
+			name:  "web host sidebar ping",
+			input: "https://3.basecamp.com/123/my/sidebar/circles/456",
+			want:  Parsed{AccountID: "123", Type: "circles", RecordingID: "456", PingID: "456"},
+		},
+		{
+			name:  "app host sidebar ping line",
+			input: "https://app.basecamp.com/123/my/sidebar/circles/456@789",
+			want:  Parsed{AccountID: "123", ProjectID: "456", Type: "lines", RecordingID: "789", PingID: "456"},
+		},
+		{
+			name:  "web host sidebar ping line",
+			input: "https://3.basecamp.com/123/my/sidebar/circles/456@789",
+			want:  Parsed{AccountID: "123", ProjectID: "456", Type: "lines", RecordingID: "789", PingID: "456"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

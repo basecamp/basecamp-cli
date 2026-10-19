@@ -18,6 +18,10 @@ var chatAtRe = regexp.MustCompile(`(/chats/\d+)@(\d+)`)
 // whose bucket is the Ping; the Campfire is not in the URL.
 var pingAtRe = regexp.MustCompile(`/circles/(\d+)@(\d+)`)
 
+// pingSidebarRe matches the sidebar form my/sidebar/circles/{pingID}, which
+// Basecamp links to for the same Ping, and drops the my/sidebar prefix.
+var pingSidebarRe = regexp.MustCompile(`/my/sidebar(/circles/\d+)`)
+
 // Parsed represents components extracted from a Basecamp URL.
 type Parsed struct {
 	AccountID      string
@@ -45,6 +49,7 @@ func IsURL(input string) bool {
 // slash form; a Ping line loses its @line, which the second result returns.
 func normalize(input string) (normalized, pingLineID string) {
 	normalized = chatAtRe.ReplaceAllString(input, "${1}/lines/${2}")
+	normalized = pingSidebarRe.ReplaceAllString(normalized, "${1}")
 	if m := pingAtRe.FindStringSubmatch(normalized); m != nil {
 		pingLineID = m[2]
 		normalized = pingAtRe.ReplaceAllString(normalized, "/circles/${1}")
@@ -62,6 +67,7 @@ func normalize(input string) (normalized, pingLineID string) {
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/chats/{id}@{lineId}
 //   - https://3.basecamp.com/{account}/circles/{ping}
 //   - https://3.basecamp.com/{account}/circles/{ping}@{lineId}
+//   - https://3.basecamp.com/{account}/my/sidebar/circles/{ping}, with or without @{lineId}
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/schedule_entries/{id}/occurrences/{date}
 //   - https://3.basecamp.com/{account}/projects/{project}
 func Parse(input string) *Parsed {
