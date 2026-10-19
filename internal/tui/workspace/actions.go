@@ -230,7 +230,7 @@ func DefaultActions() *Registry {
 	r.Register(Action{
 		Name:        ":pings",
 		Aliases:     []string{"dm", "direct messages"},
-		Description: "Direct messages (pings)",
+		Description: "Pings: direct and group conversations",
 		Category:    "navigation",
 		Scope:       ScopeAny,
 		Execute: func(s *Session) tea.Cmd {

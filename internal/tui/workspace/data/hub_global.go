@@ -191,7 +191,8 @@ func (h *Hub) Assignments() *Pool[[]AssignmentInfo] {
 	return p
 }
 
-// PingRooms returns a global-scope pool of 1:1 chat threads.
+// PingRooms returns a global-scope pool of the caller's pings, direct and
+// group, most recently active first.
 func (h *Hub) PingRooms() *Pool[[]PingRoomInfo] {
 	p := RealmPool(h.Global(), "ping-rooms", func() *Pool[[]PingRoomInfo] {
 		return NewPool("ping-rooms", PoolConfig{
@@ -206,47 +207,7 @@ func (h *Hub) PingRooms() *Pool[[]PingRoomInfo] {
 
 			results := FanOut[[]PingRoomInfo](ctx, h.multi,
 				func(acct AccountInfo, client *basecamp.AccountClient) ([]PingRoomInfo, error) {
-					campfires, err := client.Campfires().List(ctx, nil)
-					if err != nil {
-						return nil, err
-					}
-					var rooms []PingRoomInfo
-					for _, cf := range campfires.Campfires {
-						if cf.Bucket != nil && cf.Bucket.Type == "Project" {
-							continue
-						}
-						var lastMsg, lastAt string
-						var lastAtTS int64
-						lines, err := client.Campfires().ListLines(ctx, cf.ID, nil)
-						if err == nil && len(lines.Lines) > 0 {
-							last := lines.Lines[len(lines.Lines)-1]
-							if last.Creator != nil {
-								lastMsg = last.Creator.Name + ": "
-							}
-							content := last.Content
-							if r := []rune(content); len(r) > 40 {
-								content = string(r[:37]) + "…"
-							}
-							lastMsg += content
-							lastAt = last.CreatedAt.Format("Jan 2 3:04pm")
-							lastAtTS = last.CreatedAt.Unix()
-						}
-						var projectID int64
-						if cf.Bucket != nil {
-							projectID = cf.Bucket.ID
-						}
-						rooms = append(rooms, PingRoomInfo{
-							ChatID:      cf.ID,
-							ProjectID:   projectID,
-							PersonName:  cf.Title,
-							Account:     acct.Name,
-							AccountID:   acct.ID,
-							LastMessage: lastMsg,
-							LastAt:      lastAt,
-							LastAtTS:    lastAtTS,
-						})
-					}
-					return rooms, nil
+					return fetchAccountPingRooms(ctx, client, acct)
 				})
 
 			var all []PingRoomInfo
@@ -265,9 +226,62 @@ func (h *Hub) PingRooms() *Pool[[]PingRoomInfo] {
 	return p
 }
 
+// pingLastMessageLimit bounds how many pings get their latest line fetched per
+// refresh: one request each, and the list arrives most recently updated first.
+const pingLastMessageLimit = 20
+
+// fetchAccountPingRooms lists an account's pings. A ping is a bucket of its
+// own, so the room's project is the ping and its chat is the ping's Campfire.
+func fetchAccountPingRooms(ctx context.Context, client *basecamp.AccountClient, acct AccountInfo) ([]PingRoomInfo, error) {
+	pings, err := client.Pings().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	rooms := make([]PingRoomInfo, 0, len(pings))
+	for i := range pings {
+		ping := &pings[i]
+		chatID, ok := ping.CampfireID()
+		if !ok {
+			continue
+		}
+		room := PingRoomInfo{
+			ChatID:    chatID,
+			ProjectID: ping.ID,
+			Title:     ping.Title,
+			Account:   acct.Name,
+			AccountID: acct.ID,
+			LastAt:    ping.UpdatedAt.Format("Jan 2 3:04pm"),
+			LastAtTS:  ping.UpdatedAt.Unix(),
+		}
+		if i < pingLastMessageLimit {
+			lines, err := client.Campfires().ListLines(ctx, chatID, &basecamp.CampfireLineListOptions{
+				Sort:      "created_at",
+				Direction: "desc",
+				Limit:     1,
+			})
+			if err == nil && len(lines.Lines) > 0 {
+				last := lines.Lines[0]
+				if last.Creator != nil {
+					room.LastMessage = last.Creator.Name + ": "
+				}
+				content := last.Content
+				if r := []rune(content); len(r) > 40 {
+					content = string(r[:37]) + "…"
+				}
+				room.LastMessage += content
+				room.LastAt = last.CreatedAt.Format("Jan 2 3:04pm")
+				room.LastAtTS = last.CreatedAt.Unix()
+			}
+		}
+		rooms = append(rooms, room)
+	}
+	return rooms, nil
+}
+
 // BonfireRooms returns a global-scope pool of chat rooms from bookmarked
 // and recently visited projects. Uses FanOut like PingRooms but filters for
-// project chats (not 1:1 pings). For accounts with no bookmarks, falls back
+// project chats (not pings). For accounts with no bookmarks, falls back
 // to recently visited projects (from recents store). The RoomStore (if configured
 // via SetRoomStore) can further narrow or widen via explicit includes/excludes.
 func (h *Hub) BonfireRooms() *Pool[[]BonfireRoomConfig] {
