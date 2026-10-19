@@ -119,8 +119,10 @@ func (r *Resolver) ResolveProject(ctx context.Context, input string) (string, st
 				return strconv.FormatInt(id, 10), p.Name, nil
 			}
 		}
-		// Unknown here - return as-is and let the API validate
-		return input, "", nil
+		// Unknown here: return the canonical ID and let the API validate.
+		// Callers compare this string with bucket IDs, so "00123" must come
+		// back as "123".
+		return strconv.FormatInt(id, 10), "", nil
 	}
 
 	// Fetch projects for name resolution
@@ -417,19 +419,17 @@ func (r *Resolver) getMe(ctx context.Context) (*Person, error) {
 
 // ProjectName returns the name of the project with the given ID, or "" when
 // the project is not found or not visible. It reads the session's project
-// list when one was already fetched, and otherwise that one project.
+// list when one was already fetched, and otherwise that one project. The list
+// holds only active projects, so a miss there still reads the project itself.
 func (r *Resolver) ProjectName(ctx context.Context, id int64) (string, error) {
 	r.mu.RLock()
 	projects := r.projects
 	r.mu.RUnlock()
 
-	if projects != nil {
-		for _, p := range projects {
-			if p.ID == id {
-				return p.Name, nil
-			}
+	for _, p := range projects {
+		if p.ID == id {
+			return p.Name, nil
 		}
-		return "", nil
 	}
 
 	resp, err := r.forAccount().Get(ctx, "/projects/"+strconv.FormatInt(id, 10)+".json")

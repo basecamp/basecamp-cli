@@ -518,6 +518,29 @@ func TestResolverProjectName_UsesSessionList(t *testing.T) {
 	assert.Equal(t, "Project Alpha", name)
 }
 
+func TestResolverProjectName_ReadsProjectMissingFromSessionList(t *testing.T) {
+	r, hits := newProjectServer(t, "99999", 12345, http.StatusOK)
+	r.projects = []Project{{ID: 67890, Name: "Project Beta"}}
+
+	name, err := r.ProjectName(context.Background(), 12345)
+	require.NoError(t, err)
+	assert.Equal(t, "Project Alpha", name, "the session list holds only active projects, so a miss must read the project itself")
+	assert.Equal(t, map[string]int{"/99999/projects/12345.json": 1}, hits())
+}
+
+func TestResolverResolveProjectNumericID_Canonical(t *testing.T) {
+	for _, input := range []string{"00123", "+123"} {
+		t.Run(input, func(t *testing.T) {
+			r, hits := newProjectServer(t, "99999", 123, http.StatusOK)
+
+			id, _, err := r.ResolveProject(context.Background(), input)
+			require.NoError(t, err)
+			assert.Equal(t, "123", id, "callers compare the resolved ID with bucket IDs as strings")
+			assert.Empty(t, hits())
+		})
+	}
+}
+
 func TestResolverResolveProjectNumericID_NotInSessionList(t *testing.T) {
 	r := newMockResolver()
 	r.setProjects([]Project{{ID: 67890, Name: "Project Beta"}})
