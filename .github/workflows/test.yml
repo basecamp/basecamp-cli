@@ -253,7 +253,7 @@ jobs:
       # shard never got as far as knowing what it was meant to run".
       - name: Record what this shard was assigned
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # The name is the directory the aggregate reads: download-artifact
           # extracts each one to <path>/<name>/, so this has to be the
@@ -280,7 +280,7 @@ jobs:
           persist-credentials: false
 
       - name: Download what each shard recorded
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: shard-*
           path: shard-records
@@ -351,7 +351,7 @@ jobs:
       # Same Ruby the eval runner gets, because the point of the check is the
       # engine: these patterns are Onigmo, and Go's RE2 guard cannot see them.
       - name: Set up Ruby
-        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0
         with:
           ruby-version: '3.3'
 
@@ -492,7 +492,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
+        uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0
         with:
           ruby-version: '3.3'
 
@@ -730,7 +730,7 @@ jobs:
 
       - name: Upload benchmark results
         if: steps.filter.outputs.bench == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: benchmarks
           path: benchmarks.txt
