@@ -506,16 +506,19 @@ it, and `--trust operator` clears it; setup refuses `--trust operator` with
 can serve only projects it's a member of. List its projects
 (`basecamp projects list -P '<profile>' --json`; if that's refused under an
 Agent identity, use the person's own login: a profile whose `auth status` isn't
-`oauth_type` `agent`, never another agent's). If it's in some, offer all of
-them as the default. If it's in none, as a new agent is, ask the person to add
-it in Basecamp to the projects they want, the way they'd add a person, and to
-tell you when that's done. Either way, say it's a starting point: to add a
-project later, they add the agent there and ask you to serve it, and until
-then nothing there reaches it. Map names to ids yourself and keep ids out of
-what you say. When a name matches more than one project, ask.
+`oauth_type` `agent`, never another agent's). Unless the person named
+projects, serve every one it's in, without asking. A personal agent is in all
+of its owner's projects: Basecamp adds it when they approve, within a few
+seconds, so if it shows none, list again after a moment. Tell the person it's
+in their projects and picks up their requests in all of them, and that if
+they'd rather it skip some, they can just say so. Any other agent is only in
+the projects someone added it to; if it's in none, ask the person to add it in
+Basecamp, the way they'd add a person, and to tell you when that's done. A
+project it joins later isn't served until you add it, so tell them to ask you
+then. Map names to ids yourself and keep ids out of what you say. When a name
+they give matches more than one project, ask.
 
-**4. Run setup** once they've named the projects, without asking them to
-confirm again:
+**4. Run setup** with those projects, without asking them to confirm:
 
 ```bash
 basecamp connect setup -P '<profile>' --serve <project-id> --serve <project-id> --json
