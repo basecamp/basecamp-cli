@@ -320,8 +320,9 @@ confirmed. Before the first setup, run `basecamp me -P '<profile>' --json` and
 say who it is: `identity` (name, email) and, when present, `person.name` and
 `person.id`. An agent credential has no `identity`; its `person` carries
 `personable_type` and, for a personal agent, `boss`, the person it works for.
-Go on only when they say that is the agent. If it names someone
-else, stop: don't run setup and don't reconnect.
+When you connected it in this session, they chose the agent on the approval
+page: tell them its name and go on. Otherwise go on only when they say that is
+the agent. If it names someone else, stop: don't run setup and don't reconnect.
 
 **Writing to Basecamp.** Everything this skill and its subagents post (boosts,
 comments, chat lines, card moves) goes out **as the agent**: always pass
@@ -498,11 +499,17 @@ A run that passes `--allow` replaces the list, a run that passes none keeps
 it, and `--trust operator` clears it; setup refuses `--trust operator` with
 `--allow`.
 
-**3. Projects, by name.** List them (`basecamp projects list -P '<profile>'
---json`; if that's refused under an Agent identity, list them with the person's
-own profile instead). Show the names, let them choose, and map each to its id
-yourself. When a name matches more than one project, ask. The agent must be a
-member of each project it serves.
+**3. Projects, by name.** The agent hears only the projects it serves, and it
+can serve only projects it's a member of. List its projects
+(`basecamp projects list -P '<profile>' --json`; if that's refused under an
+Agent identity, use the person's own login: a profile whose `auth status` isn't
+`oauth_type` `agent`, never another agent's). If it's in some, offer all of
+them as the default. If it's in none, as a new agent is, ask the person to add
+it in Basecamp to the projects they want, the way they'd add a person, and to
+tell you when that's done. Either way, say it's a starting point: to add a
+project later, they add the agent there and ask you to serve it, and until
+then nothing there reaches it. Map names to ids yourself and keep ids out of
+what you say. When a name matches more than one project, ask.
 
 **4. Confirm, then run setup.** Say back the agent, who may give it work, and
 each project by name. Then:
