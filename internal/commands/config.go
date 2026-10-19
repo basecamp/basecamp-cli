@@ -791,6 +791,13 @@ Without --project, an interactive picker is shown.`,
 				if err != nil {
 					return err
 				}
+				// A numeric ID resolves without a name; read the project to
+				// confirm it exists before saving it
+				if id, parseErr := strconv.ParseInt(resolvedID, 10, 64); projectName == "" && parseErr == nil {
+					if projectName, err = app.Names.ProjectName(cmd.Context(), id); err != nil {
+						return err
+					}
+				}
 				if projectName == "" {
 					return output.ErrNotFound("project", projectArg)
 				}

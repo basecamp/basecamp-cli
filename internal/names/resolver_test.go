@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -425,6 +426,106 @@ func TestResolverResolveProjectNumericID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "12345", id)
 	assert.Equal(t, "Project Alpha", name)
+}
+
+// newProjectServer serves one project at /<account>/projects/<id>.json and
+// counts every request by path, so a test can assert which endpoints a
+// resolution touched.
+func newProjectServer(t *testing.T, accountID string, projectID int64, status int) (*Resolver, func() map[string]int) {
+	t.Helper()
+	var mu sync.Mutex
+	hits := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits[r.URL.Path]++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != fmt.Sprintf("/%s/projects/%d.json", accountID, projectID) {
+			http.NotFound(w, r)
+			return
+		}
+		if status != http.StatusOK {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(`{"error":"nope"}`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": projectID, "name": "Project Alpha"})
+	}))
+	t.Cleanup(server.Close)
+
+	sdkClient := basecamp.NewClient(
+		&basecamp.Config{BaseURL: server.URL},
+		testTokenProvider{},
+		basecamp.WithMaxRetries(1),
+	)
+	snapshot := func() map[string]int {
+		mu.Lock()
+		defer mu.Unlock()
+		out := make(map[string]int, len(hits))
+		for k, v := range hits {
+			out[k] = v
+		}
+		return out
+	}
+	return NewResolver(sdkClient, nil, accountID), snapshot
+}
+
+func TestResolverResolveProjectNumericID_MakesNoRequest(t *testing.T) {
+	r, hits := newProjectServer(t, "99999", 12345, http.StatusOK)
+
+	id, name, err := r.ResolveProject(context.Background(), "12345")
+	require.NoError(t, err)
+	assert.Equal(t, "12345", id)
+	assert.Empty(t, name, "the name is only known once the session has listed projects")
+	assert.Empty(t, hits(), "a numeric ID should never walk /projects.json, or read anything else")
+}
+
+func TestResolverProjectName_ReadsOneProject(t *testing.T) {
+	r, hits := newProjectServer(t, "99999", 12345, http.StatusOK)
+
+	name, err := r.ProjectName(context.Background(), 12345)
+	require.NoError(t, err)
+	assert.Equal(t, "Project Alpha", name)
+	assert.Equal(t, map[string]int{"/99999/projects/12345.json": 1}, hits())
+}
+
+func TestResolverProjectName_NotVisibleIsEmpty(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			r, hits := newProjectServer(t, "99999", 12345, status)
+
+			name, err := r.ProjectName(context.Background(), 12345)
+			require.NoError(t, err)
+			assert.Empty(t, name)
+			assert.Equal(t, map[string]int{"/99999/projects/12345.json": 1}, hits())
+		})
+	}
+}
+
+func TestResolverProjectName_ServerErrorFails(t *testing.T) {
+	r, _ := newProjectServer(t, "99999", 12345, http.StatusInternalServerError)
+
+	_, err := r.ProjectName(context.Background(), 12345)
+	require.Error(t, err)
+}
+
+func TestResolverProjectName_UsesSessionList(t *testing.T) {
+	r := newMockResolver()
+	r.setProjects([]Project{{ID: 12345, Name: "Project Alpha"}})
+
+	name, err := r.ProjectName(context.Background(), 12345)
+	require.NoError(t, err)
+	assert.Equal(t, "Project Alpha", name)
+}
+
+func TestResolverResolveProjectNumericID_NotInSessionList(t *testing.T) {
+	r := newMockResolver()
+	r.setProjects([]Project{{ID: 67890, Name: "Project Beta"}})
+
+	id, name, err := r.ResolveProject(context.Background(), "12345")
+	require.NoError(t, err)
+	assert.Equal(t, "12345", id)
+	assert.Empty(t, name)
 }
 
 func TestResolverResolveProjectByName(t *testing.T) {

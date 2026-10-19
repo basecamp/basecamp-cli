@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
@@ -459,10 +460,19 @@ func setupConfigProjectTestApp(t *testing.T) (*appctx.App, *bytes.Buffer, *httpt
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]map[string]any{
-			{"id": 12345, "name": "Project Alpha"},
-			{"id": 67890, "name": "Project Beta"},
-		})
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/projects/12345.json"):
+			json.NewEncoder(w).Encode(map[string]any{"id": 12345, "name": "Project Alpha"})
+		case strings.HasSuffix(r.URL.Path, "/projects/67890.json"):
+			json.NewEncoder(w).Encode(map[string]any{"id": 67890, "name": "Project Beta"})
+		case strings.Contains(r.URL.Path, "/projects/"):
+			http.NotFound(w, r)
+		default:
+			json.NewEncoder(w).Encode([]map[string]any{
+				{"id": 12345, "name": "Project Alpha"},
+				{"id": 67890, "name": "Project Beta"},
+			})
+		}
 	}))
 	t.Cleanup(server.Close)
 
