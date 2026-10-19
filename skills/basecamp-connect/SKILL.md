@@ -472,8 +472,11 @@ pinned to its identity id, with
 for an existing profile), and pass the same `--expect-identity` to the first
 setup.
 
-**2. Who may give it work.** Explain each in a plain sentence, without these
-mode names, and default to the first:
+**2. Who may give it work.** Don't ask. Unless the person already said
+otherwise, it's only the operator (`operator`, the default). When you finish,
+tell them only they can give it work, and that if they want it to respond to
+other people too, they can just ask you. When they do, explain each choice in
+a plain sentence, without these mode names:
 
 - **operator**: only the operator, which for a personal agent is its owner (you).
 - **allowlist**: the operator plus people you name.
@@ -511,8 +514,8 @@ project later, they add the agent there and ask you to serve it, and until
 then nothing there reaches it. Map names to ids yourself and keep ids out of
 what you say. When a name matches more than one project, ask.
 
-**4. Confirm, then run setup.** Say back the agent, who may give it work, and
-each project by name. Then:
+**4. Run setup** once they've named the projects, without asking them to
+confirm again:
 
 ```bash
 basecamp connect setup -P '<profile>' --serve <project-id> --serve <project-id> --json
