@@ -46,6 +46,18 @@ setup_file() {
   assert_json_not_null '.data.id'
 }
 
+@test "boost update changes a boost's content" {
+  local id_file="$BATS_FILE_TMPDIR/boost_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No boost created in prior test"
+  local boost_id
+  boost_id=$(<"$id_file")
+
+  run_smoke basecamp boost update "$boost_id" "✅ done" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.content' '✅ done'
+}
+
 @test "boost delete removes a boost" {
   local id_file="$BATS_FILE_TMPDIR/boost_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No boost created in prior test"
