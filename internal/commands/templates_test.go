@@ -154,14 +154,14 @@ func TestTemplatesCopySendsExplicitPeopleConfirmation(t *testing.T) {
 		"copy", "3", "--project", "123", "--todoset", "9", "--confirm-adding-people")
 	require.NoError(t, err)
 
+	// A numeric --project is used as given: no /projects.json walk
 	requests := transport.recorded()
-	require.Len(t, requests, 4)
-	assert.Equal(t, "/99999/projects.json", requests[0].Path)
-	assert.Equal(t, "/99999/todosets/9", requests[1].Path)
-	assert.Equal(t, "/99999/projects/123.json", requests[2].Path)
+	require.Len(t, requests, 3)
+	assert.Equal(t, "/99999/todosets/9", requests[0].Path)
+	assert.Equal(t, "/99999/projects/123.json", requests[1].Path)
 	assert.JSONEq(t,
 		`{"template_recording_id":3,"destination_parent_id":9,"adding_people_confirmed":true}`,
-		requests[3].Body,
+		requests[2].Body,
 	)
 }
 
@@ -175,7 +175,7 @@ func TestTemplatesCopyRejectsTodosetFromAnotherProject(t *testing.T) {
 	var outputErr *output.Error
 	require.True(t, errors.As(err, &outputErr))
 	assert.Contains(t, outputErr.Message, "--todoset 9 belongs to project 456, not 123")
-	require.Len(t, transport.recorded(), 2, "copy request must not be sent")
+	require.Len(t, transport.recorded(), 1, "copy request must not be sent")
 }
 
 func TestTemplatesCopyRejectsDisabledTodoset(t *testing.T) {
@@ -197,7 +197,7 @@ func TestTemplatesCopyRejectsDisabledTodoset(t *testing.T) {
 	var outputErr *output.Error
 	require.True(t, errors.As(err, &outputErr))
 	assert.Contains(t, outputErr.Message, "--todoset 9 is disabled for project 123")
-	require.Len(t, transport.recorded(), 3, "copy request must not be sent")
+	require.Len(t, transport.recorded(), 2, "copy request must not be sent")
 }
 
 func TestTemplatesCopyExplainsPeopleConfirmation(t *testing.T) {

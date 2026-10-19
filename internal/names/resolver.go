@@ -102,22 +102,27 @@ func (r *Resolver) forAccount() *basecamp.AccountClient {
 }
 
 // ResolveProject resolves a project name or ID to an ID.
-// Returns the ID and the project name for display.
+// Returns the ID and the project name for display. For a numeric ID the name
+// is "" unless the session already listed projects; see ProjectName.
 func (r *Resolver) ResolveProject(ctx context.Context, input string) (string, string, error) {
-	// Numeric ID passthrough
+	// Numeric ID passthrough. An ID needs no resolving, so it costs no
+	// request: this path runs on every command given --in <id>, and it used
+	// to walk every page of /projects.json just to find a name most callers
+	// discard. The name comes back only when the session already holds the
+	// project list; a caller that needs it otherwise asks ProjectName.
 	if id, err := strconv.ParseInt(input, 10, 64); err == nil {
-		// Validate the ID exists by fetching projects
-		projects, err := r.getProjects(ctx)
-		if err != nil {
-			return "", "", err
-		}
+		r.mu.RLock()
+		projects := r.projects
+		r.mu.RUnlock()
 		for _, p := range projects {
 			if p.ID == id {
 				return strconv.FormatInt(id, 10), p.Name, nil
 			}
 		}
-		// ID not found - return as-is but let API handle validation
-		return input, "", nil
+		// Unknown here: return the canonical ID and let the API validate.
+		// Callers compare this string with bucket IDs, so "00123" must come
+		// back as "123".
+		return strconv.FormatInt(id, 10), "", nil
 	}
 
 	// Fetch projects for name resolution
@@ -410,6 +415,37 @@ func (r *Resolver) getMe(ctx context.Context) (*Person, error) {
 		Email:          person.EmailAddress,
 	}
 	return r.me, nil
+}
+
+// ProjectName returns the name of the project with the given ID, or "" when
+// the project is not found or not visible. It reads the session's project
+// list when one was already fetched, and otherwise that one project. The list
+// holds only active projects, so a miss there still reads the project itself.
+func (r *Resolver) ProjectName(ctx context.Context, id int64) (string, error) {
+	r.mu.RLock()
+	projects := r.projects
+	r.mu.RUnlock()
+
+	for _, p := range projects {
+		if p.ID == id {
+			return p.Name, nil
+		}
+	}
+
+	resp, err := r.forAccount().Get(ctx, "/projects/"+strconv.FormatInt(id, 10)+".json")
+	if err != nil {
+		var sdkErr *basecamp.Error
+		if errors.As(err, &sdkErr) && (sdkErr.Code == basecamp.CodeNotFound || sdkErr.Code == basecamp.CodeForbidden) {
+			return "", nil
+		}
+		return "", convertSDKError(err)
+	}
+
+	var project Project
+	if err := json.Unmarshal(resp.Data, &project); err != nil {
+		return "", err
+	}
+	return project.Name, nil
 }
 
 func (r *Resolver) getProjects(ctx context.Context) ([]Project, error) {

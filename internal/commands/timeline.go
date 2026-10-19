@@ -163,6 +163,11 @@ func runProjectTimeline(cmd *cobra.Command, project string, opts *basecamp.Timel
 		return convertSDKError(err)
 	}
 
+	// A numeric ID resolves without a name; the events carry their project's
+	if projectName == "" && len(timelineResult.Events) > 0 && timelineResult.Events[0].Bucket != nil {
+		projectName = timelineResult.Events[0].Bucket.Name
+	}
+
 	summary := fmt.Sprintf("%d events in %s", len(timelineResult.Events), projectName)
 	if projectName == "" {
 		summary = fmt.Sprintf("%d events in project #%s", len(timelineResult.Events), resolvedProjectID)
