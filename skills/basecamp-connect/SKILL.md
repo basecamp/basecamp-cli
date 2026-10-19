@@ -527,7 +527,10 @@ adding `--trust`, `--allow`, `--allow-assignments-from-authorized`,
 
 **5. Start the connector** right away (*Running the connector*), unless the
 person said not to. Connecting, setup and the watcher are one flow: don't stop
-after setup to ask whether to start it.
+after setup to ask whether to start it. Tell the person what it means for
+them: their agent picks up work while this Claude Code session is open. The
+connector, the watcher, the monitor and profiles are yours; leave their names
+out of what you say, during setup too, and don't narrate reading this skill.
 
 ### Reading setup's result
 
