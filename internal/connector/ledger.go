@@ -951,6 +951,11 @@ END;
 	// operator for a go, and which event's boost took each one's go. See
 	// ledger_asks.go.
 	migrationAsks,
+
+	// Migration 16. Acks: the boost the connector acknowledged each request
+	// with, so a request handed off again gets the same one. See
+	// ledger_acks.go.
+	migrationAcks,
 }
 
 // migrationBlockedRetrySchedule is migration 14.

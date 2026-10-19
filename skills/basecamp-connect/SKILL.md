@@ -5,9 +5,10 @@ description: |
   (basecamp connect), which listens to the account's event feed as a Basecamp
   agent and prints one line per trusted request: a mention, an assignment, a
   ping from its operator, a comment on a thread the agent follows, a boost on
-  something it wrote. This
-  session acknowledges each one that asks for something within seconds (a
-  boost in its own words), picks the repo for the project, and hands the
+  something it wrote. The
+  connector boosts each one that asks for something the moment it arrives;
+  this session puts that boost in its own words, picks the repo for the
+  project, and hands the
   request to a background subagent that reads the context, does
   the work with your settings and tools, and replies as the agent. The session
   stays free to take the next request, and you can keep using it.
@@ -49,10 +50,11 @@ Three pieces:
 - **The connector**: `basecamp connect -P '<profile>'`. It listens to the
   account's event feed as the agent, checks each event against who may give the
   agent work and which projects it serves, and prints one line per trusted
-  request. It does nothing else.
-- **This session**: the orchestrator. It watches those lines, acknowledges each
-  request, chooses the repo, and dispatches one background subagent per
-  request. It never does the work itself.
+  request. It boosts each one that asks for something first, and does
+  nothing else.
+- **This session**: the orchestrator. It watches those lines, words each
+  acknowledgement, chooses the repo, and dispatches one background subagent
+  per request. It never does the work itself.
 
 Claude Code only. The connector runs on Linux and macOS.
 
@@ -91,10 +93,6 @@ Single-quote the path, as with every other value.
 Each notification is one request: handle it with *For each request*. A request
 that arrives while you're waiting on the person is not their reply.
 
-The connector starts from the present. Anything asked more than a minute
-before it started is not picked up. If someone says the agent ignored them, that's the first
-thing to check.
-
 ### 2. The request line
 
 ```json
@@ -102,8 +100,9 @@ thing to check.
  "recording":{"bucket_id":456,"project_name":"BC5 Calendar","recording_id":789,"type":"Comment",
               "title":"Fix the date picker","url":"https://3.basecamp.com/999/buckets/456/recordings/789"},
  "reply_to":{"kind":"comment","recording_id":700},
- "requester_id":1001,"requester_name":"Jorge Manrubia","role":"operator","owner":true,"ping":false,"acknowledge":true,
- "go":false,"ask":{"title":"","content":""},"content":"<p>fix the date picker</p>","content_updated_at":"..."}
+ "requester_id":1001,"requester_name":"Jorge Manrubia","role":"operator","owner":true,"ping":false,"acknowledge":false,
+ "go":false,"ask":{"title":"","content":""},"ack":{"boost_id":555,"content":"👀"},
+ "content":"<p>fix the date picker</p>","content_updated_at":"..."}
 ```
 
 - **`trigger`**: why it reached you.
@@ -115,8 +114,10 @@ thing to check.
   - `completed`: something completed in a project it watches.
   - `boosted`: a boost on the agent's own post.
   - `pinged`: an operator wrote to it in a direct Ping.
-- **`acknowledge`**: true when a person asked for something. False for
-  `subscribed`, `completed` and `boosted`, context unless a `go`.
+- **`acknowledge`**: true when a person asked for something and it isn't yet
+  acknowledged. False for `subscribed`, `completed` and `boosted`, context
+  unless a `go`, and when `ack` is on the line.
+- **`ack`**: the connector's boost on the recording, when it gave one.
 - **`recording`**: what the event is about. `bucket_id` is the project,
   `project_name` its name. `url` works with every command below.
 - **`ping`**: true for a line in a Ping, a private chat in no project;
@@ -187,14 +188,17 @@ refusal above, the holding reply below) post as step 5 of `subagent.md` does.
 
 ### a. Acknowledge, within seconds
 
-Only when `acknowledge` is true. Boost the recording as the agent, with a
-short phrase or emoji that fits the request (16 characters at most), never a
-fixed string:
+With `ack` on the line, the connector boosted `ack.content`: reword it to a
+short phrase that fits the request (16 characters at most), never a fixed
+string. Otherwise, only when `acknowledge` is true, boost: this loop with
+`boost create '<recording.url>'`. A reply due within moments (a quick question)
+is the acknowledgement: leave the boost, or give none, and say so in the
+handoff; not for card work, where the boost shows the request landed.
 
 ```bash
 landed=false
 for i in 1 2 3; do
-  if out=$(basecamp boost create '<recording.url>' '<ack>' --profile '<profile>' 2>&1); then
+  if out=$(basecamp boost update <ack.boost_id> '<ack>' --profile '<profile>' 2>&1); then
     landed=true; break
   fi
   echo "$out" | grep -qE 'Not authenticated for|token refresh failed' || break   # anything else: no retry
@@ -203,16 +207,11 @@ done
 [ "$landed" = true ] || { echo "boost did not verifiably land: $out" >&2; false; }
 ```
 
-Values go in single quotes, the acknowledgement included, with a single quote
-inside one written as `'\''`: `'I'\''m on it'`. Numeric ids go in bare.
-Retry only those two failures, which happen before any request is sent: any
-other may have landed the boost, and a retry would post it twice. If it didn't
-verifiably land, say so in the handoff; the subagent boosts as a fallback.
-
-When the reply will come within moments (a quick question in Campfire), the
-reply itself can be the acknowledgement: skip the boost, and say so in the
-handoff. Not for card work: there the boost is how the requester sees the
-request landed.
+Values go in single quotes, a single quote inside one written `'\''`:
+`'I'\''m on it'`; numeric ids go in bare. Retry only those two failures, which
+come before any request is sent; any other may have landed. If the update
+fails, `ack.content` still acknowledges; if your own boost didn't verifiably
+land, one is still owed. Say which in the handoff.
 
 ### b. Choose the repo
 
@@ -285,8 +284,8 @@ to finish without this session:
   profile name is yours, and need not be the name the operator mentions;
 - the agent's profile name, and the repo path (or "no repo"). A subagent
   doesn't start in that repo by itself: say plainly that it must work there;
-- whether an acknowledgement is still owed (the boost failed), or not owed
-  (it landed, or the reply is the acknowledgement);
+- whether an acknowledgement is still owed (no boost landed), or not owed
+  (one landed, the connector's included);
 - the full content of the project's AGENTS.md document and any repo mapping used,
   or the explicit
   result "AGENTS.md checked: none found";
@@ -386,6 +385,8 @@ Each becomes a flag on setup (*First-time setup*, step 4):
 | "the people I named can assign it work too" | `--allow-assignments-from-authorized`: it covers the whole allowlist setup leaves (this run's `--allow`, or the list kept), not one person, so say who that is and confirm. With nobody on the allowlist setup refuses it, so name someone first. A run that passes `--allow` turns it off unless it's passed again |
 | "let Jorge talk to it, but only in our group Ping" | `--allow-in-ping <ping-id>:<jorge's person id>` (repeatable; `--disallow-in-ping <ping-id>:<person-id>` takes them out). Jorge then reaches it only by @mentioning it in that Ping, as a participant, and nowhere else. Find both ids as *Who may give it work* says. Restart the connector after changing it |
 | "let Zach's agent ping mine" | `--allow-agent <that agent's person id>` (repeatable; `--disallow-agent <id>` removes one). It wakes this agent only by @mentioning it, as a participant, never by assignment. Mentions are capped per 24 hours: `--agent-thread-cap` (default 3 per thread) and `--agent-daily-cap` (default 20 per agent). Restart the connector after changing it |
+| "acknowledge with 👍 instead" | `--ack-boost '👍'` (at most 16 characters; the default is 👀). Restart the connector after changing it |
+| "don't boost my requests automatically" | `--no-ack-boost`: the connector no longer boosts, and this session acknowledges each request itself (*Acknowledge*). Restart the connector after changing it |
 | "also work in project X" | `--serve <id of X>` |
 | "stop working in X" | `--unserve <id of X>` |
 
@@ -526,6 +527,13 @@ A run that passes `--allow` replaces the list, a run that passes none keeps
 it, and `--trust operator` clears it; setup refuses `--trust operator` with
 `--allow`.
 
+**Acknowledgement.** By default the connector boosts each request that asks
+for something with 👀, as the agent, before printing it, and this session then
+rewords that boost. `--ack-boost '<content>'` changes the boost (16 characters
+at most), and `--no-ack-boost` turns it off, leaving acknowledging to this
+session. Neither is asked about on a first setup; pass one only when the
+person wants it.
+
 **3. Projects, by name.** The agent hears only the projects it serves, and it
 can serve only projects it's a member of. List its projects
 (`basecamp projects list -P '<profile>' --json`; if that's refused under an
@@ -618,7 +626,9 @@ Requests that arrive while it's stopped are not picked up later.
 - `basecamp connect doctor -P '<profile>'`: the credential, the identity, the
   event feed and the ledger. Start here when something seems wrong. It posts
   nothing.
-- **"Did that mention reach it?"**: search the connector's output file for the
+- **"Did that mention reach it?"**: the connector starts from the present, so
+  anything asked more than a minute before it started is not picked up; check
+  that first. Then search the connector's output file for the
   recording id. A `"type":"request"` line means it was handed to you. A
   `"type":"event"` line with a `reason` says why it was turned away (for
   example `untrusted_performer`). No line means the feed never delivered it.

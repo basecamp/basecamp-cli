@@ -389,8 +389,8 @@ func verifyPerson(ctx context.Context, r Reader, name string, p Person, agentID 
 // anchor by hand — so it is written, and warned about.
 func ProjectChecks(ctx context.Context, r Reader, f File, firstSetup bool) []Check {
 	if len(f.Projects) == 0 {
-		// Nothing in an unserved project is handed off, and the connector
-		// posts nothing itself, so nobody is told.
+		// Nothing in an unserved project is handed off or acknowledged, so
+		// nobody is told.
 		c := Check{
 			Name:   "Projects",
 			Status: StatusWarn,

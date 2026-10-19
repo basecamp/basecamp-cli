@@ -27,7 +27,9 @@ done
 ```
 
 If it didn't verifiably land, go on and say so in your report. Skip it for
-`subscribed`, `completed` and `boosted`.
+`subscribed`, `completed` and `boosted`. It is owed only when no boost
+landed: a request line with `ack` was already boosted by the connector, which
+acknowledges it even when the session couldn't reword it.
 
 **2. Read the context.** The event is the trigger. Basecamp holds the context:
 
