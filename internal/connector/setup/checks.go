@@ -372,7 +372,7 @@ func ProjectChecks(ctx context.Context, r Reader, f File, firstSetup bool) []Che
 		c := Check{
 			Name:   "Projects",
 			Status: StatusWarn,
-			Message: "No project is served: this agent is handed no work at all, and the connector will start and do nothing. " +
+			Message: "No project is served: only its operators' pings reach this agent. " +
 				"Mentions and assignments in projects it doesn't serve are not handed off, and nobody is told.",
 			// Quoted, not interpolated: this is a line we tell an operator
 			// to paste into a shell, and a profile name comes from a

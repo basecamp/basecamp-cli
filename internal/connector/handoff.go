@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
@@ -34,7 +35,12 @@ type HandoffLine struct {
 	EventType string `json:"event_type"`
 	Trigger   string `json:"trigger"`
 
-	Recording   HandoffRecording `json:"recording"`
+	Recording HandoffRecording `json:"recording"`
+	// Ping says the request is a line in a Ping, a private chat with the
+	// agent, and in no project: Recording.BucketID is the Ping's id, there is
+	// no project to read an AGENTS.md or a repo from, and ReplyTo is the
+	// Ping's Campfire. Only an operator's line reaches the agent there.
+	Ping        bool             `json:"ping"`
 	ReplyTo     InstructionReply `json:"reply_to"`
 	RequesterID int64            `json:"requester_id"`
 	// RequesterName is known when the requester wrote the recording.
@@ -181,7 +187,9 @@ func handOffReady(ctx context.Context, opts HandoffOptions) error {
 		if len(opts.Buckets) > 0 {
 			buckets = slices.DeleteFunc(buckets, func(b int64) bool { return !slices.Contains(opts.Buckets, b) })
 		}
-		records, err := opts.Ledger.handoffRecords(ctx, buckets, 50)
+		// A Ping is in no project, so a run narrowed to projects hears none.
+		pings := len(opts.Buckets) == 0
+		records, err := opts.Ledger.handoffRecords(ctx, buckets, pings, 50)
 		if err != nil {
 			return err
 		}
@@ -268,6 +276,7 @@ func handoffLine(record Record, agentID int64, goes bool) (HandoffLine, error) {
 			Title:       richtext.SanitizeTerminal(snapshot.Title),
 			URL:         richtext.SanitizeTerminal(record.Decision.RecordingURL),
 		},
+		Ping:          admission.IsPingConversation(record.Decision.ConversationKey, record.BucketID),
 		ReplyTo:       InstructionReply{Kind: record.Decision.ReplyKind, RecordingID: record.Decision.ReplyRecordingID},
 		RequesterID:   record.Decision.RequesterID,
 		RequesterName: richtext.SanitizeTerminal(snapshot.RequesterName),
@@ -294,28 +303,41 @@ func handoffRole(recorded string) string {
 	return string(admission.RoleParticipant)
 }
 
-// handoffRecords lists the records waiting to be handed off in buckets,
-// oldest first. Unlike the startable query a worker used, nothing here waits
-// on a task: a ledger from the worker connector can hold a task its crash
-// left open, or a follow-up joined to one, and neither may keep a request
-// from being handed off. The hold still pauses everything.
-func (l *Ledger) handoffRecords(ctx context.Context, buckets []int64, limit int) ([]Record, error) {
-	if len(buckets) == 0 {
-		return nil, nil
-	}
+// handoffRecords lists the records waiting to be handed off in buckets, and
+// in Pings when pings is set, oldest first. Unlike the startable query a
+// worker used, nothing here waits on a task: a ledger from the worker
+// connector can hold a task its crash left open, or a follow-up joined to
+// one, and neither may keep a request from being handed off. The hold still
+// pauses everything.
+//
+// A Ping's record is known by its conversation, the Ping itself
+// (admission.PingConversationKey), which admission writes only once the Ping
+// read said the bucket is one the agent is in.
+func (l *Ledger) handoffRecords(ctx context.Context, buckets []int64, pings bool, limit int) ([]Record, error) {
 	buckets = slices.Clone(buckets)
 	slices.Sort(buckets)
 	buckets = slices.Compact(buckets)
-	args := make([]any, 0, len(buckets)+1)
-	for _, b := range buckets {
-		args = append(args, b)
+	var where []string
+	args := make([]any, 0, len(buckets)+2)
+	if len(buckets) > 0 {
+		where = append(where, `(e.served = 1 AND e.bucket_id IN (`+placeholders(len(buckets))+`))`)
+		for _, b := range buckets {
+			args = append(args, b)
+		}
+	}
+	if pings {
+		where = append(where, `e.conversation_key = (? || e.bucket_id)`)
+		args = append(args, admission.PingConversationPrefix)
+	}
+	if len(where) == 0 {
+		return nil, nil
 	}
 	args = append(args, limit)
 	//nolint:gosec // G202: only placeholders are built into the query
 	query := `
 SELECT e.id FROM events e
 WHERE e.state IN ('admitted', 'queued') AND e.content_dropped = 0 AND e.snapshot IS NOT NULL
-  AND e.served = 1 AND e.bucket_id IN (` + placeholders(len(buckets)) + `)
+  AND (` + strings.Join(where, " OR ") + `)
   AND NOT EXISTS (SELECT 1 FROM hold_marker)
 ORDER BY e.id LIMIT ?`
 	rows, err := l.db.QueryContext(ctx, query, args...)

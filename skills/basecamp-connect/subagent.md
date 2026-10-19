@@ -44,6 +44,13 @@ basecamp chat line '<recording.url>' --json -P '<profile>'
 basecamp chat messages --project <bucket_id> --room <reply_to.recording_id> --json -P '<profile>'
 ```
 
+For a Ping (`ping` true), a private chat in no project, read its recent
+conversation with `basecamp pings messages <bucket_id> --json -P '<profile>'`.
+A Ping has no project and no AGENTS.md: skip the next paragraph, and work in
+the repo the handoff names, or none. Only an operator reaches the agent in a
+Ping, so its `role` is always `operator`. A group Ping's other people read
+the reply too.
+
 **Read the project's AGENTS.md doc, if it has one, and follow it.** It's the
 project's standing instructions for agents: board meanings, how to talk, which
 repo, which workflow. Read the full document content passed in the handoff,
@@ -117,6 +124,8 @@ leave the change staged in its worktree and say so in the reply.
 basecamp comments create <reply_to.recording_id> - --project <bucket_id> --profile '<profile>' < reply.md
 # kind "chat_line"
 basecamp chat post - --project <bucket_id> --room <reply_to.recording_id> --profile '<profile>' < reply.md
+# a Ping (ping true): its Campfire is reply_to
+basecamp pings post <bucket_id> - --profile '<profile>' < reply.md
 ```
 
 - **Post exactly once.** Never repost to fix formatting, or because you're
@@ -252,6 +261,9 @@ ambiguous.
 **By trigger:**
 
 - **`mentioned`**: the instruction is `content`. Everything above applies.
+- **`pinged`**: an operator's line in a direct Ping with the agent, said to
+  it without a mention. The instruction is `content`, as for `mentioned`.
+  Reply in the Ping, chat-sized, as for any Campfire.
 - **`assigned`**: the recording is the task. Move the card, do the work, reply
   on it.
 - **`subscribed`**: activity on a thread the agent follows, not an instruction.

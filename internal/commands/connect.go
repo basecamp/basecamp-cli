@@ -48,7 +48,7 @@ a subagent that replies as the agent.
 Connect the agent to a profile first (basecamp auth agent connect -P <profile>),
 then run setup on that profile: it records who may drive the agent, maps
 which Basecamp projects it serves, and checks the connector is
-ready. Show prints what setup recorded. Then run the connector on it:
+ready. Pings need no setup: an operator's ping is handed off too. Show prints what setup recorded. Then run the connector on it:
 
   basecamp connect -P <profile> [--project <id>]... [--shadow]
 
@@ -358,6 +358,12 @@ serves: --serve <project-id>, --unserve <project-id>. Nothing in a project it
 does not serve is handed off, and nobody is told. --watch-completions <project-id>
 makes the agent hear every trusted completion in that project without being
 assigned.
+
+Pings. A Ping is in no project, so it is never served and needs no setup.
+Only an operator (the operator, or a person passed with --allow) gives the
+agent work by Ping, in every trust mode: every line of theirs in a direct
+Ping with the agent is a request, and in a group Ping a line that @mentions
+it. Anyone else's line in a Ping is discarded, as is any agent's.
 
 No directory is associated with a project here: the session handling the
 requests chooses the repo for each one.

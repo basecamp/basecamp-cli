@@ -118,7 +118,7 @@ func TestProjectChecksSeparateAFirstSetupFromWithdrawingTheLastProject(t *testin
 	withdrawn := ProjectChecks(context.Background(), &fakeReader{}, f, false)
 	require.Len(t, withdrawn, 1)
 	assert.Equal(t, StatusWarn, withdrawn[0].Status, "and withdrawing the last one is written, not refused")
-	assert.Contains(t, withdrawn[0].Message, "no work at all")
+	assert.Contains(t, withdrawn[0].Message, "only its operators' pings reach this agent")
 	assert.Contains(t, withdrawn[0].Hint, "--serve")
 
 	// A warn is not a failure, so nothing about it stops the file being

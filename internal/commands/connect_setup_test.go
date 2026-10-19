@@ -470,7 +470,7 @@ func TestConnectSetupCanWithdrawTheLastServedProject(t *testing.T) {
 	assert.Empty(t, f.Projects, "the withdrawal is on disk, not just reported")
 
 	// And the operator is told what they are now left with.
-	assert.Contains(t, out, "no work at all")
+	assert.Contains(t, out, "only its operators' pings reach this agent")
 
 	// A first setup still has to serve something: that is the other question.
 	require.NoError(t, os.Remove(connectSetupPath(t, "agent")))
