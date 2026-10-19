@@ -387,9 +387,11 @@ Each becomes a flag on setup (*First-time setup*, step 4):
 Then:
 
 0. **Versions and leftovers**, once per session (*Before anything*).
-1. **Which agent.** Use the profile they name. With none, read
-   `~/.config/basecamp-connect/last.json` (below) and confirm it. With neither,
-   list profiles (`basecamp profile list --json`) and ask.
+1. **Which agent.** Use the profile they name. Asked to connect a new agent,
+   or one no profile here is connected as, go to *First-time setup*: other
+   agents' profiles aren't theirs to sort out, so don't ask about them. With
+   neither, read `~/.config/basecamp-connect/last.json` (below) and confirm it.
+   With none of these, list profiles (`basecamp profile list --json`) and ask.
 2. **Set up, if needed.** `basecamp connect show -P '<profile>' --json`. A
    `not_found` or `unknown profile` error, or one saying no profiles are
    configured, means it isn't set up: follow *First-time setup*, whatever
@@ -438,9 +440,11 @@ mappings and ask before starting. Never start silently from the store.
 
 Ask only what you can't find out.
 
-**1. Profile and credential.** Agree a profile name (letters, digits, `-` and
-`_`, starting with a letter or digit), for example the agent's name. Check it: `basecamp auth status -P
-'<profile>' --json`.
+**1. Profile and credential.** Use the profile the person names. Otherwise
+pick one yourself from the agent's name (letters, digits, `-` and `_`,
+starting with a letter or digit), and don't ask them to choose or confirm it:
+the person knows the agent by its Basecamp name, and the profile is yours.
+Check it: `basecamp auth status -P '<profile>' --json`.
 
 - `unknown profile`, or an error saying no profiles are configured (a
   computer with none yet): it doesn't exist. Never run `basecamp profile
@@ -455,8 +459,8 @@ Ask only what you can't find out.
   create one) and approve.
 - `oauth_type` `agent`: already connected. Don't connect again: that rotates
   the agent's secret and disconnects any other computer using it.
-- Anything else: a person's login is stored. Ask; never connect an agent over
-  it.
+- Anything else: a person's login is stored. Never connect an agent over it:
+  pick another name if you chose this one, and ask if they did.
 
 Then confirm the identity (`basecamp me`, see *Identity*).
 
@@ -467,8 +471,8 @@ pinned to its identity id, with
 for an existing profile), and pass the same `--expect-identity` to the first
 setup.
 
-**2. Who may give it work.** Explain in a sentence each, and default to the
-first:
+**2. Who may give it work.** Explain each in a plain sentence, without these
+mode names, and default to the first:
 
 - **operator**: only the operator, which for a personal agent is its owner (you).
 - **allowlist**: the operator plus people you name.
