@@ -232,3 +232,22 @@ func ParseProjectScope(projectID string) ProjectScope {
 	}
 	return func(context.Context) (int64, error) { return id, nil }
 }
+
+// ResolveAmong resolves a fuzzy @Name mention against a fixed set of people,
+// such as the people in a Ping, where only they can be addressed. It applies
+// the same exact, case-insensitive, then partial matching as everywhere else,
+// and fails with the same not-found and ambiguous errors.
+func ResolveAmong(input string, people []Person) (*Person, error) {
+	match, matches := resolve(input, people, personIDName)
+	if match != nil {
+		return match, nil
+	}
+	if len(matches) > 1 {
+		return nil, ambiguousPeople(matches)
+	}
+	suggestions := suggest(input, people, func(p Person) string { return p.Name })
+	if len(suggestions) > 0 {
+		return nil, output.ErrNotFoundHint("Person", input, "Did you mean: "+strings.Join(suggestions, ", "))
+	}
+	return nil, output.ErrNotFound("Person", input)
+}

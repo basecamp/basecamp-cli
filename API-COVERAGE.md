@@ -6,12 +6,14 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 52 | 204 |
+| ✅ Implemented | 53 | 207 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **56** | **216** |
+| **Total tracked** | **57** | **219** |
 
-**204 of 204 tracked in-scope endpoints.** Moving a document, upload or folder
+**207 of 207 tracked in-scope endpoints.** The three Pings endpoints bc3#13943
+documented — `GET /circles.json`, `GET /circles/:id.json` and `POST
+/circles.json` — land as `pings`. Moving a document, upload or folder
 between folders (`POST /recordings/:id/filing.json`, documented by bc3#13644 and
 modelled by basecamp/basecamp-sdk#960) lands as `files move`. The eight subtask endpoints bc3
 #12659 documented — the flat `/recordings/:id/subtasks.json` and
@@ -209,6 +211,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | message_boards | 3 | `messageboards` | ✅ | BC4 | - | Container, accessed via project dock |
 | message_types | 5 | `messagetypes` | ✅ | BC4 | - | list, show, create, update, delete. Bucket-scoped (`/buckets/{id}/categories…`); commands are project-scoped via `--in`/`--project` |
 | campfires | 14 | `chat` | ✅ | BC4 | - | list, messages, post, line show/update/delete. @mentions in content |
+| pings | 3 | `pings` | ✅ | BC5 | - | list (`GET /circles.json`: active pings with at least one line, newest first, unpaginated), show (`GET /circles/:id.json`, archived included), start (`POST /circles.json`, which opens or reuses: an active direct ping is always reused, a group with the same people unless `--new-group`). A ping is a Circle bucket with one Campfire, so `messages`, `post` and `upload` run through the Campfire lines endpoints on the ping's `campfire_id`, with @mentions resolved among the ping's people. `<ping>` is an id, a ping URL, or a person (a direct ping: read from the list, or started when writing). `show` and `chat line` take ping URLs (`/circles/:id`, `/circles/:id@:line`). 403 `Pings have been disabled` and 422 (an agent starting a ping with nobody who can ping) surface as errors. Requires basecamp/bc3#13943 |
 | comments | 8 | `comment`, `comments` | ✅ | BC4 | - | list, show, thread, create, update. @mentions in content. `show` surfaces `reply_target` + paste-ready `mention` from its single Get (no new calls). `thread` composes Get + parent recording (via type endpoint) + List into a deterministic reply-ready context (no new endpoints) |
 | boosts | 6 | `boost`, `react` | ✅ | BC4 | - | list (recording + event), show, create (recording + event), delete. No account-wide listing — BC5 withdrew `/boosts.json` (basecamp/bc3#12464); temporary, returns via basecamp/bc3#12463 |
 | notifications | 2 | `notifications` | ✅ | BC4 | - | list, mark as read (BC5: `bubble_ups`/`scheduled_bubble_ups` sections; `memories` is BC4-only) |

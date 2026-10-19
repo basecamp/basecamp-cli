@@ -303,6 +303,22 @@ ARG basecamp people out-of-office 00 [me]
 ARG basecamp people remove 00 <person-id>...
 ARG basecamp people show 00 <id|name>
 ARG basecamp people update 00 [me]
+ARG basecamp ping messages 00 <ping>
+ARG basecamp ping post 00 <ping>
+ARG basecamp ping post 01 <message>
+ARG basecamp ping show 00 <ping>
+ARG basecamp ping start 00 <person>...
+ARG basecamp ping upload 00 <ping>
+ARG basecamp ping upload 01 <file>
+ARG basecamp ping with 00 <person>...
+ARG basecamp pings messages 00 <ping>
+ARG basecamp pings post 00 <ping>
+ARG basecamp pings post 01 <message>
+ARG basecamp pings show 00 <ping>
+ARG basecamp pings start 00 <person>...
+ARG basecamp pings upload 00 <ping>
+ARG basecamp pings upload 01 <file>
+ARG basecamp pings with 00 <person>...
 ARG basecamp profile create 00 <name>
 ARG basecamp profile delete 00 <name>
 ARG basecamp profile set-default 00 <name>
@@ -970,6 +986,22 @@ CMD basecamp people pingable
 CMD basecamp people remove
 CMD basecamp people show
 CMD basecamp people update
+CMD basecamp ping
+CMD basecamp ping list
+CMD basecamp ping messages
+CMD basecamp ping post
+CMD basecamp ping show
+CMD basecamp ping start
+CMD basecamp ping upload
+CMD basecamp ping with
+CMD basecamp pings
+CMD basecamp pings list
+CMD basecamp pings messages
+CMD basecamp pings post
+CMD basecamp pings show
+CMD basecamp pings start
+CMD basecamp pings upload
+CMD basecamp pings with
 CMD basecamp profile
 CMD basecamp profile create
 CMD basecamp profile delete
@@ -12443,6 +12475,354 @@ FLAG basecamp people update --time-zone type=string
 FLAG basecamp people update --title type=string
 FLAG basecamp people update --todolist type=string
 FLAG basecamp people update --verbose type=count
+FLAG basecamp ping --account type=string
+FLAG basecamp ping --agent type=bool
+FLAG basecamp ping --cache-dir type=string
+FLAG basecamp ping --count type=bool
+FLAG basecamp ping --help type=bool
+FLAG basecamp ping --hints type=bool
+FLAG basecamp ping --ids-only type=bool
+FLAG basecamp ping --in type=string
+FLAG basecamp ping --jq type=string
+FLAG basecamp ping --json type=bool
+FLAG basecamp ping --markdown type=bool
+FLAG basecamp ping --md type=bool
+FLAG basecamp ping --no-hints type=bool
+FLAG basecamp ping --no-stats type=bool
+FLAG basecamp ping --profile type=string
+FLAG basecamp ping --project type=string
+FLAG basecamp ping --quiet type=bool
+FLAG basecamp ping --stats type=bool
+FLAG basecamp ping --styled type=bool
+FLAG basecamp ping --todolist type=string
+FLAG basecamp ping --verbose type=count
+FLAG basecamp ping list --account type=string
+FLAG basecamp ping list --agent type=bool
+FLAG basecamp ping list --cache-dir type=string
+FLAG basecamp ping list --count type=bool
+FLAG basecamp ping list --help type=bool
+FLAG basecamp ping list --hints type=bool
+FLAG basecamp ping list --ids-only type=bool
+FLAG basecamp ping list --in type=string
+FLAG basecamp ping list --jq type=string
+FLAG basecamp ping list --json type=bool
+FLAG basecamp ping list --markdown type=bool
+FLAG basecamp ping list --md type=bool
+FLAG basecamp ping list --no-hints type=bool
+FLAG basecamp ping list --no-stats type=bool
+FLAG basecamp ping list --profile type=string
+FLAG basecamp ping list --project type=string
+FLAG basecamp ping list --quiet type=bool
+FLAG basecamp ping list --stats type=bool
+FLAG basecamp ping list --styled type=bool
+FLAG basecamp ping list --todolist type=string
+FLAG basecamp ping list --verbose type=count
+FLAG basecamp ping messages --account type=string
+FLAG basecamp ping messages --agent type=bool
+FLAG basecamp ping messages --cache-dir type=string
+FLAG basecamp ping messages --count type=bool
+FLAG basecamp ping messages --help type=bool
+FLAG basecamp ping messages --hints type=bool
+FLAG basecamp ping messages --ids-only type=bool
+FLAG basecamp ping messages --in type=string
+FLAG basecamp ping messages --jq type=string
+FLAG basecamp ping messages --json type=bool
+FLAG basecamp ping messages --limit type=int
+FLAG basecamp ping messages --markdown type=bool
+FLAG basecamp ping messages --md type=bool
+FLAG basecamp ping messages --no-hints type=bool
+FLAG basecamp ping messages --no-stats type=bool
+FLAG basecamp ping messages --profile type=string
+FLAG basecamp ping messages --project type=string
+FLAG basecamp ping messages --quiet type=bool
+FLAG basecamp ping messages --stats type=bool
+FLAG basecamp ping messages --styled type=bool
+FLAG basecamp ping messages --todolist type=string
+FLAG basecamp ping messages --verbose type=count
+FLAG basecamp ping post --account type=string
+FLAG basecamp ping post --agent type=bool
+FLAG basecamp ping post --attach type=stringArray
+FLAG basecamp ping post --cache-dir type=string
+FLAG basecamp ping post --content type=string
+FLAG basecamp ping post --content-type type=string
+FLAG basecamp ping post --count type=bool
+FLAG basecamp ping post --help type=bool
+FLAG basecamp ping post --hints type=bool
+FLAG basecamp ping post --ids-only type=bool
+FLAG basecamp ping post --in type=string
+FLAG basecamp ping post --jq type=string
+FLAG basecamp ping post --json type=bool
+FLAG basecamp ping post --markdown type=bool
+FLAG basecamp ping post --md type=bool
+FLAG basecamp ping post --no-hints type=bool
+FLAG basecamp ping post --no-stats type=bool
+FLAG basecamp ping post --profile type=string
+FLAG basecamp ping post --project type=string
+FLAG basecamp ping post --quiet type=bool
+FLAG basecamp ping post --stats type=bool
+FLAG basecamp ping post --styled type=bool
+FLAG basecamp ping post --todolist type=string
+FLAG basecamp ping post --verbose type=count
+FLAG basecamp ping show --account type=string
+FLAG basecamp ping show --agent type=bool
+FLAG basecamp ping show --cache-dir type=string
+FLAG basecamp ping show --count type=bool
+FLAG basecamp ping show --help type=bool
+FLAG basecamp ping show --hints type=bool
+FLAG basecamp ping show --ids-only type=bool
+FLAG basecamp ping show --in type=string
+FLAG basecamp ping show --jq type=string
+FLAG basecamp ping show --json type=bool
+FLAG basecamp ping show --markdown type=bool
+FLAG basecamp ping show --md type=bool
+FLAG basecamp ping show --no-hints type=bool
+FLAG basecamp ping show --no-stats type=bool
+FLAG basecamp ping show --profile type=string
+FLAG basecamp ping show --project type=string
+FLAG basecamp ping show --quiet type=bool
+FLAG basecamp ping show --stats type=bool
+FLAG basecamp ping show --styled type=bool
+FLAG basecamp ping show --todolist type=string
+FLAG basecamp ping show --verbose type=count
+FLAG basecamp ping start --account type=string
+FLAG basecamp ping start --agent type=bool
+FLAG basecamp ping start --cache-dir type=string
+FLAG basecamp ping start --count type=bool
+FLAG basecamp ping start --help type=bool
+FLAG basecamp ping start --hints type=bool
+FLAG basecamp ping start --ids-only type=bool
+FLAG basecamp ping start --in type=string
+FLAG basecamp ping start --jq type=string
+FLAG basecamp ping start --json type=bool
+FLAG basecamp ping start --markdown type=bool
+FLAG basecamp ping start --md type=bool
+FLAG basecamp ping start --new-group type=bool
+FLAG basecamp ping start --no-hints type=bool
+FLAG basecamp ping start --no-stats type=bool
+FLAG basecamp ping start --profile type=string
+FLAG basecamp ping start --project type=string
+FLAG basecamp ping start --quiet type=bool
+FLAG basecamp ping start --stats type=bool
+FLAG basecamp ping start --styled type=bool
+FLAG basecamp ping start --todolist type=string
+FLAG basecamp ping start --verbose type=count
+FLAG basecamp ping upload --account type=string
+FLAG basecamp ping upload --agent type=bool
+FLAG basecamp ping upload --cache-dir type=string
+FLAG basecamp ping upload --count type=bool
+FLAG basecamp ping upload --help type=bool
+FLAG basecamp ping upload --hints type=bool
+FLAG basecamp ping upload --ids-only type=bool
+FLAG basecamp ping upload --in type=string
+FLAG basecamp ping upload --jq type=string
+FLAG basecamp ping upload --json type=bool
+FLAG basecamp ping upload --markdown type=bool
+FLAG basecamp ping upload --md type=bool
+FLAG basecamp ping upload --no-hints type=bool
+FLAG basecamp ping upload --no-stats type=bool
+FLAG basecamp ping upload --profile type=string
+FLAG basecamp ping upload --project type=string
+FLAG basecamp ping upload --quiet type=bool
+FLAG basecamp ping upload --stats type=bool
+FLAG basecamp ping upload --styled type=bool
+FLAG basecamp ping upload --todolist type=string
+FLAG basecamp ping upload --verbose type=count
+FLAG basecamp ping with --account type=string
+FLAG basecamp ping with --agent type=bool
+FLAG basecamp ping with --cache-dir type=string
+FLAG basecamp ping with --count type=bool
+FLAG basecamp ping with --help type=bool
+FLAG basecamp ping with --hints type=bool
+FLAG basecamp ping with --ids-only type=bool
+FLAG basecamp ping with --in type=string
+FLAG basecamp ping with --jq type=string
+FLAG basecamp ping with --json type=bool
+FLAG basecamp ping with --markdown type=bool
+FLAG basecamp ping with --md type=bool
+FLAG basecamp ping with --new-group type=bool
+FLAG basecamp ping with --no-hints type=bool
+FLAG basecamp ping with --no-stats type=bool
+FLAG basecamp ping with --profile type=string
+FLAG basecamp ping with --project type=string
+FLAG basecamp ping with --quiet type=bool
+FLAG basecamp ping with --stats type=bool
+FLAG basecamp ping with --styled type=bool
+FLAG basecamp ping with --todolist type=string
+FLAG basecamp ping with --verbose type=count
+FLAG basecamp pings --account type=string
+FLAG basecamp pings --agent type=bool
+FLAG basecamp pings --cache-dir type=string
+FLAG basecamp pings --count type=bool
+FLAG basecamp pings --help type=bool
+FLAG basecamp pings --hints type=bool
+FLAG basecamp pings --ids-only type=bool
+FLAG basecamp pings --in type=string
+FLAG basecamp pings --jq type=string
+FLAG basecamp pings --json type=bool
+FLAG basecamp pings --markdown type=bool
+FLAG basecamp pings --md type=bool
+FLAG basecamp pings --no-hints type=bool
+FLAG basecamp pings --no-stats type=bool
+FLAG basecamp pings --profile type=string
+FLAG basecamp pings --project type=string
+FLAG basecamp pings --quiet type=bool
+FLAG basecamp pings --stats type=bool
+FLAG basecamp pings --styled type=bool
+FLAG basecamp pings --todolist type=string
+FLAG basecamp pings --verbose type=count
+FLAG basecamp pings list --account type=string
+FLAG basecamp pings list --agent type=bool
+FLAG basecamp pings list --cache-dir type=string
+FLAG basecamp pings list --count type=bool
+FLAG basecamp pings list --help type=bool
+FLAG basecamp pings list --hints type=bool
+FLAG basecamp pings list --ids-only type=bool
+FLAG basecamp pings list --in type=string
+FLAG basecamp pings list --jq type=string
+FLAG basecamp pings list --json type=bool
+FLAG basecamp pings list --markdown type=bool
+FLAG basecamp pings list --md type=bool
+FLAG basecamp pings list --no-hints type=bool
+FLAG basecamp pings list --no-stats type=bool
+FLAG basecamp pings list --profile type=string
+FLAG basecamp pings list --project type=string
+FLAG basecamp pings list --quiet type=bool
+FLAG basecamp pings list --stats type=bool
+FLAG basecamp pings list --styled type=bool
+FLAG basecamp pings list --todolist type=string
+FLAG basecamp pings list --verbose type=count
+FLAG basecamp pings messages --account type=string
+FLAG basecamp pings messages --agent type=bool
+FLAG basecamp pings messages --cache-dir type=string
+FLAG basecamp pings messages --count type=bool
+FLAG basecamp pings messages --help type=bool
+FLAG basecamp pings messages --hints type=bool
+FLAG basecamp pings messages --ids-only type=bool
+FLAG basecamp pings messages --in type=string
+FLAG basecamp pings messages --jq type=string
+FLAG basecamp pings messages --json type=bool
+FLAG basecamp pings messages --limit type=int
+FLAG basecamp pings messages --markdown type=bool
+FLAG basecamp pings messages --md type=bool
+FLAG basecamp pings messages --no-hints type=bool
+FLAG basecamp pings messages --no-stats type=bool
+FLAG basecamp pings messages --profile type=string
+FLAG basecamp pings messages --project type=string
+FLAG basecamp pings messages --quiet type=bool
+FLAG basecamp pings messages --stats type=bool
+FLAG basecamp pings messages --styled type=bool
+FLAG basecamp pings messages --todolist type=string
+FLAG basecamp pings messages --verbose type=count
+FLAG basecamp pings post --account type=string
+FLAG basecamp pings post --agent type=bool
+FLAG basecamp pings post --attach type=stringArray
+FLAG basecamp pings post --cache-dir type=string
+FLAG basecamp pings post --content type=string
+FLAG basecamp pings post --content-type type=string
+FLAG basecamp pings post --count type=bool
+FLAG basecamp pings post --help type=bool
+FLAG basecamp pings post --hints type=bool
+FLAG basecamp pings post --ids-only type=bool
+FLAG basecamp pings post --in type=string
+FLAG basecamp pings post --jq type=string
+FLAG basecamp pings post --json type=bool
+FLAG basecamp pings post --markdown type=bool
+FLAG basecamp pings post --md type=bool
+FLAG basecamp pings post --no-hints type=bool
+FLAG basecamp pings post --no-stats type=bool
+FLAG basecamp pings post --profile type=string
+FLAG basecamp pings post --project type=string
+FLAG basecamp pings post --quiet type=bool
+FLAG basecamp pings post --stats type=bool
+FLAG basecamp pings post --styled type=bool
+FLAG basecamp pings post --todolist type=string
+FLAG basecamp pings post --verbose type=count
+FLAG basecamp pings show --account type=string
+FLAG basecamp pings show --agent type=bool
+FLAG basecamp pings show --cache-dir type=string
+FLAG basecamp pings show --count type=bool
+FLAG basecamp pings show --help type=bool
+FLAG basecamp pings show --hints type=bool
+FLAG basecamp pings show --ids-only type=bool
+FLAG basecamp pings show --in type=string
+FLAG basecamp pings show --jq type=string
+FLAG basecamp pings show --json type=bool
+FLAG basecamp pings show --markdown type=bool
+FLAG basecamp pings show --md type=bool
+FLAG basecamp pings show --no-hints type=bool
+FLAG basecamp pings show --no-stats type=bool
+FLAG basecamp pings show --profile type=string
+FLAG basecamp pings show --project type=string
+FLAG basecamp pings show --quiet type=bool
+FLAG basecamp pings show --stats type=bool
+FLAG basecamp pings show --styled type=bool
+FLAG basecamp pings show --todolist type=string
+FLAG basecamp pings show --verbose type=count
+FLAG basecamp pings start --account type=string
+FLAG basecamp pings start --agent type=bool
+FLAG basecamp pings start --cache-dir type=string
+FLAG basecamp pings start --count type=bool
+FLAG basecamp pings start --help type=bool
+FLAG basecamp pings start --hints type=bool
+FLAG basecamp pings start --ids-only type=bool
+FLAG basecamp pings start --in type=string
+FLAG basecamp pings start --jq type=string
+FLAG basecamp pings start --json type=bool
+FLAG basecamp pings start --markdown type=bool
+FLAG basecamp pings start --md type=bool
+FLAG basecamp pings start --new-group type=bool
+FLAG basecamp pings start --no-hints type=bool
+FLAG basecamp pings start --no-stats type=bool
+FLAG basecamp pings start --profile type=string
+FLAG basecamp pings start --project type=string
+FLAG basecamp pings start --quiet type=bool
+FLAG basecamp pings start --stats type=bool
+FLAG basecamp pings start --styled type=bool
+FLAG basecamp pings start --todolist type=string
+FLAG basecamp pings start --verbose type=count
+FLAG basecamp pings upload --account type=string
+FLAG basecamp pings upload --agent type=bool
+FLAG basecamp pings upload --cache-dir type=string
+FLAG basecamp pings upload --count type=bool
+FLAG basecamp pings upload --help type=bool
+FLAG basecamp pings upload --hints type=bool
+FLAG basecamp pings upload --ids-only type=bool
+FLAG basecamp pings upload --in type=string
+FLAG basecamp pings upload --jq type=string
+FLAG basecamp pings upload --json type=bool
+FLAG basecamp pings upload --markdown type=bool
+FLAG basecamp pings upload --md type=bool
+FLAG basecamp pings upload --no-hints type=bool
+FLAG basecamp pings upload --no-stats type=bool
+FLAG basecamp pings upload --profile type=string
+FLAG basecamp pings upload --project type=string
+FLAG basecamp pings upload --quiet type=bool
+FLAG basecamp pings upload --stats type=bool
+FLAG basecamp pings upload --styled type=bool
+FLAG basecamp pings upload --todolist type=string
+FLAG basecamp pings upload --verbose type=count
+FLAG basecamp pings with --account type=string
+FLAG basecamp pings with --agent type=bool
+FLAG basecamp pings with --cache-dir type=string
+FLAG basecamp pings with --count type=bool
+FLAG basecamp pings with --help type=bool
+FLAG basecamp pings with --hints type=bool
+FLAG basecamp pings with --ids-only type=bool
+FLAG basecamp pings with --in type=string
+FLAG basecamp pings with --jq type=string
+FLAG basecamp pings with --json type=bool
+FLAG basecamp pings with --markdown type=bool
+FLAG basecamp pings with --md type=bool
+FLAG basecamp pings with --new-group type=bool
+FLAG basecamp pings with --no-hints type=bool
+FLAG basecamp pings with --no-stats type=bool
+FLAG basecamp pings with --profile type=string
+FLAG basecamp pings with --project type=string
+FLAG basecamp pings with --quiet type=bool
+FLAG basecamp pings with --stats type=bool
+FLAG basecamp pings with --styled type=bool
+FLAG basecamp pings with --todolist type=string
+FLAG basecamp pings with --verbose type=count
 FLAG basecamp profile --account type=string
 FLAG basecamp profile --agent type=bool
 FLAG basecamp profile --cache-dir type=string
@@ -19294,6 +19674,22 @@ SUB basecamp people pingable
 SUB basecamp people remove
 SUB basecamp people show
 SUB basecamp people update
+SUB basecamp ping
+SUB basecamp ping list
+SUB basecamp ping messages
+SUB basecamp ping post
+SUB basecamp ping show
+SUB basecamp ping start
+SUB basecamp ping upload
+SUB basecamp ping with
+SUB basecamp pings
+SUB basecamp pings list
+SUB basecamp pings messages
+SUB basecamp pings post
+SUB basecamp pings show
+SUB basecamp pings start
+SUB basecamp pings upload
+SUB basecamp pings with
 SUB basecamp profile
 SUB basecamp profile create
 SUB basecamp profile delete

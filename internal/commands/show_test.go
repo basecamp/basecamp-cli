@@ -817,9 +817,17 @@ func TestShowProjectURLReturnsHelpfulError(t *testing.T) {
 	assert.Contains(t, err.Error(), "projects show")
 }
 
-func TestShowCircleURLReturnsHelpfulError(t *testing.T) {
+func TestShowPingLineURLShowsTheLine(t *testing.T) {
 	transport := &showTrackingTransport{}
-	_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/circles/789@456")
+	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/circles/789@456")
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(reqs), 1)
+	assert.Contains(t, reqs[0], "/recordings/456.json")
+}
+
+func TestShowCirclePeopleURLCannotBeShown(t *testing.T) {
+	transport := &showTrackingTransport{}
+	_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/circles/people")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot be shown")
 }

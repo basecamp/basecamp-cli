@@ -1,0 +1,52 @@
+entity: ping
+kind: container
+
+identity:
+  label: title
+  id: id
+
+headline:
+  default:
+    template: "{{.title}}"
+
+fields:
+  title:
+    role: title
+    emphasis: primary
+    format: text
+
+  people:
+    role: detail
+    format: people
+
+  campfire_id:
+    role: meta
+    emphasis: muted
+    format: text
+
+  updated_at:
+    role: meta
+    emphasis: muted
+    format: relative_time
+
+  created_at:
+    role: meta
+    emphasis: muted
+    format: relative_time
+
+  app_url:
+    role: meta
+    format: text
+
+  id:
+    role: meta
+    emphasis: muted
+
+views:
+  list:
+    columns: [id, title, people, updated_at]
+  detail:
+    sections:
+      - fields: [title, people]
+      - heading: Metadata
+        fields: [id, campfire_id, app_url, created_at, updated_at]

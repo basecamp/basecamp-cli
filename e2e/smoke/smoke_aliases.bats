@@ -35,6 +35,14 @@ load smoke_helper
   mark_out_of_scope "Alias for messages — tested via canonical form"
 }
 
+@test "ping is out of scope" {
+  mark_out_of_scope "Alias for pings — tested via canonical form"
+}
+
+@test "pings with is out of scope" {
+  mark_out_of_scope "Alias for pings start — tested via canonical form"
+}
+
 @test "project is out of scope" {
   mark_out_of_scope "Alias for projects — tested via canonical form"
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -66,6 +67,9 @@ You can also pass a Basecamp URL directly:
 			// Check if the id is a URL and extract components
 			var occurrenceDate string
 			if parsed := urlarg.Parse(id); parsed != nil {
+				if parsed.PingID != "" && parsed.Type == "circles" {
+					return showPingURL(cmd, app, parsed)
+				}
 				if parsed.CommentID != "" {
 					// Fragment URL (#__recording_N) — resolve the referenced
 					// recording directly instead of the parent resource.
@@ -342,6 +346,26 @@ You can also pass a Basecamp URL directly:
 	dlDir = addDownloadAttachmentsFlag(cmd)
 
 	return cmd
+}
+
+// showPingURL shows the Ping a URL names. A Ping is not a recording, so it
+// does not go through the recording endpoints.
+func showPingURL(cmd *cobra.Command, app *appctx.App, parsed *urlarg.Parsed) error {
+	id, err := strconv.ParseInt(parsed.PingID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid ping ID")
+	}
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+	if parsed.AccountID != "" && parsed.AccountID != app.Config.AccountID {
+		return output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", parsed.AccountID, app.Config.AccountID))
+	}
+	ping, err := resolvePing(cmd.Context(), app, pingTarget{id: id}, pingLookupOnly)
+	if err != nil {
+		return err
+	}
+	return showPing(app, ping)
 }
 
 // recordingTypeEndpoint maps a recording's canonical API "type" field to the

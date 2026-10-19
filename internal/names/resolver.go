@@ -290,6 +290,33 @@ func (r *Resolver) ResolvePersonByName(ctx context.Context, input string) (*Pers
 	return nil, output.ErrNotFound("Person", input)
 }
 
+// ResolvePingable resolves a person's ID, email address or name among the
+// people the caller can ping, the only people a Ping can include. A name that
+// matches more than one of them is ambiguous.
+func (r *Resolver) ResolvePingable(ctx context.Context, input string) (*Person, error) {
+	pingable, err := r.getPingable(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if id, parseErr := strconv.ParseInt(input, 10, 64); parseErr == nil {
+		for i := range pingable {
+			if pingable[i].ID == id {
+				return &pingable[i], nil
+			}
+		}
+		return nil, output.ErrNotFoundHint("Person", input, "Not someone you can ping; see: basecamp people pingable")
+	}
+
+	for i := range pingable {
+		if pingable[i].Email != "" && strings.EqualFold(pingable[i].Email, input) {
+			return &pingable[i], nil
+		}
+	}
+
+	return ResolveAmong(input, pingable)
+}
+
 // ResolvePersonByID looks up a person by numeric ID in the pingable set.
 // Returns the Person record including AttachableSGID.
 // Returns not-found if the person is not in the pingable set.
