@@ -17,16 +17,21 @@ const (
 // inPing puts a line in the Ping whose others, as the agent sees them, are
 // people, written by author, and returns its event, performed by author.
 func inPing(f *fakeReads, people []int64, author int64, content string) Event {
-	ping := &basecamp.Ping{ID: pingID}
+	return inPingAt(f, pingID, people, author, content)
+}
+
+// inPingAt is inPing in the Ping whose bucket is ping.
+func inPingAt(f *fakeReads, ping int64, people []int64, author int64, content string) Event {
+	read := &basecamp.Ping{ID: ping}
 	for _, id := range people {
-		ping.People = append(ping.People, basecamp.Person{ID: id})
+		read.People = append(read.People, basecamp.Person{ID: id})
 	}
-	f.pings[pingID] = ping
-	s := summaryWith(recordingID, pingID, "Chat::Lines::RichText", author, content)
-	s.Bucket = &basecamp.Bucket{ID: pingID, Name: "Rob Zolkos", Type: "Circle"}
+	f.pings[ping] = read
+	s := summaryWith(recordingID, ping, "Chat::Lines::RichText", author, content)
+	s.Bucket = &basecamp.Bucket{ID: ping, Name: "Rob Zolkos", Type: "Circle"}
 	s.CampfireID = pingCampfire
 	f.summaries[recordingID] = s
-	return Event{ID: eventID, EventType: "chat.line.created", BucketID: pingID, RecordingID: recordingID, CreatorID: author}
+	return Event{ID: eventID, EventType: "chat.line.created", BucketID: ping, RecordingID: recordingID, CreatorID: author}
 }
 
 func projectPolicy() Policy {

@@ -295,6 +295,14 @@ func checkLegacyPathValue(raw json.RawMessage) error {
 	return nil
 }
 
+// PingTrust is one Ping's entry in connect.json: the people who reach the
+// agent in that Ping and nowhere else (--allow-in-ping). Each is a
+// participant there, by mention only, in every trust mode; anywhere else they
+// are whoever the rest of the policy makes them.
+type PingTrust struct {
+	Participants []int64 `json:"participants,omitempty"`
+}
+
 // Policy is what admission reads from connect.json, plus the two facts that
 // never come from that file: the agent's own Person id (from the profile's
 // verified identity) and the --project scope.
@@ -312,6 +320,9 @@ type Policy struct {
 	Trust Trust `json:"trust"`
 	// Projects maps a bucket id to the entry for the project it serves.
 	Projects map[int64]Project `json:"projects,omitempty"`
+	// Pings maps a Ping's bucket id to who may reach the agent in that Ping
+	// alone. Trust, like Trust: read once, never live.
+	Pings map[int64]PingTrust `json:"pings,omitempty"`
 	// ProjectsUnknown says the served projects could not be read at all —
 	// connect.json is unreadable, or now names another agent. It is not the
 	// same as serving none, and the difference is what a person is told: a
@@ -390,6 +401,9 @@ func (p Policy) Validate() error {
 	if err := p.validateAgents(); err != nil {
 		return err
 	}
+	if err := p.validatePings(); err != nil {
+		return err
+	}
 	for bucket := range p.Projects {
 		if bucket <= 0 {
 			return fmt.Errorf("admission: served project %d: not a bucket id", bucket)
@@ -418,6 +432,35 @@ func (p Policy) validateAgents() error {
 		}
 	}
 	return nil
+}
+
+// validatePings refuses a Ping entry that could be misread: an id that is not
+// a Ping or Person id, the agent itself, or an allowed agent. No agent
+// authorizes; an agent named here would also hold two roles at once.
+func (p Policy) validatePings() error {
+	for ping, entry := range p.Pings {
+		if ping <= 0 {
+			return fmt.Errorf("admission: ping %d: not a Ping id", ping)
+		}
+		for _, id := range entry.Participants {
+			switch {
+			case id <= 0:
+				return fmt.Errorf("admission: ping %d: participant %d is not a Person id", ping, id)
+			case id == p.AgentID:
+				return fmt.Errorf("admission: ping %d: the agent's own Person id is a participant", ping)
+			case p.Trust.allowsAgent(id):
+				return fmt.Errorf("admission: ping %d: participant %d is an allowed agent; agents reach the agent only by --allow-agent", ping, id)
+			}
+		}
+	}
+	return nil
+}
+
+// pingParticipant reports whether connect.json lets person reach the agent in
+// the Ping whose bucket is ping, as a participant there alone. It says nothing
+// about whether the bucket is a Ping: only the Ping read can.
+func (p Policy) pingParticipant(ping, person int64) bool {
+	return slices.Contains(p.Pings[ping].Participants, person)
 }
 
 // inScope reports whether bucket is in the --project scope.

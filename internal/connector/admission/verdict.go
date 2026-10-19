@@ -378,12 +378,16 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		if reason != "" {
 			return v.end(StateBlocked, reason), nil
 		}
-		if ping != nil && gate.Role != RoleOperator {
+		if ping != nil && gate.Role != RoleOperator && !gate.InPing {
 			// Project trust's participants are a project's members, and a
 			// Ping is no project. An allowed agent never gets here: the gate
 			// discards its event in any bucket connect.json does not serve.
 			return v.end(StateDiscarded, ReasonUntrustedPerformer), nil
 		}
+	}
+	if gate.InPing && ping == nil {
+		// Trusted only in a Ping, and the bucket is none the agent is in.
+		return v.end(StateDiscarded, ReasonUntrustedPerformer), nil
 	}
 
 	if gate.ConfirmMembership {
@@ -462,7 +466,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		reason Reason
 	)
 	if ping != nil {
-		rule, author, state, reason = a.matchPing(summary, ping)
+		rule, author, state, reason = a.matchPing(summary, ping, gate.Role)
 	} else if rule, author, state, reason, err = d.match(ctx, ev, policy, gate, summary); err != nil {
 		return Verdict{}, err
 	}
@@ -664,21 +668,23 @@ func (a *decision) match(ctx context.Context, ev Event, policy Policy, gate Gate
 	return Rule{}, "", endState, endReason, nil
 }
 
-// matchPing decides what a line in a Ping is to the agent. Its performer was
-// an operator at the gate; its words must be an operator's too, and no
-// agent's. In a direct Ping every such line is said to the agent; in a group
-// one only a mention is.
-func (a *Admitter) matchPing(summary *basecamp.RecordingSummary, ping *basecamp.Ping) (Rule, Role, State, Reason) {
+// matchPing decides what a line in a Ping is to the agent, and returns its
+// author's role. Its performer was an operator at the gate, or a participant
+// connect.json lets into this Ping; its words must be one of those too, and no
+// agent's. A mention is a request from either. Every line in a direct Ping is
+// said to the agent, but only an operator's needs no mention.
+func (a *Admitter) matchPing(summary *basecamp.RecordingSummary, ping *basecamp.Ping, performer Role) (Rule, Role, State, Reason) {
 	author := summary.Creator
+	role := a.policy.Trust.roleOf(author.ID)
 	switch {
 	case author.ID == a.policy.AgentID, author.PersonableType == personableAgent:
 		return Rule{}, "", StateDiscarded, ReasonAgentAuthored
-	case a.policy.Trust.roleOf(author.ID) != RoleOperator:
+	case role != RoleOperator && !a.policy.pingParticipant(ping.ID, author.ID):
 		return Rule{}, "", StateDiscarded, ReasonUntrustedAuthor
 	case slices.Contains(summary.MentionedPersonIDs, a.policy.AgentID):
-		return ruleMentioned, RoleOperator, "", ""
-	case direct(ping, author.ID):
-		return rulePinged, RoleOperator, "", ""
+		return ruleMentioned, role, "", ""
+	case least(role, performer) == RoleOperator && direct(ping, author.ID):
+		return rulePinged, role, "", ""
 	}
 	return Rule{}, "", StateDiscarded, ReasonNotAddressed
 }

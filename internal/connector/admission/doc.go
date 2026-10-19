@@ -30,8 +30,9 @@
 //     watch_completions flag, an assignment, or a subscription), or boosted
 //     (a boost on the recording itself, which the agent wrote, given by the
 //     trusted performer; a boost on one of a recording's events is not), or,
-//     in a Ping, pinged (a line in a direct Ping, the agent and its writer
-//     alone; in a group Ping only a mention counts).
+//     in a Ping, pinged (an operator's line in a direct Ping, the agent and
+//     its writer alone; in a group Ping, and from a participant anywhere,
+//     only a mention counts).
 //  6. Whether the project is served, its class, the reply destination, the
 //     conversation key and the content snapshot come from the policy and the
 //     summary, never from the pointer.
@@ -72,10 +73,16 @@
 // Admission only labels; what a participant may get the agent to do is the
 // policy of whoever reads the request.
 //
-// A Ping is no project, so it has no participants: only an operator gives the
-// agent work there, in every trust mode, and only in words an operator wrote.
-// It is never in connect.json and needs no serving; its conversation is the
-// Ping (PingConversationKey), answered in its one Campfire.
+// A Ping is no project, so project trust has no members there: an operator
+// gives the agent work in any Ping, in every trust mode, in words an operator
+// wrote. The one participant a Ping has is a person connect.json lets into
+// that Ping alone (Policy.Pings, --allow-in-ping): their mention there is a
+// participant's request, in every trust mode, and anywhere else they are
+// whoever the rest of the policy makes them. The entry counts only once the
+// Ping read says its bucket is a Ping, never in a served project, and never
+// for an agent, which Validate refuses. A Ping needs no serving; its
+// conversation is the Ping (PingConversationKey), answered in its one
+// Campfire.
 //
 // # Invariants
 //
@@ -91,7 +98,7 @@
 //     Validate cannot detect, and setup refuses. The one exception is an
 //     agent named in agent_ids: its own mention, admitted as a participant's
 //     request and never an operator's, held to the agent caps, and never in
-//     a Ping, which hears no participant's request. With no
+//     a Ping, where no agent may be a participant. With no
 //     agent named, the feed's actor_types=person filter excludes agents at
 //     source, as before.
 //  2. An assignment is admitted only when the operator performed it (or a

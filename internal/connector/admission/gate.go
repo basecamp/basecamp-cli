@@ -18,6 +18,10 @@ type GateResult struct {
 	// one (Trust.AgentIDs). Only the mentioned rule is open to it, its role
 	// is participant, and the committer holds it to the agent caps.
 	Agent bool
+	// InPing says the performer is trusted only as a participant of the Ping
+	// the event's bucket is keyed as (Policy.Pings): only once the Ping read
+	// confirms the bucket is a Ping, and only by mention.
+	InPing bool
 }
 
 // Discarded reports whether the gate ended the event.
@@ -75,6 +79,7 @@ func Gate(ev Event, p Policy, m Matrix) GateResult {
 		open       []Rule
 		reason     Reason
 		membership bool
+		inPing     bool
 	)
 	drop := func(r Reason) {
 		if reason == "" {
@@ -93,6 +98,11 @@ func Gate(ev Event, p Policy, m Matrix) GateResult {
 			continue
 		case role == RoleOperator:
 			// Named in the allowlist; Validate keeps one out of operator mode.
+		case !served && p.pingParticipant(ev.BucketID, performer):
+			// Let into this one Ping, by mention (matchPing). Before project
+			// trust, which would ask a Ping for members it does not have; a
+			// served bucket is a project, whatever a Ping entry is keyed on.
+			inPing = true
 		case p.Trust.Mode == TrustProject:
 			needsMembership = true
 		default:
@@ -109,7 +119,7 @@ func Gate(ev Event, p Policy, m Matrix) GateResult {
 	if len(open) == 0 {
 		return GateResult{Reason: reason}
 	}
-	return GateResult{Rules: open, ConfirmMembership: membership, Role: role}
+	return GateResult{Rules: open, ConfirmMembership: membership, Role: role, InPing: inPing}
 }
 
 // gateAgent opens an allowed agent's event to the mentioned rule alone. An
