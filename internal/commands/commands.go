@@ -105,7 +105,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "subscriptions", Category: "communication", Description: "Manage notification subscriptions", Actions: []string{"show", "subscribe", "unsubscribe", "add", "remove"}},
 				{Name: "attachments", Category: "communication", Description: "List and download attachments", Actions: []string{"list", "download"}},
 				{Name: "comments", Category: "communication", Description: "Manage comments", Actions: []string{"create", "list", "show", "thread", "update", "trash", "archive", "restore"}},
-				{Name: "boost", Category: "communication", Description: "Manage boosts (reactions)", Actions: []string{"list", "show", "create", "delete"}},
+				{Name: "boost", Category: "communication", Description: "Manage boosts (reactions)", Actions: []string{"list", "show", "create", "update", "delete"}},
 				{Name: "notifications", Category: "communication", Description: "View and manage notifications", Actions: []string{"list", "read", "bubbleups"}},
 				{Name: "inbox", Category: "communication", Description: "Poll addressed items from the account event feed (agents only)"},
 			},

@@ -28,11 +28,15 @@ ARG basecamp boost create 01 <content>
 ARG basecamp boost delete 00 <boost-id|url>
 ARG basecamp boost list 00 <id|url>
 ARG basecamp boost show 00 <boost-id|url>
+ARG basecamp boost update 00 <boost-id|url>
+ARG basecamp boost update 01 <content>
 ARG basecamp boosts create 00 <id|url>
 ARG basecamp boosts create 01 <content>
 ARG basecamp boosts delete 00 <boost-id|url>
 ARG basecamp boosts list 00 <id|url>
 ARG basecamp boosts show 00 <boost-id|url>
+ARG basecamp boosts update 00 <boost-id|url>
+ARG basecamp boosts update 01 <content>
 ARG basecamp bubble-up add 00 <id|url>
 ARG basecamp bubble-up remove 00 <id|url>
 ARG basecamp calendars show 00 <id|url>
@@ -577,11 +581,13 @@ CMD basecamp boost create
 CMD basecamp boost delete
 CMD basecamp boost list
 CMD basecamp boost show
+CMD basecamp boost update
 CMD basecamp boosts
 CMD basecamp boosts create
 CMD basecamp boosts delete
 CMD basecamp boosts list
 CMD basecamp boosts show
+CMD basecamp boosts update
 CMD basecamp bubble-up
 CMD basecamp bubble-up add
 CMD basecamp bubble-up remove
@@ -2548,6 +2554,27 @@ FLAG basecamp boost show --stats type=bool
 FLAG basecamp boost show --styled type=bool
 FLAG basecamp boost show --todolist type=string
 FLAG basecamp boost show --verbose type=count
+FLAG basecamp boost update --account type=string
+FLAG basecamp boost update --agent type=bool
+FLAG basecamp boost update --cache-dir type=string
+FLAG basecamp boost update --count type=bool
+FLAG basecamp boost update --help type=bool
+FLAG basecamp boost update --hints type=bool
+FLAG basecamp boost update --ids-only type=bool
+FLAG basecamp boost update --in type=string
+FLAG basecamp boost update --jq type=string
+FLAG basecamp boost update --json type=bool
+FLAG basecamp boost update --markdown type=bool
+FLAG basecamp boost update --md type=bool
+FLAG basecamp boost update --no-hints type=bool
+FLAG basecamp boost update --no-stats type=bool
+FLAG basecamp boost update --profile type=string
+FLAG basecamp boost update --project type=string
+FLAG basecamp boost update --quiet type=bool
+FLAG basecamp boost update --stats type=bool
+FLAG basecamp boost update --styled type=bool
+FLAG basecamp boost update --todolist type=string
+FLAG basecamp boost update --verbose type=count
 FLAG basecamp boosts --account type=string
 FLAG basecamp boosts --agent type=bool
 FLAG basecamp boosts --cache-dir type=string
@@ -2655,6 +2682,27 @@ FLAG basecamp boosts show --stats type=bool
 FLAG basecamp boosts show --styled type=bool
 FLAG basecamp boosts show --todolist type=string
 FLAG basecamp boosts show --verbose type=count
+FLAG basecamp boosts update --account type=string
+FLAG basecamp boosts update --agent type=bool
+FLAG basecamp boosts update --cache-dir type=string
+FLAG basecamp boosts update --count type=bool
+FLAG basecamp boosts update --help type=bool
+FLAG basecamp boosts update --hints type=bool
+FLAG basecamp boosts update --ids-only type=bool
+FLAG basecamp boosts update --in type=string
+FLAG basecamp boosts update --jq type=string
+FLAG basecamp boosts update --json type=bool
+FLAG basecamp boosts update --markdown type=bool
+FLAG basecamp boosts update --md type=bool
+FLAG basecamp boosts update --no-hints type=bool
+FLAG basecamp boosts update --no-stats type=bool
+FLAG basecamp boosts update --profile type=string
+FLAG basecamp boosts update --project type=string
+FLAG basecamp boosts update --quiet type=bool
+FLAG basecamp boosts update --stats type=bool
+FLAG basecamp boosts update --styled type=bool
+FLAG basecamp boosts update --todolist type=string
+FLAG basecamp boosts update --verbose type=count
 FLAG basecamp bubble-up --account type=string
 FLAG basecamp bubble-up --agent type=bool
 FLAG basecamp bubble-up --cache-dir type=string
@@ -19265,11 +19313,13 @@ SUB basecamp boost create
 SUB basecamp boost delete
 SUB basecamp boost list
 SUB basecamp boost show
+SUB basecamp boost update
 SUB basecamp boosts
 SUB basecamp boosts create
 SUB basecamp boosts delete
 SUB basecamp boosts list
 SUB basecamp boosts show
+SUB basecamp boosts update
 SUB basecamp bubble-up
 SUB basecamp bubble-up add
 SUB basecamp bubble-up remove

@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
@@ -27,6 +28,7 @@ characters max) or emoji.
 Use 'basecamp boost list <id>' to see boosts on an item.
 Use 'basecamp boost show <boost-id>' to view a specific boost.
 Use 'basecamp boost create <id> "content"' to boost an item.
+Use 'basecamp boost update <boost-id> "content"' to change a boost you gave.
 Use 'basecamp boost delete <boost-id>' to remove a boost.
 
 Tip: In the TUI, press 'b' on any item to boost interactively.`,
@@ -40,6 +42,7 @@ Tip: In the TUI, press 'b' on any item to boost interactively.`,
 		newBoostListCmd(&project),
 		newBoostShowCmd(&project),
 		newBoostCreateCmd(&project),
+		newBoostUpdateCmd(&project),
 		newBoostDeleteCmd(),
 	)
 
@@ -307,9 +310,21 @@ Use --event to boost a specific event within the item.`,
 	return cmd
 }
 
+// boostContentMax is the longest note a boost holds, in characters.
+const boostContentMax = 16
+
+// checkBoostLength refuses content the server would not accept as a boost,
+// before any request is made.
+func checkBoostLength(content string) error {
+	if n := utf8.RuneCountInString(content); n > boostContentMax {
+		return output.ErrUsage(fmt.Sprintf("Boost content too long (%d characters, max %d)", n, boostContentMax))
+	}
+	return nil
+}
+
 func runBoostCreate(cmd *cobra.Command, app *appctx.App, recording, project, content, eventID string) error {
-	if n := utf8.RuneCountInString(content); n > 16 {
-		return output.ErrUsage(fmt.Sprintf("Boost content too long (%d characters, max 16)", n))
+	if err := checkBoostLength(content); err != nil {
+		return err
 	}
 
 	recordingID, urlProjectID := extractCommentWithProject(recording)
@@ -388,6 +403,83 @@ func runBoostCreate(cmd *cobra.Command, app *appctx.App, recording, project, con
 			},
 		),
 	)
+}
+
+func newBoostUpdateCmd(project *string) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "update <boost-id|url> <content>",
+		Short: "Change the content of a boost",
+		Long: `Replace the content of a boost with a new short note or emoji.
+
+Only the boost's creator can update it; anyone else, admins included, is
+refused. Content is a short note, 16 characters max, as with create.
+
+You can pass either a boost ID or a Basecamp URL:
+  basecamp boost update 789 "✅ done"
+  basecamp boost update https://3.basecamp.com/123/buckets/456/boosts/789 "👍"
+
+Use "-" as the content to read it from stdin.
+
+A boost is addressed by its own ID, so no project or item is needed.`,
+		Example: `  basecamp boost update 789 "✅ done"`,
+		Args:    cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+
+			boostID, urlProjectID := extractWithProject(args[0])
+			boostIDInt, err := strconv.ParseInt(boostID, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid boost ID")
+			}
+
+			content, err := resolveContentValue(cmd, args[1], 1, "<content>")
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(content) == "" {
+				return output.ErrUsage("Boost content required")
+			}
+			if err := checkBoostLength(content); err != nil {
+				return err
+			}
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			boost, err := app.Account().Boosts().Update(cmd.Context(), boostIDInt, content)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			projectArg := "<project>"
+			for _, candidate := range []string{*project, urlProjectID, app.Flags.Project, app.Config.ProjectID} {
+				if candidate != "" {
+					projectArg = candidate
+					break
+				}
+			}
+
+			return app.OK(boost,
+				output.WithSummary(fmt.Sprintf("Updated boost #%d to %s", boost.ID, boost.Content)),
+				output.WithBreadcrumbs(
+					output.Breadcrumb{
+						Action:      "show",
+						Cmd:         fmt.Sprintf("basecamp boost show %d --project %s", boost.ID, projectArg),
+						Description: "View boost",
+					},
+					output.Breadcrumb{
+						Action:      "delete",
+						Cmd:         fmt.Sprintf("basecamp boost delete %d", boost.ID),
+						Description: "Delete boost",
+					},
+				),
+			)
+		},
+	}
+
+	allowDash(cmd, "arg:1")
+
+	return cmd
 }
 
 func newBoostDeleteCmd() *cobra.Command {
