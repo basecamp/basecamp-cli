@@ -1607,3 +1607,69 @@ func TestConnectFeedAsksForAgentsOnlyWhenOneIsAllowed(t *testing.T) {
 	p.Trust.AgentIDs = []int64{setupPeerAgent}
 	assert.Equal(t, []string{"agent", "person"}, connectActorTypes(p))
 }
+
+// --allow-in-ping lets a person into one Ping the agent is in, checked as the
+// agent reads that Ping; --disallow-in-ping takes them out, and the entries
+// are kept across runs. show tells a person all of it.
+func TestConnectSetupLetsAPersonIntoOnePing(t *testing.T) {
+	const ping int64 = 2085958513
+	const guest int64 = 1007
+	s := startConnectSetupServer(t)
+	s.bodies = map[string]any{fmt.Sprintf("/999/circles/%d", ping): map[string]any{
+		"id": ping, "title": "Launch",
+		"people": []map[string]any{
+			{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User"},
+			{"id": guest, "name": "Jorge", "personable_type": "User"},
+			{"id": setupClientPerson, "name": "Client", "personable_type": "User", "client": true},
+			{"id": setupPeerAgent, "name": "Peer (agent)", "personable_type": "Agent"},
+		},
+	}}
+	firstSetup(t, s)
+	run := func(args ...string) (setup.File, error) {
+		t.Helper()
+		out, err := runConnectSetupCmd(t, newConnectSetupApp(t, s, "agent"), args...)
+		if err != nil {
+			return setup.File{}, fmt.Errorf("%w: %s", err, out)
+		}
+		f, err := setup.Load(connectSetupPath(t, "agent"))
+		require.NoError(t, err)
+		return f, nil
+	}
+
+	f, err := run("--allow-in-ping", fmt.Sprintf("%d:%d", ping, guest))
+	require.NoError(t, err)
+	assert.Equal(t, map[int64]admission.PingTrust{ping: {Participants: []int64{guest}}}, f.Pings)
+	assert.Equal(t, admission.TrustOperator, f.Trust.Mode, "trusts nobody anywhere else")
+	assert.Nil(t, f.Trust.AllowlistIDs)
+
+	app := newConnectSetupApp(t, s, "agent")
+	var buf bytes.Buffer
+	app.Output = output.New(output.Options{Format: output.FormatStyled, Writer: &buf})
+	out, err := runConnectShowCmd(t, app)
+	require.NoError(t, err, out)
+	assert.Contains(t, buf.String(), fmt.Sprintf("%d by mention, as participants", guest))
+
+	f, err = run("--serve", fmt.Sprint(setupProject2))
+	require.NoError(t, err)
+	assert.Equal(t, []int64{guest}, f.Pings[ping].Participants, "kept when not passed")
+
+	for name, arg := range map[string]string{
+		"an agent":            fmt.Sprintf("%d:%d", ping, setupPeerAgent),
+		"the agent itself":    fmt.Sprintf("%d:%d", ping, setupAgentPerson),
+		"a client":            fmt.Sprintf("%d:%d", ping, setupClientPerson),
+		"someone not in it":   fmt.Sprintf("%d:%d", ping, setupOperatorPerson+1),
+		"a Ping it is not in": fmt.Sprintf("%d:%d", ping+1, guest),
+		"no person":           fmt.Sprint(ping),
+		"not ids":             "launch:jorge",
+	} {
+		_, err := run("--allow-in-ping", arg)
+		require.Error(t, err, name)
+	}
+	f, err = setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Equal(t, map[int64]admission.PingTrust{ping: {Participants: []int64{guest}}}, f.Pings, "a refused run wrote nothing")
+
+	f, err = run("--disallow-in-ping", fmt.Sprintf("%d:%d", ping, guest))
+	require.NoError(t, err)
+	assert.Nil(t, f.Pings)
+}

@@ -28,6 +28,19 @@ type fakeReader struct {
 	mintErr       error
 	projectErr    map[int64]error
 	projectPplErr map[int64]error
+	pings         map[int64]Ping
+	pingErr       error
+}
+
+func (f *fakeReader) Ping(_ context.Context, id int64) (Ping, error) {
+	if f.pingErr != nil {
+		return Ping{}, f.pingErr
+	}
+	p, ok := f.pings[id]
+	if !ok {
+		return Ping{}, status(http.StatusNotFound)
+	}
+	return p, nil
 }
 
 func (f *fakeReader) Me(context.Context) (Person, error) { return f.people[agentID], nil }

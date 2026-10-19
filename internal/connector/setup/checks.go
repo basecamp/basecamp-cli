@@ -55,6 +55,15 @@ type Reader interface {
 	Project(ctx context.Context, id int64) error
 	// ProjectPeople reads a project's people.
 	ProjectPeople(ctx context.Context, id int64) error
+	// Ping reads a Ping the reader is in.
+	Ping(ctx context.Context, id int64) (Ping, error)
+}
+
+// Ping is the part of a Basecamp Ping the checks look at. People are the
+// others in it, as the reader sees it.
+type Ping struct {
+	ID     int64
+	People []Person
 }
 
 // ErrMalformedTicket reports a mint that answered without a ticket or URL.
@@ -125,6 +134,19 @@ func (r SDKReader) Project(ctx context.Context, id int64) error {
 func (r SDKReader) ProjectPeople(ctx context.Context, id int64) error {
 	_, err := r.Client.People().ListProjectPeople(ctx, id, nil)
 	return err
+}
+
+// Ping implements Reader.
+func (r SDKReader) Ping(ctx context.Context, id int64) (Ping, error) {
+	p, err := r.Client.Pings().Get(ctx, id)
+	if err != nil {
+		return Ping{}, err
+	}
+	out := Ping{ID: p.ID}
+	for i := range p.People {
+		out.People = append(out.People, fromSDK(&p.People[i]))
+	}
+	return out, nil
 }
 
 func fromSDK(p *basecamp.Person) Person {
@@ -454,4 +476,72 @@ func ErrorText(err error) string {
 		return "request failed"
 	}
 	return richtext.SanitizeSingleLine(err.Error())
+}
+
+// VerifyPings checks everyone connect.json will let into one Ping, as the
+// agent sees that Ping, since admission reads it as the agent: the agent is
+// in it, so is the person, and the person is neither the agent, an Agent, nor
+// a client of the account. One read per Ping.
+//
+// A person recorded there already who cannot be confirmed now (the Ping
+// cannot be read, or they have left it) is a warning, as for the allowlist: a
+// later setup run should not fail over an entry it was not asked to change.
+// An Agent or a client fails whether recorded or not: no agent authorizes,
+// and clients are what project trust refuses too.
+func VerifyPings(ctx context.Context, r Reader, pings, recorded map[int64]admission.PingTrust, agentID int64) []Check {
+	ids := make([]int64, 0, len(pings))
+	for id := range pings {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	var checks []Check
+	for _, pingID := range ids {
+		ping, err := r.Ping(ctx, pingID)
+		for _, id := range pings[pingID].Participants {
+			checks = append(checks, verifyPingPerson(ping, err, pingID, id, agentID, slices.Contains(recorded[pingID].Participants, id)))
+		}
+	}
+	return checks
+}
+
+func verifyPingPerson(ping Ping, readErr error, pingID, id, agentID int64, recorded bool) Check {
+	c := Check{Name: fmt.Sprintf("Ping %d, person %d", pingID, id)}
+	if id == agentID {
+		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is the agent itself; the agent's own id never authorizes", id)
+		return c
+	}
+	if readErr != nil {
+		c.Status = StatusFail
+		c.Message = fmt.Sprintf("Ping %d could not be read as the agent (%s)", pingID, ErrorText(readErr))
+		if refused(readErr) {
+			c.Message = fmt.Sprintf("The agent cannot read Ping %d (HTTP %d): it is not in that Ping, or that is no Ping", pingID, httpStatus(readErr))
+			c.Hint = "Add the agent to the Ping in Basecamp, or use a Ping it is in: basecamp pings list -P <agent-profile>"
+		}
+		if recorded {
+			c.Status, c.Hint = StatusWarn, ""
+		}
+		return c
+	}
+	i := slices.IndexFunc(ping.People, func(p Person) bool { return p.ID == id })
+	if i < 0 {
+		c.Status = StatusFail
+		c.Message = fmt.Sprintf("Person %d is not in Ping %d", id, pingID)
+		c.Hint = "List the people in it: basecamp pings show <ping> --json"
+		if recorded {
+			c.Status, c.Message, c.Hint = StatusWarn, fmt.Sprintf("Person %d, already let into Ping %d, is no longer in it", id, pingID), ""
+		}
+		return c
+	}
+	p := ping.People[i]
+	switch {
+	case p.PersonableType == PersonableAgent:
+		c.Status = StatusFail
+		c.Message = fmt.Sprintf("Person %d is an Agent; agents never authorize, and are allowed only with --allow-agent", id)
+	case p.Client:
+		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is a client of the account; only members are trusted", id)
+	default:
+		c.Status = StatusPass
+		c.Message = fmt.Sprintf("Person %d, %s, may ask by mention in Ping %d alone", id, richtext.SanitizeSingleLine(p.Name), pingID)
+	}
+	return c
 }

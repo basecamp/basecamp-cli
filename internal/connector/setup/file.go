@@ -79,6 +79,11 @@ type File struct {
 	// serves, keyed by project id.
 	Trust    admission.Trust             `json:"trust"`
 	Projects map[int64]admission.Project `json:"projects"`
+	// Pings lets people reach the agent in one Ping alone, as participants
+	// there (--allow-in-ping), keyed by the Ping's id. Absent when it lets
+	// nobody in, so a file that uses none still opens in a CLI that predates
+	// the key.
+	Pings map[int64]admission.PingTrust `json:"pings,omitempty"`
 
 	// The Legacy fields are the settings of a connector that ran its own
 	// workers: which driver and coding agent, how many at once, for how
