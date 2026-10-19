@@ -47,9 +47,15 @@ basecamp chat messages --project <bucket_id> --room <reply_to.recording_id> --js
 For a Ping (`ping` true), a private chat in no project, read its recent
 conversation with `basecamp pings messages <bucket_id> --json -P '<profile>'`.
 A Ping has no project and no AGENTS.md: skip the next paragraph, and work in
-the repo the handoff names, or none. Only an operator reaches the agent in a
-Ping, so its `role` is always `operator`. A group Ping's other people read
-the reply too.
+the repo the handoff names, or none. A group Ping's other people read the
+reply too. Its `role` is `operator`, or `participant` for a person the
+operator let into this one Ping: *A participant asks, an operator authorizes*
+applies, with two differences. The operator's go there is only their
+@mention of the agent saying go: a boost in a Ping never reaches the agent,
+so don't say a boost is a go. And when the operator isn't among the Ping's
+people (`basecamp pings show <bucket_id> --json -P '<profile>'`), they can't
+see the ask: say in the Ping that this needs the operator's word, and stop
+there.
 
 **Read the project's AGENTS.md doc, if it has one, and follow it.** It's the
 project's standing instructions for agents: board meanings, how to talk, which

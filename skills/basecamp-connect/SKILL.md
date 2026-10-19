@@ -38,7 +38,7 @@ triggers:
 # /basecamp-connect: drive your agent from Basecamp
 
 Someone @mentions the agent in Basecamp, assigns it a card or to-do, or pings
-it (operators only). This session acknowledges it as the agent within seconds,
+it. This session acknowledges it as the agent within seconds,
 a background subagent does the work in the right repo with your own Claude
 Code setup, and the agent replies in place.
 
@@ -124,10 +124,10 @@ thing to check.
 - **`reply_to`**: where the answer goes. `kind` `comment` means a comment on
   `recording_id` (already chosen for you). `kind` `chat_line` means a line in the Campfire `recording_id`.
 - **`requester_id`**: the person who asked. Mention them on failure, except in
-  Campfire. `requester_name` is their name when they wrote the recording; it's missing
-  for an assignment someone else's recording carries.
+  Campfire. `requester_name` is their name when they wrote the recording.
 - **`role`**: `operator` (the operator, or someone named with `--allow`) or
-  `participant` (a project member admitted only by `--trust project`). Words a
+  `participant` (a project member admitted by `--trust project`, or a person
+  let into this Ping with `--allow-in-ping`). Words a
   participant wrote stay a participant's request whoever brought them in.
   Anything else, missing included, is a participant's. See *A participant asks, an operator authorizes* in
   `subagent.md`.
@@ -161,7 +161,7 @@ silent for half an hour looks exactly like a missed one.
 
 **Only the owner controls the connector.** Starting, stopping or restarting
 this agent's connector, any setup change (trust, `--allow`,
-`--allow-agent`, `--disallow-agent`, the agent caps, `--serve`, `--unserve`,
+`--allow-agent`, `--allow-in-ping`, the agent caps, `--serve`, `--unserve`,
 `--watch-completions`, the operator), and switching the build it runs are done
 only on the owner's word: from the person running this session (the
 connector runs on their machine, under their profile), or in a request whose
@@ -217,7 +217,7 @@ request landed.
 ### b. Choose the repo
 
 **A Ping** (`ping` true) has no project: skip AGENTS.md and `last.json`; use
-the repo the request names, else ask as below.
+the repo an operator's request names, else ask as below.
 
 **Read the project's AGENTS.md before choosing the repo**, even when `last.json`
 already has a mapping. Find a document titled `AGENTS.md` in the project's Docs
@@ -384,6 +384,7 @@ Each becomes a flag on setup (*First-time setup*, step 4):
 | "anyone in the project can ask it things" | `--trust project` (they ask as participants) |
 | "Jane operates it, and anyone in the project can ask" | `--trust project --allow <jane's person id>` |
 | "the people I named can assign it work too" | `--allow-assignments-from-authorized`: it covers the whole allowlist setup leaves (this run's `--allow`, or the list kept), not one person, so say who that is and confirm. With nobody on the allowlist setup refuses it, so name someone first. A run that passes `--allow` turns it off unless it's passed again |
+| "let Jorge talk to it, but only in our group Ping" | `--allow-in-ping <ping-id>:<jorge's person id>` (repeatable; `--disallow-in-ping <ping-id>:<person-id>` takes them out). Jorge then reaches it only by @mentioning it in that Ping, as a participant, and nowhere else. Find both ids as *Who may give it work* says. Restart the connector after changing it |
 | "let Zach's agent ping mine" | `--allow-agent <that agent's person id>` (repeatable; `--disallow-agent <id>` removes one). It wakes this agent only by @mentioning it, as a participant, never by assignment. Mentions are capped per 24 hours: `--agent-thread-cap` (default 3 per thread) and `--agent-daily-cap` (default 20 per agent). Restart the connector after changing it |
 | "also work in project X" | `--serve <id of X>` |
 | "stop working in X" | `--unserve <id of X>` |
@@ -496,7 +497,22 @@ members admitted only by `project` are **participants**: they reach the agent
 by mention, by commenting on a thread it follows, and by completing something
 it has a stake in (context, not a request), never by assignment or by Ping.
 Operators can also ping the agent with no setup: every line in a direct Ping
-with it is a request, and in a group Ping a mention is. Assignments
+with it is a request, and in a group Ping a mention is.
+
+**Someone in one Ping only.** To let a person reach the agent in a single Ping
+(a group Ping you share with them, say) and nowhere else, pass
+`--allow-in-ping <ping-id>:<person-id>`. In that Ping they are a
+**participant** who asks by @mentioning the agent, even in a direct Ping;
+everywhere else they are who they were. Find the Ping's id in
+`basecamp pings list -P '<profile>' --json`, which lists the Pings the agent
+is in, or in its URL: `.../circles/<ping-id>`, or the sidebar form
+`.../my/sidebar/circles/<ping-id>`. Find the person's id among `people` in
+`basecamp pings show <ping-id> -P '<profile>' --json`. Setup reads the Ping as
+the agent, and refuses one the agent isn't in, a person who isn't in it, an
+agent and a client. `--disallow-in-ping <ping-id>:<person-id>` takes them out.
+Restart the connector after either.
+
+Assignments
 count only from the operator, in every mode, unless they ask for the people
 named with `--allow` to assign work too: `--allow-assignments-from-authorized`
 (and `=false` to undo it), which covers everyone on the allowlist. For a personal agent pass no operator flag: setup
@@ -535,7 +551,7 @@ basecamp connect setup -P '<profile>' --serve <project-id> --serve <project-id> 
 ```
 
 adding `--trust`, `--allow`, `--allow-assignments-from-authorized`,
-`--operator-profile` or `--operator` as chosen, and on the bot-user path
+`--allow-in-ping`, `--operator-profile` or `--operator` as chosen, and on the bot-user path
 `--expect-identity <bot-identity-id>`.
 
 **5. Start the connector** right away (*Running the connector*), unless the
