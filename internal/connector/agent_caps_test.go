@@ -42,7 +42,7 @@ func newCapsFixture(t *testing.T, threadCap, dailyCap int) *capsFixture {
 			AgentIDs: []int64{capsPeerAgent}, AgentThreadCap: threadCap, AgentDailyCap: dailyCap,
 		},
 		Projects: map[int64]admission.Project{adapterBucketID: {}},
-	}, admission.Reads{Summaries: f.reads, Subscriptions: f.reads, Assignments: f.reads, Boosts: f.reads})
+	}, admission.Reads{Summaries: f.reads, Subscriptions: f.reads, Assignments: f.reads, Boosts: f.reads, Pings: f.reads})
 	require.NoError(t, err)
 	f.admitter = admitter
 	f.committer = admission.NewCommitter(f.ledger.Admission())

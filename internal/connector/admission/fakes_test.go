@@ -53,6 +53,8 @@ type fakeReads struct {
 	memberAsOf    []time.Time
 	boosts        map[int64]*basecamp.Boost // boost id → boost
 	boostErr      error
+	pings         map[int64]*basecamp.Ping // bucket id → the Ping it is
+	pingErr       error
 
 	summaryCalls int
 	summaryRefs  []basecamp.RecordingRef
@@ -60,6 +62,7 @@ type fakeReads struct {
 	assignCalls  int
 	memberCalls  int
 	boostCalls   int
+	pingCalls    int
 }
 
 func newFakeReads() *fakeReads {
@@ -69,11 +72,12 @@ func newFakeReads() *fakeReads {
 		assignments:   map[int64][]int64{},
 		members:       map[int64]map[int64]bool{},
 		boosts:        map[int64]*basecamp.Boost{},
+		pings:         map[int64]*basecamp.Ping{},
 	}
 }
 
 func (f *fakeReads) reads() Reads {
-	return Reads{Summaries: f, Subscriptions: f, Assignments: f, Boosts: f, Members: f}
+	return Reads{Summaries: f, Subscriptions: f, Assignments: f, Boosts: f, Pings: f, Members: f}
 }
 
 func (f *fakeReads) Summarize(_ context.Context, ref basecamp.RecordingRef) (*basecamp.RecordingSummary, error) {
@@ -143,10 +147,25 @@ func (f *fakeReads) Get(_ context.Context, boostID int64) (*basecamp.Boost, erro
 	return &copied, nil
 }
 
+func (f *fakeReads) Ping(_ context.Context, bucketID int64) (*basecamp.Ping, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pingCalls++
+	if f.pingErr != nil {
+		return nil, f.pingErr
+	}
+	p, ok := f.pings[bucketID]
+	if !ok {
+		return nil, nil
+	}
+	copied := *p
+	return &copied, nil
+}
+
 func (f *fakeReads) totalReads() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.summaryCalls + len(f.subCalls) + f.assignCalls + f.memberCalls + f.boostCalls
+	return f.summaryCalls + len(f.subCalls) + f.assignCalls + f.memberCalls + f.boostCalls + f.pingCalls
 }
 
 var errTransport = errors.New("connection reset")

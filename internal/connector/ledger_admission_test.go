@@ -650,7 +650,7 @@ func TestRunAdmissionDecidesWhatIntakeHandsOver(t *testing.T) {
 		AgentID:  adapterAgentID,
 		Trust:    admission.Trust{Mode: admission.TrustOperator, OperatorID: adapterOperatorID},
 		Projects: map[int64]admission.Project{adapterBucketID: {Class: "internal"}},
-	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads, Boosts: reads})
+	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads, Boosts: reads, Pings: reads})
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -731,7 +731,7 @@ func TestABoostOnTheAgentsCommentIsHandedOffAsAReply(t *testing.T) {
 		AgentID:  adapterAgentID,
 		Trust:    admission.Trust{Mode: admission.TrustOperator, OperatorID: adapterOperatorID},
 		Projects: map[int64]admission.Project{adapterBucketID: {Class: "internal"}},
-	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads, Boosts: reads})
+	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads, Boosts: reads, Pings: reads})
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -774,7 +774,7 @@ func TestRunAdmissionNeedsTheLedgerAndQueue(t *testing.T) {
 	admitter, err := admission.NewAdmitter(admission.Policy{
 		AgentID: adapterAgentID,
 		Trust:   admission.Trust{Mode: admission.TrustOperator, OperatorID: adapterOperatorID},
-	}, admission.Reads{Summaries: &adapterReads{}, Subscriptions: &adapterReads{}, Assignments: &adapterReads{}, Boosts: &adapterReads{}})
+	}, admission.Reads{Summaries: &adapterReads{}, Subscriptions: &adapterReads{}, Assignments: &adapterReads{}, Boosts: &adapterReads{}, Pings: &adapterReads{}})
 	require.NoError(t, err)
 	queue, err := NewQueue(1, 1)
 	require.NoError(t, err)
@@ -813,6 +813,8 @@ func (r *adapterReads) Subscribed(context.Context, int64) (bool, error) { return
 func (r *adapterReads) AddedPersonIDs(context.Context, int64, int64) ([]int64, bool, error) {
 	return nil, false, nil
 }
+
+func (r *adapterReads) Ping(context.Context, int64) (*basecamp.Ping, error) { return nil, nil }
 
 func (r *adapterReads) Get(_ context.Context, boostID int64) (*basecamp.Boost, error) {
 	b, ok := r.boosts[boostID]
@@ -868,7 +870,7 @@ func TestAnUnreadableConfigHoldsItsRecordsUntilTheFileAndAPersonAreBack(t *testi
 	admitter, err := admission.NewAdmitter(admission.Policy{
 		AgentID: adapterAgentID,
 		Trust:   admission.Trust{Mode: admission.TrustOperator, OperatorID: adapterOperatorID},
-	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads, Boosts: reads},
+	}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads, Boosts: reads, Pings: reads},
 		admission.WithServed(func() (map[int64]admission.Project, error) {
 			if broken.Load() {
 				return nil, errors.New("connect.json cannot be read")
@@ -941,7 +943,7 @@ func TestAGoIsOnlyForTheAskAsDeclared(t *testing.T) {
 			AgentID:  adapterAgentID,
 			Trust:    admission.Trust{Mode: admission.TrustOperator, OperatorID: adapterOperatorID},
 			Projects: map[int64]admission.Project{adapterBucketID: {Class: "internal"}},
-		}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads, Boosts: reads})
+		}, admission.Reads{Summaries: reads, Subscriptions: reads, Assignments: reads, Boosts: reads, Pings: reads})
 		require.NoError(t, err)
 		_, err = ledger.DeclareAsk(context.Background(), commentID, admission.AskFingerprint(typ, declaredTitle, declared), 31336, "local:agent")
 		require.NoError(t, err)
