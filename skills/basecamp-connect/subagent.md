@@ -24,7 +24,7 @@ for i in 1 2 3; do
   sleep 2
 done
 [ "$landed" = true ] || { echo "boost did not verifiably land: $out" >&2; false; }
-boost_id=$(printf '%s\n' "$out" | grep -xE '[0-9]+' | tail -1)   # $out may carry warnings too
+printf '%s\n' "$out" | grep -xE '[0-9]+' | tail -1   # the boost's id; $out may carry warnings too
 ```
 
 If it didn't verifiably land, go on and say so in your report. Skip it for
@@ -32,9 +32,9 @@ If it didn't verifiably land, go on and say so in your report. Skip it for
 landed: a request line with `ack` was already boosted by the connector, which
 acknowledges it even when the session couldn't reword it.
 
-Keep the id of the boost that landed: `$boost_id` when it was yours, else the
-one the handoff names. Steps 4 and 5 use it; with none, skip what they say
-about the boost.
+Keep the id of the boost that landed, `<boost_id>` below: the one that loop
+prints when it was yours, else the one the handoff names. Steps 4 and 5 use
+it; with none, skip what they say about the boost.
 
 **2. Read the context.** The event is the trigger. Basecamp holds the context:
 
@@ -160,20 +160,23 @@ basecamp pings post <bucket_id> - --profile '<profile>' < reply.md
   ```bash
   basecamp boost delete <boost_id> --profile '<profile>'
   <the reply command above> \
-    || basecamp boost create '<recording.url>' '⚠️ Reply failed' --profile '<profile>'
+    || basecamp boost create '<recording.url>' '⚠️ Reply failed' --ids-only --profile '<profile>'
   ```
 
   Run it as one command, with no turn between the delete and the reply. A
   failed delete gets no retry and doesn't stop the reply; say so in your
-  report. When the reply is an ask (*Ask the operator* below), nothing may
-  come between the post and its declaration, so the delete still goes first:
+  report. A failed reply prints the new boost's id: it is the `<boost_id>` for
+  any later post (the reply without a mention, below), which goes out the
+  same way and clears it first. When the reply is an ask (*Ask the operator*
+  below), nothing may come between the post and its declaration, so the
+  delete still goes first:
 
   ```bash
   basecamp boost delete <boost_id> --profile '<profile>'
   if url=$(<the reply command above> --jq '.data.app_url'); then
     basecamp connect ask "$url" -P '<profile>'
   else
-    basecamp boost create '<recording.url>' '⚠️ Reply failed' --profile '<profile>'
+    basecamp boost create '<recording.url>' '⚠️ Reply failed' --ids-only --profile '<profile>'
   fi
   ```
 - **Lead with the answer.** The first line says what happened. Detail goes
