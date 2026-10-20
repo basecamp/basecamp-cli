@@ -458,8 +458,11 @@ Check it: `basecamp auth status -P '<profile>' --json`.
   the person is on another device). Show them the link and code from its
   verification line. They open the link, check the code, choose the agent (or
   create one) and approve.
-- `oauth_type` `agent`: already connected. Don't connect again: that rotates
-  the agent's secret and disconnects any other computer using it.
+- `oauth_type` `agent`: an agent is already connected under it. If you chose
+  this name for a new agent, that's another agent's profile: pick another
+  name (`build-bot-2`, then `-3`) and check again. If the person named it,
+  don't connect again: that rotates the agent's secret and disconnects any
+  other computer using it.
 - Anything else: a person's login is stored. Never connect an agent over it:
   pick another name if you chose this one, and ask if they did.
 
@@ -505,9 +508,11 @@ it, and `--trust operator` clears it; setup refuses `--trust operator` with
 **3. Projects, by name.** The agent hears only the projects it serves, and it
 can serve only projects it's a member of. List its projects
 (`basecamp projects list -P '<profile>' --json`; if that's refused under an
-Agent identity, use the person's own login: a profile whose `auth status` isn't
-`oauth_type` `agent`, never another agent's). Unless the person named
-projects, serve every one it's in, without asking. A personal agent is in all
+Agent identity, list the person's own projects with their login, a profile
+whose `auth status` isn't `oauth_type` `agent`, never another agent's). Unless
+the person named projects, serve every one it's in, without asking. The
+person's own list is the agent's only for a personal agent, which follows its
+owner; for any other agent, ask which of them it's in. A personal agent is in all
 of its owner's projects: Basecamp adds it when they approve, within a few
 seconds, so if it shows none, list again after a moment. Tell the person it's
 in their projects and picks up their requests in all of them, and that if
