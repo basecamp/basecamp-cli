@@ -433,3 +433,200 @@ func (t *mockBoostNilBoosterTransport) RoundTrip(req *http.Request) (*http.Respo
 		Header:     header,
 	}, nil
 }
+
+// --- boost update ---
+
+const boostUpdatePath = "/99999/boosts/789"
+
+func boostUpdateRoute(status int, body string) stubRoute {
+	return stubRoute{method: http.MethodPut, path: boostUpdatePath, status: status, body: body}
+}
+
+func requireBoostUpdateSent(t *testing.T, transport *recordingTransport, content string) {
+	t.Helper()
+
+	call := transport.last(t)
+	assert.Equal(t, http.MethodPut, call.Method)
+	assert.Equal(t, boostUpdatePath, call.Path)
+	var sent map[string]any
+	require.NoError(t, json.Unmarshal([]byte(call.Body), &sent))
+	assert.Equal(t, content, sent["content"])
+}
+
+func TestBoostUpdateSendsNewContent(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		boostUpdateRoute(http.StatusOK, `{"id":789,"content":"✅ done","created_at":"2024-01-01T00:00:00Z"}`))
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
+
+	require.NoError(t, executeBoostCommand(NewBoostsCmd(), app, "update", "789", "✅ done"))
+
+	requireBoostUpdateSent(t, transport, "✅ done")
+	assert.Len(t, transport.recorded(), 1, "a boost is addressed by its own ID: no project or item lookup")
+
+	var envelope struct {
+		Summary string `json:"summary"`
+		Data    struct {
+			ID      int    `json:"id"`
+			Content string `json:"content"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	assert.Equal(t, "Updated boost #789 to ✅ done", envelope.Summary)
+	assert.Equal(t, 789, envelope.Data.ID)
+	assert.Equal(t, "✅ done", envelope.Data.Content)
+}
+
+func TestBoostsAliasUpdates(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		boostUpdateRoute(http.StatusOK, `{"id":789,"content":"👍","created_at":"2024-01-01T00:00:00Z"}`))
+
+	root := &cobra.Command{Use: "basecamp"}
+	root.AddCommand(NewBoostsCmd())
+	require.NoError(t, executeBoostCommand(root, app, "boosts", "update", "789", "👍"))
+
+	requireBoostUpdateSent(t, transport, "👍")
+}
+
+func TestBoostUpdateAcceptsBoostURL(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		boostUpdateRoute(http.StatusOK, `{"id":789,"content":"👍","created_at":"2024-01-01T00:00:00Z"}`))
+
+	url := "https://3.basecamp.com/99999/buckets/123/boosts/789"
+	require.NoError(t, executeBoostCommand(NewBoostsCmd(), app, "update", url, "👍"))
+
+	requireBoostUpdateSent(t, transport, "👍")
+}
+
+func TestBoostUpdateReadsContentFromStdin(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		boostUpdateRoute(http.StatusOK, `{"id":789,"content":"🎉","created_at":"2024-01-01T00:00:00Z"}`))
+
+	cmd := NewBoostsCmd()
+	cmd.SetIn(strings.NewReader("🎉\n"))
+	require.NoError(t, executeBoostCommand(cmd, app, "update", "789", "-"))
+
+	requireBoostUpdateSent(t, transport, "🎉")
+}
+
+func TestBoostUpdateRefusesLongContentBeforeAnyRequest(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, boostUpdateRoute(http.StatusOK, `{}`))
+
+	err := executeBoostCommand(NewBoostsCmd(), app, "update", "789", "this is way long!")
+
+	requireBoostUsageError(t, err, "Boost content too long (17 characters, max 16)")
+	assert.Empty(t, transport.recorded(), "an oversize boost must not reach the API")
+}
+
+func TestBoostUpdateAcceptsMaxContent(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		boostUpdateRoute(http.StatusOK, `{"id":789,"content":"exactly16chars!!","created_at":"2024-01-01T00:00:00Z"}`))
+
+	require.NoError(t, executeBoostCommand(NewBoostsCmd(), app, "update", "789", "exactly16chars!!"))
+
+	requireBoostUpdateSent(t, transport, "exactly16chars!!")
+}
+
+func TestBoostUpdateCountsCharactersNotBytes(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		boostUpdateRoute(http.StatusOK, `{"id":789,"content":"x","created_at":"2024-01-01T00:00:00Z"}`))
+
+	sixteenEmoji := strings.Repeat("🎉", 16)
+	require.NoError(t, executeBoostCommand(NewBoostsCmd(), app, "update", "789", sixteenEmoji))
+	requireBoostUpdateSent(t, transport, sixteenEmoji)
+}
+
+func TestBoostUpdateRefusesEmptyContentBeforeAnyRequest(t *testing.T) {
+	for _, content := range []string{"", "   "} {
+		app, transport := setupRecordingTestApp(t, boostUpdateRoute(http.StatusOK, `{}`))
+
+		err := executeBoostCommand(NewBoostsCmd(), app, "update", "789", content)
+
+		requireBoostUsageError(t, err, "Boost content required")
+		assert.Empty(t, transport.recorded(), "blank content %q must not reach the API", content)
+	}
+}
+
+func TestBoostUpdateRefusesBadIDBeforeAnyRequest(t *testing.T) {
+	app, transport := setupRecordingTestApp(t, boostUpdateRoute(http.StatusOK, `{}`))
+
+	err := executeBoostCommand(NewBoostsCmd(), app, "update", "nope", "👍")
+
+	requireBoostUsageError(t, err, "Invalid boost ID")
+	assert.Empty(t, transport.recorded())
+}
+
+func TestBoostUpdateMapsServerRefusals(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		code   string
+	}{
+		{"not the creator", http.StatusForbidden, ``, output.CodeForbidden},
+		{"no such boost", http.StatusNotFound, ``, output.CodeNotFound},
+		{"rejected content", http.StatusUnprocessableEntity, `{"error":"Content can't be blank"}`, output.CodeValidation},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app, _ := setupRecordingTestApp(t, boostUpdateRoute(tc.status, tc.body))
+
+			err := executeBoostCommand(NewBoostsCmd(), app, "update", "789", "👍")
+
+			require.Error(t, err)
+			var e *output.Error
+			require.True(t, errors.As(err, &e))
+			assert.Equal(t, tc.status, e.HTTPStatus)
+			assert.Equal(t, tc.code, e.Code)
+		})
+	}
+}
+
+// A URL is held to one boost in the configured account, on a Basecamp host,
+// before anything is sent: a URL naming another account, another kind of
+// thing, or a list of boosts would otherwise update the wrong boost.
+func TestBoostUpdateRefusesAURLThatIsNotOneBoostHere(t *testing.T) {
+	for _, tc := range []struct {
+		name, url, want string
+	}{
+		{"another account", "https://3.basecamp.com/88888/buckets/123/boosts/789", "does not match the configured account"},
+		{"an untrusted host", "https://evil.example.com/99999/buckets/123/boosts/789", "untrusted host"},
+		{"a to-do", "https://3.basecamp.com/99999/buckets/123/todos/789", "expected a boost ID or a boost URL"},
+		{"a recording's boosts", "https://3.basecamp.com/99999/buckets/123/recordings/789/boosts", "expected a boost ID or a boost URL"},
+		{"a project's boosts", "https://3.basecamp.com/99999/buckets/123/boosts", "expected a boost ID or a boost URL"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, transport := setupRecordingTestApp(t, boostUpdateRoute(http.StatusOK, `{"id":789,"content":"👍"}`))
+
+			err := executeBoostCommand(NewBoostsCmd(), app, "update", tc.url, "👍")
+
+			require.Error(t, err)
+			var e *output.Error
+			require.True(t, errors.As(err, &e), "a usage error: %v", err)
+			assert.Equal(t, output.CodeUsage, e.Code)
+			assert.Contains(t, e.Message, tc.want)
+			assert.Empty(t, transport.recorded(), "nothing is sent")
+		})
+	}
+}
+
+// The show breadcrumb keeps a project name with a space as one argument.
+func TestBoostUpdateQuotesTheProjectInItsBreadcrumb(t *testing.T) {
+	app, _ := setupRecordingTestApp(t,
+		boostUpdateRoute(http.StatusOK, `{"id":789,"content":"👍","created_at":"2024-01-01T00:00:00Z"}`))
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
+	app.Flags.Hints = true
+
+	require.NoError(t, executeBoostCommand(NewBoostsCmd(), app, "update", "789", "👍", "--project", "My Project"))
+
+	var envelope struct {
+		Breadcrumbs []struct {
+			Cmd string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.NotEmpty(t, envelope.Breadcrumbs)
+	assert.Equal(t, "basecamp boost show 789 --project 'My Project'", envelope.Breadcrumbs[0].Cmd)
+}
