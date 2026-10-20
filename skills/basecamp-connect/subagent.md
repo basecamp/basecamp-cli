@@ -24,6 +24,7 @@ for i in 1 2 3; do
   sleep 2
 done
 [ "$landed" = true ] || { echo "boost did not verifiably land: $out" >&2; false; }
+boost_id=$(printf '%s\n' "$out" | grep -xE '[0-9]+' | tail -1)   # $out may carry warnings too
 ```
 
 If it didn't verifiably land, go on and say so in your report. Skip it for
@@ -31,9 +32,9 @@ If it didn't verifiably land, go on and say so in your report. Skip it for
 landed: a request line with `ack` was already boosted by the connector, which
 acknowledges it even when the session couldn't reword it.
 
-Keep the id of the boost that landed: `$out` when it was yours, else the one
-the handoff names. Steps 4 and 5 use it; with none, skip what they say about
-the boost.
+Keep the id of the boost that landed: `$boost_id` when it was yours, else the
+one the handoff names. Steps 4 and 5 use it; with none, skip what they say
+about the boost.
 
 **2. Read the context.** The event is the trigger. Basecamp holds the context:
 

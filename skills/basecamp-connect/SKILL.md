@@ -190,7 +190,7 @@ refusal above, the holding reply below) post as step 5 of `subagent.md` does.
 With `ack` on the line, the connector boosted `ack.content`: reword it to fit
 the request, emoji first (16 characters at most), never a fixed string.
 Otherwise, only when `acknowledge` is true, boost: this loop with
-`boost create '<recording.url>' --ids-only`. A reply due within moments (a quick question)
+`boost create '<recording.url>' --ids-only` (id: `$out`'s digits-only line). A reply due within moments (a quick question)
 is the acknowledgement: leave the boost, or give none, and say so in the
 handoff; not for card work, where the boost shows the request landed.
 
@@ -200,7 +200,7 @@ for i in 1 2 3; do
   if out=$(basecamp boost update <ack.boost_id> '<ack>' --profile '<profile>' 2>&1); then
     landed=true; break
   fi
-  echo "$out" | grep -qE 'Not authenticated for|token refresh failed' || break   # anything else: no retry
+  echo "$out" | grep -qE 'Not authenticated for|token refresh failed' || break
   sleep 2
 done
 [ "$landed" = true ] || { echo "boost did not verifiably land: $out" >&2; false; }
