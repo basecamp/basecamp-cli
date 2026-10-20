@@ -96,7 +96,9 @@ func newCardsListCmd(project, cardTable *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List cards",
-		Long: "List all cards in a project's card table, or across every project with --all-projects.\n\n" +
+		Long: "List the cards in a project's card table, or across every project with --all-projects.\n\n" +
+			"Without --column the listing covers every column, up to 100 cards from each; --all lifts\n" +
+			"that cap. --column lists one column in full unless --limit or --page narrows it.\n\n" +
 			"With --all-projects the listing comes from the account-wide card aggregates, grouped by\n" +
 			"project. --status completed, --unassigned, --no-due-date, --not-now, and --overdue each\n" +
 			"select a different aggregate and are account-wide only.\n\n" +
@@ -114,7 +116,7 @@ func newCardsListCmd(project, cardTable *string) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&opts.column, "column", "c", "", "Filter by column ID or name")
-	cmd.Flags().IntVarP(&opts.limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = all in one project, 100 account-wide; use --all for every page)")
+	cmd.Flags().IntVarP(&opts.limit, "limit", "n", 0, "Maximum number of cards to fetch (0 = all in one column, 100 per column across a card table, 100 account-wide; use --all for every page)")
 	cmd.Flags().BoolVar(&opts.all, "all", false, "Fetch all cards (no limit)")
 	cmd.Flags().IntVar(&opts.page, "page", 0, "Fetch a single page (use --all for everything)")
 	cmd.Flags().StringVar(&opts.sortField, "sort", "", "Sort by field (title, created, updated, position, due)")
@@ -499,12 +501,13 @@ func runCardsListInProject(cmd *cobra.Command, app *appctx.App, opts cardsListOp
 		return output.ErrUsage("--limit cannot be negative")
 	}
 
-	// Pagination flags only make sense when listing a single column
-	// When aggregating across columns, pagination is per-column which is confusing
-	if opts.column == "" && (opts.page > 0 || opts.limit > 0 || opts.all) {
+	// --page and --limit only make sense when listing a single column: across
+	// columns they would apply per column, which is confusing. --all does make
+	// sense there: it lifts the per-column cap on the aggregate listing.
+	if opts.column == "" && (opts.page > 0 || opts.limit > 0) {
 		return output.ErrUsageHint(
 			"Pagination flags require --column",
-			"When listing all columns, pagination applies per-column. Use --column <id> to paginate a single column.",
+			"When listing all columns, pagination applies per-column. Use --column <id> to paginate a single column, or --all for every card in every column.",
 		)
 	}
 
@@ -589,6 +592,7 @@ func runCardsListInProject(cmd *cobra.Command, app *appctx.App, opts cardsListOp
 
 	// Get cards from all columns or specific column
 	var allCards []basecamp.Card
+	var respOpts []output.ResponseOption
 	if opts.column != "" {
 		// Find column by ID or name
 		columnID := resolveColumn(cardTableData.Lists, opts.column)
@@ -613,21 +617,38 @@ func runCardsListInProject(cmd *cobra.Command, app *appctx.App, opts cardsListOp
 			return output.ErrUsage("--sort position requires --column (position is per-column)")
 		}
 
-		// Get cards from all columns (no pagination - already validated above)
+		// Get cards from all columns, up to cardsPerColumnLimit from each. A
+		// done column holds every card ever finished, and walking all of it
+		// cost one request per 50 cards on every listing. --all lifts the cap,
+		// and so does --count, which has no way to report a truncated total.
+		perColumn := &basecamp.CardListOptions{Limit: cardsPerColumnLimit}
+		if opts.all || app.Flags.Count {
+			perColumn = nil
+		}
+		var truncated []string
 		for _, col := range cardTableData.Lists {
-			cardsResult, err := app.Account().Cards().List(cmd.Context(), col.ID, nil)
+			cardsResult, err := app.Account().Cards().List(cmd.Context(), col.ID, perColumn)
 			if err != nil {
 				continue // Skip columns with errors
 			}
 			allCards = append(allCards, cardsResult.Cards...)
+			if cardsResult.Meta.Truncated {
+				truncated = append(truncated, truncatedColumnLabel(col, cardsResult.Meta.TotalCount))
+			}
 		}
 
 		if opts.sortField != "" {
 			sortCards(allCards, opts.sortField, opts.reverse)
 		}
+
+		if len(truncated) > 0 {
+			respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
+				"Showing the first %d cards of %s; use --column <id> --all for every card in one column, or --all for every column",
+				cardsPerColumnLimit, strings.Join(truncated, ", "))))
+		}
 	}
 
-	return app.OK(allCards,
+	respOpts = append(respOpts,
 		output.WithSummary(fmt.Sprintf("%d cards", len(allCards))),
 		output.WithBreadcrumbs(append(cardsListBreadcrumbs(resolvedProjectID),
 			output.Breadcrumb{
@@ -637,6 +658,19 @@ func runCardsListInProject(cmd *cobra.Command, app *appctx.App, opts cardsListOp
 			},
 		)...),
 	)
+	return app.OK(allCards, respOpts...)
+}
+
+// cardsPerColumnLimit caps each column of a project-wide `cards list`.
+const cardsPerColumnLimit = 100
+
+// truncatedColumnLabel names a column the aggregate listing cut short, with its
+// total when the API reported one.
+func truncatedColumnLabel(col basecamp.CardColumn, total int) string {
+	if total > 0 {
+		return fmt.Sprintf("%s (%d total)", col.Title, total)
+	}
+	return col.Title
 }
 
 // countAccountWideCards totals the cards inside the project groups.
