@@ -542,7 +542,9 @@ person wants it.
 can serve only projects it's a member of. List its projects
 (`basecamp projects list -P '<profile>' --json`; if that's refused under an
 Agent identity, list the person's own projects with their login, a profile
-whose `auth status` isn't `oauth_type` `agent`, never another agent's). Unless
+whose `auth status` isn't `oauth_type` `agent`, never another agent's, in the
+agent's account: `--account` with the `account_id` the agent's `auth status`
+reports, since the person's login may default to another). Unless
 the person named projects, serve every one it's in, without asking. The
 person's own list is the agent's only for a personal agent, which follows its
 owner; for any other agent, ask which of them it's in. A personal agent is in all
