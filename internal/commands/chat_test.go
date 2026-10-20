@@ -2363,3 +2363,83 @@ func TestDeleteConfirmableFollowsTheAudienceNotTheDevice(t *testing.T) {
 		})
 	}
 }
+
+// A message that is HTML from end to end, with no --content-type, is refused
+// before anything is posted: as plain text it would show its tags, and as rich
+// text a literal one ("<p> pairs with </p>") would lose them. With a content
+// type, or as prose that only names a tag, it posts exactly as written.
+func TestChatPostRefusesHTMLWithoutAContentType(t *testing.T) {
+	tests := []struct {
+		name            string
+		args            []string
+		refused         bool
+		wantContentType string
+		wantContent     string
+	}{
+		{name: "HTML from end to end", args: []string{"<p>Build is green</p><ul><li>#913</li></ul>"}, refused: true},
+		{name: "HTML through --content", args: []string{"--content", "<p>Build is green</p>"}, refused: true},
+		{name: "tags meant literally", args: []string{"<p> pairs with </p>"}, refused: true},
+		{
+			name:            "HTML sent as rich text",
+			args:            []string{"<p>Build is green</p><ul><li>#913</li></ul>", "--content-type", "text/html"},
+			wantContentType: "text/html",
+			wantContent:     "<p>Build is green</p><ul><li>#913</li></ul>",
+		},
+		{
+			name:            "HTML sent as typed",
+			args:            []string{"<p> pairs with </p>", "--content-type", "text/plain"},
+			wantContentType: "text/plain",
+			wantContent:     "<p> pairs with </p>",
+		},
+		{name: "prose that names a tag", args: []string{"use <br> for a line break"}, wantContent: "use <br> for a line break"},
+		{name: "inline markup leading prose", args: []string{"<b>Note:</b> the build is green"}, wantContent: "<b>Note:</b> the build is green"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("BASECAMP_NO_KEYRING", "1")
+			transport := &mockChatMentionTransport{}
+			app, _ := newTestAppWithTransport(t, transport)
+
+			err := executeChatCommand(NewChatCmd(), app, append([]string{"post"}, tt.args...)...)
+
+			if tt.refused {
+				require.Error(t, err)
+				var e *output.Error
+				require.True(t, errors.As(err, &e), "a usage error: %v", err)
+				assert.Equal(t, output.CodeUsage, e.Code)
+				assert.Contains(t, e.Hint, "--content-type text/html")
+				assert.Contains(t, e.Hint, "--content-type text/plain")
+				assert.Empty(t, transport.capturedBody, "nothing is posted")
+				return
+			}
+			require.NoError(t, err)
+			var body map[string]any
+			require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+			contentType, sent := body["content_type"]
+			if tt.wantContentType == "" {
+				assert.False(t, sent, "plain text sends no content_type")
+			} else {
+				assert.Equal(t, tt.wantContentType, contentType)
+			}
+			assert.Equal(t, tt.wantContent, body["content"], "the message is sent as written")
+		})
+	}
+}
+
+// A mention makes a message rich text before the refusal is considered, so
+// HTML with a mention posts as it did, the mention resolved.
+func TestChatPostPostsHTMLWithAMention(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	transport := &mockChatMentionTransport{}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	require.NoError(t, executeChatCommand(NewChatCmd(), app, "post", "<p>Hey @Jane.Smith</p><ul><li>one</li></ul>"))
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(transport.capturedBody, &body))
+	assert.Equal(t, "text/html", body["content_type"])
+	content, _ := body["content"].(string)
+	assert.Equal(t, 1, strings.Count(content, `sgid="sgid-jane"`), "one mention of Jane: %s", content)
+	assert.Contains(t, content, "<ul><li>one</li></ul>")
+	assert.NotContains(t, content, "&lt;")
+}
