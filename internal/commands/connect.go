@@ -48,7 +48,7 @@ a subagent that replies as the agent.
 Connect the agent to a profile first (basecamp auth agent connect -P <profile>),
 then run setup on that profile: it records who may drive the agent, maps
 which Basecamp projects it serves, and checks the connector is
-ready. Show prints what setup recorded. Then run the connector on it:
+ready. Pings need no setup: an operator's ping is handed off too. Show prints what setup recorded. Then run the connector on it:
 
   basecamp connect -P <profile> [--project <id>]... [--shadow]
 
@@ -95,7 +95,7 @@ func newConnectShowCmd() *cobra.Command {
 		Use:   "show",
 		Short: "Show a profile's connector setup without changing it",
 		Long: `Show the connect.json a profile's setup wrote: the agent, the operator and
-trust mode, and each served project.
+trust mode, each served project, and who is let into a Ping.
 
 The file is read through the same checks setup and the connector apply:
 it is refused, and nothing of it shown, when it is a symlink, is not a
@@ -208,6 +208,13 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		"agents":   agents,
 		"projects": strconv.Itoa(len(f.Projects)) + " served",
 	}
+	for id, entry := range f.Pings {
+		ids := make([]string, len(entry.Participants))
+		for i, person := range entry.Participants {
+			ids[i] = strconv.FormatInt(person, 10)
+		}
+		d[fmt.Sprintf("ping_%d", id)] = strings.Join(ids, ", ") + " by mention, as participants"
+	}
 	for id, r := range f.Projects {
 		settings := "served"
 		if r.Class != "" {
@@ -285,6 +292,11 @@ type connectSetupFlags struct {
 	threadCap      optionalInt
 	dailyCap       optionalInt
 
+	// allowInPing and disallowInPing let people into one Ping and take them
+	// out, each <ping-id>:<person-id>.
+	allowInPing    []string
+	disallowInPing []string
+
 	serve   []string
 	classes []string
 	watch   []string
@@ -359,6 +371,20 @@ does not serve is handed off, and nobody is told. --watch-completions <project-i
 makes the agent hear every trusted completion in that project without being
 assigned.
 
+Pings. A Ping is in no project, so it is never served and needs no setup.
+An operator (the operator, or a person passed with --allow) gives the agent
+work by Ping in every trust mode: every line of theirs in a direct Ping with
+the agent is a request, and in a group Ping a line that @mentions it.
+--allow-in-ping <ping-id>:<person-id> lets one more person reach the agent in
+that one Ping, as a participant, by @mention only, in every trust mode;
+anywhere else they are who they were. Setup reads the Ping as the agent: the
+agent and the person must both be in it, and the person can be neither an
+agent nor a client. --disallow-in-ping takes them out. Find the Ping's id
+with basecamp pings list, or in its URL (.../circles/<ping-id>), and the
+person's in basecamp pings show <ping-id> --json. Anyone else's line in a
+Ping is discarded, as is any agent's. Restart the connector after changing
+who is let into a Ping.
+
 No directory is associated with a project here: the session handling the
 requests chooses the repo for each one.
 
@@ -396,6 +422,7 @@ Examples:
   basecamp connect setup -P bot --operator-profile me --expect-identity 4242 --serve 12345
   basecamp connect setup -P agent --class 12345=internal
   basecamp connect setup -P agent --allow-agent 333
+  basecamp connect setup -P agent --allow-in-ping 2085958513:111
   basecamp connect setup -P agent --agent-thread-cap 5 --agent-daily-cap 30`,
 		Annotations: map[string]string{AnnotationProfileMayCreate: "true"},
 		Args:        cobra.NoArgs,
@@ -421,6 +448,8 @@ Examples:
 	fl.Lookup("allow-assignments-from-authorized").NoOptDefVal = "true"
 	fl.StringArrayVar(&f.allowAgents, "allow-agent", nil, "Agent person id allowed to wake this agent by @mentioning it, as a participant (repeatable; default: no agent)")
 	fl.StringArrayVar(&f.disallowAgents, "disallow-agent", nil, "Stop allowing an agent to wake this one by mention (repeatable)")
+	fl.StringArrayVar(&f.allowInPing, "allow-in-ping", nil, "Let a person reach the agent in one Ping alone, by mention, as a participant: <ping-id>:<person-id> (repeatable)")
+	fl.StringArrayVar(&f.disallowInPing, "disallow-in-ping", nil, "Take a person let into a Ping out of it: <ping-id>:<person-id> (repeatable)")
 	fl.Var(&f.threadCap, "agent-thread-cap", fmt.Sprintf("Allowed agents' mentions handed off per thread or Campfire in 24 hours (default %d; 0 restores it; at most %d)", admission.DefaultAgentThreadCap, admission.MaxAgentCap))
 	fl.Var(&f.dailyCap, "agent-daily-cap", fmt.Sprintf("One allowed agent's mentions handed off across all threads in 24 hours (default %d; 0 restores it; at most %d)", admission.DefaultAgentDailyCap, admission.MaxAgentCap))
 	fl.StringArrayVar(&f.serve, "serve", nil, "Serve a Basecamp project: <project-id> (repeatable)")
@@ -628,6 +657,13 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		trust.Operator = setup.Person{ID: operatorID}
 	}
 	trustChecks := setup.VerifyTrust(ctx, people, trust, me.ID)
+	// A Ping is read as the agent, as admission reads it: whether the agent
+	// is in it, and who is with it there, is the agent's view.
+	var recordedPings map[int64]admission.PingTrust
+	if exists {
+		recordedPings = existing.Pings
+	}
+	trustChecks = append(trustChecks, setup.VerifyPings(ctx, reader, next.Pings, recordedPings, me.ID)...)
 	for _, c := range trustChecks {
 		if c.Status == setup.StatusFail {
 			return output.ErrUsageHint("Trust was refused, and nothing was written: "+c.Name+": "+c.Message, c.Hint)
@@ -876,6 +912,27 @@ func (f *connectSetupFlags) changes() (setup.Changes, error) {
 				}
 				*list.out = append(*list.out, id)
 			}
+		}
+	}
+	for _, list := range []struct {
+		flag string
+		raw  []string
+		out  *[]setup.PingPerson
+	}{
+		{"--allow-in-ping", f.allowInPing, &ch.AllowInPing},
+		{"--disallow-in-ping", f.disallowInPing, &ch.DisallowInPing},
+	} {
+		for _, raw := range list.raw {
+			pingText, personText, ok := strings.Cut(raw, ":")
+			ping, err := parsePositiveID(list.flag, strings.TrimSpace(pingText))
+			if !ok || err != nil || ping == 0 {
+				return ch, output.ErrUsage(fmt.Sprintf("Invalid %s %q: expected <ping-id>:<person-id>", list.flag, raw))
+			}
+			person, err := parsePositiveID(list.flag, strings.TrimSpace(personText))
+			if err != nil || person == 0 {
+				return ch, output.ErrUsage(fmt.Sprintf("Invalid %s %q: expected <ping-id>:<person-id>", list.flag, raw))
+			}
+			*list.out = append(*list.out, setup.PingPerson{Ping: ping, Person: person})
 		}
 	}
 	if f.threadCap.set {

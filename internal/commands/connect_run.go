@@ -43,7 +43,7 @@ func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
 	fl := cmd.Flags()
 	// --project shadows the global flag of the same name and keeps its type,
 	// so the flag reads the same everywhere; here it may be repeated.
-	fl.Var((*repeatedString)(&f.projects), "project", "Only hear events in this project id (repeatable; default every project the agent can see)")
+	fl.Var((*repeatedString)(&f.projects), "project", "Only hear events in this project id (repeatable; default every project and ping the agent can see, and a run given one hears no ping)")
 	fl.BoolVar(&f.shadow, "shadow", false, "Admit and log in an isolated state directory; dispatch and post nothing")
 	fl.Int64Var(&f.since, "since", 0, "Enter the feed just after this event id, whatever the ledger holds")
 	fl.BoolVar(&f.hold, "hold", false, "Set the durable hold: intake and admission run, nothing is dispatched or posted until the hold is released, and earlier records wait for review")

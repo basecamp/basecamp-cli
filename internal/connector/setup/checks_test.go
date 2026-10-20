@@ -28,6 +28,19 @@ type fakeReader struct {
 	mintErr       error
 	projectErr    map[int64]error
 	projectPplErr map[int64]error
+	pings         map[int64]Ping
+	pingErr       error
+}
+
+func (f *fakeReader) Ping(_ context.Context, id int64) (Ping, error) {
+	if f.pingErr != nil {
+		return Ping{}, f.pingErr
+	}
+	p, ok := f.pings[id]
+	if !ok {
+		return Ping{}, status(http.StatusNotFound)
+	}
+	return p, nil
 }
 
 func (f *fakeReader) Me(context.Context) (Person, error) { return f.people[agentID], nil }
@@ -118,7 +131,7 @@ func TestProjectChecksSeparateAFirstSetupFromWithdrawingTheLastProject(t *testin
 	withdrawn := ProjectChecks(context.Background(), &fakeReader{}, f, false)
 	require.Len(t, withdrawn, 1)
 	assert.Equal(t, StatusWarn, withdrawn[0].Status, "and withdrawing the last one is written, not refused")
-	assert.Contains(t, withdrawn[0].Message, "no work at all")
+	assert.Contains(t, withdrawn[0].Message, "only its operators' pings reach this agent")
 	assert.Contains(t, withdrawn[0].Hint, "--serve")
 
 	// A warn is not a failure, so nothing about it stops the file being

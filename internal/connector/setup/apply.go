@@ -35,6 +35,12 @@ type Changes struct {
 	AgentThreadCap *int
 	AgentDailyCap  *int
 
+	// AllowInPing lets people reach the agent in one Ping alone, as
+	// participants there; DisallowInPing takes them out. Kept across runs,
+	// like the allowed agents.
+	AllowInPing    []PingPerson
+	DisallowInPing []PingPerson
+
 	// Serve are the project (bucket) ids to serve. A project already served
 	// keeps its class and watch_completions.
 	Serve []int64
@@ -45,6 +51,12 @@ type Changes struct {
 	WatchCompletions map[int64]bool
 	// Remove stops serving projects.
 	Remove []int64
+}
+
+// PingPerson is a person in one Ping.
+type PingPerson struct {
+	Ping   int64
+	Person int64
 }
 
 // Apply returns f with ch applied. f is not modified. Everything that can
@@ -58,13 +70,17 @@ func Apply(f File, ch Changes) (File, error) {
 	}
 	out.Trust.AllowlistIDs = slices.Clone(f.Trust.AllowlistIDs)
 
-	if err := applyTrust(&out.Trust, ch); err != nil {
+	var err error
+	if err = applyTrust(&out.Trust, ch); err != nil {
 		return File{}, err
 	}
 	if err := applyAssignmentOptIn(&out.Trust, ch); err != nil {
 		return File{}, err
 	}
 	if err := applyAgents(&out.Trust, ch); err != nil {
+		return File{}, err
+	}
+	if out.Pings, err = applyPings(f.Pings, ch); err != nil {
 		return File{}, err
 	}
 
@@ -212,6 +228,39 @@ func applyAgents(t *admission.Trust, ch Changes) error {
 		*c.field = *c.value
 	}
 	return nil
+}
+
+// applyPings returns the Ping entries with ch's people let in and taken out,
+// a fresh map that shares nothing with pings. A Ping nobody is let into is no
+// entry, and none at all is nil, so the key stays out of the file.
+func applyPings(pings map[int64]admission.PingTrust, ch Changes) (map[int64]admission.PingTrust, error) {
+	people := map[int64][]int64{}
+	for id, entry := range pings {
+		people[id] = slices.Clone(entry.Participants)
+	}
+	for _, pp := range ch.AllowInPing {
+		switch {
+		case pp.Ping <= 0 || pp.Person <= 0:
+			return nil, fmt.Errorf("--allow-in-ping %d:%d: expected <ping-id>:<person-id>", pp.Ping, pp.Person)
+		case slices.Contains(ch.DisallowInPing, pp):
+			return nil, fmt.Errorf("person %d is both let into Ping %d and taken out in one run", pp.Person, pp.Ping)
+		}
+		people[pp.Ping] = append(people[pp.Ping], pp.Person)
+	}
+	for _, pp := range ch.DisallowInPing {
+		people[pp.Ping] = slices.DeleteFunc(people[pp.Ping], func(id int64) bool { return id == pp.Person })
+	}
+	var out map[int64]admission.PingTrust
+	for id, ids := range people {
+		if len(ids) == 0 {
+			continue
+		}
+		if out == nil {
+			out = map[int64]admission.PingTrust{}
+		}
+		out[id] = admission.PingTrust{Participants: sortedIDs(ids)}
+	}
+	return out, nil
 }
 
 // SetOperator records the operator. When the allowlist then names nobody

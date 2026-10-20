@@ -49,6 +49,7 @@ var connectSetupPolicyFlags = []string{
 	"serve", "unserve", "class", "watch-completions", "no-watch-completions",
 	"allow-assignments-from-authorized",
 	"allow-agent", "disallow-agent", "agent-thread-cap", "agent-daily-cap",
+	"allow-in-ping", "disallow-in-ping",
 }
 
 // connectGOOS is the platform guided setup checks before connecting. A
@@ -635,13 +636,13 @@ func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, fil
 		// try it.
 		fmt.Fprintln(w, "  Works in:  no projects")
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "It isn't working in any projects, so it won't pick up any mentions. To add one: basecamp connect setup -P %s --serve <project-id>\n", richtext.ShellQuote(name))
+		fmt.Fprintf(w, "It isn't working in any projects, so only your pings reach it. To add one: basecamp connect setup -P %s --serve <project-id>\n", richtext.ShellQuote(name))
 		return
 	}
 	fmt.Fprintf(w, "  Works in:  %s\n", strings.Join(served, ", "))
 	if running {
 		fmt.Fprintln(w, "  Running:   yes")
-		fmt.Fprintf(w, "\nMention %s in one of those projects to try it.\n", agentName)
+		fmt.Fprintf(w, "\nMention %s in one of those projects, or ping it, to try it.\n", agentName)
 	} else {
 		// The connector only listens: the person's own Claude Code session
 		// does the work, through the basecamp-connect skill.
@@ -650,6 +651,6 @@ func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, fil
 		fmt.Fprintln(w, "To start it, run /basecamp-connect in your Claude Code session. It starts the")
 		fmt.Fprintln(w, "connector and handles each request with your own setup. The connector on its own:")
 		fmt.Fprintln(w, "  basecamp connect -P "+richtext.ShellQuote(name))
-		fmt.Fprintf(w, "\nOnce it's running, mention %s in one of those projects to try it.\n", agentName)
+		fmt.Fprintf(w, "\nOnce it's running, mention %s in one of those projects, or ping it, to try it.\n", agentName)
 	}
 }

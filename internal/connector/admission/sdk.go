@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strconv"
 	"sync"
@@ -16,6 +17,10 @@ const (
 	SubscriptionTTL = 10 * time.Minute
 	// MembershipTTL is how long a project's member list is reused.
 	MembershipTTL = 10 * time.Minute
+	// NotAPingTTL is how long a bucket's answer that it is no Ping the agent
+	// is in is reused. Only that answer is cached: a project never becomes a
+	// Ping, while a Ping's people are read fresh each time they decide.
+	NotAPingTTL = 10 * time.Minute
 	// MaxAssignmentPages bounds the events read for an assignment delta.
 	MaxAssignmentPages = 5
 	// maxCacheEntries bounds each cache, so a process alive for weeks never
@@ -35,6 +40,7 @@ func NewSDKReads(cfg *basecamp.Config, tokens basecamp.TokenProvider, accountID 
 		Subscriptions: NewSubscriptions(client, time.Now),
 		Assignments:   &Assignments{client: client},
 		Boosts:        client.Boosts(),
+		Pings:         NewPings(client, time.Now),
 		Members:       NewMembers(client, time.Now),
 	}
 }
@@ -102,6 +108,36 @@ func (a *Assignments) AddedPersonIDs(ctx context.Context, recordingID, eventID i
 		}
 	}
 	return nil, false, nil
+}
+
+// Pings reads a bucket as a Ping, remembering for NotAPingTTL each bucket that
+// is not one.
+type Pings struct {
+	client   *basecamp.AccountClient
+	notPings *ttlCache[int64, bool]
+}
+
+// NewPings builds the Ping read.
+func NewPings(client *basecamp.AccountClient, now func() time.Time) *Pings {
+	return &Pings{client: client, notPings: newTTLCache[int64, bool](now, NotAPingTTL)}
+}
+
+// Ping implements PingReader. Basecamp answers 404 for a bucket that is not a
+// Ping the caller is in, and 403 to a caller whose company has Pings turned
+// off, so both mean no Ping. Every other failure is returned as itself.
+func (p *Pings) Ping(ctx context.Context, bucketID int64) (*basecamp.Ping, error) {
+	if _, ok := p.notPings.get(bucketID); ok {
+		return nil, nil
+	}
+	ping, err := p.client.Pings().Get(ctx, bucketID)
+	if apiErr, ok := errors.AsType[*basecamp.Error](err); ok && (apiErr.Code == basecamp.CodeNotFound || apiErr.Code == basecamp.CodeForbidden) {
+		p.notPings.put(bucketID, true)
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return ping, nil
 }
 
 // Members reads a project's people and answers membership from that listing.

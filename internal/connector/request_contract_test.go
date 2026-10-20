@@ -29,6 +29,7 @@ var requestLineContract = []string{
 	"event_type",
 	"go",
 	"owner",
+	"ping",
 	"recording.bucket_id",
 	"recording.project_name",
 	"recording.recording_id",

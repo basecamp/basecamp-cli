@@ -116,6 +116,71 @@ func TestOnlyServedProjectsAreHandedOff(t *testing.T) {
 	assert.Equal(t, StateAdmitted, getRecord(t, ledger, 1).State)
 }
 
+// A Ping is in no project connect.json serves, and its operator's line is
+// handed off all the same, saying it is a Ping's, even with no project
+// served. A run narrowed to projects hears no Ping.
+func TestAPingsRequestIsHandedOffWithNoServedProject(t *testing.T) {
+	const ping int64 = 2085958521
+	ping1 := func(t *testing.T, ledger *Ledger, id int64) {
+		t.Helper()
+		ev := testEvent(id)
+		ev.EventType, ev.BucketID = "chat.line.created", ping
+		_, err := ledger.RecordSeen(context.Background(), ev, LanePoll)
+		require.NoError(t, err)
+		v := admittedVerdict(id, 0, admission.PingConversationKey(ping))
+		v.EventType, v.BucketID, v.Served, v.Class = "chat.line.created", ping, false, ""
+		v.Trigger = admission.TriggerPinged
+		v.Reply = &admission.ReplyDestination{Kind: admission.ReplyChatLine, RecordingID: 1069480220}
+		_, err = ledger.Admission().Commit(context.Background(), v)
+		require.NoError(t, err)
+	}
+
+	t.Run("handed off", func(t *testing.T) {
+		ledger := newTestLedger(t)
+		ping1(t, ledger, 1)
+		admitOn(t, ledger, 2, "recording:1")
+		var out bytes.Buffer
+		opts := handoffOptions(ledger, &out)
+		opts.Served = func() (map[int64]admission.Project, error) { return map[int64]admission.Project{}, nil }
+
+		require.NoError(t, handOffReady(context.Background(), opts))
+
+		lines := handedOffLines(t, &out)
+		require.Len(t, lines, 1, "the project's record waits for its project to be served")
+		assert.Equal(t, int64(1), lines[0].EventID)
+		assert.True(t, lines[0].Ping)
+		assert.Equal(t, "pinged", lines[0].Trigger)
+		assert.Equal(t, ping, lines[0].Recording.BucketID)
+		assert.Equal(t, InstructionReply{Kind: "chat_line", RecordingID: 1069480220}, lines[0].ReplyTo)
+		assert.Equal(t, StateAdmitted, getRecord(t, ledger, 2).State)
+	})
+
+	t.Run("a project's line says it is none", func(t *testing.T) {
+		ledger := newTestLedger(t)
+		admitOn(t, ledger, 1, "recording:1")
+		var out bytes.Buffer
+
+		require.NoError(t, handOffReady(context.Background(), handoffOptions(ledger, &out)))
+
+		lines := handedOffLines(t, &out)
+		require.Len(t, lines, 1)
+		assert.False(t, lines[0].Ping)
+	})
+
+	t.Run("a run narrowed to projects", func(t *testing.T) {
+		ledger := newTestLedger(t)
+		ping1(t, ledger, 1)
+		var out bytes.Buffer
+		opts := handoffOptions(ledger, &out)
+		opts.Buckets = []int64{adapterBucketID}
+
+		require.NoError(t, handOffReady(context.Background(), opts))
+
+		assert.Empty(t, out.String())
+		assert.Equal(t, StateAdmitted, getRecord(t, ledger, 1).State)
+	})
+}
+
 // The line names the project and, when they wrote the recording, the person
 // who asked: the session needn't ask Basecamp as the agent.
 func TestTheLineNamesTheProjectAndTheRequester(t *testing.T) {

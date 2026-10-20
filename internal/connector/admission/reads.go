@@ -36,6 +36,13 @@ type BoostReader interface {
 	Get(ctx context.Context, boostID int64) (*basecamp.Boost, error)
 }
 
+// PingReader reads the Ping a bucket is, as the agent sees it: People are the
+// others in it. It returns nil, and no error, when the bucket is not a Ping the
+// agent is in, which is the answer for every project.
+type PingReader interface {
+	Ping(ctx context.Context, bucketID int64) (*basecamp.Ping, error)
+}
+
 // MemberReader answers whether a person is a non-client member of a project.
 // Only project trust mode consults it.
 //
@@ -58,5 +65,6 @@ type Reads struct {
 	Subscriptions SubscriptionReader
 	Assignments   AssignmentReader
 	Boosts        BoostReader
+	Pings         PingReader
 	Members       MemberReader
 }

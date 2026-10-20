@@ -136,7 +136,7 @@ func TestGuidedConnectSetupFromNothing(t *testing.T) {
 	assert.Contains(t, out, "Running:   no")
 	assert.Contains(t, out, "To start it, run /basecamp-connect in your Claude Code session.")
 	assert.Contains(t, out, "  basecamp connect -P agent\n")
-	assert.Contains(t, out, "Once it's running, mention Marie Chef in one of those projects to try it.")
+	assert.Contains(t, out, "Once it's running, mention Marie Chef in one of those projects, or ping it, to try it.")
 	for _, internal := range []string{"Connected profile", "Account: 999", "auth status", "connect.json", "Identity", "Person " + strconv.FormatInt(setupOperatorPerson, 10)} {
 		assert.NotContains(t, out, internal)
 	}

@@ -12,6 +12,11 @@ const (
 	// TriggerBoosted: someone boosted a recording the agent wrote. The boost
 	// is the content; the boosted recording is what it answers.
 	TriggerBoosted Trigger = "boosted"
+	// TriggerPinged: an operator's line in a direct Ping with the agent, the
+	// agent and one other person. Every line there is said to the agent, so
+	// none needs a mention; in a group Ping a line is the agent's business
+	// only as a mention.
+	TriggerPinged Trigger = "pinged"
 )
 
 // Rule is one row of the trigger matrix: a trigger an event type can admit
@@ -52,7 +57,13 @@ var (
 	// to a thumbs-up. Who may boost is whoever may mention the agent, in
 	// every trust mode, so it is not OperatorOnly.
 	ruleBoosted = Rule{Trigger: TriggerBoosted, RequiresServed: true}
+	// Only a line in a Ping admits under pinged, and a Ping is never a served
+	// project, so the rule is not in the matrix: matchPing returns it.
+	rulePinged = Rule{Trigger: TriggerPinged, Acknowledge: true}
 )
+
+// eventChatLineCreated is the one type a Ping's lines arrive as.
+const eventChatLineCreated = "chat.line.created"
 
 // V1Matrix returns the trigger matrix: version 1, plus boosted. Every other cataloged type
 // is discarded as not_in_matrix. A fresh copy each call, so no caller can

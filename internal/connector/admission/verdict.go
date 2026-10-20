@@ -61,7 +61,8 @@ type Snapshot struct {
 	// Role is whose request this is: an operator's or a participant's.
 	Role Role `json:"role,omitempty"`
 	// Owner says the operator connect.json names asked, in words they wrote:
-	// they mentioned the agent, or assigned it a recording they wrote. A
+	// they mentioned the agent, wrote to it in their direct Ping, or assigned
+	// it a recording they wrote. A
 	// comment on a followed thread, a completion and a boost are never the
 	// owner's word; an operator's go on a declared ask is a separate
 	// approval (AskRecordingID) and does not make one. Someone named with --allow is an operator but never the
@@ -273,8 +274,8 @@ func NewAdmitter(policy Policy, reads Reads, opts ...Option) (*Admitter, error) 
 		return nil, err
 	}
 	switch {
-	case reads.Summaries == nil || reads.Subscriptions == nil || reads.Assignments == nil || reads.Boosts == nil:
-		return nil, errors.New("admission: the summary, subscription, assignment and boost reads are required")
+	case reads.Summaries == nil || reads.Subscriptions == nil || reads.Assignments == nil || reads.Boosts == nil || reads.Pings == nil:
+		return nil, errors.New("admission: the summary, subscription, assignment, boost and ping reads are required")
 	case policy.Trust.Mode == TrustProject && reads.Members == nil:
 		return nil, errors.New("admission: project trust mode needs a membership read")
 	}
@@ -366,6 +367,29 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		}
 	}
 
+	// Where the line was said decides whose word counts, so it is settled
+	// before anyone's trust is read: a Ping has no members to ask about.
+	var ping *basecamp.Ping
+	if _, served := policy.served(ev.BucketID); !served && ev.EventType == eventChatLineCreated {
+		var reason Reason
+		if ping, reason, err = d.pingOf(ctx, ev.BucketID); err != nil {
+			return Verdict{}, err
+		}
+		if reason != "" {
+			return v.end(StateBlocked, reason), nil
+		}
+		if ping != nil && gate.Role != RoleOperator && !gate.InPing {
+			// Project trust's participants are a project's members, and a
+			// Ping is no project. An allowed agent never gets here: the gate
+			// discards its event in any bucket connect.json does not serve.
+			return v.end(StateDiscarded, ReasonUntrustedPerformer), nil
+		}
+	}
+	if gate.InPing && ping == nil {
+		// Trusted only in a Ping, and the bucket is none the agent is in.
+		return v.end(StateDiscarded, ReasonUntrustedPerformer), nil
+	}
+
 	if gate.ConfirmMembership {
 		member, reason, err := d.memberOf(ctx, ev.BucketID, ev.Performer(), ev.SeenAt)
 		if err != nil {
@@ -435,8 +459,15 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		v.Served, v.Class = true, project.Class
 	}
 
-	rule, author, state, reason, err := d.match(ctx, ev, policy, gate, summary)
-	if err != nil {
+	var (
+		rule   Rule
+		author Role
+		state  State
+		reason Reason
+	)
+	if ping != nil {
+		rule, author, state, reason = a.matchPing(summary, ping, gate.Role)
+	} else if rule, author, state, reason, err = d.match(ctx, ev, policy, gate, summary); err != nil {
 		return Verdict{}, err
 	}
 	if state != "" {
@@ -457,7 +488,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 			v.RequesterID = summary.Creator.ID
 		}
 	}
-	v.address(summary, shape)
+	v.address(summary, shape, ping != nil)
 	if gate.Agent {
 		v.agentCaps = &agentCaps{
 			agentID: ev.Performer(),
@@ -468,7 +499,7 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		}
 	}
 
-	if !v.Served {
+	if !v.Served && ping == nil {
 		// Mentioned and assigned are answered in an unserved project rather
 		// than dropped: the record keeps its trigger and reply destination
 		// for the holding reply, and is read again once the operator serves
@@ -496,10 +527,10 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		// ask (AskRecordingID): Owner is the owner's word on the connector
 		// itself, and a go approves only what its ask names, never that.
 		Owner: v.Role == RoleOperator && ev.Performer() == policy.Trust.OperatorID &&
-			(rule.Trigger == TriggerMentioned || rule.Trigger == TriggerAssigned) &&
+			(rule.Trigger == TriggerMentioned || rule.Trigger == TriggerAssigned || rule.Trigger == TriggerPinged) &&
 			summary.Creator.ID == policy.Trust.OperatorID,
 	}
-	if summary.Bucket != nil {
+	if summary.Bucket != nil && ping == nil {
 		v.Snapshot.ProjectName = summary.Bucket.Name
 	}
 	switch {
@@ -629,9 +660,41 @@ func (a *decision) match(ctx context.Context, ev Event, policy Policy, gate Gate
 			if subscribed {
 				return rule, "", "", "", nil
 			}
+
+		case TriggerPinged:
+			// Not in the matrix: only matchPing returns it.
 		}
 	}
 	return Rule{}, "", endState, endReason, nil
+}
+
+// matchPing decides what a line in a Ping is to the agent, and returns its
+// author's role. Its performer was an operator at the gate, or a participant
+// connect.json lets into this Ping; its words must be one of those too, and no
+// agent's. A mention is a request from either. Every line in a direct Ping is
+// said to the agent, but only an operator's needs no mention.
+func (a *Admitter) matchPing(summary *basecamp.RecordingSummary, ping *basecamp.Ping, performer Role) (Rule, Role, State, Reason) {
+	author := summary.Creator
+	role := a.policy.Trust.roleOf(author.ID)
+	switch {
+	case author.ID == a.policy.AgentID, author.PersonableType == personableAgent:
+		return Rule{}, "", StateDiscarded, ReasonAgentAuthored
+	case role != RoleOperator && !a.policy.pingParticipant(ping.ID, author.ID):
+		return Rule{}, "", StateDiscarded, ReasonUntrustedAuthor
+	case slices.Contains(summary.MentionedPersonIDs, a.policy.AgentID):
+		return ruleMentioned, role, "", ""
+	case least(role, performer) == RoleOperator && direct(ping, author.ID):
+		return rulePinged, role, "", ""
+	}
+	return Rule{}, "", StateDiscarded, ReasonNotAddressed
+}
+
+// direct reports whether the Ping is the agent and the writer alone. People
+// are the others in it as the agent sees it. Basecamp carries no group flag,
+// so a group that has shrunk to the two of them reads as direct, which it now
+// is: nobody else reads the line. A direct Ping never gains a third person.
+func direct(ping *basecamp.Ping, writer int64) bool {
+	return len(ping.People) == 1 && ping.People[0].ID == writer
 }
 
 func assigned(summary *basecamp.RecordingSummary, personID int64) bool {
@@ -698,7 +761,7 @@ func shapeOf(eventType string, summary *basecamp.RecordingSummary) shape {
 	switch {
 	case eventType == "comment.created", boost && summary.Type == "Comment":
 		return shapeComment
-	case eventType == "chat.line.created", boost && strings.HasPrefix(summary.Type, "Chat::Lines::"):
+	case eventType == eventChatLineCreated, boost && strings.HasPrefix(summary.Type, "Chat::Lines::"):
 		return shapeChatLine
 	}
 	return shapeRecording
@@ -706,13 +769,17 @@ func shapeOf(eventType string, summary *basecamp.RecordingSummary) shape {
 
 // address sets the conversation key and reply destination. Decide has
 // already refused a comment without its recording and a line without its
-// Campfire.
-func (v *Verdict) address(summary *basecamp.RecordingSummary, shape shape) {
-	switch shape {
-	case shapeChatLine:
+// Campfire. A line in a Ping is answered in its Campfire like any other, and
+// its conversation is the Ping.
+func (v *Verdict) address(summary *basecamp.RecordingSummary, shape shape, ping bool) {
+	switch {
+	case ping:
+		v.ConversationKey = PingConversationKey(v.BucketID)
+		v.Reply = &ReplyDestination{Kind: ReplyChatLine, RecordingID: summary.CampfireID}
+	case shape == shapeChatLine:
 		v.ConversationKey = "campfire:" + strconv.FormatInt(summary.CampfireID, 10)
 		v.Reply = &ReplyDestination{Kind: ReplyChatLine, RecordingID: summary.CampfireID}
-	case shapeComment:
+	case shape == shapeComment:
 		v.ConversationKey = "recording:" + strconv.FormatInt(summary.Parent.ID, 10)
 		v.Reply = &ReplyDestination{Kind: ReplyComment, RecordingID: summary.Parent.ID}
 	default:
@@ -720,6 +787,24 @@ func (v *Verdict) address(summary *basecamp.RecordingSummary, shape shape) {
 		v.Reply = &ReplyDestination{Kind: ReplyComment, RecordingID: v.RecordingID}
 	}
 }
+
+// PingConversationKey is the conversation of a line in a Ping: the Ping
+// itself, whose one Campfire holds all of it. It also marks the record as a
+// Ping's for whoever reads the ledger, since a Ping is answered with no served
+// project; admission writes it only after the Ping read said the bucket is one.
+func PingConversationKey(pingID int64) string {
+	return PingConversationPrefix + strconv.FormatInt(pingID, 10)
+}
+
+// IsPingConversation reports whether key is the conversation of the Ping whose
+// bucket is bucketID.
+func IsPingConversation(key string, bucketID int64) bool {
+	return key == PingConversationKey(bucketID)
+}
+
+// PingConversationPrefix is PingConversationKey's prefix, for a query that
+// builds the key from a bucket id.
+const PingConversationPrefix = "ping:"
 
 func (a *decision) subscribed(ctx context.Context, recordingID int64) (bool, Reason, error) {
 	var subscribed bool
@@ -733,6 +818,21 @@ func (a *decision) subscribed(ctx context.Context, recordingID int64) (bool, Rea
 		return false, reason, ctxErr
 	}
 	return subscribed, "", nil
+}
+
+// pingOf reads the Ping the bucket is, or nil when it is none.
+func (a *decision) pingOf(ctx context.Context, bucketID int64) (*basecamp.Ping, Reason, error) {
+	var ping *basecamp.Ping
+	err := a.retry(ctx, func() error {
+		var err error
+		ping, err = a.reads.Pings.Ping(ctx, bucketID)
+		return err
+	})
+	if err != nil {
+		reason, ctxErr := failure(ctx, err)
+		return nil, reason, ctxErr
+	}
+	return ping, "", nil
 }
 
 func (a *decision) memberOf(ctx context.Context, bucketID, personID int64, asOf time.Time) (bool, Reason, error) {

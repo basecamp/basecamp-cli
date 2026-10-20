@@ -10,23 +10,30 @@
 //     least one of the type's triggers, the bucket is in scope, and a trigger
 //     that only a served project admits is in one. Most account traffic
 //     ends here, for the price of its pointer.
-//  2. In project trust mode a performer the policy does not name is confirmed
+//  2. A chat line in a bucket connect.json does not serve is read as a Ping
+//     (Reads.Pings), because where the line was said decides whose word
+//     counts, and that comes before anyone's trust is read. A bucket that
+//     is no Ping goes on as an unserved project's; its answer is cached.
+//  3. In project trust mode a performer the policy does not name is confirmed
 //     as a non-client member of the project. That is a read, cached per
 //     project, and it is the one trust decision the pointer alone cannot make.
-//  3. The RecordingSummary read (the SDK's step-10 helper) resolves the
+//  4. The RecordingSummary read (the SDK's step-10 helper) resolves the
 //     recording through the typed read its event type names. A boost's type
 //     names no recording, so a boost is read first, for the boosted
 //     recording's type and for the boost itself. A recording still drafted or
 //     since trashed is stale.
-//  4. The trigger rules decide what the event is to the agent: mentioned (the
+//  5. The trigger rules decide what the event is to the agent: mentioned (the
 //     agent's Person id is among the mention attachments — never a name),
 //     subscribed (a subscription read on the commented recording), assigned
 //     (the recording's events, at most five pages, for details.added_person_ids)
 //     completed (trusted completer and a stake: the served project's
 //     watch_completions flag, an assignment, or a subscription), or boosted
 //     (a boost on the recording itself, which the agent wrote, given by the
-//     trusted performer; a boost on one of a recording's events is not).
-//  5. Whether the project is served, its class, the reply destination, the
+//     trusted performer; a boost on one of a recording's events is not), or,
+//     in a Ping, pinged (an operator's line in a direct Ping, the agent and
+//     its writer alone; in a group Ping, and from a participant anywhere,
+//     only a mention counts).
+//  6. Whether the project is served, its class, the reply destination, the
 //     conversation key and the content snapshot come from the policy and the
 //     summary, never from the pointer.
 //
@@ -66,6 +73,17 @@
 // Admission only labels; what a participant may get the agent to do is the
 // policy of whoever reads the request.
 //
+// A Ping is no project, so project trust has no members there: an operator
+// gives the agent work in any Ping, in every trust mode, in words an operator
+// wrote. The one participant a Ping has is a person connect.json lets into
+// that Ping alone (Policy.Pings, --allow-in-ping): their mention there is a
+// participant's request, in every trust mode, and anywhere else they are
+// whoever the rest of the policy makes them. The entry counts only once the
+// Ping read says its bucket is a Ping, never in a served project, and never
+// for an agent, which Validate refuses. A Ping needs no serving; its
+// conversation is the Ping (PingConversationKey), answered in its one
+// Campfire.
+//
 // # Invariants
 //
 // Every rule below is held by a test that fails without it.
@@ -79,7 +97,8 @@
 //     write (a completion). Allowlisting an agent is an operator error that
 //     Validate cannot detect, and setup refuses. The one exception is an
 //     agent named in agent_ids: its own mention, admitted as a participant's
-//     request and never an operator's, and held to the agent caps. With no
+//     request and never an operator's, held to the agent caps, and never in
+//     a Ping, where no agent may be a participant. With no
 //     agent named, the feed's actor_types=person filter excludes agents at
 //     source, as before.
 //  2. An assignment is admitted only when the operator performed it (or a
