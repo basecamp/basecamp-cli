@@ -190,7 +190,7 @@ refusal above, the holding reply below) post as step 5 of `subagent.md` does.
 With `ack` on the line, the connector boosted `ack.content`: reword it to fit
 the request, emoji first (16 characters at most), never a fixed string.
 Otherwise, only when `acknowledge` is true, boost: this loop with
-`boost create '<recording.url>' --ids-only` (id: `$out`'s digits-only line). A reply due within moments (a quick question)
+`boost create '<recording.url>' --ids-only`, printing `$out`'s digits line. A reply due within moments (a quick question)
 is the acknowledgement: leave the boost, or give none, and say so in the
 handoff; not for card work, where the boost shows the request landed.
 
