@@ -76,12 +76,37 @@ func TestEachTrustedRequestIsHandedOffOnce(t *testing.T) {
 	}
 }
 
-func TestARequestMadeTooLongBeforeTheRunIsNotHandedOff(t *testing.T) {
+func admitAt(t *testing.T, ledger *Ledger, id int64, at time.Time) {
+	t.Helper()
+	ledger.now = func() time.Time { return at }
+	admitOn(t, ledger, id, "recording:1")
+}
+
+func TestARequestThisRunAdmittedIsHandedOffIfMadeWithinTheCatchUp(t *testing.T) {
+	for _, before := range []time.Duration{2 * time.Minute, time.Hour, handoffCatchUp} {
+		t.Run(before.String(), func(t *testing.T) {
+			ledger := newTestLedger(t)
+			var out bytes.Buffer
+			opts := handoffOptions(ledger, &out)
+			opts.Started = testEvent(1).CreatedAt.Add(before)
+			admitAt(t, ledger, 1, opts.Started.Add(time.Second))
+
+			require.NoError(t, handOffReady(context.Background(), opts))
+
+			lines := handedOffLines(t, &out)
+			require.Len(t, lines, 1)
+			assert.Equal(t, int64(1), lines[0].EventID)
+			assert.Equal(t, ReasonHandedOff, getRecord(t, ledger, 1).Reason)
+		})
+	}
+}
+
+func TestARequestThisRunAdmittedIsClosedIfMadeBeforeTheCatchUp(t *testing.T) {
 	ledger := newTestLedger(t)
-	admitOn(t, ledger, 1, "recording:1")
 	var out bytes.Buffer
 	opts := handoffOptions(ledger, &out)
-	opts.Started = testEvent(1).CreatedAt.Add(HandoffGrace + time.Second)
+	opts.Started = testEvent(1).CreatedAt.Add(handoffCatchUp + time.Second)
+	admitAt(t, ledger, 1, opts.Started.Add(time.Second))
 
 	require.NoError(t, handOffReady(context.Background(), opts))
 
@@ -91,23 +116,33 @@ func TestARequestMadeTooLongBeforeTheRunIsNotHandedOff(t *testing.T) {
 	assert.Equal(t, ReasonBeforeThisRun, r.Reason)
 }
 
-func TestARequestMadeWhileNoConnectorRanIsHandedOffWhenOneStarts(t *testing.T) {
-	for _, down := range []time.Duration{2 * time.Minute, time.Hour, HandoffGrace} {
-		t.Run(down.String(), func(t *testing.T) {
+func TestARequestAnEarlierRunAdmittedIsHandedOffOnlyWithinTheGrace(t *testing.T) {
+	for _, tc := range []struct {
+		before time.Duration
+		handed bool
+	}{
+		{HandoffGrace, true},
+		{HandoffGrace + time.Second, false},
+		{time.Hour, false},
+	} {
+		t.Run(tc.before.String(), func(t *testing.T) {
 			ledger := newTestLedger(t)
-			admitOn(t, ledger, 1, "recording:1")
 			var out bytes.Buffer
 			opts := handoffOptions(ledger, &out)
-			opts.Started = testEvent(1).CreatedAt.Add(down)
+			opts.Started = testEvent(1).CreatedAt.Add(tc.before)
+			admitAt(t, ledger, 1, testEvent(1).CreatedAt.Add(time.Second))
 
 			require.NoError(t, handOffReady(context.Background(), opts))
 
-			lines := handedOffLines(t, &out)
-			require.Len(t, lines, 1)
-			assert.Equal(t, int64(1), lines[0].EventID)
 			r := getRecord(t, ledger, 1)
+			if tc.handed {
+				require.Len(t, handedOffLines(t, &out), 1)
+				assert.Equal(t, ReasonHandedOff, r.Reason)
+				return
+			}
+			assert.Empty(t, out.String())
 			assert.Equal(t, StateDiscarded, r.State)
-			assert.Equal(t, ReasonHandedOff, r.Reason)
+			assert.Equal(t, ReasonBeforeThisRun, r.Reason)
 		})
 	}
 }

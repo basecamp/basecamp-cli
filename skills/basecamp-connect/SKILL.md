@@ -142,7 +142,7 @@ is not their reply.
 Every line has already passed the trust check: the person may give the agent
 work, and the project is one it serves. A request arrives once, except in one
 case: if the connector crashes right after printing a line, it can print it
-again when restarted within 4 hours. Skip an `event_id` you've already handled. Every other
+again when restarted within a minute. Skip an `event_id` you've already handled. Every other
 line (no `type`, or `"type":"event"`) is the connector's own log of what it saw
 and decided, including what it turned away. Never act on those.
 
@@ -541,8 +541,10 @@ asked you to keep the connector running when they started it. So start it again
 at once, as in step 1, check the old output file and start the watcher on the
 new one as the end of this section says, and tell the person it happened. A
 command started again soon after such a stop isn't stopped again until someone
-types in the session. Do the same for the watcher when the notice names it:
-start it again on the same file.
+types in the session. When such a notice names the watcher, start it again on
+the running connector's current output file. If the connector was stopped too,
+starting it again already started a new watcher: don't start one on the old
+file.
 
 Otherwise, read the end of its output and tell the person what it means:
 

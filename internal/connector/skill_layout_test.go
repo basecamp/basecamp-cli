@@ -110,22 +110,21 @@ func TestTheConnectSkillStartsTheConnectorAgainAfterAMemoryStop(t *testing.T) {
 
 	assert.Contains(t, section, "stopped because the system is running low on memory")
 	assert.Contains(t, section, "So start it again at once, as in step 1")
-	assert.Contains(t, section, "Do the same for the watcher when the notice names it: start it again on the same file.")
+	assert.Contains(t, section, "When such a notice names the watcher, start it again on the running connector's current output file.")
+	assert.Contains(t, section, "don't start one on the old file.")
 }
 
 func TestTheConnectSkillStatesHowFarBackARestartCatchesUp(t *testing.T) {
 	skill := flatText(readConnectSkill(t, "SKILL.md"))
-	window := fmt.Sprintf("%d hours", int(HandoffGrace/time.Hour))
+	window := fmt.Sprintf("%d hours", int(handoffCatchUp/time.Hour))
 
 	for _, phrase := range []string{
-		"restarted within " + window + ".",
 		"it hands off the requests made while it was stopped, up to " + window + " before it started.",
 		"hands off requests made up to " + window + " before it started",
 		"dropped if that's more than " + window + " later.",
 	} {
 		assert.Contains(t, skill, phrase)
 	}
-	assert.NotContains(t, skill, "within a minute")
 	assert.NotContains(t, skill, "not picked up later")
 	assert.NotContains(t, skill, "starts from the present")
 }

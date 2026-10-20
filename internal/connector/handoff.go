@@ -76,16 +76,17 @@ const (
 	// ReasonUnreadable: the request's record had no content to hand off, so
 	// nothing was written.
 	ReasonUnreadable = "unreadable"
-	// ReasonBeforeThisRun: the request was made more than HandoffGrace
-	// before this run started, too long ago to answer now.
+	// ReasonBeforeThisRun: the request was made too long before this run
+	// started to answer now.
 	ReasonBeforeThisRun = "before_this_run"
 )
 
 // HandoffGrace is how long before the run started a request may have been
-// made and still be handed off: a mention made while no connector was
-// running, because the last one was stopped or the computer slept, is still
-// answered when one starts again.
-const HandoffGrace = 4 * time.Hour
+// made and still be handed off: a mention written a moment before the
+// session started is still meant for it.
+const HandoffGrace = time.Minute
+
+const handoffCatchUp = 4 * time.Hour
 
 // HandoffOptions configure RunHandoff.
 type HandoffOptions struct {
@@ -179,11 +180,18 @@ func handOffReady(ctx context.Context, opts HandoffOptions) error {
 	}
 }
 
-// handOff writes one record and closes it. A record made more than
-// HandoffGrace before the run started is closed without being written.
+func handoffCutoff(opts HandoffOptions, record Record) time.Time {
+	if decided := record.Decision.DecidedAt; decided != nil && !decided.Before(opts.Started) {
+		return opts.Started.Add(-handoffCatchUp)
+	}
+	return opts.Started.Add(-HandoffGrace)
+}
+
+// handOff writes one record and closes it. A record made too long before the
+// run started is closed without being written.
 func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
-	if record.CreatedAt.Before(opts.Started.Add(-HandoffGrace)) {
-		opts.log().Info("connector: a request made too long before this run started is not handed off", "event_id", record.ID, "created_at", record.CreatedAt, "catch_up", HandoffGrace)
+	if cutoff := handoffCutoff(opts, record); record.CreatedAt.Before(cutoff) {
+		opts.log().Info("connector: a request made too long before this run started is not handed off", "event_id", record.ID, "created_at", record.CreatedAt, "cutoff", cutoff)
 		return opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonBeforeThisRun)
 	}
 	line, err := handoffLine(record, opts.AgentID)
