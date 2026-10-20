@@ -301,6 +301,7 @@ func checkLegacyPathValue(raw json.RawMessage) error {
 // are whoever the rest of the policy makes them.
 type PingTrust struct {
 	Participants []int64 `json:"participants,omitempty"`
+	Agents       []int64 `json:"agents,omitempty"`
 }
 
 // Policy is what admission reads from connect.json, plus the two facts that
@@ -448,12 +449,39 @@ func (p Policy) validatePings() error {
 				return fmt.Errorf("admission: ping %d: participant %d is not a Person id", ping, id)
 			case id == p.AgentID:
 				return fmt.Errorf("admission: ping %d: the agent's own Person id is a participant", ping)
-			case p.Trust.allowsAgent(id):
-				return fmt.Errorf("admission: ping %d: participant %d is an allowed agent; agents reach the agent only by --allow-agent", ping, id)
+			case p.allowsAgentAnywhere(id):
+				return fmt.Errorf("admission: ping %d: participant %d is an allowed agent; agents reach the agent only by --allow-agent or --allow-agent-in-ping", ping, id)
+			}
+		}
+		for _, id := range entry.Agents {
+			switch {
+			case id <= 0:
+				return fmt.Errorf("admission: ping %d: agent %d is not a Person id", ping, id)
+			case id == p.AgentID:
+				return fmt.Errorf("admission: ping %d: the agent's own Person id is in agents; an agent never wakes itself", ping)
+			case id == p.Trust.OperatorID || slices.Contains(p.Trust.AllowlistIDs, id):
+				return fmt.Errorf("admission: ping %d: person %d is both a trusted person and an allowed agent", ping, id)
 			}
 		}
 	}
 	return nil
+}
+
+func (p Policy) pingAgent(ping, agent int64) bool {
+	return agent > 0 && slices.Contains(p.Pings[ping].Agents, agent)
+}
+
+func (p Policy) allowsAgentAnywhere(id int64) bool {
+	return slices.Contains(p.AllowedAgents(), id)
+}
+
+func (p Policy) AllowedAgents() []int64 {
+	ids := slices.Clone(p.Trust.AgentIDs)
+	for _, entry := range p.Pings {
+		ids = append(ids, entry.Agents...)
+	}
+	slices.Sort(ids)
+	return slices.Compact(ids)
 }
 
 // pingParticipant reports whether connect.json lets person reach the agent in

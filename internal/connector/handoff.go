@@ -43,8 +43,9 @@ type HandoffLine struct {
 	// no project to read an AGENTS.md or a repo from, and ReplyTo is the
 	// Ping's Campfire. It says where the request was made, not who made it or
 	// with what authority: an operator's line reaches the agent there, and so
-	// does the mention of a person connect.json lets into that one Ping
-	// (--allow-in-ping), who is a participant. Role says which.
+	// does the mention of a person or another agent connect.json lets into
+	// that one Ping (--allow-in-ping, --allow-agent-in-ping), who is a
+	// participant. Role says which.
 	Ping        bool             `json:"ping"`
 	ReplyTo     InstructionReply `json:"reply_to"`
 	RequesterID int64            `json:"requester_id"`

@@ -40,6 +40,10 @@ type Changes struct {
 	// like the allowed agents.
 	AllowInPing    []PingPerson
 	DisallowInPing []PingPerson
+	// AllowAgentInPing lets agents wake this one by mention in one Ping
+	// alone; DisallowAgentInPing takes them out. Kept across runs.
+	AllowAgentInPing    []PingPerson
+	DisallowAgentInPing []PingPerson
 
 	// Serve are the project (bucket) ids to serve. A project already served
 	// keeps its class and watch_completions.
@@ -251,30 +255,44 @@ func applyAgents(t *admission.Trust, ch Changes) error {
 // entry, and none at all is nil, so the key stays out of the file.
 func applyPings(pings map[int64]admission.PingTrust, ch Changes) (map[int64]admission.PingTrust, error) {
 	people := map[int64][]int64{}
+	agents := map[int64][]int64{}
 	for id, entry := range pings {
 		people[id] = slices.Clone(entry.Participants)
+		agents[id] = slices.Clone(entry.Agents)
 	}
-	for _, pp := range ch.AllowInPing {
-		switch {
-		case pp.Ping <= 0 || pp.Person <= 0:
-			return nil, fmt.Errorf("--allow-in-ping %d:%d: expected <ping-id>:<person-id>", pp.Ping, pp.Person)
-		case slices.Contains(ch.DisallowInPing, pp):
-			return nil, fmt.Errorf("person %d is both let into Ping %d and taken out in one run", pp.Person, pp.Ping)
+	for _, list := range []struct {
+		flag, what      string
+		allow, disallow []PingPerson
+		ids             map[int64][]int64
+	}{
+		{"--allow-in-ping", "person", ch.AllowInPing, ch.DisallowInPing, people},
+		{"--allow-agent-in-ping", "agent", ch.AllowAgentInPing, ch.DisallowAgentInPing, agents},
+	} {
+		for _, pp := range list.allow {
+			switch {
+			case pp.Ping <= 0 || pp.Person <= 0:
+				return nil, fmt.Errorf("%s %d:%d: expected <ping-id>:<%s-id>", list.flag, pp.Ping, pp.Person, list.what)
+			case slices.Contains(list.disallow, pp):
+				return nil, fmt.Errorf("%s %d is both let into Ping %d and taken out in one run", list.what, pp.Person, pp.Ping)
+			}
+			list.ids[pp.Ping] = append(list.ids[pp.Ping], pp.Person)
 		}
-		people[pp.Ping] = append(people[pp.Ping], pp.Person)
-	}
-	for _, pp := range ch.DisallowInPing {
-		people[pp.Ping] = slices.DeleteFunc(people[pp.Ping], func(id int64) bool { return id == pp.Person })
+		for _, pp := range list.disallow {
+			list.ids[pp.Ping] = slices.DeleteFunc(list.ids[pp.Ping], func(id int64) bool { return id == pp.Person })
+		}
 	}
 	var out map[int64]admission.PingTrust
-	for id, ids := range people {
-		if len(ids) == 0 {
-			continue
+	for _, ids := range []map[int64][]int64{people, agents} {
+		for id := range ids {
+			entry := admission.PingTrust{Participants: sortedIDs(people[id]), Agents: sortedIDs(agents[id])}
+			if len(entry.Participants) == 0 && len(entry.Agents) == 0 {
+				continue
+			}
+			if out == nil {
+				out = map[int64]admission.PingTrust{}
+			}
+			out[id] = entry
 		}
-		if out == nil {
-			out = map[int64]admission.PingTrust{}
-		}
-		out[id] = admission.PingTrust{Participants: sortedIDs(ids)}
 	}
 	return out, nil
 }

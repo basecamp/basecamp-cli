@@ -79,8 +79,10 @@
 // that Ping alone (Policy.Pings, --allow-in-ping): their mention there is a
 // participant's request, in every trust mode, and anywhere else they are
 // whoever the rest of the policy makes them. The entry counts only once the
-// Ping read says its bucket is a Ping, never in a served project, and never
-// for an agent, which Validate refuses. A Ping needs no serving; its
+// Ping read says its bucket is a Ping, and never in a served project. An
+// agent is never a participant, which Validate refuses; the entry's agents
+// (--allow-agent-in-ping) are heard there by mention, in words each wrote
+// itself, as a participant's request held to the agent caps. A Ping needs no serving; its
 // conversation is the Ping (PingConversationKey), answered in its one
 // Campfire.
 //
@@ -96,9 +98,10 @@
 //     put in the allowlist, performing an event whose content it did not
 //     write (a completion). Allowlisting an agent is an operator error that
 //     Validate cannot detect, and setup refuses. The one exception is an
-//     agent named in agent_ids: its own mention, admitted as a participant's
-//     request and never an operator's, held to the agent caps, and never in
-//     a Ping, where no agent may be a participant. With no
+//     agent named in agent_ids, or in one Ping's agents: its own mention,
+//     admitted as a participant's request and never an operator's, held to
+//     the agent caps. agent_ids reaches no Ping; a Ping's agents reach that
+//     Ping alone. With no
 //     agent named, the feed's actor_types=person filter excludes agents at
 //     source, as before.
 //  2. An assignment is admitted only when the operator performed it (or a
