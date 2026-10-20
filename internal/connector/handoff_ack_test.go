@@ -22,6 +22,8 @@ type fakeBooster struct {
 	out    *bytes.Buffer
 	err    error
 	boosts []fakeBoost
+	// during runs while a boost is in flight.
+	during func()
 }
 
 type fakeBoost struct {
@@ -33,6 +35,9 @@ type fakeBoost struct {
 
 func (b *fakeBooster) Boost(_ context.Context, recordingID int64, content string) (int64, error) {
 	b.boosts = append(b.boosts, fakeBoost{RecordingID: recordingID, Content: content, Written: b.out.String()})
+	if b.during != nil {
+		b.during()
+	}
 	if b.err != nil {
 		return 0, b.err
 	}
@@ -182,4 +187,51 @@ func TestTheAckOnTheLineIsItsBoostIDAndContent(t *testing.T) {
 	var line map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(out.String())), &line))
 	assert.JSONEq(t, `{"boost_id":9001,"content":"👀"}`, string(line["ack"]))
+}
+
+// A hold that lands while the boost is in flight keeps the request from
+// being handed off, and the connector running; the boost stays recorded for
+// a later redispatch rather than being given again.
+func TestAHoldDuringTheAcknowledgementStopsTheHandoff(t *testing.T) {
+	ledger := newTestLedger(t)
+	admitOn(t, ledger, 1, "recording:1")
+	var out bytes.Buffer
+	opts, booster := ackOptions(ledger, &out)
+	booster.during = func() {
+		_, err := ledger.SetHold(context.Background(), "operator", HoldByOperator)
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, handOffReady(context.Background(), opts))
+
+	assert.Len(t, booster.boosts, 1)
+	assert.Empty(t, strings.TrimSpace(out.String()), "nothing is handed off once held")
+	assert.Equal(t, StateHeld, getRecord(t, ledger, 1).State)
+	ack, ok, err := ledger.ack(context.Background(), 1)
+	require.NoError(t, err)
+	require.True(t, ok, "the boost given is recorded")
+	assert.Equal(t, int64(9001), ack.BoostID)
+}
+
+// A request handed off again after a crash carries the boost it got even when
+// the restart turns boosting off, so its reader does not boost a second time.
+func TestABoostAlreadyGivenSurvivesTurningAcknowledgementOff(t *testing.T) {
+	ledger := newTestLedger(t)
+	admitOn(t, ledger, 1, "recording:1")
+	var out bytes.Buffer
+	opts, booster := ackOptions(ledger, &out)
+
+	crashed := opts
+	crashed.Lines = ndjson.NewWriter(failingWriter{})
+	require.Error(t, handOffReady(context.Background(), crashed))
+	require.Len(t, booster.boosts, 1)
+
+	opts.AckContent = ""
+	require.NoError(t, handOffReady(context.Background(), opts))
+
+	assert.Len(t, booster.boosts, 1, "no second boost")
+	lines := handedOffLines(t, &out)
+	require.Len(t, lines, 1)
+	assert.Equal(t, &HandoffAck{BoostID: 9001, Content: "👀"}, lines[0].Ack)
+	assert.False(t, lines[0].Acknowledge, "nothing is owed")
 }

@@ -258,6 +258,16 @@ func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 	if line.Ack, err = acknowledge(ctx, opts, record); err != nil {
 		return err
 	}
+	// A hold can land while the boost is in flight. A record it moved is not
+	// handed off; its ack stays recorded for a later redispatch to reuse.
+	current, ok, err := opts.Ledger.Get(ctx, record.ID)
+	if err != nil {
+		return err
+	}
+	if !ok || current.State != record.State {
+		opts.log().Info("connector: a request that changed state while it was acknowledged is not handed off", "event_id", record.ID, "state", current.State)
+		return nil
+	}
 	// A reader that predates ack boosts whenever acknowledge says so, which
 	// would put a second boost beside the connector's.
 	line.Acknowledge = line.Acknowledge && line.Ack == nil
@@ -276,23 +286,32 @@ func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 // a request that failed may still have landed, and a second would post the
 // boost twice. Only the ledger failing is an error.
 func acknowledge(ctx context.Context, opts HandoffOptions, record Record) (*HandoffAck, error) {
-	if !record.Decision.Acknowledge || opts.AckContent == "" || opts.Booster == nil {
+	if !record.Decision.Acknowledge {
 		return nil, nil
 	}
+	// A boost already given is the acknowledgement even if boosting has since
+	// been turned off: without it on the line, the reader would boost again.
 	if ack, ok, err := opts.Ledger.ack(ctx, record.ID); err != nil || ok {
 		return &ack, err
 	}
-	// A shutdown does not cut a boost off midway: one cut off may have
-	// landed unrecorded, and the next run would boost again.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), AckTimeout)
+	if opts.AckContent == "" || opts.Booster == nil {
+		return nil, nil
+	}
+	// A shutdown does not cut a boost off midway, nor its recording: one cut
+	// off may have landed unrecorded, and the next run would boost again. The
+	// recording has a deadline of its own, so a boost that used most of its
+	// budget still gets written.
+	boostCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), AckTimeout)
 	defer cancel()
-	id, err := opts.Booster.Boost(ctx, record.RecordingID, opts.AckContent)
+	id, err := opts.Booster.Boost(boostCtx, record.RecordingID, opts.AckContent)
 	if err != nil {
 		opts.log().Warn("connector: the acknowledgement boost failed; the request is handed off without it", "event_id", record.ID, "error", err)
 		return nil, nil
 	}
 	ack := HandoffAck{BoostID: id, Content: richtext.SanitizeTerminal(opts.AckContent)}
-	if err := opts.Ledger.recordAck(ctx, record.ID, ack); err != nil {
+	recordCtx, cancelRecord := context.WithTimeout(context.WithoutCancel(ctx), AckTimeout)
+	defer cancelRecord()
+	if err := opts.Ledger.recordAck(recordCtx, record.ID, ack); err != nil {
 		return nil, err
 	}
 	return &ack, nil
