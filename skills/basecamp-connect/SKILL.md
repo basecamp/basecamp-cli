@@ -533,7 +533,7 @@ it, and `--trust operator` clears it; setup refuses `--trust operator` with
 
 **Acknowledgement.** By default the connector boosts each request that asks
 for something with 👀, as the agent, before printing it, and this session then
-rewords that boost; the subagent clears it once its reply lands, so it never
+rewords that boost; the subagent clears it as it posts its reply, so it never
 stays behind as the request's last word in the Boost report.
 `--ack-boost '<content>'` changes the boost (16 characters
 at most), and `--no-ack-boost` turns it off, leaving acknowledging to this

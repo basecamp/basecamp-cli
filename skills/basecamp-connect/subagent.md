@@ -151,16 +151,31 @@ basecamp pings post <bucket_id> - --profile '<profile>' < reply.md
   unsure it landed: read the thread or room to check instead. Basecamp
   doesn't let agents delete what they post, so a duplicate stays until a
   person removes it.
-- **Clear the boost in the same command as the reply**, after `&&`:
-  `<the reply command above> && basecamp boost delete <boost_id> --profile
-  '<profile>'`. It goes the moment the reply lands, with no turn between them,
-  and `&&` skips it when the reply fails, leaving the boost to show the
-  request was taken. A boost left behind shows in the Boost report as the
-  request's final state. A failed delete gets no retry; say so in your report.
-  When the reply is an ask (*Ask the operator* below), the declaration still
-  comes first, so chain all three: `url=$(<the reply command> --jq
-  '.data.app_url') && basecamp connect ask "$url" -P '<profile>' && basecamp
-  boost delete <boost_id> --profile '<profile>'`.
+- **Clear the boost just before the reply, in the same command**, so nothing
+  moves once the reply lands: removing the boost reflows the request, and
+  done after the reply it jolts the thread while the reply is being read. A
+  boost left behind shows in the Boost report as the request's final state.
+  If the reply then fails, boost the request again so it still reads as taken:
+
+  ```bash
+  basecamp boost delete <boost_id> --profile '<profile>'
+  <the reply command above> \
+    || basecamp boost create '<recording.url>' '⚠️ Reply failed' --profile '<profile>'
+  ```
+
+  Run it as one command, with no turn between the delete and the reply. A
+  failed delete gets no retry and doesn't stop the reply; say so in your
+  report. When the reply is an ask (*Ask the operator* below), nothing may
+  come between the post and its declaration, so the delete still goes first:
+
+  ```bash
+  basecamp boost delete <boost_id> --profile '<profile>'
+  if url=$(<the reply command above> --jq '.data.app_url'); then
+    basecamp connect ask "$url" -P '<profile>'
+  else
+    basecamp boost create '<recording.url>' '⚠️ Reply failed' --profile '<profile>'
+  fi
+  ```
 - **Lead with the answer.** The first line says what happened. Detail goes
   under it.
 - **Success**: the results, where the request was written.
