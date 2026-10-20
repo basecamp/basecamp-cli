@@ -106,6 +106,11 @@ func TestMarkdownToHTMLWithEmbedsLeavesEverythingButAURLAloneOnALine(t *testing.
 		"in a table":            "| a |\n|---|\n| " + videoURL + " |",
 		"followed by text":      videoURL + " is the one",
 		"after a bc-attachment": `<bc-attachment sgid="x"></bc-attachment> ` + videoURL,
+		"inside inline HTML":    "Intro <span>\n" + videoURL + "\n</span>",
+		"under inline HTML":     "<b>Watch</b>\n" + videoURL,
+		"with an entity":        "https://www.youtube.com/watch?v=x&amp;t=1",
+		"with a number entity":  "https://www.youtube.com/watch?v=x&#38;t=1",
+		"autolinked entity":     "<https://www.youtube.com/watch?v=x&amp;t=1>",
 	} {
 		t.Run(name, func(t *testing.T) {
 			var seen []string
@@ -115,6 +120,13 @@ func TestMarkdownToHTMLWithEmbedsLeavesEverythingButAURLAloneOnALine(t *testing.
 			assert.Equal(t, MarkdownToHTML(md), got)
 		})
 	}
+}
+
+func TestMarkdownToHTMLWithEmbedsKeepsAQueryWithABareAmpersand(t *testing.T) {
+	var seen []string
+	MarkdownToHTMLWithEmbeds("https://www.youtube.com/watch?v=x&t=1", embedAll(&seen))
+
+	assert.Equal(t, []string{"https://www.youtube.com/watch?v=x&t=1"}, seen)
 }
 
 func TestMarkdownToHTMLWithEmbedsWithoutAnEmbedFuncIsMarkdownToHTML(t *testing.T) {

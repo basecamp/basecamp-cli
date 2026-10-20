@@ -60,7 +60,10 @@ func MarkdownToHTMLWithEmbeds(md string, embed EmbedFunc) string {
 	return strings.TrimSpace(buf.String())
 }
 
-var reStandaloneURL = regexp.MustCompile(`^https?://[^\s<>"'\\]+$`)
+var (
+	reStandaloneURL      = regexp.MustCompile(`^https?://[^\s<>"'\\]+$`)
+	reCharacterReference = regexp.MustCompile(`&(#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);`)
+)
 
 func embedStandaloneURLs(doc ast.Node, source []byte, embed EmbedFunc) {
 	paragraphs := topLevelParagraphs(doc)
@@ -90,11 +93,20 @@ func embedStandaloneURLs(doc ast.Node, source []byte, embed EmbedFunc) {
 func topLevelParagraphs(doc ast.Node) []*ast.Paragraph {
 	var paragraphs []*ast.Paragraph
 	for child := doc.FirstChild(); child != nil; child = child.NextSibling() {
-		if p, ok := child.(*ast.Paragraph); ok {
+		if p, ok := child.(*ast.Paragraph); ok && !holdsInlineHTML(p) {
 			paragraphs = append(paragraphs, p)
 		}
 	}
 	return paragraphs
+}
+
+func holdsInlineHTML(p *ast.Paragraph) bool {
+	for child := p.FirstChild(); child != nil; child = child.NextSibling() {
+		if _, ok := child.(*ast.RawHTML); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func paragraphLines(p *ast.Paragraph) [][]ast.Node {
@@ -124,11 +136,7 @@ func standaloneURL(line []ast.Node, source []byte) string {
 
 	if len(content) == 1 {
 		if link, ok := content[0].(*ast.AutoLink); ok && link.AutoLinkType == ast.AutoLinkURL {
-			url := string(link.URL(source))
-			if reStandaloneURL.MatchString(url) {
-				return url
-			}
-			return ""
+			return embeddableURL(string(link.URL(source)))
 		}
 	}
 
@@ -140,8 +148,11 @@ func standaloneURL(line []ast.Node, source []byte) string {
 		}
 		raw = append(raw, t.Segment.Value(source)...)
 	}
-	url := string(bytes.TrimSpace(raw))
-	if reStandaloneURL.MatchString(url) {
+	return embeddableURL(string(bytes.TrimSpace(raw)))
+}
+
+func embeddableURL(url string) string {
+	if reStandaloneURL.MatchString(url) && !reCharacterReference.MatchString(url) {
 		return url
 	}
 	return ""

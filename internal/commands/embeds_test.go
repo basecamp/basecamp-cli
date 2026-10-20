@@ -32,6 +32,7 @@ type embedReply struct {
 
 type embedTransport struct {
 	mu      sync.Mutex
+	hang    bool
 	creates map[string]embedReply
 	gets    map[string][]embedReply
 	calls   []string
@@ -58,6 +59,12 @@ func (t *embedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	switch {
+	case req.Method == http.MethodPost && req.URL.Path == "/99999/embeds.json" && t.hang:
+		t.calls = append(t.calls, "create (hung)")
+		t.mu.Unlock()
+		<-req.Context().Done()
+		t.mu.Lock()
+		return nil, req.Context().Err()
 	case req.Method == http.MethodPost && req.URL.Path == "/99999/embeds.json":
 		var params struct {
 			URL string `json:"url"`
@@ -228,6 +235,58 @@ func TestCommentsCreateLeavesALinkWhenTheEmbedFails(t *testing.T) {
 			assert.Contains(t, stderr, tc.warning)
 		})
 	}
+}
+
+func TestCommentsCreateKeepsPollingTheOthersWhileOneProviderIsSlow(t *testing.T) {
+	fastEmbedPolling(t, 50*time.Millisecond)
+	transport := &embedTransport{
+		creates: map[string]embedReply{
+			embedChartURL: {http.StatusOK, embedJSON(embedChartURL, "pending", "sgid-chart")},
+			embedVideoURL: {http.StatusOK, embedJSON(embedVideoURL, "pending", "sgid-video")},
+		},
+		gets: map[string][]embedReply{
+			"sgid-chart": {{http.StatusOK, embedJSON(embedChartURL, "pending", "sgid-chart")}},
+			"sgid-video": {{http.StatusOK, embedJSON(embedVideoURL, "active", "sgid-video")}},
+		},
+	}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	stderr, err := runEmbedCommand(NewCommentsCmd(), app, "create", embedCardURL, embedChartURL+"\n"+embedVideoURL)
+	require.NoError(t, err)
+
+	assert.Equal(t, "<p>"+embedChartURL+"</p>\n"+`<bc-attachment sgid="sgid-video" content-type="embed/youtube-video"></bc-attachment>`, transport.postedContent(t))
+	assert.Contains(t, stderr, embedChartURL+" took too long to answer")
+}
+
+func TestCommentsCreateStopsAskingForEmbedsAfterAFailure(t *testing.T) {
+	transport := &embedTransport{
+		creates: map[string]embedReply{
+			embedChartURL: {http.StatusInternalServerError, `{"error":"boom"}`},
+			embedVideoURL: {http.StatusOK, embedJSON(embedVideoURL, "active", "sgid-video")},
+		},
+	}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	stderr, err := runEmbedCommand(NewCommentsCmd(), app, "create", embedCardURL, embedChartURL+"\n"+embedVideoURL)
+	require.NoError(t, err)
+
+	assert.Equal(t, "<p>"+embedChartURL+"\n"+embedVideoURL+"</p>", transport.postedContent(t))
+	assert.Equal(t, 1, strings.Count(strings.Join(transport.recordedCalls(), ","), "create "))
+	assert.Contains(t, stderr, "the URL after it stays a link too")
+}
+
+func TestCommentsCreatePostsWhenAnEmbedRequestHangs(t *testing.T) {
+	fastEmbedPolling(t, 50*time.Millisecond)
+	transport := &embedTransport{hang: true}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	started := time.Now()
+	stderr, err := runEmbedCommand(NewCommentsCmd(), app, "create", embedCardURL, embedVideoURL)
+	require.NoError(t, err)
+
+	assert.Less(t, time.Since(started), 5*time.Second)
+	assert.Equal(t, "<p>"+embedVideoURL+"</p>", transport.postedContent(t))
+	assert.Contains(t, stderr, "couldn't embed "+embedVideoURL)
 }
 
 func TestCommentsCreateWithFormatHTMLEmbedsNothing(t *testing.T) {

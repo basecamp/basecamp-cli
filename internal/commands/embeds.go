@@ -120,24 +120,33 @@ func createEmbed(ctx context.Context, client embedClient, url string) (*basecamp
 		}
 		return nil, convertSDKError(err)
 	}
-	return waitForEmbed(ctx, client, embed, time.Now().Add(embedWait))
+	return waitForEmbed(ctx, client, embed)
 }
 
-func waitForEmbed(ctx context.Context, client embedClient, embed *basecamp.Embed, deadline time.Time) (*basecamp.Embed, error) {
-	for embed.Status == "pending" && time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(embedPollInterval):
-		}
+func waitForEmbed(ctx context.Context, client embedClient, embed *basecamp.Embed) (*basecamp.Embed, error) {
+	ctx, cancel := context.WithTimeout(ctx, embedWait)
+	defer cancel()
 
+	for embed.Status == "pending" && pauseForEmbed(ctx) {
 		refreshed, err := client.Get(ctx, embed.SGID)
 		if err != nil {
+			if ctx.Err() != nil {
+				break
+			}
 			return nil, convertSDKError(err)
 		}
 		embed = refreshed
 	}
 	return embed, nil
+}
+
+func pauseForEmbed(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(embedPollInterval):
+		return true
+	}
 }
 
 func embedResult(embed *basecamp.Embed) EmbedResult {
@@ -170,32 +179,55 @@ func embedLinks(cmd *cobra.Command) richtext.EmbedFunc {
 }
 
 func resolveEmbeds(ctx context.Context, client embedClient, urls []string, warnings io.Writer) map[string]richtext.EmbedRef {
-	created := map[string]*basecamp.Embed{}
-	for _, url := range urls {
+	ctx, cancel := context.WithTimeout(ctx, embedWait)
+	defer cancel()
+
+	var created []string
+	embeds := map[string]*basecamp.Embed{}
+	for i, url := range urls {
 		embed, err := client.Create(ctx, url)
 		if err != nil {
-			if status := httpStatus(err); status != http.StatusUnprocessableEntity && status != http.StatusNotFound {
-				fmt.Fprintf(warnings, "Warning: couldn't embed %s, so it stays a link: %v\n", url, err)
+			if status := httpStatus(err); status == http.StatusUnprocessableEntity || status == http.StatusNotFound {
+				continue
 			}
-			continue
+			fmt.Fprintf(warnings, "Warning: couldn't embed %s, so it stays a link: %v\n", url, err)
+			switch rest := len(urls) - i - 1; rest {
+			case 0:
+			case 1:
+				fmt.Fprintln(warnings, "Warning: the URL after it stays a link too.")
+			default:
+				fmt.Fprintf(warnings, "Warning: the %d URLs after it stay links too.\n", rest)
+			}
+			break
 		}
-		created[url] = embed
+		created = append(created, url)
+		embeds[url] = embed
+	}
+
+	var pollErr error
+	for pollErr == nil && anyPendingEmbed(created, embeds) && pauseForEmbed(ctx) {
+		for _, url := range created {
+			if embeds[url].Status != "pending" {
+				continue
+			}
+			refreshed, err := client.Get(ctx, embeds[url].SGID)
+			if err != nil {
+				if ctx.Err() == nil {
+					pollErr = err
+				}
+				break
+			}
+			embeds[url] = refreshed
+		}
 	}
 
 	refs := map[string]richtext.EmbedRef{}
-	deadline := time.Now().Add(embedWait)
-	for _, url := range urls {
-		embed, ok := created[url]
-		if !ok {
-			continue
-		}
-
-		embed, err := waitForEmbed(ctx, client, embed, deadline)
-		switch {
-		case err != nil:
-			fmt.Fprintf(warnings, "Warning: couldn't embed %s, so it stays a link: %v\n", url, err)
+	for _, url := range created {
+		switch embed := embeds[url]; {
 		case embed.Status == "active":
 			refs[url] = richtext.EmbedRef{SGID: embed.SGID, ContentType: embed.ContentType}
+		case embed.Status == "pending" && pollErr != nil:
+			fmt.Fprintf(warnings, "Warning: couldn't embed %s, so it stays a link: %v\n", url, pollErr)
 		case embed.Status == "pending":
 			fmt.Fprintf(warnings, "Warning: %s took too long to answer, so it stays a link.\n", url)
 		default:
@@ -203,6 +235,15 @@ func resolveEmbeds(ctx context.Context, client embedClient, urls []string, warni
 		}
 	}
 	return refs
+}
+
+func anyPendingEmbed(urls []string, embeds map[string]*basecamp.Embed) bool {
+	for _, url := range urls {
+		if embeds[url].Status == "pending" {
+			return true
+		}
+	}
+	return false
 }
 
 func httpStatus(err error) int {
