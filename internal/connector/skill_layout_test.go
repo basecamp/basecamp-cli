@@ -1,10 +1,12 @@
 package connector
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -92,4 +94,38 @@ func TestTheSubagentReadsItsInstructionsFromTheirOwnFile(t *testing.T) {
 	for _, step := range []string{"**Shell quoting.**", "**1. Acknowledge", "**5. Reply at `reply_to`", "**6. Report back", "**A participant asks, an operator authorizes.**"} {
 		assert.Contains(t, subagent, step)
 	}
+}
+
+func flatText(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func TestTheConnectSkillStartsTheConnectorAgainAfterAMemoryStop(t *testing.T) {
+	skill := readConnectSkill(t, "SKILL.md")
+	start := strings.Index(skill, "## When the connector stops")
+	require.GreaterOrEqual(t, start, 0)
+	end := strings.Index(skill[start+1:], "\n## ")
+	require.GreaterOrEqual(t, end, 0)
+	section := flatText(skill[start : start+1+end])
+
+	assert.Contains(t, section, "stopped because the system is running low on memory")
+	assert.Contains(t, section, "So start it again at once, as in step 1")
+	assert.Contains(t, section, "Do the same for the watcher when the notice names it: start it again on the same file.")
+}
+
+func TestTheConnectSkillStatesHowFarBackARestartCatchesUp(t *testing.T) {
+	skill := flatText(readConnectSkill(t, "SKILL.md"))
+	window := fmt.Sprintf("%d hours", int(HandoffGrace/time.Hour))
+
+	for _, phrase := range []string{
+		"restarted within " + window + ".",
+		"it hands off the requests made while it was stopped, up to " + window + " before it started.",
+		"hands off requests made up to " + window + " before it started",
+		"dropped if that's more than " + window + " later.",
+	} {
+		assert.Contains(t, skill, phrase)
+	}
+	assert.NotContains(t, skill, "within a minute")
+	assert.NotContains(t, skill, "not picked up later")
+	assert.NotContains(t, skill, "starts from the present")
 }

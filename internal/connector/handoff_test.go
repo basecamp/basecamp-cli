@@ -76,14 +76,12 @@ func TestEachTrustedRequestIsHandedOffOnce(t *testing.T) {
 	}
 }
 
-// A request made before this run started is not run late: nobody was there
-// to take it.
-func TestARequestFromBeforeTheRunIsNotHandedOff(t *testing.T) {
+func TestARequestMadeTooLongBeforeTheRunIsNotHandedOff(t *testing.T) {
 	ledger := newTestLedger(t)
 	admitOn(t, ledger, 1, "recording:1")
 	var out bytes.Buffer
 	opts := handoffOptions(ledger, &out)
-	opts.Started = opts.Started.Add(time.Hour)
+	opts.Started = testEvent(1).CreatedAt.Add(HandoffGrace + time.Second)
 
 	require.NoError(t, handOffReady(context.Background(), opts))
 
@@ -91,6 +89,27 @@ func TestARequestFromBeforeTheRunIsNotHandedOff(t *testing.T) {
 	r := getRecord(t, ledger, 1)
 	assert.Equal(t, StateDiscarded, r.State)
 	assert.Equal(t, ReasonBeforeThisRun, r.Reason)
+}
+
+func TestARequestMadeWhileNoConnectorRanIsHandedOffWhenOneStarts(t *testing.T) {
+	for _, down := range []time.Duration{2 * time.Minute, time.Hour, HandoffGrace} {
+		t.Run(down.String(), func(t *testing.T) {
+			ledger := newTestLedger(t)
+			admitOn(t, ledger, 1, "recording:1")
+			var out bytes.Buffer
+			opts := handoffOptions(ledger, &out)
+			opts.Started = testEvent(1).CreatedAt.Add(down)
+
+			require.NoError(t, handOffReady(context.Background(), opts))
+
+			lines := handedOffLines(t, &out)
+			require.Len(t, lines, 1)
+			assert.Equal(t, int64(1), lines[0].EventID)
+			r := getRecord(t, ledger, 1)
+			assert.Equal(t, StateDiscarded, r.State)
+			assert.Equal(t, ReasonHandedOff, r.Reason)
+		})
+	}
 }
 
 // Only the projects the agent serves, narrowed to the run's --project.

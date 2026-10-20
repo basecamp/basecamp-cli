@@ -76,15 +76,16 @@ const (
 	// ReasonUnreadable: the request's record had no content to hand off, so
 	// nothing was written.
 	ReasonUnreadable = "unreadable"
-	// ReasonBeforeThisRun: the request was made before this run started.
-	// Nobody was there to take it, and it is not run late.
+	// ReasonBeforeThisRun: the request was made more than HandoffGrace
+	// before this run started, too long ago to answer now.
 	ReasonBeforeThisRun = "before_this_run"
 )
 
 // HandoffGrace is how long before the run started a request may have been
-// made and still be handed off: a mention written a moment before the
-// session started is still meant for it.
-const HandoffGrace = time.Minute
+// made and still be handed off: a mention made while no connector was
+// running, because the last one was stopped or the computer slept, is still
+// answered when one starts again.
+const HandoffGrace = 4 * time.Hour
 
 // HandoffOptions configure RunHandoff.
 type HandoffOptions struct {
@@ -178,11 +179,11 @@ func handOffReady(ctx context.Context, opts HandoffOptions) error {
 	}
 }
 
-// handOff writes one record and closes it. A record made before the run
-// started is closed without being written.
+// handOff writes one record and closes it. A record made more than
+// HandoffGrace before the run started is closed without being written.
 func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 	if record.CreatedAt.Before(opts.Started.Add(-HandoffGrace)) {
-		opts.log().Info("connector: a request from before this run started is not handed off", "event_id", record.ID, "created_at", record.CreatedAt)
+		opts.log().Info("connector: a request made too long before this run started is not handed off", "event_id", record.ID, "created_at", record.CreatedAt, "catch_up", HandoffGrace)
 		return opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonBeforeThisRun)
 	}
 	line, err := handoffLine(record, opts.AgentID)
