@@ -190,6 +190,23 @@ func TestCommentsCreateLeavesAURLBasecampCanNotEmbedAsALinkQuietly(t *testing.T)
 	assert.Empty(t, stderr)
 }
 
+func TestCommentsCreateStopsQuietlyWhereBasecampHasNoEmbeds(t *testing.T) {
+	transport := &embedTransport{
+		creates: map[string]embedReply{
+			embedChartURL: {http.StatusNotFound, `{"error":"not found"}`},
+			embedVideoURL: {http.StatusNotFound, `{"error":"not found"}`},
+		},
+	}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	stderr, err := runEmbedCommand(NewCommentsCmd(), app, "create", embedCardURL, embedChartURL+"\n"+embedVideoURL)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"create " + embedChartURL, "comment"}, transport.recordedCalls())
+	assert.Equal(t, "<p>"+embedChartURL+"\n"+embedVideoURL+"</p>", transport.postedContent(t))
+	assert.Empty(t, stderr)
+}
+
 func TestCommentsCreateLeavesALinkWhenTheEmbedFails(t *testing.T) {
 	for name, tc := range map[string]struct {
 		create  embedReply

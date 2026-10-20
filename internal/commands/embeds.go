@@ -186,11 +186,15 @@ func resolveEmbeds(ctx context.Context, client embedClient, urls []string, warni
 	var created []string
 	var failure error
 	embeds := map[string]*basecamp.Embed{}
+creating:
 	for i, url := range urls {
 		embed, err := client.Create(ctx, url)
 		if err != nil {
-			if status := httpStatus(err); status == http.StatusUnprocessableEntity || status == http.StatusNotFound {
+			switch httpStatus(err) {
+			case http.StatusUnprocessableEntity:
 				continue
+			case http.StatusNotFound:
+				break creating
 			}
 			failure = err
 			warnEmbed(warnings, "Warning: couldn't embed %s, so it stays a link: %v", url, err)
@@ -201,7 +205,7 @@ func resolveEmbeds(ctx context.Context, client embedClient, urls []string, warni
 			default:
 				warnEmbed(warnings, "Warning: the %d URLs after it stay links too.", rest)
 			}
-			break
+			break creating
 		}
 		created = append(created, url)
 		embeds[url] = embed
