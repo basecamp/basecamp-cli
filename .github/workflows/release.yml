@@ -610,3 +610,41 @@ jobs:
 
           # Always emit annotation so the failure is visible in the workflow summary
           echo "::error::Skills sync to basecamp/skills failed for ${REF_NAME}. See https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}"
+
+  # The 37signals marketplace (basecamp/plugins) installs the Claude Code and
+  # Codex plugin from the `stable` branch, so plugin users get the skills of the
+  # latest release instead of whatever is on main. `stable` moves only once the
+  # release has published, and only to the latest stable release, as the skills
+  # sync does. force=false makes GitHub refuse anything but a fast-forward, so
+  # `stable` can never move backwards or onto a commit off main's history.
+  promote-stable:
+    name: Promote stable branch
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    concurrency:
+      group: promote-stable
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Fast-forward stable to this release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          latest=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)
+          if [ "$TAG" != "$latest" ]; then
+            echo "::warning::Leaving stable alone for ${TAG}: the latest stable release is ${latest}."
+            exit 0
+          fi
+
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/stable" --silent; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/heads/stable" \
+              -f sha="${GITHUB_SHA}" -F force=false --silent
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref=refs/heads/stable -f sha="${GITHUB_SHA}" --silent
+          fi
+          echo "stable is now ${TAG} (${GITHUB_SHA})"
