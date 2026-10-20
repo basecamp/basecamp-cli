@@ -89,8 +89,8 @@ github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuP
 github.com/aymerick/douceur v0.2.0/go.mod h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=
 github.com/basecamp/actioncable-go v1.2.0 h1:t0MxlfMTcmaGXZ5ztgKRs7ZiY1MwXtBRwSSSAh1ofVg=
 github.com/basecamp/actioncable-go v1.2.0/go.mod h1:ezaV5z1GXQAsqyejqTs6wCFl2D8Wj+COLQkHc/kwoRs=
-github.com/basecamp/basecamp-sdk/go v0.26.0 h1:ENIK+0Q9WWRCzcJjz0RLLpvAMSfKoQOl8lHRumaEeOg=
-github.com/basecamp/basecamp-sdk/go v0.26.0/go.mod h1:PAp3gBnEPH7LtAyWXwgQ1tfmCAJiMkRHgRJAKT/Xefc=
+github.com/basecamp/basecamp-sdk/go v0.26.1-0.20261020150141-b0c6c2c9a84f h1:GV6HeQXyxZ119ZdvZ6mwNo6sVisyPM9G7WxGFvguWZc=
+github.com/basecamp/basecamp-sdk/go v0.26.1-0.20261020150141-b0c6c2c9a84f/go.mod h1:PAp3gBnEPH7LtAyWXwgQ1tfmCAJiMkRHgRJAKT/Xefc=
 github.com/basecamp/cli v0.2.2-0.20260828230226-767413fc712d h1:jAzDrCCzDpIwhbFT1xVVs0z2xpXoDEkomHfKB2bUUp8=
 github.com/basecamp/cli v0.2.2-0.20260828230226-767413fc712d/go.mod h1:iTBTaWvsPEFIcZfkxQHEfISyJ6sZ7036K6bNx0RY3EE=
 github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d h1:zEQVGq1x1nhKMZ2TudFAcSJ32CHT8richI1vQakIKz4=

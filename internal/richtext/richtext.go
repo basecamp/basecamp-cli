@@ -3,7 +3,6 @@
 package richtext
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"html"
@@ -350,6 +349,7 @@ func (r *trixRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
 	reg.Register(ast.KindFencedCodeBlock, r.renderFencedCodeBlock)
 	reg.Register(KindTrixBreak, r.renderTrixBreak)
 	reg.Register(KindEscapedAt, r.renderEscapedAt)
+	reg.Register(KindEmbedAttachment, r.renderEmbedAttachment)
 }
 
 func (r *trixRenderer) renderBlockquote(w util.BufWriter, _ []byte, _ ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -479,19 +479,7 @@ func (r *trixRenderer) renderEscapedAt(w util.BufWriter, _ []byte, _ ast.Node, e
 // is not converted, as CommonMark specifies; a blank line ends the block.
 // Callers that want HTML sent exactly as written skip this function.
 func MarkdownToHTML(md string) string {
-	if md == "" {
-		return ""
-	}
-
-	md = strings.ReplaceAll(md, "\r\n", "\n")
-	md = strings.ReplaceAll(md, "\r", "\n")
-
-	var buf bytes.Buffer
-	if err := mdConverter.Convert([]byte(md), &buf); err != nil {
-		return "<p>" + html.EscapeString(md) + "</p>"
-	}
-
-	return strings.TrimSpace(buf.String())
+	return MarkdownToHTMLWithEmbeds(md, nil)
 }
 
 // HasRichTextHTML reports whether MarkdownToHTML would keep any raw HTML from

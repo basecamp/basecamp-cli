@@ -182,6 +182,8 @@ ARG basecamp documents uploads create 00 <file>
 ARG basecamp documents vault create 00 <name>
 ARG basecamp documents vaults create 00 <name>
 ARG basecamp documents versions 00 <upload_id|url>
+ARG basecamp embeds create 00 <url>
+ARG basecamp embeds show 00 <sgid>
 ARG basecamp events 00 [id|url]
 ARG basecamp file archive 00 <id|url>
 ARG basecamp file doc create 00 <title>
@@ -788,6 +790,9 @@ CMD basecamp documents vaults list
 CMD basecamp documents versions
 CMD basecamp drafts
 CMD basecamp drafts list
+CMD basecamp embeds
+CMD basecamp embeds create
+CMD basecamp embeds show
 CMD basecamp events
 CMD basecamp events poll
 CMD basecamp events ticket
@@ -7532,6 +7537,69 @@ FLAG basecamp drafts list --stats type=bool
 FLAG basecamp drafts list --styled type=bool
 FLAG basecamp drafts list --todolist type=string
 FLAG basecamp drafts list --verbose type=count
+FLAG basecamp embeds --account type=string
+FLAG basecamp embeds --agent type=bool
+FLAG basecamp embeds --cache-dir type=string
+FLAG basecamp embeds --count type=bool
+FLAG basecamp embeds --help type=bool
+FLAG basecamp embeds --hints type=bool
+FLAG basecamp embeds --ids-only type=bool
+FLAG basecamp embeds --in type=string
+FLAG basecamp embeds --jq type=string
+FLAG basecamp embeds --json type=bool
+FLAG basecamp embeds --markdown type=bool
+FLAG basecamp embeds --md type=bool
+FLAG basecamp embeds --no-hints type=bool
+FLAG basecamp embeds --no-stats type=bool
+FLAG basecamp embeds --profile type=string
+FLAG basecamp embeds --project type=string
+FLAG basecamp embeds --quiet type=bool
+FLAG basecamp embeds --stats type=bool
+FLAG basecamp embeds --styled type=bool
+FLAG basecamp embeds --todolist type=string
+FLAG basecamp embeds --verbose type=count
+FLAG basecamp embeds create --account type=string
+FLAG basecamp embeds create --agent type=bool
+FLAG basecamp embeds create --cache-dir type=string
+FLAG basecamp embeds create --count type=bool
+FLAG basecamp embeds create --help type=bool
+FLAG basecamp embeds create --hints type=bool
+FLAG basecamp embeds create --ids-only type=bool
+FLAG basecamp embeds create --in type=string
+FLAG basecamp embeds create --jq type=string
+FLAG basecamp embeds create --json type=bool
+FLAG basecamp embeds create --markdown type=bool
+FLAG basecamp embeds create --md type=bool
+FLAG basecamp embeds create --no-hints type=bool
+FLAG basecamp embeds create --no-stats type=bool
+FLAG basecamp embeds create --profile type=string
+FLAG basecamp embeds create --project type=string
+FLAG basecamp embeds create --quiet type=bool
+FLAG basecamp embeds create --stats type=bool
+FLAG basecamp embeds create --styled type=bool
+FLAG basecamp embeds create --todolist type=string
+FLAG basecamp embeds create --verbose type=count
+FLAG basecamp embeds show --account type=string
+FLAG basecamp embeds show --agent type=bool
+FLAG basecamp embeds show --cache-dir type=string
+FLAG basecamp embeds show --count type=bool
+FLAG basecamp embeds show --help type=bool
+FLAG basecamp embeds show --hints type=bool
+FLAG basecamp embeds show --ids-only type=bool
+FLAG basecamp embeds show --in type=string
+FLAG basecamp embeds show --jq type=string
+FLAG basecamp embeds show --json type=bool
+FLAG basecamp embeds show --markdown type=bool
+FLAG basecamp embeds show --md type=bool
+FLAG basecamp embeds show --no-hints type=bool
+FLAG basecamp embeds show --no-stats type=bool
+FLAG basecamp embeds show --profile type=string
+FLAG basecamp embeds show --project type=string
+FLAG basecamp embeds show --quiet type=bool
+FLAG basecamp embeds show --stats type=bool
+FLAG basecamp embeds show --styled type=bool
+FLAG basecamp embeds show --todolist type=string
+FLAG basecamp embeds show --verbose type=count
 FLAG basecamp events --account type=string
 FLAG basecamp events --agent type=bool
 FLAG basecamp events --all type=bool
@@ -19520,6 +19588,9 @@ SUB basecamp documents vaults list
 SUB basecamp documents versions
 SUB basecamp drafts
 SUB basecamp drafts list
+SUB basecamp embeds
+SUB basecamp embeds create
+SUB basecamp embeds show
 SUB basecamp events
 SUB basecamp events poll
 SUB basecamp events ticket
