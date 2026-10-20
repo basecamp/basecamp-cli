@@ -275,6 +275,25 @@ func TestCommentsCreateStopsAskingForEmbedsAfterAFailure(t *testing.T) {
 	assert.Contains(t, stderr, "the URL after it stays a link too")
 }
 
+func TestCommentsCreateStopsPollingAfterAFailure(t *testing.T) {
+	fastEmbedPolling(t, time.Second)
+	transport := &embedTransport{
+		creates: map[string]embedReply{
+			embedChartURL: {http.StatusOK, embedJSON(embedChartURL, "pending", "sgid-chart")},
+			embedVideoURL: {http.StatusInternalServerError, `{"error":"boom"}`},
+		},
+		gets: map[string][]embedReply{"sgid-chart": {{http.StatusOK, embedJSON(embedChartURL, "active", "sgid-chart")}}},
+	}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	stderr, err := runEmbedCommand(NewCommentsCmd(), app, "create", embedCardURL, embedChartURL+"\n"+embedVideoURL)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"create " + embedChartURL, "create " + embedVideoURL, "comment"}, transport.recordedCalls())
+	assert.Equal(t, "<p>"+embedChartURL+"\n"+embedVideoURL+"</p>", transport.postedContent(t))
+	assert.Contains(t, stderr, "couldn't embed "+embedChartURL)
+}
+
 func TestCommentsCreatePostsWhenAnEmbedRequestHangs(t *testing.T) {
 	fastEmbedPolling(t, 50*time.Millisecond)
 	transport := &embedTransport{hang: true}

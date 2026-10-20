@@ -183,6 +183,7 @@ func resolveEmbeds(ctx context.Context, client embedClient, urls []string, warni
 	defer cancel()
 
 	var created []string
+	var failure error
 	embeds := map[string]*basecamp.Embed{}
 	for i, url := range urls {
 		embed, err := client.Create(ctx, url)
@@ -190,6 +191,7 @@ func resolveEmbeds(ctx context.Context, client embedClient, urls []string, warni
 			if status := httpStatus(err); status == http.StatusUnprocessableEntity || status == http.StatusNotFound {
 				continue
 			}
+			failure = err
 			fmt.Fprintf(warnings, "Warning: couldn't embed %s, so it stays a link: %v\n", url, err)
 			switch rest := len(urls) - i - 1; rest {
 			case 0:
@@ -204,8 +206,7 @@ func resolveEmbeds(ctx context.Context, client embedClient, urls []string, warni
 		embeds[url] = embed
 	}
 
-	var pollErr error
-	for pollErr == nil && anyPendingEmbed(created, embeds) && pauseForEmbed(ctx) {
+	for failure == nil && anyPendingEmbed(created, embeds) && pauseForEmbed(ctx) {
 		for _, url := range created {
 			if embeds[url].Status != "pending" {
 				continue
@@ -213,7 +214,7 @@ func resolveEmbeds(ctx context.Context, client embedClient, urls []string, warni
 			refreshed, err := client.Get(ctx, embeds[url].SGID)
 			if err != nil {
 				if ctx.Err() == nil {
-					pollErr = err
+					failure = err
 				}
 				break
 			}
@@ -226,8 +227,8 @@ func resolveEmbeds(ctx context.Context, client embedClient, urls []string, warni
 		switch embed := embeds[url]; {
 		case embed.Status == "active":
 			refs[url] = richtext.EmbedRef{SGID: embed.SGID, ContentType: embed.ContentType}
-		case embed.Status == "pending" && pollErr != nil:
-			fmt.Fprintf(warnings, "Warning: couldn't embed %s, so it stays a link: %v\n", url, pollErr)
+		case embed.Status == "pending" && failure != nil:
+			fmt.Fprintf(warnings, "Warning: couldn't embed %s, so it stays a link: %v\n", url, failure)
 		case embed.Status == "pending":
 			fmt.Fprintf(warnings, "Warning: %s took too long to answer, so it stays a link.\n", url)
 		default:

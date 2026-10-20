@@ -101,12 +101,15 @@ func topLevelParagraphs(doc ast.Node) []*ast.Paragraph {
 }
 
 func holdsInlineHTML(p *ast.Paragraph) bool {
-	for child := p.FirstChild(); child != nil; child = child.NextSibling() {
-		if _, ok := child.(*ast.RawHTML); ok {
-			return true
+	found := false
+	_ = ast.Walk(p, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if _, ok := n.(*ast.RawHTML); ok && entering {
+			found = true
+			return ast.WalkStop, nil
 		}
-	}
-	return false
+		return ast.WalkContinue, nil
+	})
+	return found
 }
 
 func paragraphLines(p *ast.Paragraph) [][]ast.Node {

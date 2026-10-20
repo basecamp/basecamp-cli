@@ -108,6 +108,7 @@ func TestMarkdownToHTMLWithEmbedsLeavesEverythingButAURLAloneOnALine(t *testing.
 		"after a bc-attachment": `<bc-attachment sgid="x"></bc-attachment> ` + videoURL,
 		"inside inline HTML":    "Intro <span>\n" + videoURL + "\n</span>",
 		"under inline HTML":     "<b>Watch</b>\n" + videoURL,
+		"under nested HTML":     "**<span>Intro</span>**\n" + videoURL,
 		"with an entity":        "https://www.youtube.com/watch?v=x&amp;t=1",
 		"with a number entity":  "https://www.youtube.com/watch?v=x&#38;t=1",
 		"autolinked entity":     "<https://www.youtube.com/watch?v=x&amp;t=1>",
