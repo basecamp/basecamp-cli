@@ -15,9 +15,9 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/tui/workspace/widget"
 )
 
-// Pings shows 1:1 chat threads across all accounts.
-// Discovery: list all chats per account, identify 1:1 rooms,
-// fetch the latest line from each.
+// Pings shows the caller's pings, direct and group, across all accounts.
+// Discovery: list each account's pings, then fetch the latest line of the
+// most recent ones.
 type Pings struct {
 	session *workspace.Session
 	pool    *data.Pool[[]data.PingRoomInfo]
@@ -184,7 +184,7 @@ func (v *Pings) syncRooms(rooms []workspace.PingRoomInfo) {
 			v.roomMeta[id] = r
 			items = append(items, widget.ListItem{
 				ID:          id,
-				Title:       r.PersonName,
+				Title:       r.Title,
 				Description: r.LastMessage,
 				Extra:       accountExtra(accounts, r.AccountID, r.LastAt),
 			})
@@ -205,7 +205,7 @@ func (v *Pings) openSelected() tea.Cmd {
 		return nil
 	}
 
-	// Navigate to chat view for this 1:1 room
+	// Navigate to the chat view for this ping
 	scope := v.session.Scope()
 	scope.AccountID = meta.AccountID
 	scope.ProjectID = meta.ProjectID

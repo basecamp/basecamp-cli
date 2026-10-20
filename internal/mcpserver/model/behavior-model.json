@@ -251,6 +251,17 @@
         ]
       }
     },
+    "CreatePing": {
+      "retry": {
+        "max": 2,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
     "CreateProject": {
       "retry": {
         "max": 3,
@@ -1543,6 +1554,18 @@
         ]
       }
     },
+    "GetPing": {
+      "readonly": true,
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
     "GetProgressReport": {
       "readonly": true,
       "pagination": {
@@ -2317,6 +2340,18 @@
         "style": "link",
         "maxPageSize": 50
       },
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListPings": {
+      "readonly": true,
       "retry": {
         "max": 3,
         "base_delay_ms": 1000,
@@ -3122,6 +3157,18 @@
         ]
       }
     },
+    "UpdateBoost": {
+      "idempotent": true,
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
     "UpdateCalendar": {
       "idempotent": true,
       "retry": {
@@ -3578,6 +3625,9 @@
     ],
     "PersonCompany": [
       "$.name"
+    ],
+    "Ping": [
+      "$.avatar_url"
     ],
     "TemplateLibraryConfirmationPerson": [
       "$.name",

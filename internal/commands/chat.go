@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -60,7 +61,10 @@ func newChatListCmd(project, chatID *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List chats",
-		Long:  "List chats in a project or account-wide with --all.",
+		Long: `List chats in a project or account-wide with --all.
+
+These are project chats. Pings, private conversations with people, are not
+chats of a project and are not listed here: use 'basecamp pings list'.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
@@ -88,6 +92,7 @@ func runChatList(cmd *cobra.Command, app *appctx.App, project, chatID string, al
 
 		return app.OK(chats,
 			output.WithSummary(summary),
+			output.WithNotice("These are project chats. Pings are not listed here; see: basecamp pings list"),
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "messages",
@@ -257,12 +262,55 @@ func runChatMessages(cmd *cobra.Command, app *appctx.App, chatID, project string
 		return output.ErrUsage("Invalid chat room ID")
 	}
 
+	return showChatMessages(cmd, app, chatIDInt, limit, chatRoomNav(chatID, resolvedProjectID))
+}
+
+// chatNav names the commands that continue from a Campfire, so the commands
+// that read and write one can send the reader on in their own vocabulary: a
+// project chat continues through `chat`, a Ping through `pings`.
+type chatNav struct {
+	messages func(limit int) string
+	post     func(text string) string
+	// unresolved words the notice for @mentions left as text; nil uses the
+	// project chat's.
+	unresolved func(names []string) string
+}
+
+func (n chatNav) unresolvedMentions(names []string) string {
+	if n.unresolved != nil {
+		return n.unresolved(names)
+	}
+	return unresolvedMentionWarning(names)
+}
+
+// chatRoomNav continues a project chat with `chat --room`, adding --in when a
+// project is known.
+func chatRoomNav(roomID, projectID string) chatNav {
+	in := ""
+	if projectID != "" {
+		in = " --in " + projectID
+	}
+	return chatNav{
+		messages: func(limit int) string {
+			if limit > 0 {
+				return fmt.Sprintf("basecamp chat messages --limit %d --room %s%s", limit, roomID, in)
+			}
+			return fmt.Sprintf("basecamp chat messages --room %s%s", roomID, in)
+		},
+		post: func(text string) string {
+			return fmt.Sprintf("basecamp chat post %q --room %s%s", text, roomID, in)
+		},
+	}
+}
+
+// showChatMessages prints the most recent lines of a Campfire, oldest first.
+func showChatMessages(cmd *cobra.Command, app *appctx.App, roomID int64, limit int, nav chatNav) error {
 	if limit < 0 {
 		return output.ErrUsage("--limit must not be negative")
 	}
 
 	// Get recent messages (lines) using SDK, newest first
-	result, err := app.Account().Campfires().ListLines(cmd.Context(), chatIDInt, &basecamp.CampfireLineListOptions{
+	result, err := app.Account().Campfires().ListLines(cmd.Context(), roomID, &basecamp.CampfireLineListOptions{
 		Sort:      "created_at",
 		Direction: "desc",
 		Limit:     limit,
@@ -284,12 +332,12 @@ func runChatMessages(cmd *cobra.Command, app *appctx.App, chatID, project string
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp chat post \"message\" --room %s --in %s", chatID, resolvedProjectID),
+				Cmd:         nav.post("message"),
 				Description: "Post message",
 			},
 			output.Breadcrumb{
 				Action:      "more",
-				Cmd:         fmt.Sprintf("basecamp chat messages --limit 50 --room %s --in %s", chatID, resolvedProjectID),
+				Cmd:         nav.messages(50),
 				Description: "Load more",
 			},
 		),
@@ -317,51 +365,21 @@ Use - as the message argument to read the message from stdin:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			// Validate user input first, before checking account. A
-			// positional and --content are the same input, so supplying both
-			// is rejected rather than one silently winning — with "-" in
-			// play, the losing source would discard piped content unread.
-			messageContent := content
-			argIndex, what := -1, "--content"
-			if len(args) > 0 {
-				if cmd.Flags().Changed("content") {
-					return output.ErrUsage("cannot combine a <message> argument with --content")
-				}
-				messageContent = args[0]
-				argIndex, what = 0, "<message>"
-			}
-
 			// An explicitly supplied --room must be numeric; when it is absent
 			// the room is resolved from the project, which needs the network.
-			// Check the supplied case here so a malformed room does not cost
-			// the caller a drained pipe. Same for the content mode, which chat
-			// update already checks before its own read.
-			if *chatID != "" {
-				if _, err := strconv.ParseInt(*chatID, 10, 64); err != nil {
-					return output.ErrUsage("Invalid chat room ID")
+			// Check the supplied case before the pipe is drained.
+			checkRoom := func() error {
+				if *chatID != "" {
+					if _, err := strconv.ParseInt(*chatID, 10, 64); err != nil {
+						return output.ErrUsage("Invalid chat room ID")
+					}
 				}
-			}
-			switch *contentType {
-			case "", "text/html", "text/plain":
-			default:
-				return output.ErrUsage(fmt.Sprintf("unsupported --content-type %q (expected text/html or text/plain)", *contentType))
+				return nil
 			}
 
-			// Attachment paths are readable or not regardless of the body, so
-			// check them before the pipe is drained.
-			if err := validateAttachPaths(attachFiles); err != nil {
+			messageContent, err := readPostInput(cmd, args, 0, content, *contentType, attachFiles, checkRoom)
+			if err != nil || (messageContent == "" && len(attachFiles) == 0) {
 				return err
-			}
-
-			var err error
-			messageContent, err = resolveContentValue(cmd, messageContent, argIndex, what)
-			if err != nil {
-				return err
-			}
-
-			// Show help when invoked with no message content
-			if strings.TrimSpace(messageContent) == "" {
-				return missingArg(cmd, "<message>")
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -379,6 +397,60 @@ Use - as the message argument to read the message from stdin:
 	allowDash(cmd, "arg:0", "flag:content")
 
 	return cmd
+}
+
+// readPostInput validates and reads the message for a chat post. msgArgs is
+// the command's positional message, at argIndex among its arguments. Everything
+// decidable from the arguments is checked before stdin is read, so a bad
+// invocation does not cost the caller a drained pipe; checkRoom is the
+// command's own check of an explicit room, run at the same point.
+//
+// A positional and --content are the same input, so supplying both is rejected
+// rather than one silently winning: with "-" in play, the losing source would
+// discard piped content unread.
+//
+// A missing message shows help in a terminal, which is not an error: the result
+// is then empty with a nil error, and the caller is done unless it has
+// attachments, which post without text.
+func readPostInput(cmd *cobra.Command, msgArgs []string, argIndex int, content, contentType string, attachFiles []string, checkRoom func() error) (string, error) {
+	messageContent := content
+	index, what := -1, "--content"
+	if len(msgArgs) > 0 {
+		if cmd.Flags().Changed("content") {
+			return "", output.ErrUsage("cannot combine a <message> argument with --content")
+		}
+		messageContent = msgArgs[0]
+		index, what = argIndex, "<message>"
+	}
+
+	if err := checkRoom(); err != nil {
+		return "", err
+	}
+	switch contentType {
+	case "", "text/html", "text/plain":
+	default:
+		return "", output.ErrUsage(fmt.Sprintf("unsupported --content-type %q (expected text/html or text/plain)", contentType))
+	}
+
+	// Attachment paths are readable or not regardless of the body, so
+	// check them before the pipe is drained.
+	if err := validateAttachPaths(attachFiles); err != nil {
+		return "", err
+	}
+
+	messageContent, err := resolveContentValue(cmd, messageContent, index, what)
+	if err != nil {
+		return "", err
+	}
+
+	// Show help when invoked with neither a message nor attachments
+	if strings.TrimSpace(messageContent) == "" {
+		if len(attachFiles) > 0 {
+			return "", nil
+		}
+		return "", missingArg(cmd, "<message>")
+	}
+	return messageContent, nil
 }
 
 func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, contentType string, attachFiles []string) error {
@@ -416,6 +488,17 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		return output.ErrUsage("Invalid chat room ID")
 	}
 
+	mentions := func(ctx context.Context, html string) (richtext.MentionResult, error) {
+		return resolveMentions(ctx, app.Names, mentionScope(app, resolvedProjectID, project, app.Flags.Project), html)
+	}
+	return postToChat(cmd, app, chatIDInt, content, contentType, attachFiles, mentions, chatRoomNav(chatID, resolvedProjectID))
+}
+
+// mentionResolver turns the mention syntax in HTML into mention attachments.
+type mentionResolver func(ctx context.Context, html string) (richtext.MentionResult, error)
+
+// postToChat posts text and attachments to a Campfire.
+func postToChat(cmd *cobra.Command, app *appctx.App, chatIDInt int64, content, contentType string, attachFiles []string, resolve mentionResolver, nav chatNav) error {
 	// Resolve @mentions — skip if user explicitly set a non-HTML content type.
 	// When contentType is unset, convert Markdown to HTML first so the mention
 	// resolver operates on HTML input.
@@ -425,7 +508,7 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		if contentType == "" {
 			mentionInput = richtext.MarkdownToHTML(content)
 		}
-		result, resolveErr := resolveMentions(cmd.Context(), app.Names, mentionScope(app, resolvedProjectID, project, app.Flags.Project), mentionInput)
+		result, resolveErr := resolve(cmd.Context(), mentionInput)
 		if resolveErr != nil {
 			return resolveErr
 		}
@@ -435,7 +518,7 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 				contentType = "text/html"
 			}
 		}
-		mentionNotice = unresolvedMentionWarning(result.Unresolved)
+		mentionNotice = nav.unresolvedMentions(result.Unresolved)
 	}
 
 	// Post message using SDK
@@ -493,34 +576,9 @@ func runChatPost(cmd *cobra.Command, app *appctx.App, chatID, project, content, 
 		summary = fmt.Sprintf("Posted %d attachment(s)", len(uploadIDs))
 	}
 
-	// Build breadcrumbs — include project context if resolved
-	var breadcrumbs []output.Breadcrumb
-	if resolvedProjectID != "" {
-		breadcrumbs = append(breadcrumbs,
-			output.Breadcrumb{
-				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat messages --room %s --in %s", chatID, resolvedProjectID),
-				Description: "View messages",
-			},
-			output.Breadcrumb{
-				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp chat post \"reply\" --room %s --in %s", chatID, resolvedProjectID),
-				Description: "Post another",
-			},
-		)
-	} else {
-		breadcrumbs = append(breadcrumbs,
-			output.Breadcrumb{
-				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat messages --room %s", chatID),
-				Description: "View messages",
-			},
-			output.Breadcrumb{
-				Action:      "post",
-				Cmd:         fmt.Sprintf("basecamp chat post \"reply\" --room %s", chatID),
-				Description: "Post another",
-			},
-		)
+	breadcrumbs := []output.Breadcrumb{
+		{Action: "messages", Cmd: nav.messages(0), Description: "View messages"},
+		{Action: "post", Cmd: nav.post("reply"), Description: "Post another"},
 	}
 
 	respOpts := []output.ResponseOption{
@@ -619,6 +677,11 @@ func runChatUpload(cmd *cobra.Command, app *appctx.App, chatID, project, filePat
 		return output.ErrUsage("Invalid chat room ID")
 	}
 
+	return uploadToChat(cmd, app, chatIDInt, filePath, chatRoomNav(chatID, resolvedProjectID))
+}
+
+// uploadToChat uploads a validated local file to a Campfire as a chat line.
+func uploadToChat(cmd *cobra.Command, app *appctx.App, chatIDInt int64, filePath string, nav chatNav) error {
 	contentType := richtext.DetectMIME(filePath)
 	filename := filepath.Base(filePath)
 
@@ -631,26 +694,6 @@ func runChatUpload(cmd *cobra.Command, app *appctx.App, chatID, project, filePat
 	line, err := app.Account().Campfires().CreateUpload(cmd.Context(), chatIDInt, filename, contentType, f)
 	if err != nil {
 		return convertSDKError(err)
-	}
-
-	// Build breadcrumbs
-	var breadcrumbs []output.Breadcrumb
-	if resolvedProjectID != "" {
-		breadcrumbs = append(breadcrumbs,
-			output.Breadcrumb{
-				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat messages --room %s --in %s", chatID, resolvedProjectID),
-				Description: "View messages",
-			},
-		)
-	} else {
-		breadcrumbs = append(breadcrumbs,
-			output.Breadcrumb{
-				Action:      "messages",
-				Cmd:         fmt.Sprintf("basecamp chat messages --room %s", chatID),
-				Description: "View messages",
-			},
-		)
 	}
 
 	// Build summary — prefer attachment filename from API response over local basename
@@ -667,7 +710,11 @@ func runChatUpload(cmd *cobra.Command, app *appctx.App, chatID, project, filePat
 		output.WithSummary(summary),
 		output.WithEntity("chat_line"),
 		output.WithDisplayData(chatLineDisplayData(line)),
-		output.WithBreadcrumbs(breadcrumbs...),
+		output.WithBreadcrumbs(output.Breadcrumb{
+			Action:      "messages",
+			Cmd:         nav.messages(0),
+			Description: "View messages",
+		}),
 	)
 }
 
@@ -691,14 +738,14 @@ You can pass either a line ID or a Basecamp line URL:
 			}
 
 			// Extract ID, project and room from URL if provided
-			lineID, urlProjectID, urlChatID, err := chatLineRef(app, args[0])
+			lineID, urlProjectID, urlChatID, urlIsPing, err := chatLineRef(cmd.Context(), app, args[0])
 			if err != nil {
 				return err
 			}
 
 			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
-			if projectID == "" && urlProjectID != "" {
+			if urlProjectID != "" && (projectID == "" || urlIsPing) {
 				projectID = urlProjectID
 			}
 			if projectID == "" {
@@ -963,6 +1010,14 @@ edit to rich text.`,
 				return output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", parsedURL.AccountID, app.Config.AccountID))
 			}
 
+			var ping *basecamp.Ping
+			if parsedURL != nil && parsedURL.PingID != "" {
+				var err error
+				if ping, urlChatID, err = pingURLCampfire(cmd.Context(), app, parsedURL.PingID); err != nil {
+					return err
+				}
+			}
+
 			// Resolve the chat (campfire) ID, and a project only when needed. The
 			// PUT needs just the chat + line IDs; a project is required only to
 			// discover the default room (no URL chat and no --room) and is
@@ -1033,12 +1088,20 @@ edit to rich text.`,
 				if ct == "" {
 					messageContent = richtext.MarkdownToHTML(messageContent)
 				}
-				result, resolveErr := resolveMentions(cmd.Context(), app.Names, mentionScope(app, urlProjectID, resolvedProjectID, *project, app.Flags.Project), messageContent)
+				resolve := func(ctx context.Context, html string) (richtext.MentionResult, error) {
+					return resolveMentions(ctx, app.Names, mentionScope(app, urlProjectID, resolvedProjectID, *project, app.Flags.Project), html)
+				}
+				notice := unresolvedMentionWarning
+				if ping != nil {
+					// A Ping is no project, and only its people can read the line.
+					resolve, notice = pingMentionResolver(ping), pingNav(ping.ID).unresolvedMentions
+				}
+				result, resolveErr := resolve(cmd.Context(), messageContent)
 				if resolveErr != nil {
 					return resolveErr
 				}
 				messageContent = result.HTML
-				mentionNotice = unresolvedMentionWarning(result.Unresolved)
+				mentionNotice = notice(result.Unresolved)
 			}
 
 			if err := app.Account().Campfires().UpdateLine(cmd.Context(), chatIDInt, lineIDInt, messageContent); err != nil {
@@ -1149,14 +1212,14 @@ You can pass either a line ID or a Basecamp line URL:
 			}
 
 			// Extract ID, project and room from URL if provided
-			lineID, urlProjectID, urlChatID, err := chatLineRef(app, args[0])
+			lineID, urlProjectID, urlChatID, urlIsPing, err := chatLineRef(cmd.Context(), app, args[0])
 			if err != nil {
 				return err
 			}
 
 			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
-			if projectID == "" && urlProjectID != "" {
+			if urlProjectID != "" && (projectID == "" || urlIsPing) {
 				projectID = urlProjectID
 			}
 			if projectID == "" {
@@ -1252,27 +1315,86 @@ You can pass either a line ID or a Basecamp line URL:
 // A URL is held to what chat update holds it to: a trusted Basecamp host, an
 // individual line (a room's /chats/{c}/lines parses with the room's ID where
 // the line's belongs, and would act on line {c}), and the configured account.
-func chatLineRef(app *appctx.App, arg string) (lineID, projectID, chatID string, err error) {
+//
+// A Ping line URL names the Ping, not a room: its Campfire is looked up here
+// and returned as the room, with isPing set so the caller keeps the Ping as the
+// bucket whatever --in says.
+func chatLineRef(ctx context.Context, app *appctx.App, arg string) (lineID, projectID, chatID string, isPing bool, err error) {
 	if !urlarg.IsURL(arg) {
 		lineID, projectID = extractWithProject(arg)
-		return lineID, projectID, "", nil
+		return lineID, projectID, "", false, nil
 	}
 	if !hostutil.IsTrustedBasecampHost(arg, app.Config.BaseURL) {
-		return "", "", "", output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
+		return "", "", "", false, output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
 	}
 	parsed := urlarg.Parse(arg)
+	if parsed != nil && parsed.PingID != "" && parsed.Type != "lines" {
+		return "", "", "", false, output.ErrUsageHint("a ping URL names a ping, not a message",
+			fmt.Sprintf("Show the ping with: basecamp pings show %s; a message URL ends in @<line>", parsed.PingID))
+	}
 	if parsed == nil || parsed.Type != "lines" || parsed.IsCollection {
-		return "", "", "", output.ErrUsage("expected a chat-line ID or URL of the form /chats/{c}/lines/{l} or /chats/{c}@{l}")
+		return "", "", "", false, output.ErrUsage("expected a chat-line ID or URL of the form /chats/{c}/lines/{l} or /chats/{c}@{l}")
 	}
 	if parsed.AccountID != "" && app.Config.AccountID != "" && parsed.AccountID != app.Config.AccountID {
-		return "", "", "", output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", parsed.AccountID, app.Config.AccountID))
+		return "", "", "", false, output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", parsed.AccountID, app.Config.AccountID))
 	}
-	return parsed.RecordingID, parsed.ProjectID, parsed.CampfireID, nil
+	if parsed.PingID != "" {
+		_, chatID, err = pingURLCampfire(ctx, app, parsed.PingID)
+		if err != nil {
+			return "", "", "", false, err
+		}
+		return parsed.RecordingID, parsed.ProjectID, chatID, true, nil
+	}
+	return parsed.RecordingID, parsed.ProjectID, parsed.CampfireID, false, nil
+}
+
+// pingURLCampfire finds the Ping a chat-line URL names, and its Campfire. The
+// URL carries the Ping and the line but not the Campfire, so the room the URL
+// names has to be asked of the account, as a /chats/{c}@{l} URL names its own.
+func pingURLCampfire(ctx context.Context, app *appctx.App, pingID string) (*basecamp.Ping, string, error) {
+	id, err := strconv.ParseInt(pingID, 10, 64)
+	if err != nil {
+		return nil, "", output.ErrUsage("Invalid ping ID")
+	}
+	ping, campfireID, err := resolvePingCampfire(ctx, app, pingTarget{id: id}, pingLookupOnly)
+	if err != nil {
+		return nil, "", err
+	}
+	return ping, strconv.FormatInt(campfireID, 10), nil
 }
 
 // getChatID retrieves the chat ID from a project's dock, handling multi-dock projects.
 func getChatID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
-	return getDockToolID(cmd.Context(), app, projectID, "chat", "", "chat room", "room")
+	id, err := getDockToolID(cmd.Context(), app, projectID, "chat", "", "chat room", "room")
+	if err != nil {
+		return pingCampfireID(cmd.Context(), app, projectID, err)
+	}
+	return id, nil
+}
+
+// pingCampfireID finds the Campfire of a Ping named where a project was
+// expected. A Ping is a bucket without a dock, so a project lookup that failed
+// as not found is retried as a Ping. The project's error stands when the Ping
+// is not found either; a Ping lookup that failed any other way (Pings turned
+// off, a rate limit, the network) is reported instead, since it left the answer
+// unknown.
+func pingCampfireID(ctx context.Context, app *appctx.App, bucketID string, lookupErr error) (string, error) {
+	var e *output.Error
+	if !errors.As(lookupErr, &e) || e.Code != output.CodeNotFound {
+		return "", lookupErr
+	}
+	id, err := strconv.ParseInt(bucketID, 10, 64)
+	if err != nil {
+		return "", lookupErr
+	}
+	_, campfireID, err := resolvePingCampfire(ctx, app, pingTarget{id: id}, pingLookupOnly)
+	if err != nil {
+		if errors.As(err, &e) && e.Code == output.CodeNotFound {
+			return "", lookupErr
+		}
+		return "", err
+	}
+	return strconv.FormatInt(campfireID, 10), nil
 }
 
 // chatLineDisplayContent produces human-readable content for a campfire line,

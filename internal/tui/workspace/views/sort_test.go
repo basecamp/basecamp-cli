@@ -31,16 +31,16 @@ func TestPingRoomSortByTimestamp(t *testing.T) {
 	// Verify that sorting uses numeric timestamps, not formatted strings.
 	// "Dec 31 11:59pm" > "Jan 1 12:00am" lexicographically but Dec 31 is earlier.
 	rooms := []workspace.PingRoomInfo{
-		{ChatID: 1, PersonName: "Alice", LastAt: "Dec 31 11:59pm", LastAtTS: 1704067140},
-		{ChatID: 2, PersonName: "Bob", LastAt: "Jan 1 12:00am", LastAtTS: 1704067200},
-		{ChatID: 3, PersonName: "Carol", LastAt: "Jan 2 9:00am", LastAtTS: 1704186000},
+		{ChatID: 1, Title: "Alice", LastAt: "Dec 31 11:59pm", LastAtTS: 1704067140},
+		{ChatID: 2, Title: "Bob", LastAt: "Jan 1 12:00am", LastAtTS: 1704067200},
+		{ChatID: 3, Title: "Carol", LastAt: "Jan 2 9:00am", LastAtTS: 1704186000},
 	}
 
 	sort.Slice(rooms, func(i, j int) bool {
 		return rooms[i].LastAtTS > rooms[j].LastAtTS
 	})
 
-	assert.Equal(t, "Carol", rooms[0].PersonName, "Jan 2 should be most recent")
-	assert.Equal(t, "Bob", rooms[1].PersonName, "Jan 1 should be second")
-	assert.Equal(t, "Alice", rooms[2].PersonName, "Dec 31 should be oldest")
+	assert.Equal(t, "Carol", rooms[0].Title, "Jan 2 should be most recent")
+	assert.Equal(t, "Bob", rooms[1].Title, "Jan 1 should be second")
+	assert.Equal(t, "Alice", rooms[2].Title, "Dec 31 should be oldest")
 }

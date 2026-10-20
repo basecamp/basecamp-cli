@@ -165,11 +165,11 @@ func NoDocsFiles() Message {
 	}
 }
 
-// NoPings returns the empty state for no ping threads.
+// NoPings returns the empty state for no pings.
 func NoPings() Message {
 	return Message{
-		Title: "No ping threads",
-		Body:  "No active ping conversations.",
+		Title: "No pings",
+		Body:  "A ping appears here once it has a message. Start one with: basecamp pings start <person>",
 	}
 }
 

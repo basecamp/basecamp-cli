@@ -13,6 +13,15 @@ import (
 // and normalizes it to chats/{chatID}/lines/{lineID} before routing.
 var chatAtRe = regexp.MustCompile(`(/chats/\d+)@(\d+)`)
 
+// pingAtRe matches the Basecamp web URL form circles/{pingID}@{lineID}, a chat
+// line in a Ping. A Ping is its own bucket, so the form is parsed as a line
+// whose bucket is the Ping; the Campfire is not in the URL.
+var pingAtRe = regexp.MustCompile(`/circles/(\d+)@(\d+)`)
+
+// pingSidebarRe matches the sidebar form my/sidebar/circles/{pingID}, which
+// Basecamp links to for the same Ping, and drops the my/sidebar prefix.
+var pingSidebarRe = regexp.MustCompile(`/my/sidebar(/circles/\d+)`)
+
 // Parsed represents components extracted from a Basecamp URL.
 type Parsed struct {
 	AccountID      string
@@ -20,6 +29,7 @@ type Parsed struct {
 	Type           string // e.g., "todos", "messages", "cards"
 	RecordingID    string
 	CampfireID     string // parent campfire ID for chat-line URLs (chats/{campfireId}/lines/{lineId})
+	PingID         string // the Ping (a Circle bucket) named by circles/{pingId} and circles/{pingId}@{lineId} URLs
 	CommentID      string
 	IsCollection   bool   // URL points to a list of items, not an individual resource
 	OccurrenceDate string // date from schedule_entries/{id}/occurrences/{date} URLs
@@ -31,8 +41,20 @@ var router = basecamp.DefaultRouter()
 // IsURL checks if the input looks like a Basecamp URL.
 // Returns true if the URL can be matched (either as an API route or structurally).
 func IsURL(input string) bool {
-	normalized := chatAtRe.ReplaceAllString(input, "${1}/lines/${2}")
+	normalized, _ := normalize(input)
 	return router.Match(normalized) != nil
+}
+
+// normalize rewrites the web @-forms into routable URLs. Chat lines become the
+// slash form; a Ping line loses its @line, which the second result returns.
+func normalize(input string) (normalized, pingLineID string) {
+	normalized = chatAtRe.ReplaceAllString(input, "${1}/lines/${2}")
+	normalized = pingSidebarRe.ReplaceAllString(normalized, "${1}")
+	if m := pingAtRe.FindStringSubmatch(normalized); m != nil {
+		pingLineID = m[2]
+		normalized = pingAtRe.ReplaceAllString(normalized, "/circles/${1}")
+	}
+	return normalized, pingLineID
 }
 
 // Parse extracts IDs from a Basecamp URL.
@@ -43,16 +65,34 @@ func IsURL(input string) bool {
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/{type}/{id}#__recording_{comment}
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/card_tables/cards/{id}
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/chats/{id}@{lineId}
+//   - https://3.basecamp.com/{account}/circles/{ping}
+//   - https://3.basecamp.com/{account}/circles/{ping}@{lineId}
+//   - https://3.basecamp.com/{account}/my/sidebar/circles/{ping}, with or without @{lineId}
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/schedule_entries/{id}/occurrences/{date}
 //   - https://3.basecamp.com/{account}/projects/{project}
 func Parse(input string) *Parsed {
-	// Normalize the Basecamp web @-form for chat lines (chats/789@111)
-	// into the slash form (chats/789/lines/111) before routing.
-	normalized := chatAtRe.ReplaceAllString(input, "${1}/lines/${2}")
+	// Normalize the Basecamp web @-forms (chats/789@111, circles/456@111)
+	// into routable URLs before routing.
+	normalized, pingLineID := normalize(input)
 
 	m := router.Match(normalized)
 	if m == nil {
 		return nil
+	}
+
+	if pingLineID != "" {
+		pingID := m.Params["pingId"]
+		if pingID == "" {
+			return nil
+		}
+		return &Parsed{
+			AccountID:   m.AccountID,
+			ProjectID:   pingID,
+			Type:        "lines",
+			RecordingID: pingLineID,
+			PingID:      pingID,
+			CommentID:   m.CommentID,
+		}
 	}
 
 	pathType := m.PathType
@@ -102,6 +142,7 @@ func Parse(input string) *Parsed {
 		Type:           pathType,
 		RecordingID:    resourceID,
 		CampfireID:     campfireID,
+		PingID:         m.Params["pingId"],
 		CommentID:      m.CommentID,
 		IsCollection:   isCollection,
 		OccurrenceDate: occurrenceDate,

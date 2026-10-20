@@ -650,9 +650,19 @@ func applySubscribeFlags(ctx context.Context, resolver *names.Resolver, subscrib
 // left as plain text; their names are returned in the Unresolved slice.
 // Deterministic syntaxes (mention:SGID, person:ID) still hard-fail on error.
 func resolveMentions(ctx context.Context, resolver *names.Resolver, scope names.ProjectScope, html string) (richtext.MentionResult, error) {
+	return resolveMentionsWith(html,
+		func(name string) (*names.Person, error) { return resolver.ResolveMentionByName(ctx, name, scope) },
+		func(id int64) (*names.Person, error) { return resolver.ResolveMentionByID(ctx, id) },
+	)
+}
+
+// resolveMentionsWith is resolveMentions over caller-supplied lookups, for a
+// command whose mentions draw on a fixed set of people rather than the
+// pingable set.
+func resolveMentionsWith(html string, byName func(name string) (*names.Person, error), byID func(id int64) (*names.Person, error)) (richtext.MentionResult, error) {
 	return richtext.ResolveMentions(html,
 		func(name string) (string, string, error) {
-			person, err := resolver.ResolveMentionByName(ctx, name, scope)
+			person, err := byName(name)
 			// A project that cannot be resolved is the command's error, not a
 			// missed mention: never downgrade it to plain text.
 			var scopeErr *names.ScopeError
@@ -681,7 +691,7 @@ func resolveMentions(ctx context.Context, resolver *names.Resolver, scope names.
 			if err != nil {
 				return "", "", output.ErrUsage(fmt.Sprintf("invalid person ID %q — must be numeric", id))
 			}
-			person, err := resolver.ResolveMentionByID(ctx, personID)
+			person, err := byID(personID)
 			if err != nil {
 				return "", "", err
 			}

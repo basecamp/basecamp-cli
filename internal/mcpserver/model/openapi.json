@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Basecamp",
-    "version": "2026-09-15",
+    "version": "2026-10-19",
     "description": "Basecamp API",
     "contact": {
       "name": "Basecamp",
@@ -448,6 +448,112 @@
             503
           ]
         }
+      },
+      "put": {
+        "description": "Replace the content of a boost. Only the boost's creator may update it: an\nadmin updating someone else's boost gets 403 Forbidden, as does any caller\nwhen comments are closed on the boosted recording. A boost on a deleted\nrecording, or in another account, answers 404. A missing or invalid\n`content` answers a bodiless 422. There is no bucket-scoped route.",
+        "operationId": "UpdateBoost",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBoostRequestContent"
+              }
+            }
+          },
+          "required": true
+        },
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "boostId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "UpdateBoost 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateBoostResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "BareValidationError 422 response"
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Boosts"
+        ],
+        "x-basecamp-idempotent": {
+          "natural": true
+        },
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
       }
     },
     "/{accountId}/buckets/{bucketId}/card_tables/columns/{columnId}/color.json": {
@@ -812,7 +918,7 @@
     },
     "/{accountId}/buckets/{bucketId}/card_tables/wormholes/{wormholeId}": {
       "delete": {
-        "description": "Delete a wormhole",
+        "description": "Permanently delete a card table's wormhole, the shortcut that sends cards to another card table.\n\nIt does not go to the trash and cannot be restored.",
         "operationId": "DeleteWormhole",
         "parameters": [
           {
@@ -917,7 +1023,7 @@
         }
       },
       "put": {
-        "description": "Update a wormhole's destination column",
+        "description": "Point a card table's wormhole, its shortcut for sending cards to another card table, at a different destination column",
         "operationId": "UpdateWormhole",
         "requestBody": {
           "content": {
@@ -1031,7 +1137,7 @@
     },
     "/{accountId}/buckets/{bucketId}/card_tables/{cardTableId}/wormholes.json": {
       "post": {
-        "description": "Create a wormhole linking this card table to a column on another card table.\n\nA wormhole is the only mechanism for moving a card to a different project: its\nid is a valid `column_id` for MoveCard, teleporting the card across projects.\n`destinationRecordingId` is the id of a column on another accessible card table.",
+        "description": "Add a wormhole to a card table: a standing shortcut that sends cards to a column on another card table, usually in another project.\n\nA wormhole is the only mechanism for moving a card to a different project: its\nid is a valid `column_id` for MoveCard, teleporting the card there. It is not\nneeded for a one-off move within a project; MoveCard goes to any column there\ndirectly. A card table holds at most four wormholes.\n`destinationRecordingId` is the id of a column on another accessible card table.",
         "operationId": "CreateWormhole",
         "requestBody": {
           "content": {
@@ -4105,7 +4211,7 @@
     },
     "/{accountId}/card_tables/cards/{cardId}/moves.json": {
       "post": {
-        "description": "Move a card to a different column",
+        "description": "Move a card to any column in its project, including on another card table there, or through a linked wormhole to another project (queued: the card gets a new id, and position, if sent, must still be positive but doesn't set placement).\n\n`column_id` may be any column in the card's project, including a column on\nanother card table in the same project; the card moves there directly, with\nno wormhole needed. To send the card to another project, pass the id of a\nlinked wormhole (`linked: true`) the card table already has, listed in\nGetCardTable's `wormholes`; an unlinked or unreachable one returns not found.\nA move through a wormhole is queued: the card arrives under a new id and its\nold id then returns not found. `position` does not control where it lands,\nbut if supplied it must still be a positive integer.",
         "operationId": "MoveCard",
         "requestBody": {
           "content": {
@@ -5555,7 +5661,7 @@
     },
     "/{accountId}/card_tables/{cardTableId}/moves.json": {
       "post": {
-        "description": "Move a column within a card table",
+        "description": "Move a column to a slot within its card table. target_id is the card table's own id (the same as cardTableId), not a column; position is the 1-based slot among the columns, not counting Triage, Not Now or Done.",
         "operationId": "MoveCardColumn",
         "requestBody": {
           "content": {
@@ -7344,6 +7450,183 @@
         }
       }
     },
+    "/{accountId}/circles.json": {
+      "get": {
+        "description": "Get Pings: the caller's active Pings that have a line in them, most\nrecently updated first, in one unpaginated response. Archived Pings, and\nPings no one has posted in yet, are not listed; GetPing reads either by id.\n\nAnswers `403 Forbidden` (`{\"error\": \"Pings have been disabled\"}`) when the\ncaller cannot ping.",
+        "operationId": "ListPings",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ListPings 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPingsResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Pings"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      },
+      "post": {
+        "description": "Create a Ping with people, or return the one that already holds exactly\nthem.\n\nThe caller is always included. Without `new_group`, an existing active\nPing with exactly these people (the oldest, if several) is returned rather\nthan a second one created; with `new_group: true` and more than one other\nperson, a new group is created every time. Either way the answer is\n`201 Created` with the Ping.\n\nAnswers `403 Forbidden` (`{\"error\": \"Pings have been disabled\"}`) when the\ncaller cannot ping, and a bodiless `422` when nobody in the Ping would be a\nperson who can ping.",
+        "operationId": "CreatePing",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePingRequestContent"
+              }
+            }
+          },
+          "required": true
+        },
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "CreatePing 201 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatePingResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "BareValidationError 422 response"
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Pings"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 2,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
     "/{accountId}/circles/people.json": {
       "get": {
         "description": "List all account users who can be pinged\n\n**Pagination**: Uses Link header (RFC5988). Follow the `next` rel URL\nto fetch additional pages. X-Total-Count header provides total count.",
@@ -7421,6 +7704,110 @@
           "totalCountHeader": "X-Total-Count",
           "maxPageSize": 50
         },
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
+    "/{accountId}/circles/{pingId}": {
+      "get": {
+        "description": "Get a Ping by its id, which is its bucket's id.\n\nAnswers `403 Forbidden` (`{\"error\": \"Pings have been disabled\"}`) when the\ncaller cannot ping, and `404 Not Found` for a bucket that is not a Ping the\ncaller is in.",
+        "operationId": "GetPing",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "pingId",
+            "in": "path",
+            "description": "A Ping's id is the id of the bucket that holds it (the bucket type is\n\"Circle\", which is also the wire path), so the `bucket.id` a Ping's\nrecordings carry is the id GetPing takes.",
+            "schema": {
+              "type": "integer",
+              "description": "A Ping's id is the id of the bucket that holds it (the bucket type is\n\"Circle\", which is also the wire path), so the `bucket.id` a Ping's\nrecordings carry is the id GetPing takes.",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GetPing 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetPingResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Pings"
+        ],
         "x-basecamp-retry": {
           "maxAttempts": 3,
           "baseDelayMs": 1000,
@@ -10313,7 +10700,7 @@
         }
       },
       "post": {
-        "description": "Create a new lineup marker",
+        "description": "Create a new lineup marker. Returns the created marker.",
         "operationId": "CreateLineupMarker",
         "requestBody": {
           "content": {
@@ -10340,7 +10727,14 @@
         ],
         "responses": {
           "201": {
-            "description": "CreateLineupMarker 201 response"
+            "description": "CreateLineupMarker 201 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateLineupMarkerResponseContent"
+                }
+              }
+            }
           },
           "401": {
             "description": "UnauthorizedError 401 response",
@@ -10495,7 +10889,7 @@
         }
       },
       "put": {
-        "description": "Update an existing lineup marker",
+        "description": "Update an existing lineup marker. Returns the updated marker.",
         "operationId": "UpdateLineupMarker",
         "requestBody": {
           "content": {
@@ -10530,7 +10924,14 @@
         ],
         "responses": {
           "200": {
-            "description": "UpdateLineupMarker 200 response"
+            "description": "UpdateLineupMarker 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateLineupMarkerResponseContent"
+                }
+              }
+            }
           },
           "401": {
             "description": "UnauthorizedError 401 response",
@@ -12601,7 +13002,7 @@
     },
     "/{accountId}/my/readings.json": {
       "get": {
-        "description": "Get the current user's notification inbox (the \"Hey!\" menu).\nNotifications are grouped into unreads, reads, bubble-ups, and\nscheduled bubble-ups (`memories` remains as an always-empty\nplaceholder on BC5). Reads are paginated (50 per page). Unreads are\ncapped at 100. Bubble-ups are capped per `limit_bubble_ups`.",
+        "description": "Get the current user's notifications (the \"Hey!\" menu in Basecamp 4).\nNotifications are grouped into unreads, reads, bubble-ups, and\nscheduled bubble-ups (`memories` remains as an always-empty\nplaceholder on BC5). Reads are paginated (50 per page). Unreads are\ncapped at 100. Bubble-ups are capped per `limit_bubble_ups`.",
         "operationId": "GetMyNotifications",
         "parameters": [
           {
@@ -16461,7 +16862,7 @@
         }
       },
       "put": {
-        "description": "Update an existing question",
+        "description": "Update an existing question's title, schedule or both. A schedule replaces the whole schedule, so send every part of it: one without frequency or time_of_day is refused, and one without start_date re-anchors the recurrence on today. Pausing and resuming are PauseQuestion and ResumeQuestion.",
         "operationId": "UpdateQuestion",
         "requestBody": {
           "content": {
@@ -18676,7 +19077,7 @@
     },
     "/{accountId}/recordings/{recordingId}/events/{eventId}/boosts.json": {
       "get": {
-        "description": "List boosts on a specific event within a recording",
+        "description": "List boosts on a specific event within a recording. Only boostable events carry boosts: those whose action is completed, adopted, column_changed or moved_in (their JSON includes boosts_count and boosts_url). Any other event answers 403 Forbidden; an event on a recording the person cannot see answers 404.",
         "operationId": "ListEventBoosts",
         "parameters": [
           {
@@ -18790,7 +19191,7 @@
         }
       },
       "post": {
-        "description": "Create a boost on a specific event within a recording",
+        "description": "Create a boost on a specific event within a recording. Only boostable events accept one: those whose action is completed, adopted, column_changed or moved_in (their JSON includes boosts_count and boosts_url). Any other event answers 403 Forbidden, as does an event on a recording whose comments are closed; an event on a recording the person cannot see answers 404.",
         "operationId": "CreateEventBoost",
         "requestBody": {
           "content": {
@@ -30445,6 +30846,7 @@
             "items": {
               "$ref": "#/components/schemas/Wormhole"
             },
+            "description": "The card table's wormholes: shortcuts for sending cards to other card\ntables, usually in other projects. Only wormholes whose destination the\nrequester can reach are listed; the rest are omitted, not shown unlinked.\nNot needed to move a card within its project; MoveCard reaches any column\nthere directly.",
             "x-go-type-skip-optional-pointer": true
           }
         },
@@ -31523,6 +31925,9 @@
           "name"
         ]
       },
+      "CreateLineupMarkerResponseContent": {
+        "$ref": "#/components/schemas/LineupMarker"
+      },
       "CreateMessageRequestContent": {
         "type": "object",
         "properties": {
@@ -31600,6 +32005,29 @@
           "email_address",
           "name"
         ]
+      },
+      "CreatePingRequestContent": {
+        "type": "object",
+        "properties": {
+          "user_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Person ids of the people to ping. People the caller cannot reach are\ndropped."
+          },
+          "new_group": {
+            "type": "boolean",
+            "description": "Create a new group even when a Ping with exactly these people exists."
+          }
+        },
+        "required": [
+          "user_ids"
+        ]
+      },
+      "CreatePingResponseContent": {
+        "$ref": "#/components/schemas/Ping"
       },
       "CreateProjectFromTemplateRequestContent": {
         "type": "object",
@@ -32528,10 +32956,12 @@
           },
           "boosts_count": {
             "type": "integer",
+            "description": "Present only on boostable events (action completed, adopted,\ncolumn_changed or moved_in); the event boost operations refuse any\nother event with 403.",
             "format": "int32"
           },
           "boosts_url": {
-            "type": "string"
+            "type": "string",
+            "description": "Present only on boostable events; see boosts_count."
           }
         },
         "required": [
@@ -33857,6 +34287,9 @@
       "GetPersonResponseContent": {
         "$ref": "#/components/schemas/Person"
       },
+      "GetPingResponseContent": {
+        "$ref": "#/components/schemas/Ping"
+      },
       "GetProgressReportResponseContent": {
         "type": "array",
         "items": {
@@ -34498,6 +34931,12 @@
           "$ref": "#/components/schemas/Person"
         }
       },
+      "ListPingsResponseContent": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Ping"
+        }
+      },
       "ListProjectPeopleResponseContent": {
         "type": "array",
         "items": {
@@ -34844,14 +35283,17 @@
         "properties": {
           "source_id": {
             "type": "integer",
+            "description": "The column to move.",
             "format": "int64"
           },
           "target_id": {
             "type": "integer",
+            "description": "The card table the column moves within: the same id as `cardTableId`.\nBasecamp refuses any other destination, a column included, with 422.",
             "format": "int64"
           },
           "position": {
             "type": "integer",
+            "description": "1-based slot among the card table's columns, not counting Triage,\nNot Now or Done. 1 puts the column first; a slot past the last puts it\nlast. Default: 1.",
             "format": "int32"
           }
         },
@@ -34865,6 +35307,7 @@
         "properties": {
           "column_id": {
             "type": "integer",
+            "description": "Any column in the card's project, on this or another card table, or a\nwormhole id to send the card to another project.",
             "format": "int64"
           },
           "position": {
@@ -35490,6 +35933,110 @@
           "name"
         ]
       },
+      "Ping": {
+        "type": "object",
+        "description": "A Ping: a private conversation between people, held in its own bucket with\none Campfire. The Campfire's lines are read and written through the\nCampfires service; `room_url` and `links.lines` name it.",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "The Ping's id, which is also its bucket's id.",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string",
+            "x-go-type": "time.Time",
+            "x-go-type-import": {
+              "path": "time"
+            }
+          },
+          "updated_at": {
+            "type": "string",
+            "x-go-type": "time.Time",
+            "x-go-type-import": {
+              "path": "time"
+            }
+          },
+          "title": {
+            "type": "string",
+            "description": "The Ping's name for the caller: its given name when `named`, else the\nnames of the other people in it."
+          },
+          "named": {
+            "type": "boolean",
+            "description": "Whether someone gave the Ping a name."
+          },
+          "image_url": {
+            "type": "string",
+            "description": "The Ping's own image, present only when one was uploaded."
+          },
+          "avatar_url": {
+            "type": "string",
+            "format": "password",
+            "x-basecamp-sensitive": {
+              "category": "pii",
+              "redact": true
+            }
+          },
+          "url": {
+            "type": "string"
+          },
+          "app_url": {
+            "type": "string"
+          },
+          "bookmark_url": {
+            "type": "string"
+          },
+          "room_url": {
+            "type": "string",
+            "description": "The Ping's Campfire (`/buckets/{bucketId}/chats/{campfireId}.json`)."
+          },
+          "edit_title_url": {
+            "type": "string",
+            "description": "Present only when the Ping can be renamed: one with more than one other\nperson in it."
+          },
+          "links": {
+            "$ref": "#/components/schemas/PingLinks"
+          },
+          "people": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Person"
+            },
+            "description": "The people in the Ping other than the caller; the caller alone when\nnobody else is in it."
+          }
+        },
+        "required": [
+          "app_url",
+          "avatar_url",
+          "bookmark_url",
+          "created_at",
+          "id",
+          "links",
+          "named",
+          "people",
+          "room_url",
+          "title",
+          "updated_at",
+          "url"
+        ]
+      },
+      "PingLinks": {
+        "type": "object",
+        "description": "The Ping's Campfire endpoints, so a client need not derive them from\n`room_url`. The wire object also repeats `url`, `app_url`, `bookmark_url`\nand `edit_title_url` as `self`, `app`, `bookmark` and `edit_title`; those\nare read from the Ping's own fields.",
+        "properties": {
+          "lines": {
+            "type": "string",
+            "description": "The Campfire's lines (`/buckets/{bucketId}/chats/{campfireId}/lines.json`)."
+          },
+          "files": {
+            "type": "string",
+            "description": "The Campfire's uploads."
+          }
+        },
+        "required": [
+          "files",
+          "lines"
+        ]
+      },
       "PollEventsResponseContent": {
         "type": "object",
         "description": "The poll envelope. Every 200 carries `events` and `position`; `next` only\nwhile the walk continues.",
@@ -35665,6 +36212,10 @@
           },
           "clients_enabled": {
             "type": "boolean"
+          },
+          "timesheet_enabled": {
+            "type": "boolean",
+            "description": "True when the project's timesheet is turned on. The project timesheet\nreport (GET /projects/{projectId}/timesheet.json) answers 404 until it is."
           },
           "bookmark_url": {
             "type": "string"
@@ -38991,6 +39542,21 @@
       "UpdateAccountNameResponseContent": {
         "$ref": "#/components/schemas/Account"
       },
+      "UpdateBoostRequestContent": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "maxLength": 16
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "UpdateBoostResponseContent": {
+        "$ref": "#/components/schemas/Boost"
+      },
       "UpdateCalendarRequestContent": {
         "type": "object",
         "properties": {
@@ -39245,6 +39811,9 @@
           }
         }
       },
+      "UpdateLineupMarkerResponseContent": {
+        "$ref": "#/components/schemas/LineupMarker"
+      },
       "UpdateMessageRequestContent": {
         "type": "object",
         "properties": {
@@ -39454,13 +40023,11 @@
         "type": "object",
         "properties": {
           "title": {
-            "type": "string"
+            "type": "string",
+            "description": "The question text. An update carries a title, a schedule or both."
           },
           "schedule": {
             "$ref": "#/components/schemas/QuestionScheduleInput"
-          },
-          "paused": {
-            "type": "boolean"
           }
         }
       },
@@ -40171,7 +40738,7 @@
       },
       "Wormhole": {
         "type": "object",
-        "description": "A wormhole links this card table to a column on another card table, enabling\ncards to move across projects. It carries the full recording representation\nplus the destination-linkage fields. The wormhole's own `url`/`app_url`/`parent`\npoint at the *source* board; `destination_url` is the only field identifying\nthe destination column.",
+        "description": "A wormhole is a standing shortcut from this card table to a column on another\ncard table, usually in another project, and the only way to move a card across\nprojects. It carries the full recording representation\nplus the destination-linkage fields. The wormhole's own `url`/`app_url`/`parent`\npoint at the *source* board; `destination_url` is the only field identifying\nthe destination column.",
         "properties": {
           "id": {
             "type": "integer",

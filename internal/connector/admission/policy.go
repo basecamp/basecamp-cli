@@ -412,9 +412,9 @@ func (p Policy) validateAgents() error {
 			return fmt.Errorf("admission: person %d is both a trusted person and an allowed agent", id)
 		}
 	}
-	for name, cap := range map[string]int{"agent_thread_cap": p.Trust.AgentThreadCap, "agent_daily_cap": p.Trust.AgentDailyCap} {
-		if cap < 0 || cap > MaxAgentCap {
-			return fmt.Errorf("admission: %s %d is outside 1 to %d", name, cap, MaxAgentCap)
+	for name, limit := range map[string]int{"agent_thread_cap": p.Trust.AgentThreadCap, "agent_daily_cap": p.Trust.AgentDailyCap} {
+		if limit < 0 || limit > MaxAgentCap {
+			return fmt.Errorf("admission: %s %d is outside 1 to %d", name, limit, MaxAgentCap)
 		}
 	}
 	return nil

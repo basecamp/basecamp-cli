@@ -99,7 +99,7 @@ var curatedCategories = []struct {
 	{
 		heading:  "CORE COMMANDS",
 		category: "Core Commands",
-		include:  map[string]bool{"projects": true, "todos": true, "todolists": true, "messages": true, "chat": true, "cards": true, "files": true, "checkins": true, "schedule": true},
+		include:  map[string]bool{"projects": true, "todos": true, "todolists": true, "messages": true, "chat": true, "pings": true, "cards": true, "files": true, "checkins": true, "schedule": true},
 	},
 	{
 		heading:  "SHORTCUTS",

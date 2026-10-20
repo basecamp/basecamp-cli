@@ -618,6 +618,7 @@ func TestChatListAllBreadcrumbSyntax(t *testing.T) {
 	require.NoError(t, err)
 
 	var envelope struct {
+		Notice      string `json:"notice"`
 		Breadcrumbs []struct {
 			Cmd string `json:"cmd"`
 		} `json:"breadcrumbs"`
@@ -629,6 +630,8 @@ func TestChatListAllBreadcrumbSyntax(t *testing.T) {
 		assert.Contains(t, bc.Cmd, "--room")
 		assert.NotContains(t, bc.Cmd, "chat <id> messages")
 	}
+	assert.Contains(t, envelope.Notice, "Pings are not listed here")
+	assert.Contains(t, envelope.Notice, "basecamp pings list")
 }
 
 // mockChatMessagesTransport returns a fixed set of 5 campfire lines (newest-first)

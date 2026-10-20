@@ -221,11 +221,12 @@ type ProjectInfo struct {
 	Dock        []DockToolInfo
 }
 
-// PingRoomInfo represents a 1:1 chat thread.
+// PingRoomInfo represents a ping, direct or group. A ping is its own bucket, so
+// ProjectID is the ping's id and ChatID its Campfire.
 type PingRoomInfo struct {
 	ChatID      int64
 	ProjectID   int64
-	PersonName  string
+	Title       string
 	Account     string
 	AccountID   string
 	LastMessage string

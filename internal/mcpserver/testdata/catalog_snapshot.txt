@@ -60,8 +60,8 @@ ACTIONS (RO = read-only):
 - create_card: Create a card in a column
 - create_card_column: Create a column in a card table
 - create_card_step: Create a step on a card
-- create_wormhole: Create a wormhole linking this card table to a column on another card table
-- delete_wormhole: Delete a wormhole
+- create_wormhole: Add a wormhole to a card table: a standing shortcut that sends cards to a column on another card table, usually in another project
+- delete_wormhole: Permanently delete a card table's wormhole, the shortcut that sends cards to another card table
 - disable_card_column_on_hold: Disable on-hold section in a column
 - enable_card_column_on_hold: Enable on-hold section in a column
 - get_card (RO): Get a card by ID
@@ -69,8 +69,8 @@ ACTIONS (RO = read-only):
 - get_card_step (RO): Get a step by ID
 - get_card_table (RO): Get a card table by ID
 - list_cards (RO, paginated): List cards in a column
-- move_card: Move a card to a different column
-- move_card_column: Move a column within a card table
+- move_card: Move a card to any column in its project, including on another card table there, or through a linked wormhole to another project (queued: the card gets a new id, and position, if sent, must still be positive but doesn't set placement)
+- move_card_column: Move a column to a slot within its card table
 - reposition_card_step: Reposition a step within a card
 - set_card_column_color: Set the color of a column
 - set_card_step_completion: Set card step completion status (PUT with completion: "on" to complete, "" to uncomplete)
@@ -79,7 +79,7 @@ ACTIONS (RO = read-only):
 - update_card: Update an existing card
 - update_card_column: Update an existing column
 - update_card_step: Update an existing step
-- update_wormhole: Update a wormhole's destination column
+- update_wormhole: Point a card table's wormhole, its shortcut for sending cards to another card table, at a different destination column
 
 == basecamp_messages
 Message boards: messages, comments, message types (categories), and pinning.
@@ -106,7 +106,7 @@ ACTIONS (RO = read-only):
 - update_message_type: Update an existing message type
 
 == basecamp_campfires
-Campfire chat: rooms, chat lines, uploads, and chatbots.
+Campfire chat: rooms, chat lines, uploads, and chatbots, and Pings: private conversations, direct or group, each held in its own Campfire.
 
 Gateway tool: call with {"action": "...", "params": {...}}.
 Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
@@ -114,20 +114,23 @@ Call {"action": "describe", "params": {"action": "NAME"}} for an action's full p
 ACTIONS (RO = read-only):
 - create_campfire_line: Create a new line (message) in a campfire
 - create_chatbot: Create a new chatbot for a campfire
+- create_ping: Create a Ping with people, or return the one that already holds exactly them
 - delete_campfire_line: Delete a campfire line; allowed for the line's creator or an admin
 - delete_chatbot: Delete a chatbot
 - get_campfire (RO): Get a campfire by ID
 - get_campfire_line (RO): Get a campfire line by ID
 - get_chatbot (RO): Get a chatbot by ID
+- get_ping (RO): Get a Ping by its id, which is its bucket's id
 - list_campfire_lines (RO, paginated): List all lines (messages) in a campfire
 - list_campfire_uploads (RO, paginated): List uploaded files in a campfire
 - list_campfires (RO, paginated): List all campfires across the account
 - list_chatbots (RO, paginated): List all chatbots for a campfire
+- list_pings (RO): Get Pings: the caller's active Pings that have a line in them, most recently updated first, in one unpaginated response
 - update_campfire_line: Update an existing campfire line; the content is always treated as rich text (HTML)
 - update_chatbot: Update an existing chatbot
 
 == basecamp_boosts
-Boosts (emoji reactions) on recordings and their events: list, get, create, and delete.
+Boosts (emoji reactions) on recordings and their events: list, get, create, update, and delete.
 
 Gateway tool: call with {"action": "...", "params": {...}}.
 Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
@@ -139,6 +142,7 @@ ACTIONS (RO = read-only):
 - get_boost (RO): Get a single boost
 - list_event_boosts (RO, paginated): List boosts on a specific event within a recording
 - list_recording_boosts (RO, paginated): List boosts on a recording
+- update_boost: Replace the content of a boost
 
 == basecamp_schedules
 Schedules and schedule entries (calendar events), timesheets and time tracking, and per-account calendars.
@@ -283,7 +287,7 @@ ACTIONS (RO = read-only):
 - unspotlight_recording: Remove a recording from the spotlight area
 - update_answer: Update an existing answer
 - update_lineup_marker: Update an existing lineup marker
-- update_question: Update an existing question
+- update_question: Update an existing question's title, schedule or both
 - update_question_notification_settings: Update notification settings for a check-in question
 - update_template: Update an existing template
 - update_tool: Update (rename) an existing tool
@@ -387,7 +391,7 @@ ACTIONS (RO = read-only):
 - get_my_completed_assignments (RO): Get the current user's completed assignments
 - get_my_due_assignments (RO): Get the current user's assignments filtered by due date scope
 - get_my_note (RO): Get the authenticated user's note — a per-person notebook singleton at /my/notes.json
-- get_my_notifications (RO): Get the current user's notification inbox (the "Hey!" menu)
+- get_my_notifications (RO): Get the current user's notifications (the "Hey!" menu in Basecamp 4)
 - list_gauge_needles (RO, paginated): List gauge needles for a project, ordered newest first
 - list_gauges (RO, paginated): List gauges across all projects the authenticated user has access to
 - list_my_bookmarks (RO, paginated): List the current user's bookmarks, most recently bookmarked first (paginated)

@@ -13,6 +13,8 @@ triggers:
   - basecamp cards
   - basecamp chat
   - basecamp campfire
+  - basecamp ping
+  - basecamp pings
   - basecamp messages
   - basecamp file
   - basecamp document
@@ -187,6 +189,32 @@ basecamp comments thread "<comment-url>" --json
 
 Use `comments show` when only the cheap reply target and mention atoms are
 needed; use `comments thread` when surrounding discussion matters.
+
+## Pings
+
+A ping is a private conversation between people on an account, outside any
+project: direct with one other person, a group with more. It is not a project
+chat, so `chat list --all` never shows one. Use the `pings` group.
+
+```bash
+basecamp pings list --agent                  # your pings
+basecamp pings start "Jane Smith" --agent    # open your ping with Jane, or start it
+basecamp pings post "Jane Smith" "Lunch?" --agent
+basecamp pings messages "Jane Smith" --agent
+```
+
+- A `<ping>` is a ping ID, a ping URL (`/circles/<id>` or `/circles/<id>@<line>`),
+  or a person. A bare number is always a ping ID, never a person ID.
+- `pings list` shows a ping once it has a message. A ping you just started is
+  not listed yet; `pings start` prints it.
+- `pings start` reuses what exists: one direct ping per person, and a group per
+  set of people unless `--new-group`. Use it to find the ping you already have.
+- `pings messages` and `pings show` of a person read the direct ping you already
+  have and never start one; `pings post` and `pings upload` start it if missing.
+- @mentions in `pings post` resolve among the people in that ping.
+- A message URL (`/circles/<id>@<line>`) works with `basecamp show` and
+  `chat line`; edit or delete such a message with `chat update` or `chat delete`
+  on that URL.
 
 ## Content and stdin
 

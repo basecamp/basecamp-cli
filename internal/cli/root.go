@@ -325,6 +325,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewSearchCmd())
 	cmd.AddCommand(commands.NewRecordingsCmd())
 	cmd.AddCommand(commands.NewChatCmd())
+	cmd.AddCommand(commands.NewPingsCmd())
 	cmd.AddCommand(commands.NewScheduleCmd())
 	cmd.AddCommand(commands.NewFilesCmd())
 	cmd.AddCommand(commands.NewVaultsCmd())

@@ -16,7 +16,7 @@ import (
 )
 
 // BonfireSidebar is a compact live chat/ping panel designed for the sidebar.
-// Shows chat rooms with activity and 1:1 pings, grouped and sorted by
+// Shows chat rooms with activity and pings, grouped and sorted by
 // recency. Replaces the single-line ticker with a scannable, interactive list.
 type BonfireSidebar struct {
 	session *workspace.Session
@@ -329,7 +329,7 @@ func (b *BonfireSidebar) renderPingItem(p data.PingRoomInfo, selected bool, them
 	}
 
 	bullet := lipgloss.NewStyle().Foreground(theme.Secondary).Render("\u25cb")
-	name := truncateRunes(p.PersonName, maxW-8)
+	name := truncateRunes(p.Title, maxW-8)
 	elapsed := relativeTime(p.LastAtTS)
 
 	nameStyle := lipgloss.NewStyle()
