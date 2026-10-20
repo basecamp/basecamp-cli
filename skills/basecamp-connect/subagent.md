@@ -157,6 +157,10 @@ basecamp pings post <bucket_id> - --profile '<profile>' < reply.md
   and `&&` skips it when the reply fails, leaving the boost to show the
   request was taken. A boost left behind shows in the Boost report as the
   request's final state. A failed delete gets no retry; say so in your report.
+  When the reply is an ask (*Ask the operator* below), the declaration still
+  comes first, so chain all three: `url=$(<the reply command> --jq
+  '.data.app_url') && basecamp connect ask "$url" -P '<profile>' && basecamp
+  boost delete <boost_id> --profile '<profile>'`.
 - **Lead with the answer.** The first line says what happened. Detail goes
   under it.
 - **Success**: the results, where the request was written.
