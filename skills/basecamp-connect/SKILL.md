@@ -320,8 +320,9 @@ confirmed. Before the first setup, run `basecamp me -P '<profile>' --json` and
 say who it is: `identity` (name, email) and, when present, `person.name` and
 `person.id`. An agent credential has no `identity`; its `person` carries
 `personable_type` and, for a personal agent, `boss`, the person it works for.
-Go on only when they say that is the agent. If it names someone
-else, stop: don't run setup and don't reconnect.
+When you connected it in this session, they chose the agent on the approval
+page: tell them its name and go on. Otherwise go on only when they say that is
+the agent. If it names someone else, stop: don't run setup and don't reconnect.
 
 **Writing to Basecamp.** Everything this skill and its subagents post (boosts,
 comments, chat lines, card moves) goes out **as the agent**: always pass
@@ -387,9 +388,11 @@ Each becomes a flag on setup (*First-time setup*, step 4):
 Then:
 
 0. **Versions and leftovers**, once per session (*Before anything*).
-1. **Which agent.** Use the profile they name. With none, read
-   `~/.config/basecamp-connect/last.json` (below) and confirm it. With neither,
-   list profiles (`basecamp profile list --json`) and ask.
+1. **Which agent.** Use the profile they name. Asked to connect a new agent,
+   or one no profile here is connected as, go to *First-time setup*: other
+   agents' profiles aren't theirs to sort out, so don't ask about them. With
+   neither, read `~/.config/basecamp-connect/last.json` (below) and confirm it.
+   With none of these, list profiles (`basecamp profile list --json`) and ask.
 2. **Set up, if needed.** `basecamp connect show -P '<profile>' --json`. A
    `not_found` or `unknown profile` error, or one saying no profiles are
    configured, means it isn't set up: follow *First-time setup*, whatever
@@ -438,9 +441,11 @@ mappings and ask before starting. Never start silently from the store.
 
 Ask only what you can't find out.
 
-**1. Profile and credential.** Agree a profile name (letters, digits, `-` and
-`_`, starting with a letter or digit), for example the agent's name. Check it: `basecamp auth status -P
-'<profile>' --json`.
+**1. Profile and credential.** Use the profile the person names. Otherwise
+pick one yourself from the agent's name (letters, digits, `-` and `_`,
+starting with a letter or digit), and don't ask them to choose or confirm it:
+the person knows the agent by its Basecamp name, and the profile is yours.
+Check it: `basecamp auth status -P '<profile>' --json`.
 
 - `unknown profile`, or an error saying no profiles are configured (a
   computer with none yet): it doesn't exist. Never run `basecamp profile
@@ -453,10 +458,13 @@ Ask only what you can't find out.
   the person is on another device). Show them the link and code from its
   verification line. They open the link, check the code, choose the agent (or
   create one) and approve.
-- `oauth_type` `agent`: already connected. Don't connect again: that rotates
-  the agent's secret and disconnects any other computer using it.
-- Anything else: a person's login is stored. Ask; never connect an agent over
-  it.
+- `oauth_type` `agent`: an agent is already connected under it. If you chose
+  this name for a new agent, that's another agent's profile: pick another
+  name (`build-bot-2`, then `-3`) and check again. If the person named it,
+  don't connect again: that rotates the agent's secret and disconnects any
+  other computer using it.
+- Anything else: a person's login is stored. Never connect an agent over it:
+  pick another name if you chose this one, and ask if they did.
 
 Then confirm the identity (`basecamp me`, see *Identity*).
 
@@ -467,8 +475,11 @@ pinned to its identity id, with
 for an existing profile), and pass the same `--expect-identity` to the first
 setup.
 
-**2. Who may give it work.** Explain in a sentence each, and default to the
-first:
+**2. Who may give it work.** Don't ask. Unless the person already said
+otherwise, it's only the operator (`operator`, the default). When you finish,
+tell them only they can give it work, and that if they want it to respond to
+other people too, they can just ask you. When they do, explain each choice in
+a plain sentence, without these mode names:
 
 - **operator**: only the operator, which for a personal agent is its owner (you).
 - **allowlist**: the operator plus people you name.
@@ -494,14 +505,25 @@ A run that passes `--allow` replaces the list, a run that passes none keeps
 it, and `--trust operator` clears it; setup refuses `--trust operator` with
 `--allow`.
 
-**3. Projects, by name.** List them (`basecamp projects list -P '<profile>'
---json`; if that's refused under an Agent identity, list them with the person's
-own profile instead). Show the names, let them choose, and map each to its id
-yourself. When a name matches more than one project, ask. The agent must be a
-member of each project it serves.
+**3. Projects, by name.** The agent hears only the projects it serves, and it
+can serve only projects it's a member of. List its projects
+(`basecamp projects list -P '<profile>' --json`; if that's refused under an
+Agent identity, list the person's own projects with their login, a profile
+whose `auth status` isn't `oauth_type` `agent`, never another agent's). Unless
+the person named projects, serve every one it's in, without asking. The
+person's own list is the agent's only for a personal agent, which follows its
+owner; for any other agent, ask which of them it's in. A personal agent is in all
+of its owner's projects: Basecamp adds it when they approve, within a few
+seconds, so if it shows none, list again after a moment. Tell the person it's
+in their projects and picks up their requests in all of them, and that if
+they'd rather it skip some, they can just say so. Any other agent is only in
+the projects someone added it to; if it's in none, ask the person to add it in
+Basecamp, the way they'd add a person, and to tell you when that's done. A
+project it joins later isn't served until you add it, so tell them to ask you
+then. Map names to ids yourself and keep ids out of what you say. When a name
+they give matches more than one project, ask.
 
-**4. Confirm, then run setup.** Say back the agent, who may give it work, and
-each project by name. Then:
+**4. Run setup** with those projects, without asking them to confirm:
 
 ```bash
 basecamp connect setup -P '<profile>' --serve <project-id> --serve <project-id> --json
@@ -513,7 +535,10 @@ adding `--trust`, `--allow`, `--allow-assignments-from-authorized`,
 
 **5. Start the connector** right away (*Running the connector*), unless the
 person said not to. Connecting, setup and the watcher are one flow: don't stop
-after setup to ask whether to start it.
+after setup to ask whether to start it. Tell the person what it means for
+them: their agent picks up work while this Claude Code session is open. The
+connector, the watcher, the monitor and profiles are yours; leave their names
+out of what you say, during setup too, and don't narrate reading this skill.
 
 ### Reading setup's result
 
