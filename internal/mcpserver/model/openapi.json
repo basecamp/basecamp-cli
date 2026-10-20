@@ -9016,7 +9016,7 @@
     },
     "/{accountId}/embeds.json": {
       "post": {
-        "description": "Create an embed for a URL, or return the one Basecamp already has for it.\n\nAnswers `201 Created` with a new embed, whose status is `pending`, and\n`200 OK` with an existing embed in any status. Get the embed about once a\nsecond until its status is `active` or `not_found`.\n\nAnswers `422` (`{\"error\": \"Basecamp can't embed this URL. Link to it\ninstead.\"}`) for a URL no provider embeds, and `429` when the caller has\ncreated too many new embeds in the last hour.",
+        "description": "Create an embed for a URL, or return the one Basecamp already has for it.\n\nAnswers `200 OK` with the embed either way. A new embed's status is\n`pending`; get it about once a second until its status is `active` or\n`not_found`.\n\nAnswers `422` (`{\"error\": \"Basecamp can't embed this URL. Link to it\ninstead.\"}`) for a URL no provider embeds. Past 100 new embeds in an hour,\ncreating another answers `429` (`{\"error\": \"Too many new embeds. Try again\nlater.\"}`) with no Retry-After; asking for an embed Basecamp already has\nstill works. That 429 is a verdict for the rest of the hour, not\nthrottling, so this operation declares `retryOn: [503]` and the 429\nsurfaces on the first attempt.",
         "operationId": "CreateEmbed",
         "requestBody": {
           "content": {
@@ -9042,8 +9042,8 @@
           }
         ],
         "responses": {
-          "201": {
-            "description": "CreateEmbed 201 response",
+          "200": {
+            "description": "CreateEmbed 200 response",
             "content": {
               "application/json": {
                 "schema": {
@@ -9124,7 +9124,6 @@
           "baseDelayMs": 1000,
           "backoff": "exponential",
           "retryOn": [
-            429,
             503
           ]
         }
@@ -15516,7 +15515,7 @@
     },
     "/{accountId}/projects/{projectId}/people/client_users.json": {
       "put": {
-        "description": "Update project client access (grant/revoke/create client users)\n\nThe client-side counterpart to UpdateProjectAccess: `grant` adds existing\nclient users by id, `revoke` removes client users, and `create` invites\nbrand-new clients by email (`name` optional, defaulting to the address).\nOnly client users are eligible \u2014 a `grant` id belonging to a team member is\nrejected (omitted from `granted`) rather than cross-graded, and `revoke` never removes a team\nmember. The response mirrors UpdateProjectAccess: `granted` and `revoked`\npeople, each with `client: true`.\n\nRequires clients to be enabled on the project (EnableProjectClients);\notherwise 403. Invitations are all-or-nothing: an invalid `create` row\n(including one with no email address) answers 422 with the rejected\naddresses and nobody is invited; new addresses that would exceed the\naccount's user limit answer 429 and nobody is invited. Addresses already on\nthe account take no seat and a repeated address counts once.\n\nThe seat-limit 429 is a verdict, not throttling: it carries no Retry-After\nand re-asking cannot change the answer, so this operation declares\n`retryOn: [503]` and a 429 surfaces on the first attempt (status-mapped to\n`rate_limit`, since the wire status is the only signal). Every other\noperation retries on 429.",
+        "description": "Update project client access (grant/revoke/create client users)\n\nThe client-side counterpart to UpdateProjectAccess: `grant` adds existing\nclient users by id, `revoke` removes client users, and `create` invites\nbrand-new clients by email (`name` optional, defaulting to the address).\nOnly client users are eligible \u2014 a `grant` id belonging to a team member is\nrejected (omitted from `granted`) rather than cross-graded, and `revoke` never removes a team\nmember. The response mirrors UpdateProjectAccess: `granted` and `revoked`\npeople, each with `client: true`.\n\nRequires clients to be enabled on the project (EnableProjectClients);\notherwise 403. Invitations are all-or-nothing: an invalid `create` row\n(including one with no email address) answers 422 with the rejected\naddresses and nobody is invited; new addresses that would exceed the\naccount's user limit answer 429 and nobody is invited. Addresses already on\nthe account take no seat and a repeated address counts once.\n\nThe seat-limit 429 is a verdict, not throttling: it carries no Retry-After\nand re-asking cannot change the answer, so this operation declares\n`retryOn: [503]` and a 429 surfaces on the first attempt (status-mapped to\n`rate_limit`, since the wire status is the only signal). Every other\noperation but CreateEmbed retries on 429.",
         "operationId": "UpdateProjectClientAccess",
         "requestBody": {
           "content": {

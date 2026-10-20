@@ -278,6 +278,7 @@ func TestGatingHooksHeaderless429BlocksUnlessTheOperationTreatsItAsAVerdict(t *t
 	assert.Greater(t, block("UpdateProjectAccess"), 50*time.Second, "throttling 429 keeps the default block")
 	assert.Greater(t, block(""), 50*time.Second, "an unnamed operation keeps the default block")
 	assert.Zero(t, block("UpdateProjectClientAccess"), "a seat-limit verdict sets no block")
+	assert.Zero(t, block("CreateEmbed"), "the hourly new-embed limit sets no block")
 }
 
 // A 429 that names a Retry-After is honored regardless of the operation.
