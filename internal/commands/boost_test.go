@@ -582,3 +582,51 @@ func TestBoostUpdateMapsServerRefusals(t *testing.T) {
 		})
 	}
 }
+
+// A URL is held to one boost in the configured account, on a Basecamp host,
+// before anything is sent: a URL naming another account, another kind of
+// thing, or a list of boosts would otherwise update the wrong boost.
+func TestBoostUpdateRefusesAURLThatIsNotOneBoostHere(t *testing.T) {
+	for _, tc := range []struct {
+		name, url, want string
+	}{
+		{"another account", "https://3.basecamp.com/88888/buckets/123/boosts/789", "does not match the configured account"},
+		{"an untrusted host", "https://evil.example.com/99999/buckets/123/boosts/789", "untrusted host"},
+		{"a to-do", "https://3.basecamp.com/99999/buckets/123/todos/789", "expected a boost ID or a boost URL"},
+		{"a recording's boosts", "https://3.basecamp.com/99999/buckets/123/recordings/789/boosts", "expected a boost ID or a boost URL"},
+		{"a project's boosts", "https://3.basecamp.com/99999/buckets/123/boosts", "expected a boost ID or a boost URL"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, transport := setupRecordingTestApp(t, boostUpdateRoute(http.StatusOK, `{"id":789,"content":"👍"}`))
+
+			err := executeBoostCommand(NewBoostsCmd(), app, "update", tc.url, "👍")
+
+			require.Error(t, err)
+			var e *output.Error
+			require.True(t, errors.As(err, &e), "a usage error: %v", err)
+			assert.Equal(t, output.CodeUsage, e.Code)
+			assert.Contains(t, e.Message, tc.want)
+			assert.Empty(t, transport.recorded(), "nothing is sent")
+		})
+	}
+}
+
+// The show breadcrumb keeps a project name with a space as one argument.
+func TestBoostUpdateQuotesTheProjectInItsBreadcrumb(t *testing.T) {
+	app, _ := setupRecordingTestApp(t,
+		boostUpdateRoute(http.StatusOK, `{"id":789,"content":"👍","created_at":"2024-01-01T00:00:00Z"}`))
+	buf := &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: output.FormatJSON, Writer: buf})
+	app.Flags.Hints = true
+
+	require.NoError(t, executeBoostCommand(NewBoostsCmd(), app, "update", "789", "👍", "--project", "My Project"))
+
+	var envelope struct {
+		Breadcrumbs []struct {
+			Cmd string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.NotEmpty(t, envelope.Breadcrumbs)
+	assert.Equal(t, "basecamp boost show 789 --project 'My Project'", envelope.Breadcrumbs[0].Cmd)
+}

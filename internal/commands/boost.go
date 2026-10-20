@@ -9,7 +9,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // NewBoostsCmd creates the boost command for managing boosts.
@@ -426,7 +428,21 @@ A boost is addressed by its own ID, so no project or item is needed.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			boostID, urlProjectID := extractWithProject(args[0])
+			// A URL's host and shape are settled before content is read, so a
+			// bad reference doesn't cost the caller a drained pipe.
+			boostID, urlProjectID, urlAccountID := args[0], "", ""
+			if urlarg.IsURL(args[0]) {
+				if !hostutil.IsTrustedBasecampHost(args[0], app.Config.BaseURL) {
+					return output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
+				}
+				// A recording's boost list (/recordings/{r}/boosts) parses as
+				// boosts too, with the recording's ID: only one boost will do.
+				parsed := urlarg.Parse(args[0])
+				if parsed == nil || parsed.Type != "boosts" || parsed.IsCollection || parsed.RecordingID == "" {
+					return output.ErrUsage("expected a boost ID or a boost URL of the form /buckets/{p}/boosts/{b}")
+				}
+				boostID, urlProjectID, urlAccountID = parsed.RecordingID, parsed.ProjectID, parsed.AccountID
+			}
 			boostIDInt, err := strconv.ParseInt(boostID, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid boost ID")
@@ -445,16 +461,19 @@ A boost is addressed by its own ID, so no project or item is needed.`,
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
+			if urlAccountID != "" && urlAccountID != app.Config.AccountID {
+				return output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", urlAccountID, app.Config.AccountID))
+			}
 
 			boost, err := app.Account().Boosts().Update(cmd.Context(), boostIDInt, content)
 			if err != nil {
 				return convertSDKError(err)
 			}
 
-			projectArg := "<project>"
+			scope := " --project <project>"
 			for _, candidate := range []string{*project, urlProjectID, app.Flags.Project, app.Config.ProjectID} {
 				if candidate != "" {
-					projectArg = candidate
+					scope = breadcrumbScope(candidate)
 					break
 				}
 			}
@@ -464,7 +483,7 @@ A boost is addressed by its own ID, so no project or item is needed.`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp boost show %d --project %s", boost.ID, projectArg),
+						Cmd:         fmt.Sprintf("basecamp boost show %d%s", boost.ID, scope),
 						Description: "View boost",
 					},
 					output.Breadcrumb{
