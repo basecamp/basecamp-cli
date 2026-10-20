@@ -3,7 +3,7 @@ tags: [domain, create]
 accept:
   - 'cards? create .*Checkout latency'
   - '--(in|project) 55555'
-  - '(?m)^https://dash\.37signals\.com/widgets/abc\s*$'
+  - '(?m)(^|["''])https://dash\.37signals\.com/widgets/abc\s*(["'']|$)'
 reject:
   - '\[[^\]]*\]\(https://dash\.37signals\.com/widgets/abc\)'
   - '--format html'

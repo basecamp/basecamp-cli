@@ -101,6 +101,7 @@ level1=(
   "$SMOKE_DIR"/smoke_assign.bats
   "$SMOKE_DIR"/smoke_lineup.bats
   "$SMOKE_DIR"/smoke_communication_write.bats
+  "$SMOKE_DIR"/smoke_embeds.bats
   "$SMOKE_DIR"/smoke_misc_write.bats
   "$SMOKE_DIR"/smoke_tools.bats
   "$SMOKE_DIR"/smoke_cards_column_write.bats
