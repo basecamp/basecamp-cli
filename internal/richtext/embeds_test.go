@@ -130,6 +130,13 @@ func TestMarkdownToHTMLWithEmbedsKeepsAQueryWithABareAmpersand(t *testing.T) {
 	assert.Equal(t, []string{"https://www.youtube.com/watch?v=x&t=1"}, seen)
 }
 
+func TestMarkdownToHTMLWithEmbedsReadsTheSchemeInAnyCase(t *testing.T) {
+	var seen []string
+	MarkdownToHTMLWithEmbeds("HTTPS://www.youtube.com/watch?v=x", embedAll(&seen))
+
+	assert.Equal(t, []string{"HTTPS://www.youtube.com/watch?v=x"}, seen)
+}
+
 func TestMarkdownToHTMLWithEmbedsWithoutAnEmbedFuncIsMarkdownToHTML(t *testing.T) {
 	md := "Intro\n" + videoURL + "\n\n- item"
 

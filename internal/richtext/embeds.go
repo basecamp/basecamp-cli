@@ -61,7 +61,7 @@ func MarkdownToHTMLWithEmbeds(md string, embed EmbedFunc) string {
 }
 
 var (
-	reStandaloneURL      = regexp.MustCompile(`^https?://[^\s<>"'\\]+$`)
+	reStandaloneURL      = regexp.MustCompile(`^(?i:https?)://[^\s<>"'\\]+$`)
 	reCharacterReference = regexp.MustCompile(`&(#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);`)
 )
 
