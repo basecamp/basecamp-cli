@@ -196,8 +196,7 @@ People are names, email addresses or person IDs among the people you can ping
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			if newGroup && len(args) < 2 {
-				return output.ErrUsageHint("--new-group needs two or more people",
-					"A direct ping is always the one you have with that person")
+				return newGroupNeedsPeople()
 			}
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
@@ -206,6 +205,9 @@ People are names, email addresses or person IDs among the people you can ping
 			people, err := resolvePingPeople(cmd.Context(), app, args)
 			if err != nil {
 				return err
+			}
+			if newGroup && len(people) < 2 {
+				return newGroupNeedsPeople()
 			}
 			ping, err := startPing(cmd.Context(), app, people, newGroup)
 			if err != nil {
@@ -227,6 +229,11 @@ People are names, email addresses or person IDs among the people you can ping
 	cmd.Flags().BoolVar(&newGroup, "new-group", false, "Start a new group even when you already have one with these people")
 
 	return cmd
+}
+
+func newGroupNeedsPeople() error {
+	return output.ErrUsageHint("--new-group needs two or more people",
+		"A direct ping is always the one you have with that person")
 }
 
 func newPingsMessagesCmd() *cobra.Command {
@@ -303,7 +310,7 @@ Use - as the message argument to read the message from stdin:
 			}
 
 			messageContent, err := readPostInput(cmd, args[1:], 1, content, *contentType, attachFiles, func() error { return nil })
-			if err != nil || messageContent == "" {
+			if err != nil || (messageContent == "" && len(attachFiles) == 0) {
 				return err
 			}
 			if err := ensureAccount(cmd, app); err != nil {
@@ -435,6 +442,8 @@ const (
 type pingTarget struct {
 	id     int64
 	person string
+	// accountID is the account a URL named, to hold against the resolved one.
+	accountID string
 }
 
 // parsePingTarget reads a <ping> argument without touching the network. A URL
@@ -457,7 +466,7 @@ func parsePingTarget(app *appctx.App, arg string) (pingTarget, error) {
 		if err != nil {
 			return pingTarget{}, output.ErrUsage("Invalid ping ID")
 		}
-		return pingTarget{id: id}, nil
+		return pingTarget{id: id, accountID: parsed.AccountID}, nil
 	}
 	if isNumeric(arg) {
 		id, err := strconv.ParseInt(arg, 10, 64)
@@ -474,6 +483,9 @@ func parsePingTarget(app *appctx.App, arg string) (pingTarget, error) {
 
 // resolvePing finds the Ping a target names.
 func resolvePing(ctx context.Context, app *appctx.App, target pingTarget, mode pingLookup) (*basecamp.Ping, error) {
+	if target.accountID != "" && target.accountID != app.Config.AccountID {
+		return nil, output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", target.accountID, app.Config.AccountID))
+	}
 	if target.id != 0 {
 		ping, err := app.Account().Pings().Get(ctx, target.id)
 		if err != nil {
@@ -500,7 +512,7 @@ func resolvePing(ctx context.Context, app *appctx.App, target pingTarget, mode p
 		}
 	}
 	return nil, output.ErrNotFoundHint("Ping", target.person,
-		fmt.Sprintf("No ping with %s has a message yet. Start one: basecamp pings start %s", people[0].Name, quoteArg(target.person)))
+		fmt.Sprintf("No ping with %s has a message yet. Start one: basecamp pings start %s", people[0].Name, richtext.ShellQuote(target.person)))
 }
 
 func isDirectPingWith(ping *basecamp.Ping, personID int64) bool {
@@ -591,13 +603,6 @@ func peopleLeftOut(requested []names.Person, ping *basecamp.Ping) []string {
 		}
 	}
 	return left
-}
-
-func quoteArg(s string) string {
-	if strings.ContainsAny(s, " \t\"'") {
-		return strconv.Quote(s)
-	}
-	return s
 }
 
 // pingMentionResolver resolves @mentions among the people in the Ping: only

@@ -378,7 +378,7 @@ Use - as the message argument to read the message from stdin:
 			}
 
 			messageContent, err := readPostInput(cmd, args, 0, content, *contentType, attachFiles, checkRoom)
-			if err != nil || messageContent == "" {
+			if err != nil || (messageContent == "" && len(attachFiles) == 0) {
 				return err
 			}
 
@@ -410,7 +410,8 @@ Use - as the message argument to read the message from stdin:
 // discard piped content unread.
 //
 // A missing message shows help in a terminal, which is not an error: the result
-// is then empty with a nil error, and the caller is done.
+// is then empty with a nil error, and the caller is done unless it has
+// attachments, which post without text.
 func readPostInput(cmd *cobra.Command, msgArgs []string, argIndex int, content, contentType string, attachFiles []string, checkRoom func() error) (string, error) {
 	messageContent := content
 	index, what := -1, "--content"
@@ -442,8 +443,11 @@ func readPostInput(cmd *cobra.Command, msgArgs []string, argIndex int, content, 
 		return "", err
 	}
 
-	// Show help when invoked with no message content
+	// Show help when invoked with neither a message nor attachments
 	if strings.TrimSpace(messageContent) == "" {
+		if len(attachFiles) > 0 {
+			return "", nil
+		}
 		return "", missingArg(cmd, "<message>")
 	}
 	return messageContent, nil
@@ -734,14 +738,14 @@ You can pass either a line ID or a Basecamp line URL:
 			}
 
 			// Extract ID, project and room from URL if provided
-			lineID, urlProjectID, urlChatID, err := chatLineRef(app, args[0])
+			lineID, urlProjectID, urlChatID, urlIsPing, err := chatLineRef(cmd.Context(), app, args[0])
 			if err != nil {
 				return err
 			}
 
 			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
-			if projectID == "" && urlProjectID != "" {
+			if urlProjectID != "" && (projectID == "" || urlIsPing) {
 				projectID = urlProjectID
 			}
 			if projectID == "" {
@@ -1006,6 +1010,13 @@ edit to rich text.`,
 				return output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", parsedURL.AccountID, app.Config.AccountID))
 			}
 
+			if parsedURL != nil && parsedURL.PingID != "" {
+				var err error
+				if urlChatID, err = pingURLCampfireID(cmd.Context(), app, parsedURL.PingID); err != nil {
+					return err
+				}
+			}
+
 			// Resolve the chat (campfire) ID, and a project only when needed. The
 			// PUT needs just the chat + line IDs; a project is required only to
 			// discover the default room (no URL chat and no --room) and is
@@ -1192,14 +1203,14 @@ You can pass either a line ID or a Basecamp line URL:
 			}
 
 			// Extract ID, project and room from URL if provided
-			lineID, urlProjectID, urlChatID, err := chatLineRef(app, args[0])
+			lineID, urlProjectID, urlChatID, urlIsPing, err := chatLineRef(cmd.Context(), app, args[0])
 			if err != nil {
 				return err
 			}
 
 			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
-			if projectID == "" && urlProjectID != "" {
+			if urlProjectID != "" && (projectID == "" || urlIsPing) {
 				projectID = urlProjectID
 			}
 			if projectID == "" {
@@ -1295,61 +1306,86 @@ You can pass either a line ID or a Basecamp line URL:
 // A URL is held to what chat update holds it to: a trusted Basecamp host, an
 // individual line (a room's /chats/{c}/lines parses with the room's ID where
 // the line's belongs, and would act on line {c}), and the configured account.
-func chatLineRef(app *appctx.App, arg string) (lineID, projectID, chatID string, err error) {
+//
+// A Ping line URL names the Ping, not a room: its Campfire is looked up here
+// and returned as the room, with isPing set so the caller keeps the Ping as the
+// bucket whatever --in says.
+func chatLineRef(ctx context.Context, app *appctx.App, arg string) (lineID, projectID, chatID string, isPing bool, err error) {
 	if !urlarg.IsURL(arg) {
 		lineID, projectID = extractWithProject(arg)
-		return lineID, projectID, "", nil
+		return lineID, projectID, "", false, nil
 	}
 	if !hostutil.IsTrustedBasecampHost(arg, app.Config.BaseURL) {
-		return "", "", "", output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
+		return "", "", "", false, output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
 	}
 	parsed := urlarg.Parse(arg)
 	if parsed != nil && parsed.PingID != "" && parsed.Type != "lines" {
-		return "", "", "", output.ErrUsageHint("a ping URL names a ping, not a message",
+		return "", "", "", false, output.ErrUsageHint("a ping URL names a ping, not a message",
 			fmt.Sprintf("Show the ping with: basecamp pings show %s; a message URL ends in @<line>", parsed.PingID))
 	}
 	if parsed == nil || parsed.Type != "lines" || parsed.IsCollection {
-		return "", "", "", output.ErrUsage("expected a chat-line ID or URL of the form /chats/{c}/lines/{l} or /chats/{c}@{l}")
+		return "", "", "", false, output.ErrUsage("expected a chat-line ID or URL of the form /chats/{c}/lines/{l} or /chats/{c}@{l}")
 	}
 	if parsed.AccountID != "" && app.Config.AccountID != "" && parsed.AccountID != app.Config.AccountID {
-		return "", "", "", output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", parsed.AccountID, app.Config.AccountID))
+		return "", "", "", false, output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", parsed.AccountID, app.Config.AccountID))
 	}
-	return parsed.RecordingID, parsed.ProjectID, parsed.CampfireID, nil
+	if parsed.PingID != "" {
+		chatID, err = pingURLCampfireID(ctx, app, parsed.PingID)
+		if err != nil {
+			return "", "", "", false, err
+		}
+		return parsed.RecordingID, parsed.ProjectID, chatID, true, nil
+	}
+	return parsed.RecordingID, parsed.ProjectID, parsed.CampfireID, false, nil
+}
+
+// pingURLCampfireID finds the Campfire of the Ping a chat-line URL names. The
+// URL carries the Ping and the line but not the Campfire, so the room the URL
+// names has to be asked of the account, as a /chats/{c}@{l} URL names its own.
+func pingURLCampfireID(ctx context.Context, app *appctx.App, pingID string) (string, error) {
+	id, err := strconv.ParseInt(pingID, 10, 64)
+	if err != nil {
+		return "", output.ErrUsage("Invalid ping ID")
+	}
+	_, campfireID, err := resolvePingCampfire(ctx, app, pingTarget{id: id}, pingLookupOnly)
+	if err != nil {
+		return "", err
+	}
+	return strconv.FormatInt(campfireID, 10), nil
 }
 
 // getChatID retrieves the chat ID from a project's dock, handling multi-dock projects.
 func getChatID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
 	id, err := getDockToolID(cmd.Context(), app, projectID, "chat", "", "chat room", "room")
 	if err != nil {
-		if campfireID, ok := pingCampfireID(cmd.Context(), app, projectID, err); ok {
-			return campfireID, nil
-		}
-		return "", err
+		return pingCampfireID(cmd.Context(), app, projectID, err)
 	}
 	return id, nil
 }
 
 // pingCampfireID finds the Campfire of a Ping named where a project was
 // expected. A Ping is a bucket without a dock, so a project lookup that failed
-// as not found is retried as a Ping; any other failure stands.
-func pingCampfireID(ctx context.Context, app *appctx.App, bucketID string, lookupErr error) (string, bool) {
+// as not found is retried as a Ping. The project's error stands when the Ping
+// is not found either; a Ping lookup that failed any other way (Pings turned
+// off, a rate limit, the network) is reported instead, since it left the answer
+// unknown.
+func pingCampfireID(ctx context.Context, app *appctx.App, bucketID string, lookupErr error) (string, error) {
 	var e *output.Error
 	if !errors.As(lookupErr, &e) || e.Code != output.CodeNotFound {
-		return "", false
+		return "", lookupErr
 	}
 	id, err := strconv.ParseInt(bucketID, 10, 64)
 	if err != nil {
-		return "", false
+		return "", lookupErr
 	}
-	ping, err := app.Account().Pings().Get(ctx, id)
+	_, campfireID, err := resolvePingCampfire(ctx, app, pingTarget{id: id}, pingLookupOnly)
 	if err != nil {
-		return "", false
+		if errors.As(err, &e) && e.Code == output.CodeNotFound {
+			return "", lookupErr
+		}
+		return "", err
 	}
-	campfireID, ok := ping.CampfireID()
-	if !ok {
-		return "", false
-	}
-	return strconv.FormatInt(campfireID, 10), true
+	return strconv.FormatInt(campfireID, 10), nil
 }
 
 // chatLineDisplayContent produces human-readable content for a campfire line,

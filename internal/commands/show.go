@@ -358,10 +358,7 @@ func showPingURL(cmd *cobra.Command, app *appctx.App, parsed *urlarg.Parsed) err
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
-	if parsed.AccountID != "" && parsed.AccountID != app.Config.AccountID {
-		return output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", parsed.AccountID, app.Config.AccountID))
-	}
-	ping, err := resolvePing(cmd.Context(), app, pingTarget{id: id}, pingLookupOnly)
+	ping, err := resolvePing(cmd.Context(), app, pingTarget{id: id, accountID: parsed.AccountID}, pingLookupOnly)
 	if err != nil {
 		return err
 	}

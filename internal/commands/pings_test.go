@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -561,4 +563,131 @@ func pingsErrorHint(t *testing.T, err error) string {
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
 	return e.Hint
+}
+
+func (f *pingsFake) askedAbout(fragment string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, r := range f.requests {
+		if strings.Contains(r, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestChatLineCommandsTakeThePingLineURLsRoomOverRoomAndIn(t *testing.T) {
+	const url = "https://app.basecamp.com/99999/circles/500@111"
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"line", []string{"line", url, "--room", "456", "--in", "777"}, "GET /99999/chats/700/lines/111"},
+		{"update", []string{"update", url, "edited", "--room", "456", "--in", "777"}, "PUT /99999/chats/700/lines/111"},
+		{"delete", []string{"delete", url, "--force", "--room", "456", "--in", "777"}, "DELETE /99999/chats/700/lines/111"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPingsFakeWithPeople()
+			f.on("GET", "/99999/circles/500", 200, pingJSON(500, 700, "Jason Fried", false, pingPersonJSON(1001, "Jason Fried", "jason@example.com")))
+			f.on("GET", "/99999/chats/700/lines/111", 200, `{"id":111,"content":"hi","creator":{"name":"Jason Fried"},"created_at":"2026-10-19T15:15:25.688Z"}`)
+			f.on("PUT", "/99999/chats/700/lines/111", 204, ``)
+			f.on("DELETE", "/99999/chats/700/lines/111", 204, ``)
+			f.on("GET", "/99999/recordings/111/comments.json", 200, `[]`)
+
+			env, err := runPings(t, f, NewChatCmd, tc.args...)
+			require.NoError(t, err)
+
+			assert.True(t, f.asked(tc.want), f.requests)
+			assert.False(t, f.askedAbout("/chats/456"), "the stale --room must not be used")
+			assert.False(t, f.askedAbout("/projects/777"), "--in must not replace the ping")
+			if tc.name != "update" {
+				assert.Contains(t, env.crumbs(), "basecamp chat messages --room 700 --in 500")
+			}
+		})
+	}
+}
+
+func TestChatLinePingURLReportsAFailedPingLookup(t *testing.T) {
+	f := newPingsFakeWithPeople()
+	f.on("GET", "/99999/circles/500", 403, `{"error":"Pings have been disabled"}`)
+
+	_, err := runPings(t, f, NewChatCmd, "line", "https://app.basecamp.com/99999/circles/500@111", "--room", "456")
+	require.Error(t, err)
+	assert.Contains(t, pingsErrorHint(t, err), "turned Pings off")
+	assert.False(t, f.askedAbout("/chats/456"))
+}
+
+func TestChatMessagesInAPingReportsAFailedPingLookup(t *testing.T) {
+	f := newPingsFakeWithPeople()
+	f.on("GET", "/99999/circles/500", 403, `{"error":"Pings have been disabled"}`)
+
+	_, err := runPings(t, f, NewChatCmd, "messages", "--in", "500")
+	require.Error(t, err)
+	assert.Contains(t, pingsErrorHint(t, err), "turned Pings off")
+}
+
+func TestPingsStartNewGroupNeedsTwoDistinctPeople(t *testing.T) {
+	f := newPingsFakeWithPeople()
+
+	_, err := runPingsCmd(t, f, "start", "Jane", "jane@example.com", "--new-group")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--new-group needs two or more people")
+	assert.False(t, f.asked("POST /99999/circles.json"))
+}
+
+func attachmentFile(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "report.txt")
+	require.NoError(t, os.WriteFile(path, []byte("report"), 0o600))
+	return path
+}
+
+func TestPostsAnAttachmentWithoutAMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  func() *cobra.Command
+		args []string
+	}{
+		{"pings post", NewPingsCmd, []string{"post", "500"}},
+		{"chat post", NewChatCmd, []string{"post", "--room", "700"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPingsFakeWithPeople()
+			f.on("GET", "/99999/circles/500", 200, pingJSON(500, 700, "Jason Fried", false, pingPersonJSON(1001, "Jason Fried", "jason@example.com")))
+			f.on("POST", "/99999/chats/700/uploads.json", 201, `{"id":888,"content":"","created_at":"2026-10-19T15:15:25.688Z"}`)
+
+			env, err := runPings(t, f, tc.cmd, append(tc.args, "--attach", attachmentFile(t))...)
+			require.NoError(t, err)
+
+			assert.True(t, f.asked("POST /99999/chats/700/uploads.json"), f.requests)
+			assert.False(t, f.asked("POST /99999/chats/700/lines.json"), "there is no text to post")
+			assert.Equal(t, "Posted 1 attachment(s)", env.Summary)
+		})
+	}
+}
+
+func TestPingsTargetKeepsTheURLAccountForTheResolvedOne(t *testing.T) {
+	f := newPingsFakeWithPeople()
+	app, _ := newTestAppWithTransport(t, f)
+	app.Config.AccountID = ""
+
+	target, err := parsePingTarget(app, "https://app.basecamp.com/11111/circles/500")
+	require.NoError(t, err, "with no account configured the URL cannot be compared yet")
+
+	app.Config.AccountID = "99999" // what ensureAccount settles on
+	_, err = resolvePing(context.Background(), app, target, pingLookupOnly)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "URL account 11111 does not match the configured account 99999")
+	assert.Empty(t, f.requests)
+}
+
+func TestPingsHintQuotesThePersonForTheShell(t *testing.T) {
+	f := newPingsFake()
+	f.on("GET", "/99999/circles/people.json", 200, `[{"id":1005,"name":"Sam $HOME","email_address":"sam@example.com","attachable_sgid":"sgid-1005"}]`)
+	f.on("GET", "/99999/circles.json", 200, `[]`)
+
+	_, err := runPingsCmd(t, f, "messages", "Sam $HOME")
+	require.Error(t, err)
+	assert.Contains(t, pingsErrorHint(t, err), "basecamp pings start 'Sam $HOME'")
 }
