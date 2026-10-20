@@ -41,7 +41,9 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
@@ -84,6 +86,12 @@ type File struct {
 	// nobody in, so a file that uses none still opens in a CLI that predates
 	// the key.
 	Pings map[int64]admission.PingTrust `json:"pings,omitempty"`
+	// AckBoost is how the connector acknowledges a request someone made of
+	// the agent (--ack-boost, --no-ack-boost). Absent means the default, a
+	// DefaultAckContent boost, and setup writes it only when it is not, so a
+	// file that keeps the default still opens in a CLI that predates the
+	// key.
+	AckBoost *AckBoost `json:"ack_boost,omitempty"`
 
 	// The Legacy fields are the settings of a connector that ran its own
 	// workers: which driver and coding agent, how many at once, for how
@@ -122,6 +130,49 @@ type Agent struct {
 	// IdentityID is the bot user's account-independent identity, the value
 	// --expect-identity pins. Zero for an Agent person, which has none.
 	IdentityID int64 `json:"identity_id,omitempty"`
+}
+
+// AckBoost is the connector's acknowledgement of a request: a boost on the
+// request's recording with Content, given before the request is handed off,
+// or none at all when Off, which leaves acknowledging to the session.
+type AckBoost struct {
+	Off     bool   `json:"off,omitempty"`
+	Content string `json:"content,omitempty"`
+}
+
+// DefaultAckContent is the boost the connector acknowledges with unless
+// connect.json says otherwise.
+const DefaultAckContent = "👀"
+
+// AckContentMax is the longest boost Basecamp takes, counted in runes as
+// `basecamp boost create` counts it.
+const AckContentMax = 16
+
+// Ack is the acknowledgement this file asks for, the default when it names
+// none.
+func (f File) Ack() AckBoost {
+	if f.AckBoost == nil {
+		return AckBoost{Content: DefaultAckContent}
+	}
+	return *f.AckBoost
+}
+
+// Validate refuses an acknowledgement the connector could not give: one
+// both off and with content, or a boost Basecamp would refuse.
+func (a AckBoost) Validate() error {
+	if a.Off {
+		if a.Content != "" {
+			return errors.New("the acknowledgement boost is off and has content")
+		}
+		return nil
+	}
+	if strings.TrimSpace(a.Content) == "" {
+		return errors.New("the acknowledgement boost is empty; turn it off with --no-ack-boost instead")
+	}
+	if n := utf8.RuneCountInString(a.Content); n > AckContentMax {
+		return fmt.Errorf("the acknowledgement boost is %d characters, and a boost holds at most %d", n, AckContentMax)
+	}
+	return nil
 }
 
 // Duration is a time.Duration written as Go's duration string ("45m0s").
@@ -229,6 +280,9 @@ func (f File) Validate() error {
 		if project.Class != "" && !ValidClass(project.Class) {
 			return fmt.Errorf("served project %d: class %q must be lowercase letters, digits, - or _, at most 40", bucket, project.Class)
 		}
+	}
+	if err := f.Ack().Validate(); err != nil {
+		return fmt.Errorf("connect.json ack_boost: %w", err)
 	}
 	return nil
 }

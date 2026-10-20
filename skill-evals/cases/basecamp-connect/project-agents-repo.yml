@@ -30,7 +30,7 @@ expect_sequence:
   - match: '^recordings documents(?=.*\s--all(?:\s|$))(?=.*\s--project[ =][''"]?456[''"]?(?:\s|$))(?=.*\s(?:-P|--profile)[ =][''"]?helper[''"]?(?:\s|$))'
   - match: '^docs show [''"]?901[''"]?(?=\s|$)(?=.*\s--project[ =][''"]?456[''"]?(?:\s|$))(?=.*\s(?:-P|--profile)[ =][''"]?helper[''"]?(?:\s|$))'
 reject:
-  - '^boost create\b'
+  - '^boost (create|update)\b'
   - '^connect setup\b'
   - '^(cards move|comments create|chat post)\b'
 accept_response:

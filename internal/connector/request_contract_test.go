@@ -20,6 +20,8 @@ import (
 // dropping one breaks a reader that nothing here runs, so it is a breaking
 // change made on purpose, here, or not at all. Adding a key is not.
 var requestLineContract = []string{
+	"ack.boost_id",
+	"ack.content",
 	"acknowledge",
 	"ask.content",
 	"ask.title",
@@ -47,7 +49,7 @@ var requestLineContract = []string{
 
 // optionalKeys are the contract's keys a line may leave out: the ones whose
 // value is not always known.
-var optionalKeys = []string{"recording.project_name", "requester_name"}
+var optionalKeys = []string{"ack.boost_id", "ack.content", "recording.project_name", "requester_name"}
 
 // The line the connector writes carries exactly the keys the contract names,
 // under those names: a key dropped or renamed breaks a reader, and a key
@@ -100,6 +102,9 @@ func fill(t *testing.T, v reflect.Value) {
 		return
 	}
 	switch v.Kind() {
+	case reflect.Pointer:
+		v.Set(reflect.New(v.Type().Elem()))
+		fill(t, v.Elem())
 	case reflect.Struct:
 		for i := range v.NumField() {
 			if v.Type().Field(i).IsExported() {

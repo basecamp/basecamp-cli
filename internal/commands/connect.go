@@ -41,9 +41,11 @@ func NewConnectCmd() *cobra.Command {
 		Long: `Run a local agent connector: it listens to the account event feed as a
 Basecamp agent, admits what a trusted person asks of that agent, and prints
 each trusted request for the session that started it to handle. It starts no
-workers and posts nothing itself: the basecamp-connect skill, run in your own
-Claude Code session, acknowledges each request, picks the repo and hands it to
-a subagent that replies as the agent.
+workers and posts only the acknowledgement boost, unless setup turns it off
+(--no-ack-boost): a request someone made of the agent is boosted as the agent
+before it is printed. The basecamp-connect skill, run in your own Claude Code
+session, picks the repo and hands each request to a subagent that replies as
+the agent.
 
 Connect the agent to a profile first (basecamp auth agent connect -P <profile>),
 then run setup on that profile: it records who may drive the agent, maps
@@ -95,7 +97,8 @@ func newConnectShowCmd() *cobra.Command {
 		Use:   "show",
 		Short: "Show a profile's connector setup without changing it",
 		Long: `Show the connect.json a profile's setup wrote: the agent, the operator and
-trust mode, each served project, and who is let into a Ping.
+trust mode, each served project, who is let into a Ping, and the boost the
+connector acknowledges requests with (ack_boost, the default included).
 
 The file is read through the same checks setup and the connector apply:
 it is refused, and nothing of it shown, when it is a symlink, is not a
@@ -156,7 +159,7 @@ func runConnectShow(app *appctx.App) error {
 	// agent, the trust and the served projects live, so a person's formats get them
 	// flattened to one line each; JSON keeps the file's own shape.
 	markdown := app.Output.EffectiveFormat() == output.FormatMarkdown
-	return app.OK(connectShowResult{Path: path, File: f},
+	return app.OK(connectShowResult{Path: path, File: f, AckBoost: f.Ack()},
 		output.WithDisplayData(connectShowDisplay(path, f, markdown)),
 		output.WithSummary(fmt.Sprintf("Connector setup for profile %q: trust %s, %d served project(s)", name, f.Trust.Mode, len(f.Projects))))
 }
@@ -207,6 +210,7 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		"trust":    trust,
 		"agents":   agents,
 		"projects": strconv.Itoa(len(f.Projects)) + " served",
+		"ack":      connectAckDisplay(f.Ack()),
 	}
 	for id, entry := range f.Pings {
 		ids := make([]string, len(entry.Participants))
@@ -226,6 +230,14 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		d[fmt.Sprintf("project_%d", id)] = settings
 	}
 	return d
+}
+
+// connectAckDisplay says how the connector acknowledges a request.
+func connectAckDisplay(ack setup.AckBoost) string {
+	if ack.Off {
+		return "off: the session boosts each request"
+	}
+	return "boosts " + strconv.Quote(ack.Content) + " before handing each request off"
 }
 
 // escapeControls writes every control or non-printable rune in s, the
@@ -267,9 +279,12 @@ func markdownCode(s string) string {
 }
 
 // connectShowResult is show's data: where the file is, and what it holds.
+// AckBoost is the acknowledgement in effect, the default included, which
+// the file leaves out.
 type connectShowResult struct {
 	Path string `json:"path"`
 	setup.File
+	AckBoost setup.AckBoost `json:"ack_boost"`
 }
 
 // connectSetupFlags are setup's flags, as typed.
@@ -296,6 +311,11 @@ type connectSetupFlags struct {
 	// out, each <ping-id>:<person-id>.
 	allowInPing    []string
 	disallowInPing []string
+
+	// ackBoost is --ack-boost, the boost the connector acknowledges a
+	// request with; noAckBoost turns it off.
+	ackBoost   optionalString
+	noAckBoost bool
 
 	serve   []string
 	classes []string
@@ -385,6 +405,14 @@ person's in basecamp pings show <ping-id> --json. Anyone else's line in a
 Ping is discarded, as is any agent's. Restart the connector after changing
 who is let into a Ping.
 
+Acknowledgement. When someone asks the agent for something (a mention, an
+assignment, a ping), the connector boosts that recording as the agent before
+printing the request, and the request line carries the boost's id. Followed
+threads, completions and boosts are context and are not acknowledged.
+--ack-boost <content> sets the boost (default 👀, at most 16 characters);
+--no-ack-boost turns it off, and the session acknowledges instead. Restart
+the connector after changing it.
+
 No directory is associated with a project here: the session handling the
 requests chooses the repo for each one.
 
@@ -423,7 +451,9 @@ Examples:
   basecamp connect setup -P agent --class 12345=internal
   basecamp connect setup -P agent --allow-agent 333
   basecamp connect setup -P agent --allow-in-ping 2085958513:111
-  basecamp connect setup -P agent --agent-thread-cap 5 --agent-daily-cap 30`,
+  basecamp connect setup -P agent --agent-thread-cap 5 --agent-daily-cap 30
+  basecamp connect setup -P agent --ack-boost 'On it'
+  basecamp connect setup -P agent --no-ack-boost`,
 		Annotations: map[string]string{AnnotationProfileMayCreate: "true"},
 		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -457,7 +487,10 @@ Examples:
 	fl.StringArrayVar(&f.classes, "class", nil, "Classify a served project: <project-id>=<class>, or <project-id>= to clear it (repeatable)")
 	fl.StringArrayVar(&f.watch, "watch-completions", nil, "Admit every trusted completion in a served project (repeatable)")
 	fl.StringArrayVar(&f.unwatch, "no-watch-completions", nil, "Stop watching a project's completions (repeatable)")
+	fl.Var(&f.ackBoost, "ack-boost", fmt.Sprintf("Boost the connector acknowledges each request with, as the agent, before handing it off (default %s; at most %d characters)", setup.DefaultAckContent, setup.AckContentMax))
+	fl.BoolVar(&f.noAckBoost, "no-ack-boost", false, "Don't acknowledge requests in the connector; the session reading them boosts instead")
 	cmd.MarkFlagsMutuallyExclusive("operator", "operator-profile")
+	cmd.MarkFlagsMutuallyExclusive("ack-boost", "no-ack-boost")
 
 	return cmd
 }
@@ -980,6 +1013,12 @@ func (f *connectSetupFlags) changes() (setup.Changes, error) {
 		}
 		ch.Remove = append(ch.Remove, id)
 	}
+	switch {
+	case f.ackBoost.set:
+		ch.AckBoost = &setup.AckBoost{Content: f.ackBoost.value}
+	case f.noAckBoost:
+		ch.AckBoost = &setup.AckBoost{Off: true}
+	}
 
 	return ch, nil
 }
@@ -1439,5 +1478,20 @@ func (n *optionalInt) Set(s string) error {
 		return err
 	}
 	n.set, n.value = true, v
+	return nil
+}
+
+// optionalString is a string flag that remembers whether it was passed, so
+// an empty value given is told apart from none.
+type optionalString struct {
+	set   bool
+	value string
+}
+
+func (o *optionalString) String() string { return o.value }
+func (o *optionalString) Type() string   { return "string" }
+
+func (o *optionalString) Set(s string) error {
+	o.set, o.value = true, s
 	return nil
 }

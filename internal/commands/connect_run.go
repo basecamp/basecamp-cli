@@ -352,13 +352,17 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return connector.RunAdmission(ctx, connector.AdmissionOptions{Ledger: ledger, Queue: queue, Admitter: admitter, Lines: lines, Logger: logger})
 	})
 	if !f.shadow {
-		// Each trusted request goes to stdout for the session that started
-		// the connector, and the connector is done with it.
+		// Each trusted request someone made of the agent is acknowledged
+		// with a boost, unless connect.json turns that off, then goes to
+		// stdout for the session that started the connector, and the
+		// connector is done with it. A shadow runs no handoff, so it posts
+		// nothing; a hold hands nothing off, so it boosts nothing.
 		started := time.Now()
 		runPart("handoff", func(ctx context.Context) error {
 			return connector.RunHandoff(ctx, connector.HandoffOptions{
 				Ledger: ledger, Served: served.Current, Buckets: buckets, AgentID: agentID,
 				Lines: lines, Logger: logger, Started: started,
+				AckContent: file.Ack().Content, Booster: connector.SDKBooster{Client: accountClient},
 			})
 		})
 	}

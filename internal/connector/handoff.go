@@ -16,10 +16,12 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
-// The handoff is what the connector does with a request it trusts: it writes
-// it to stdout as an event line and is done with it. Whoever reads the lines,
+// The handoff is what the connector does with a request it trusts: it
+// acknowledges it with a boost when someone asked for something, writes it to
+// stdout as an event line, and is done with it. Whoever reads the lines,
 // usually the person's own Claude session through the basecamp-connect skill,
-// acknowledges it, does the work and replies. The connector starts no worker.
+// does the work and replies. The connector starts no worker, and the boost is
+// the one thing it posts.
 
 // HandoffLine is one trusted request, as the reader gets it. It is the
 // instruction a worker used to pull, written out: the agent's own mention
@@ -60,8 +62,9 @@ type HandoffLine struct {
 	// comparing ids itself. Admission settles it (Snapshot.Owner); a record
 	// admitted before it did says false.
 	Owner bool `json:"owner"`
-	// Acknowledge says a person asked for something. A comment on a thread
-	// the agent follows, or a completion, is context and is not acknowledged.
+	// Acknowledge says an acknowledgement is still owed: a person asked for
+	// something and the connector did not boost it. A comment on a thread the
+	// agent follows, or a completion, is context and is not acknowledged.
 	Acknowledge bool `json:"acknowledge"`
 	// Go says this boosted request is the operator's go: their boost on a
 	// post the agent declared an ask (`basecamp connect ask`), and the first
@@ -74,6 +77,11 @@ type HandoffLine struct {
 	// approves. The worker acts on these words, never on a fresh read of
 	// Recording, which may have been edited since. Empty on every other line.
 	Ask HandoffAsk `json:"ask"`
+	// Ack is the boost the connector acknowledged the request with, as the
+	// agent, before writing this line. Absent when it gave none: the request
+	// is not one to acknowledge, the acknowledgement is turned off, or the
+	// boost failed, and then the reader acknowledges it as before.
+	Ack *HandoffAck `json:"ack,omitempty"`
 
 	Content          string    `json:"content"`
 	ContentUpdatedAt time.Time `json:"content_updated_at"`
@@ -83,6 +91,13 @@ type HandoffLine struct {
 // chat line.
 type HandoffAsk struct {
 	Title   string `json:"title"`
+	Content string `json:"content"`
+}
+
+// HandoffAck is the boost that acknowledged a request: its id, which the
+// agent can update to words of its own, and what it says.
+type HandoffAck struct {
+	BoostID int64  `json:"boost_id"`
 	Content string `json:"content"`
 }
 
@@ -129,7 +144,21 @@ type HandoffOptions struct {
 	// Interval is how often admitted records are looked for. Zero means
 	// DefaultHandoffInterval.
 	Interval time.Duration
+	// AckContent is the boost a request someone made of the agent is
+	// acknowledged with, through Booster, before its line is written. Empty
+	// turns the acknowledgement off.
+	AckContent string
+	Booster    Booster
 }
+
+// Booster boosts a recording as the agent and returns the boost's id.
+type Booster interface {
+	Boost(ctx context.Context, recordingID int64, content string) (int64, error)
+}
+
+// AckTimeout bounds the acknowledgement boost, so a Basecamp that does not
+// answer delays a request's line by this much and no more.
+const AckTimeout = 10 * time.Second
 
 func (o HandoffOptions) log() *slog.Logger {
 	if o.Logger == nil {
@@ -226,10 +255,66 @@ func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 		opts.log().Warn("connector: a request could not be handed off", "event_id", record.ID, "error", err)
 		return opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonUnreadable)
 	}
+	if line.Ack, err = acknowledge(ctx, opts, record); err != nil {
+		return err
+	}
+	// A hold can land while the boost is in flight. A record it moved is not
+	// handed off; its ack stays recorded for a later redispatch to reuse.
+	current, ok, err := opts.Ledger.Get(ctx, record.ID)
+	if err != nil {
+		return err
+	}
+	if !ok || current.State != record.State {
+		opts.log().Info("connector: a request that changed state while it was acknowledged is not handed off", "event_id", record.ID, "state", current.State)
+		return nil
+	}
+	// A reader that predates ack boosts whenever acknowledge says so, which
+	// would put a second boost beside the connector's.
+	line.Acknowledge = line.Acknowledge && line.Ack == nil
 	if err := opts.Lines.WriteLine(line); err != nil {
 		return fmt.Errorf("connector: hand off event %d: %w", record.ID, err)
 	}
 	return opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonHandedOff)
+}
+
+// acknowledge boosts the recording of a request someone made of the agent,
+// once, and returns the boost for its line. A request handed off again after
+// a crash gets the boost the ledger recorded rather than another.
+//
+// A boost that failed is no acknowledgement and stops nothing: the line goes
+// out without one, and its reader acknowledges instead. It is never retried:
+// a request that failed may still have landed, and a second would post the
+// boost twice. Only the ledger failing is an error.
+func acknowledge(ctx context.Context, opts HandoffOptions, record Record) (*HandoffAck, error) {
+	if !record.Decision.Acknowledge {
+		return nil, nil
+	}
+	// A boost already given is the acknowledgement even if boosting has since
+	// been turned off: without it on the line, the reader would boost again.
+	if ack, ok, err := opts.Ledger.ack(ctx, record.ID); err != nil || ok {
+		return &ack, err
+	}
+	if opts.AckContent == "" || opts.Booster == nil {
+		return nil, nil
+	}
+	// A shutdown does not cut a boost off midway, nor its recording: one cut
+	// off may have landed unrecorded, and the next run would boost again. The
+	// recording has a deadline of its own, so a boost that used most of its
+	// budget still gets written.
+	boostCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), AckTimeout)
+	defer cancel()
+	id, err := opts.Booster.Boost(boostCtx, record.RecordingID, opts.AckContent)
+	if err != nil {
+		opts.log().Warn("connector: the acknowledgement boost failed; the request is handed off without it", "event_id", record.ID, "error", err)
+		return nil, nil
+	}
+	ack := HandoffAck{BoostID: id, Content: richtext.SanitizeTerminal(opts.AckContent)}
+	recordCtx, cancelRecord := context.WithTimeout(context.WithoutCancel(ctx), AckTimeout)
+	defer cancelRecord()
+	if err := opts.Ledger.recordAck(recordCtx, record.ID, ack); err != nil {
+		return nil, err
+	}
+	return &ack, nil
 }
 
 // handoffLine is a record as the reader gets it.

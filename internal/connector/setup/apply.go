@@ -51,6 +51,10 @@ type Changes struct {
 	WatchCompletions map[int64]bool
 	// Remove stops serving projects.
 	Remove []int64
+
+	// AckBoost sets how the connector acknowledges a request; nil keeps the
+	// file's.
+	AckBoost *AckBoost
 }
 
 // PingPerson is a person in one Ping.
@@ -82,6 +86,18 @@ func Apply(f File, ch Changes) (File, error) {
 	}
 	if out.Pings, err = applyPings(f.Pings, ch); err != nil {
 		return File{}, err
+	}
+	if ch.AckBoost != nil {
+		if err := ch.AckBoost.Validate(); err != nil {
+			return File{}, fmt.Errorf("--ack-boost: %w", err)
+		}
+		// The default is written as no key at all, which a CLI that
+		// predates the key still reads.
+		out.AckBoost = nil
+		if *ch.AckBoost != (AckBoost{Content: DefaultAckContent}) {
+			ack := *ch.AckBoost
+			out.AckBoost = &ack
+		}
 	}
 
 	for _, id := range ch.Remove {
