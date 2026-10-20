@@ -36,7 +36,7 @@ func NewChatCmd() *cobra.Command {
 Use 'basecamp chat list' to see chats in a project.
 Use 'basecamp chat messages' to view recent messages.
 Use 'basecamp chat post "message"' to post a message.`,
-		Annotations: map[string]string{"agent_notes": "Projects may have multiple chats — use --room to target a specific one\nContent is sent as plain text by default; use --content-type text/html for rich text\nChat is project-scoped, no cross-project chat queries\n@mentions: prefer [@Name](mention:SGID) for zero API calls, or [@Name](person:ID) for one lookup; @Name/@First.Last for fuzzy matching (auto-promotes to text/html)\nUse --content-type text/plain to bypass mention resolution"},
+		Annotations: map[string]string{"agent_notes": "Projects may have multiple chats — use --room to target a specific one\nContent is sent as plain text by default; use --content-type text/html for rich text. HTML from end to end (opens and closes with a block tag such as <p>) is refused without a --content-type: pass text/html, or text/plain to send it as typed\nChat is project-scoped, no cross-project chat queries\n@mentions: prefer [@Name](mention:SGID) for zero API calls, or [@Name](person:ID) for one lookup; @Name/@First.Last for fuzzy matching (auto-promotes to text/html)\nUse --content-type text/plain to bypass mention resolution"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
@@ -354,7 +354,10 @@ func newChatPostCmd(project, chatID, contentType *string) *cobra.Command {
 		Long: `Post a message to a chat.
 
 By default, messages are sent as plain text. Use --content-type text/html
-for rich text (HTML) messages.
+for rich text (HTML) messages. A message that is HTML from end to end, opening
+and closing with a block tag such as <p>, <ul> or <div>, is refused without a
+--content-type rather than posted with its tags showing: pass text/html to send
+it as rich text, or text/plain to send it exactly as typed.
 
 @mentions (@Name or @First.Last) are resolved automatically and the
 content type is promoted to text/html when mentions are present.
@@ -519,6 +522,14 @@ func postToChat(cmd *cobra.Command, app *appctx.App, chatIDInt int64, content, c
 			}
 		}
 		mentionNotice = nav.unresolvedMentions(result.Unresolved)
+	}
+
+	// HTML sent as plain text shows its tags, and whether markup was meant
+	// can't be read from the text ("<p> pairs with </p>"), so ask, before
+	// anything is posted, rather than guess.
+	if contentType == "" && richtext.IsHTMLDocument(content) {
+		return output.ErrUsageHint("this message is HTML, which plain text would show as tags",
+			"Send it as rich text with --content-type text/html, or exactly as typed with --content-type text/plain")
 	}
 
 	// Post message using SDK

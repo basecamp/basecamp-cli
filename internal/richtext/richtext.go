@@ -1813,6 +1813,25 @@ func (index textSpanIndex) contains(pos int) bool {
 	return i < len(index) && index[i].start <= pos
 }
 
+// IsHTMLDocument reports whether s reads as HTML from end to end: it opens with
+// a block element's tag and closes with one, as in <p>…</p> or <ul>…</ul>, or
+// with a mention attachment. Prose that mentions a tag ("use <br> here") does
+// not, nor does markup quoted in a code span or fence. Unlike IsHTML, a single
+// tag anywhere is not enough. Text can read this way and still be meant
+// literally ("<p> pairs with </p>"), so this says what s looks like, not what
+// its author meant.
+func IsHTMLDocument(s string) bool {
+	s = strings.TrimSpace(s)
+	return reHTMLDocumentOpen.MatchString(s) && reHTMLDocumentClose.MatchString(s)
+}
+
+// reHTMLDocumentOpen and reHTMLDocumentClose match a block element's opening
+// tag at the start of a string and a closing tag at its end.
+var (
+	reHTMLDocumentOpen  = regexp.MustCompile(`(?i)\A<(p|div|ul|ol|h[1-6]|blockquote|pre|table|figure)(\s(?:[^<>"']|"[^"]*"|'[^']*')*)?>`)
+	reHTMLDocumentClose = regexp.MustCompile(`(?i)</(p|div|ul|ol|h[1-6]|blockquote|pre|table|figure|bc-attachment)\s*>\z`)
+)
+
 // IsHTML attempts to detect if the input string contains HTML.
 // Only returns true for well-formed HTML with common content tags.
 // Does not detect arbitrary tags like <script> to prevent XSS passthrough.

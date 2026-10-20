@@ -3215,3 +3215,52 @@ func TestPlainToHTMLRoundTripsThroughHTMLToMarkdown(t *testing.T) {
 		}
 	}
 }
+
+func TestIsHTMLDocument(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"a paragraph", "<p>Build is green</p>", true},
+		{"paragraphs and a list", "<p>Status:</p><ul><li>one</li><li>two</li></ul><p>Done.</p>", true},
+		{"surrounding whitespace and newlines", "\n  <p>Hi</p>\n<ul>\n<li>a</li>\n</ul>\n", true},
+		{"attributes", `<p dir="auto">Hi</p>`, true},
+		{"upper case", "<P>Hi</P>", true},
+		{"a heading", "<h2>Release</h2>", true},
+		{"a div", "<div>Hi</div>", true},
+		{"a blockquote", "<blockquote>quoted</blockquote>", true},
+		{"preformatted", "<pre>go test ./...</pre>", true},
+		{"a figure", "<figure><table><tr><td>Ready</td></tr></table></figure>", true},
+		{"a quoted > in an attribute", `<p title="a > b">Ready</p>`, true},
+		{"ending in a mention", `<p>Hello</p><bc-attachment sgid="x" content-type="application/vnd.basecamp.mention">@Jane</bc-attachment>`, true},
+		{"indented", "    <p>Hi</p>", true},
+		{"tags meant literally", "<p> starts a paragraph; close it with </p>", true},
+
+		{"empty", "", false},
+		{"plain text", "Build is green", false},
+		{"prose naming a tag", "use <br> for a line break", false},
+		{"prose opening with a tag", "<p> starts a paragraph", false},
+		{"prose closing with a tag", "a paragraph ends with </p>", false},
+		{"inline markup only", "<strong>Done</strong>", false},
+		{"inline markup leading prose", "<b>Note:</b> the build is green", false},
+		{"a line break between words", "Hello<br>world", false},
+		{"markup in a code span", "`<p>Hi</p>`", false},
+		{"markup in a fenced block", "```html\n<p>Hi</p>\n```", false},
+		{"escaped tag", `\<p>Hi</p>`, false},
+		{"unclosed paragraph", "<p>Hi", false},
+		{"trailing prose", "<p>Hi</p> and more", false},
+		{"leading prose", "Hi <p>there</p>", false},
+		{"a longer tag name", "<press>Hi</press>", false},
+		{"a tag that is not rich text", "<script>alert(1)</script>", false},
+		{"a generic type", "Vec<String>", false},
+		{"an angle-bracket placeholder", "<message>", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsHTMLDocument(tt.input); got != tt.want {
+				t.Errorf("IsHTMLDocument(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}

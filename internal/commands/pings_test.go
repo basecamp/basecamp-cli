@@ -736,3 +736,27 @@ func TestChatUpdateOnAPingLineMentionsOnlyThePingsPeople(t *testing.T) {
 		})
 	}
 }
+
+// pings post refuses HTML without a content type as chat post does, and
+// posts it as rich text when asked.
+func TestPingsPostRefusesHTMLWithoutAContentType(t *testing.T) {
+	const post = "POST /99999/chats/700/lines.json"
+	newFake := func() *pingsFake {
+		f := newPingsFakeWithPeople()
+		f.on("GET", "/99999/circles/500", 200, pingJSON(500, 700, "Jason Fried", false, pingPersonJSON(1001, "Jason Fried", "jason@example.com")))
+		f.on("POST", "/99999/chats/700/lines.json", 201, `{"id":9,"content":"x","created_at":"2026-10-19T15:15:25.688Z"}`)
+		return f
+	}
+
+	f := newFake()
+	_, err := runPingsCmd(t, f, "post", "500", "<p>Build is green</p><ul><li>#913</li></ul>")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "this message is HTML")
+	assert.False(t, f.asked(post), "nothing is posted")
+
+	f = newFake()
+	_, err = runPingsCmd(t, f, "post", "500", "<p>Build is green</p>", "--content-type", "text/html")
+	require.NoError(t, err)
+	assert.Equal(t, "text/html", f.body(post)["content_type"])
+	assert.Equal(t, "<p>Build is green</p>", f.body(post)["content"])
+}
