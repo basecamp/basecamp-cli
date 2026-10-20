@@ -294,6 +294,20 @@ func TestCommentsCreateStopsPollingAfterAFailure(t *testing.T) {
 	assert.Contains(t, stderr, "couldn't embed "+embedChartURL)
 }
 
+func TestCommentsCreateWarnsOnOneCleanLine(t *testing.T) {
+	transport := &embedTransport{
+		creates: map[string]embedReply{embedVideoURL: {http.StatusInternalServerError, `{"error":"boom\u001b[31m\nWarning: forged"}`}},
+	}
+	app, _ := newTestAppWithTransport(t, transport)
+
+	stderr, err := runEmbedCommand(NewCommentsCmd(), app, "create", embedCardURL, embedVideoURL)
+	require.NoError(t, err)
+
+	assert.NotContains(t, stderr, "\x1b")
+	assert.Equal(t, 1, strings.Count(stderr, "\n"), stderr)
+	assert.Contains(t, stderr, "couldn't embed "+embedVideoURL)
+}
+
 func TestCommentsCreatePostsWhenAnEmbedRequestHangs(t *testing.T) {
 	fastEmbedPolling(t, 50*time.Millisecond)
 	transport := &embedTransport{hang: true}

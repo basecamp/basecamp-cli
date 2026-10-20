@@ -44,9 +44,9 @@ With Markdown content (the default), you don't need this command: put the URL
 on a line by itself and Basecamp embeds it, as the editor does when you paste
 a link. Write [title](url) to keep a link instead.
 
-Use 'create' when you write HTML (--format html): it prints the
-<bc-attachment> tag to put in your content.`,
-		Annotations: map[string]string{"agent_notes": "A URL alone on its line in Markdown content becomes an embed automatically\nWrite [title](url) to keep it a link\nURLs Basecamp can't embed stay links, with no warning\nWith --format html, use embeds create and paste its attachment tag"},
+Use 'create --json' when you write HTML (--format html): its attachment
+field is the <bc-attachment> tag to put in your content.`,
+		Annotations: map[string]string{"agent_notes": "A URL alone on its line in Markdown content becomes an embed automatically\nWrite [title](url) to keep it a link\nURLs Basecamp can't embed stay links, with no warning\nWith --format html, use embeds create --json and paste its attachment field"},
 	}
 
 	cmd.AddCommand(
@@ -63,7 +63,8 @@ func newEmbedsCreateCmd() *cobra.Command {
 		Short: "Create an embed for a URL",
 		Long: `Create an embed for a URL and wait until Basecamp has it from the provider.
 
-Prints the embed, with the <bc-attachment> tag to put in HTML rich text.
+With --json, the embed's attachment field is the <bc-attachment> tag to put
+in HTML rich text.
 A URL no provider embeds is refused; link to it instead.`,
 		Example: `  basecamp embeds create https://www.youtube.com/watch?v=dQw4w9WgXcQ
   basecamp embeds create https://dash.37signals.com/widgets/abc --json`,
@@ -192,13 +193,13 @@ func resolveEmbeds(ctx context.Context, client embedClient, urls []string, warni
 				continue
 			}
 			failure = err
-			fmt.Fprintf(warnings, "Warning: couldn't embed %s, so it stays a link: %v\n", url, err)
+			warnEmbed(warnings, "Warning: couldn't embed %s, so it stays a link: %v", url, err)
 			switch rest := len(urls) - i - 1; rest {
 			case 0:
 			case 1:
-				fmt.Fprintln(warnings, "Warning: the URL after it stays a link too.")
+				warnEmbed(warnings, "Warning: the URL after it stays a link too.")
 			default:
-				fmt.Fprintf(warnings, "Warning: the %d URLs after it stay links too.\n", rest)
+				warnEmbed(warnings, "Warning: the %d URLs after it stay links too.", rest)
 			}
 			break
 		}
@@ -228,14 +229,18 @@ func resolveEmbeds(ctx context.Context, client embedClient, urls []string, warni
 		case embed.Status == "active":
 			refs[url] = richtext.EmbedRef{SGID: embed.SGID, ContentType: embed.ContentType}
 		case embed.Status == "pending" && failure != nil:
-			fmt.Fprintf(warnings, "Warning: couldn't embed %s, so it stays a link: %v\n", url, failure)
+			warnEmbed(warnings, "Warning: couldn't embed %s, so it stays a link: %v", url, failure)
 		case embed.Status == "pending":
-			fmt.Fprintf(warnings, "Warning: %s took too long to answer, so it stays a link.\n", url)
+			warnEmbed(warnings, "Warning: %s took too long to answer, so it stays a link.", url)
 		default:
-			fmt.Fprintf(warnings, "Warning: Basecamp found nothing to embed at %s, so it stays a link.\n", url)
+			warnEmbed(warnings, "Warning: Basecamp found nothing to embed at %s, so it stays a link.", url)
 		}
 	}
 	return refs
+}
+
+func warnEmbed(warnings io.Writer, format string, args ...any) {
+	fmt.Fprintln(warnings, richtext.SanitizeSingleLine(fmt.Sprintf(format, args...)))
 }
 
 func anyPendingEmbed(urls []string, embeds map[string]*basecamp.Embed) bool {
