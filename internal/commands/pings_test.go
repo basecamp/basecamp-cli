@@ -691,3 +691,48 @@ func TestPingsHintQuotesThePersonForTheShell(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, pingsErrorHint(t, err), "basecamp pings start 'Sam $HOME'")
 }
+
+// Editing a Ping line resolves @mentions among the Ping's people, as posting
+// there does: a name nobody in the Ping has stays text, and the account's
+// people are not asked about, since the Ping is no project.
+func TestChatUpdateOnAPingLineMentionsOnlyThePingsPeople(t *testing.T) {
+	const url = "https://app.basecamp.com/99999/circles/500@111"
+	const put = "PUT /99999/chats/700/lines/111"
+	for _, tc := range []struct {
+		name        string
+		message     string
+		wantSGID    string
+		wantNotice  string
+		wantNoSGIDs []string
+	}{
+		{"a name in the Ping", "thanks @Jason", "sgid-1001", "", []string{"sgid-1004"}},
+		{"a name nobody has", "thanks @Nobody", "", "@Nobody", nil},
+		{"a namesake outside the Ping", "thanks @Jane.Smith", "", "@Jane.Smith", []string{"sgid-1002"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPingsFakeWithPeople()
+			f.on("GET", "/99999/circles/500", 200, pingJSON(500, 700, "Jason Fried", false, pingPersonJSON(1001, "Jason Fried", "jason@example.com")))
+			f.on("PUT", "/99999/chats/700/lines/111", 204, ``)
+			f.on("GET", "/99999/chats/700/lines/111", 200, `{"id":111,"content":"edited","creator":{"name":"Jason Fried"},"created_at":"2026-10-19T15:15:25.688Z"}`)
+
+			env, err := runPings(t, f, NewChatCmd, "update", url, tc.message)
+			require.NoError(t, err)
+
+			require.True(t, f.asked(put), f.requests)
+			content, _ := f.body(put)["content"].(string)
+			if tc.wantSGID != "" {
+				assert.Contains(t, content, tc.wantSGID)
+			}
+			for _, sgid := range tc.wantNoSGIDs {
+				assert.NotContains(t, content, sgid, "only the Ping's people can be mentioned")
+			}
+			if tc.wantNotice != "" {
+				assert.Contains(t, content, tc.wantNotice, "an unresolved mention stays text")
+				assert.Contains(t, env.Notice, tc.wantNotice)
+				assert.Contains(t, env.Notice, "only people in this ping")
+			}
+			assert.False(t, f.askedAbout("/projects/500"), "a Ping is no project")
+			assert.False(t, f.askedAbout("people.json"), "the account's people are not asked about")
+		})
+	}
+}

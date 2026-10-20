@@ -1010,9 +1010,10 @@ edit to rich text.`,
 				return output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", parsedURL.AccountID, app.Config.AccountID))
 			}
 
+			var ping *basecamp.Ping
 			if parsedURL != nil && parsedURL.PingID != "" {
 				var err error
-				if urlChatID, err = pingURLCampfireID(cmd.Context(), app, parsedURL.PingID); err != nil {
+				if ping, urlChatID, err = pingURLCampfire(cmd.Context(), app, parsedURL.PingID); err != nil {
 					return err
 				}
 			}
@@ -1087,12 +1088,20 @@ edit to rich text.`,
 				if ct == "" {
 					messageContent = richtext.MarkdownToHTML(messageContent)
 				}
-				result, resolveErr := resolveMentions(cmd.Context(), app.Names, mentionScope(app, urlProjectID, resolvedProjectID, *project, app.Flags.Project), messageContent)
+				resolve := func(ctx context.Context, html string) (richtext.MentionResult, error) {
+					return resolveMentions(ctx, app.Names, mentionScope(app, urlProjectID, resolvedProjectID, *project, app.Flags.Project), html)
+				}
+				notice := unresolvedMentionWarning
+				if ping != nil {
+					// A Ping is no project, and only its people can read the line.
+					resolve, notice = pingMentionResolver(ping), pingNav(ping.ID).unresolvedMentions
+				}
+				result, resolveErr := resolve(cmd.Context(), messageContent)
 				if resolveErr != nil {
 					return resolveErr
 				}
 				messageContent = result.HTML
-				mentionNotice = unresolvedMentionWarning(result.Unresolved)
+				mentionNotice = notice(result.Unresolved)
 			}
 
 			if err := app.Account().Campfires().UpdateLine(cmd.Context(), chatIDInt, lineIDInt, messageContent); err != nil {
@@ -1330,7 +1339,7 @@ func chatLineRef(ctx context.Context, app *appctx.App, arg string) (lineID, proj
 		return "", "", "", false, output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", parsed.AccountID, app.Config.AccountID))
 	}
 	if parsed.PingID != "" {
-		chatID, err = pingURLCampfireID(ctx, app, parsed.PingID)
+		_, chatID, err = pingURLCampfire(ctx, app, parsed.PingID)
 		if err != nil {
 			return "", "", "", false, err
 		}
@@ -1339,19 +1348,19 @@ func chatLineRef(ctx context.Context, app *appctx.App, arg string) (lineID, proj
 	return parsed.RecordingID, parsed.ProjectID, parsed.CampfireID, false, nil
 }
 
-// pingURLCampfireID finds the Campfire of the Ping a chat-line URL names. The
+// pingURLCampfire finds the Ping a chat-line URL names, and its Campfire. The
 // URL carries the Ping and the line but not the Campfire, so the room the URL
 // names has to be asked of the account, as a /chats/{c}@{l} URL names its own.
-func pingURLCampfireID(ctx context.Context, app *appctx.App, pingID string) (string, error) {
+func pingURLCampfire(ctx context.Context, app *appctx.App, pingID string) (*basecamp.Ping, string, error) {
 	id, err := strconv.ParseInt(pingID, 10, 64)
 	if err != nil {
-		return "", output.ErrUsage("Invalid ping ID")
+		return nil, "", output.ErrUsage("Invalid ping ID")
 	}
-	_, campfireID, err := resolvePingCampfire(ctx, app, pingTarget{id: id}, pingLookupOnly)
+	ping, campfireID, err := resolvePingCampfire(ctx, app, pingTarget{id: id}, pingLookupOnly)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
-	return strconv.FormatInt(campfireID, 10), nil
+	return ping, strconv.FormatInt(campfireID, 10), nil
 }
 
 // getChatID retrieves the chat ID from a project's dock, handling multi-dock projects.
