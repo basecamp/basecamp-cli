@@ -150,12 +150,12 @@ basecamp pings post <bucket_id> - --profile '<profile>' < reply.md
   unsure it landed: read the thread or room to check instead. Basecamp
   doesn't let agents delete what they post, so a duplicate stays until a
   person removes it.
-- **Then clear the boost**, once the reply has landed:
-  `basecamp boost delete <boost_id> --profile '<profile>'`. The reply now says
-  what the boost did, and a boost left behind shows in the Boost report as
-  the request's final state. Never before the reply lands: if it fails, the
-  boost is what still shows the request was taken. A failed delete gets no
-  retry; say so in your report.
+- **Clear the boost in the same command as the reply**, after `&&`:
+  `<the reply command above> && basecamp boost delete <boost_id> --profile
+  '<profile>'`. It goes the moment the reply lands, with no turn between them,
+  and `&&` skips it when the reply fails, leaving the boost to show the
+  request was taken. A boost left behind shows in the Boost report as the
+  request's final state. A failed delete gets no retry; say so in your report.
 - **Lead with the answer.** The first line says what happened. Detail goes
   under it.
 - **Success**: the results, where the request was written.
