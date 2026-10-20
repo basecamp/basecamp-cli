@@ -62,9 +62,8 @@ Claude Code only. The connector runs on Linux and macOS.
 
 ### 1. Start it, and watch its output
 
-Only one connector per agent can run at a time. If it's already running
-elsewhere, it refuses to start and says so: tell the person, and don't start a
-second.
+One connector per profile can run in this state directory. If another holds
+its lock, it refuses: tell the person, and don't start a second.
 
 Start it in the background with the Bash tool (`run_in_background: true`), and
 note the output file the harness reports:
@@ -456,9 +455,13 @@ Check it: `basecamp auth status -P '<profile>' --json`.
   computer with none yet): it doesn't exist. Never run `basecamp profile
   create` for an agent: that signs in a person. If Basecamp's instructions
   page connected this agent over HTTP before (a
-  `~/.basecamp-agent/credentials.json`; never read it), say first that
-  connecting replaces that connection, so they approve once more and the
-  file stops working. Then connect the agent with
+  `~/.basecamp-agent/credentials.json`; never read it), ask whether the agent
+  is personal or shared. Warn before approval: an agent whose kind (personal
+  or shared) doesn't have adding enabled replaces the existing connection;
+  one whose kind does keeps both live. Read the approval page, never
+  assume adding is enabled. Don't delete credential files. If the owner says
+  nothing uses the old file, have them disconnect its connection in Basecamp,
+  then remove that unused file themselves. Then connect the agent with
   `basecamp auth agent connect -P '<profile>' --json` (add `--no-browser` if
   the person is on another device). Show them the link and code from its
   verification line. They open the link, check the code, choose the agent (or
@@ -466,8 +469,9 @@ Check it: `basecamp auth status -P '<profile>' --json`.
 - `oauth_type` `agent`: an agent is already connected under it. If you chose
   this name for a new agent, that's another agent's profile: pick another
   name (`build-bot-2`, then `-3`) and check again. If the person named it,
-  don't connect again: that rotates the agent's secret and disconnects any
-  other computer using it.
+  don't connect again: approval may replace an existing connection, or add
+  one and leave this profile's old connection live until disconnected in
+  Basecamp.
 - Anything else: a person's login is stored. Never connect an agent over it:
   pick another name if you chose this one, and ask if they did.
 
@@ -599,7 +603,8 @@ Failed checks worth knowing:
 - **Stream ticket refused.** The account event feed isn't enabled for this
   account or agent. That's a Basecamp setting the person has to ask for.
 - **Scope: not full access.** The agent couldn't reply. Connect again with full
-  access, with the person's consent, since it rotates the secret.
+  access only with consent: approval may replace the existing connection,
+  or add one and leave the read-only connection live. Check the approval page.
 
 **Never edit connect.json by hand**, and never read it directly: use
 `basecamp connect show -P '<profile>' --json`, which checks the file is safe
@@ -610,11 +615,12 @@ first. Every change goes through setup, which keeps whatever you don't pass.
 The background task notifies you when the connector exits. Read the end of its
 output and tell the person what it means:
 
-- **"was disconnected in Basecamp, or connected on another computer"**: run
+- **"was disconnected in Basecamp, or replaced by a newer connection"**: run
   `basecamp connect setup -P '<profile>'` (it reconnects with one approval),
   then start it again.
-- **Already running**: another connector for this agent holds its lock, on
-  this computer or in another session. Don't start a second.
+- **Already running**: another connector holds the profile's lock in this
+  state directory. Don't start a second. An older build holding legacy state
+  must be stopped and its existing profile restarted on this build first.
 - **`BASECAMP_TOKEN` is set**: the person unsets it, then you start it again.
 - **Anything else**: show the error, and run `basecamp connect doctor -P
   '<profile>'`.

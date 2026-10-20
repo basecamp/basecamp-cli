@@ -26,7 +26,7 @@ accept:
   - '^me .*(-P|--profile)[ =]''?helper\b'
 reject:
   # The credential is not the agent the person named: nothing is set up, and
-  # reconnecting (which rotates a secret) is the person's call.
+  # reconnecting (which may replace a live connection) is the person's call.
   - 'connect setup'
   - 'auth agent connect'
   - 'auth logout'

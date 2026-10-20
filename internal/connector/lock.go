@@ -12,17 +12,8 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 )
 
-// ErrAlreadyRunning reports a second connector for the same agent.
-var ErrAlreadyRunning = errors.New("connector: another connector already holds this account and agent")
+var ErrAlreadyRunning = errors.New("connector: another connector already runs for this profile")
 
-// InstanceLock is the refusal of a second connector on one agent identity.
-//
-// It is keyed on the ACCOUNT and the agent's Person id, not on the profile
-// name. Two profiles can hold credentials for the same agent, and the failure
-// this prevents is not "the same configuration twice" — it is one agent's
-// mentions being dispatched twice, which is a property of the identity, not of
-// the file that names it.
-//
 // The kernel drops a flock when the holding descriptor closes, process death
 // included, so a crashed connector cannot wedge the lock and there is no
 // stale-lock reaping to get wrong. The metadata written beside it is
@@ -41,7 +32,8 @@ type instanceHolder struct {
 	AgentID   int64  `json:"agent_person_id"`
 }
 
-// AcquireInstanceLock takes the lock for one account and agent, or refuses.
+// AcquireInstanceLock takes the lock in a profile's state directory, or refuses.
+// The account and agent name the file; the containing directory isolates profiles.
 func AcquireInstanceLock(dir, accountID string, agentPersonID int64, now time.Time) (*InstanceLock, error) {
 	account, err := strconv.ParseUint(accountID, 10, 64)
 	if err != nil || account == 0 || agentPersonID <= 0 {
@@ -59,7 +51,7 @@ func AcquireInstanceLock(dir, accountID string, agentPersonID int64, now time.Ti
 	// the lock file itself are vetted here, by the same check the connector's
 	// trust file gets. Someone who can write the directory can point two
 	// connectors at two inodes, and then neither excludes the other: one
-	// agent's mentions dispatched twice, which is the failure this lock
+	// profile's mentions dispatched twice, which is the failure this lock
 	// exists to prevent.
 	unlock, err := setup.TryLockPrivate(path)
 	switch {

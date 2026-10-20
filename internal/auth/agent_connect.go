@@ -354,12 +354,11 @@ func (m *Manager) ConnectAgent(ctx context.Context, opts AgentConnectOptions) (*
 // adoptAgentGrantOrSayWhatWasLost stores the handed-over credential, and
 // says what a failure costs.
 //
-// The poll that answered burned the one-time code and MINTED THE AGENT'S
-// SECRET — a rotation, for an agent something was already connected to —
-// so what this holds is the only live copy and the server will not hand it
-// over twice. A failure here (a refused mint, a profile that cannot be
-// written, a Ctrl-C landing in the gap) therefore leaves the agent
-// connected to nothing. Retrying this command starts a new ceremony, which
+// The poll that answered burned the one-time code and minted this connection's
+// secret, possibly replacing an existing connection. The server will not hand
+// it over twice. A failure here (a refused mint, a profile that cannot be
+// written, a Ctrl-C landing in the gap) leaves this connection without a kept
+// credential; other connections may still work. Retrying this command starts a new ceremony, which
 // is the right remedy; polling the spent code again is not, and neither is
 // looking for the secret somewhere.
 func (m *Manager) adoptAgentGrantOrSayWhatWasLost(ctx context.Context, disc *discovery, conn *AgentConnection, log func(string), opts ClientCredentialsOptions) (*LoginResult, error) {
@@ -384,14 +383,14 @@ func reconnectRemedy(err error) error {
 		return err
 	}
 	hinted := *e
-	hinted.Hint = "Disconnect the agent in Basecamp and run the connect command again; the secret this connection was handed is gone."
+	hinted.Hint = "Disconnect the newest connection in Basecamp (last in the list, where connections are listed), not Disconnect all, and run the connect command again; its secret is gone, so cleanup can wait."
 	return &hinted
 }
 
 // warnHandoverLost says what a failure after the handover costs, in the
 // one line an operator has to act on.
 func warnHandoverLost(log func(string)) {
-	log("warning: the connection was approved and the agent's client secret was handed over once, but keeping it failed. Disconnect the agent in Basecamp and connect again.")
+	log("warning: the connection was approved and its client secret was handed over once, but keeping it failed. Disconnect the newest connection in Basecamp (last in the list, where connections are listed), not Disconnect all, and connect again; its secret is gone, so cleanup can wait.")
 }
 
 // spentHandoverError marks an error raised once the poll had already been

@@ -600,7 +600,8 @@ func (l *Ledger) move(ctx context.Context, db dbtx, t transition) (bool, error) 
 // It reads the row it is about to write, which every caller that writes a
 // verdict does inside its own transaction. Outside one the read could in
 // principle see a row another writer is changing — but AcquireInstanceLock is
-// a flock keyed on account and agent, so there is no other writer, and the
+// a flock inside this profile's state directory, excluding another connector
+// on this ledger, and the
 // UPDATE's own revision and state guards are what keep the move correct
 // either way. Only the schedule stamp could be stale, and only in a case the
 // lock does not allow.

@@ -271,9 +271,21 @@ basecamp connect setup -P my-agent --serve 12345        # who may give it work, 
 basecamp connect -P my-agent                            # the watcher
 ```
 
-Connect each agent once. Every connection rotates the agent's secret, so a
-second one, from this CLI or from the HTTP handshake on Basecamp's instructions
-page, disconnects the first and asks you to approve again.
+An approval may add a connection or replace an existing one: read the approval
+page before proceeding. Personal and team agents can have several connections
+where Basecamp enables adding them for that kind of agent. Otherwise a new
+approval replaces the existing connection. This applies to both the CLI and
+Basecamp's HTTP handshake. Do not reconnect just to upgrade the CLI.
+
+Each profile has its own projects, ledger, cursor, hold and local lock. When
+two connections serve the same project, a request both admit can be answered
+twice, so serve each project from one. Use a distinct `--device-name` for each
+profile on the same computer. Where Basecamp lists several connections, you
+can rename them and disconnect one without using Disconnect all. Reconnecting
+a profile on an add-capable server leaves its old connection live until you
+disconnect it; older credential files can remain live too. Do not delete them
+as part of setup. See the [upgrade and downgrade runbook](docs/agent-connections-rollout.md)
+for legacy state adoption and mixed-version precautions.
 
 In Claude Code, the `/basecamp-connect` skill runs the watcher and hands each
 request to a subagent. It ships in this CLI's plugin from 0.12.0 on, and an

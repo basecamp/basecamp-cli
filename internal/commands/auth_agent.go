@@ -55,6 +55,17 @@ the agent's own OAuth client: this CLI mints an access token from it
 whenever it needs one, so there is no token to paste and none to renew by
 hand.
 
+An approval may add a connection or replace an existing one; read the
+approval page before proceeding. An agent, personal or team, keeps several
+connections where Basecamp has enabled adding them for its kind. Otherwise
+connecting replaces the existing connection, wherever it runs.
+
+The device name defaults to this computer's name. Give each profile its own
+--device-name when several on this computer connect the same agent.
+Reconnecting a profile stores its new credential in place of the old one.
+Where approval adds, the old connection stays live until disconnected in
+Basecamp; other credential files are not removed or revoked by this CLI.
+
 The account comes from the agent you approve — pass --account only to
 insist on one, and the connection is refused if the agent belongs to
 another.
@@ -83,8 +94,9 @@ for a person go to stderr, and the browser opens as it would without
 The link and the code are for the person approving at this computer:
 show them there, never anywhere else.
 
-Disconnecting is done in Basecamp: disconnecting the agent there kills the
-client secret this holds. Drop the local copy with ` + "`basecamp auth logout -P <profile>`" + `.`,
+Disconnecting is done in Basecamp: disconnecting this connection there kills
+the secret this holds. Where several connections are listed, choose this
+connection, not Disconnect all. Drop the local copy with ` + "`basecamp auth logout -P <profile>`" + `.`,
 		Annotations: map[string]string{AnnotationProfileMayCreate: "true"},
 		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -113,7 +125,7 @@ client secret this holds. Drop the local copy with ` + "`basecamp auth logout -P
 		},
 	}
 
-	cmd.Flags().StringVar(&deviceName, "device-name", "", "Name this computer on the approval page (default: this host's name)")
+	cmd.Flags().StringVar(&deviceName, "device-name", "", "Name this device/connection (default: this host's name; use a distinct name for each profile)")
 	cmd.Flags().StringVar(&softwareName, "software-name", "", "Name the software this CLI runs inside, shown as \"Connected to\"")
 	cmd.Flags().StringVar(&scope, "scope", "", "OAuth scope to ask for: 'read' or 'full' (default full; the approval page can downgrade it)")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Print the link instead of opening a browser")
