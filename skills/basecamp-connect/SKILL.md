@@ -541,10 +541,10 @@ asked you to keep the connector running when they started it. So start it again
 at once, as in step 1, check the old output file and start the watcher on the
 new one as the end of this section says, and tell the person it happened. A
 command started again soon after such a stop isn't stopped again until someone
-types in the session. When such a notice names the watcher, start it again on
-the running connector's current output file. If the connector was stopped too,
-starting it again already started a new watcher: don't start one on the old
-file.
+types in the session. When such a notice names the watcher, check the
+connector first. If it was stopped too, start it again as above, which starts a
+new watcher, and don't start one on the old file. If it's still running, start
+the watcher again on its current output file.
 
 Otherwise, read the end of its output and tell the person what it means:
 

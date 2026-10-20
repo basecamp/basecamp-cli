@@ -110,8 +110,8 @@ func TestTheConnectSkillStartsTheConnectorAgainAfterAMemoryStop(t *testing.T) {
 
 	assert.Contains(t, section, "stopped because the system is running low on memory")
 	assert.Contains(t, section, "So start it again at once, as in step 1")
-	assert.Contains(t, section, "When such a notice names the watcher, start it again on the running connector's current output file.")
-	assert.Contains(t, section, "don't start one on the old file.")
+	assert.Contains(t, section, "When such a notice names the watcher, check the connector first. If it was stopped too, start it again as above, which starts a new watcher, and don't start one on the old file.")
+	assert.Contains(t, section, "If it's still running, start the watcher again on its current output file.")
 }
 
 func TestTheConnectSkillStatesHowFarBackARestartCatchesUp(t *testing.T) {
