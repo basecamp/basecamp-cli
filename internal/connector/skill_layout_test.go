@@ -1,10 +1,12 @@
 package connector
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -92,4 +94,37 @@ func TestTheSubagentReadsItsInstructionsFromTheirOwnFile(t *testing.T) {
 	for _, step := range []string{"**Shell quoting.**", "**1. Acknowledge", "**5. Reply at `reply_to`", "**6. Report back", "**A participant asks, an operator authorizes.**"} {
 		assert.Contains(t, subagent, step)
 	}
+}
+
+func flatText(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func TestTheConnectSkillStartsTheConnectorAgainAfterAMemoryStop(t *testing.T) {
+	skill := readConnectSkill(t, "SKILL.md")
+	start := strings.Index(skill, "## When the connector stops")
+	require.GreaterOrEqual(t, start, 0)
+	end := strings.Index(skill[start+1:], "\n## ")
+	require.GreaterOrEqual(t, end, 0)
+	section := flatText(skill[start : start+1+end])
+
+	assert.Contains(t, section, "stopped because the system is running low on memory")
+	assert.Contains(t, section, "So start it again at once, as in step 1")
+	assert.Contains(t, section, "When such a notice names the watcher, check the connector first. If it was stopped too, start it again as above, which starts a new watcher, and don't start one on the old file.")
+	assert.Contains(t, section, "If it's still running, start the watcher again on its current output file.")
+}
+
+func TestTheConnectSkillStatesHowFarBackARestartCatchesUp(t *testing.T) {
+	skill := flatText(readConnectSkill(t, "SKILL.md"))
+	window := fmt.Sprintf("%d hours", int(handoffCatchUp/time.Hour))
+
+	for _, phrase := range []string{
+		"it hands off the requests made while it was stopped, up to " + window + " before it started.",
+		"hands off requests made up to " + window + " before it started",
+		"dropped if that's more than " + window + " later.",
+	} {
+		assert.Contains(t, skill, phrase)
+	}
+	assert.NotContains(t, skill, "not picked up later")
+	assert.NotContains(t, skill, "starts from the present")
 }

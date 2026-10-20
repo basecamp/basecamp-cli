@@ -347,6 +347,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if err := ledger.NoteConnection(ctx, connector.ConnectionRunning, ""); err != nil {
 		logger.Warn("connector: could not record that it runs, for status", "error", err)
 	}
+	started := time.Now()
 	runPart("intake", intake.Run)
 	runPart("admission", func(ctx context.Context) error {
 		return connector.RunAdmission(ctx, connector.AdmissionOptions{Ledger: ledger, Queue: queue, Admitter: admitter, Lines: lines, Logger: logger})
@@ -354,7 +355,6 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if !f.shadow {
 		// Each trusted request goes to stdout for the session that started
 		// the connector, and the connector is done with it.
-		started := time.Now()
 		runPart("handoff", func(ctx context.Context) error {
 			return connector.RunHandoff(ctx, connector.HandoffOptions{
 				Ledger: ledger, Served: served.Current, Buckets: buckets, AgentID: agentID,
