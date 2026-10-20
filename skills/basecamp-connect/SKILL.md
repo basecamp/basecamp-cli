@@ -187,10 +187,10 @@ refusal above, the holding reply below) post as step 5 of `subagent.md` does.
 
 ### a. Acknowledge, within seconds
 
-With `ack` on the line, the connector boosted `ack.content`: reword it to a
-short phrase that fits the request (16 characters at most), never a fixed
-string. Otherwise, only when `acknowledge` is true, boost: this loop with
-`boost create '<recording.url>'`. A reply due within moments (a quick question)
+With `ack` on the line, the connector boosted `ack.content`: reword it to fit
+the request, emoji first (16 characters at most), never a fixed string.
+Otherwise, only when `acknowledge` is true, boost: this loop with
+`boost create '<recording.url>' --ids-only`. A reply due within moments (a quick question)
 is the acknowledgement: leave the boost, or give none, and say so in the
 handoff; not for card work, where the boost shows the request landed.
 
@@ -284,7 +284,7 @@ to finish without this session:
 - the agent's profile name, and the repo path (or "no repo"). A subagent
   doesn't start in that repo by itself: say plainly that it must work there;
 - whether an acknowledgement is still owed (no boost landed), or not owed
-  (one landed, the connector's included);
+  (one landed, the connector's included), with its id;
 - the full content of the project's AGENTS.md document and any repo mapping used,
   or the explicit
   result "AGENTS.md checked: none found";
@@ -533,7 +533,9 @@ it, and `--trust operator` clears it; setup refuses `--trust operator` with
 
 **Acknowledgement.** By default the connector boosts each request that asks
 for something with 👀, as the agent, before printing it, and this session then
-rewords that boost. `--ack-boost '<content>'` changes the boost (16 characters
+rewords that boost; the subagent clears it once its reply lands, so it never
+stays behind as the request's last word in the Boost report.
+`--ack-boost '<content>'` changes the boost (16 characters
 at most), and `--no-ack-boost` turns it off, leaving acknowledging to this
 session. Neither is asked about on a first setup; pass one only when the
 person wants it.

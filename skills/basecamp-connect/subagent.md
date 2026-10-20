@@ -17,7 +17,7 @@ most), never a fixed string, retrying only on the two errors the loop names:
 ```bash
 landed=false
 for i in 1 2 3; do
-  if out=$(basecamp boost create '<recording.url>' '<ack>' --profile '<profile>' 2>&1); then
+  if out=$(basecamp boost create '<recording.url>' '<ack>' --ids-only --profile '<profile>' 2>&1); then
     landed=true; break
   fi
   echo "$out" | grep -qE 'Not authenticated for|token refresh failed' || break   # anything else: no retry
@@ -30,6 +30,10 @@ If it didn't verifiably land, go on and say so in your report. Skip it for
 `subscribed`, `completed` and `boosted`. It is owed only when no boost
 landed: a request line with `ack` was already boosted by the connector, which
 acknowledges it even when the session couldn't reword it.
+
+Keep the id of the boost that landed: `$out` when it was yours, else the one
+the handoff names. Steps 4 and 5 use it; with none, skip what they say about
+the boost.
 
 **2. Read the context.** The event is the trigger. Basecamp holds the context:
 
@@ -92,6 +96,12 @@ there. "no repo" means the request needs none (a summary, a question about the
 project): do it from Basecamp alone. Work that changes code goes in a fresh git
 worktree off the default branch, never in the main checkout.
 
+When the work will take more than a moment, say so on the boost first, once,
+in a phrase led by an emoji that fits the work (`🛠 Drafting it`, 16
+characters at most): `basecamp boost update <boost_id> '<phrase>' --profile
+'<profile>'`. It's a status, not a running commentary, and a failed update
+changes nothing: go on.
+
 **Read the code before you answer anything about it.** Open the files the
 request is about, and answer from what's there, not from what the request or
 the names suggest. If what it asks about isn't in the code, say so. If a
@@ -140,6 +150,12 @@ basecamp pings post <bucket_id> - --profile '<profile>' < reply.md
   unsure it landed: read the thread or room to check instead. Basecamp
   doesn't let agents delete what they post, so a duplicate stays until a
   person removes it.
+- **Then clear the boost**, once the reply has landed:
+  `basecamp boost delete <boost_id> --profile '<profile>'`. The reply now says
+  what the boost did, and a boost left behind shows in the Boost report as
+  the request's final state. Never before the reply lands: if it fails, the
+  boost is what still shows the request was taken. A failed delete gets no
+  retry; say so in your report.
 - **Lead with the answer.** The first line says what happened. Detail goes
   under it.
 - **Success**: the results, where the request was written.
@@ -296,5 +312,5 @@ Never run `basecamp auth login` in response, and never report the profile as
 missing.
 
 **6. Report back in one line**: posted or failed, the line or comment id,
-and any refusal the main session must pass on. Don't repeat the reply: the
+whether the boost was cleared, and any refusal the main session must pass on. Don't repeat the reply: the
 person reads it in Basecamp.
