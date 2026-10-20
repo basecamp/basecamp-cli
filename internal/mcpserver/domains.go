@@ -41,13 +41,13 @@ var DomainSpecs = []catalog.DomainSpec{
 	},
 	{
 		Key:   "campfires",
-		Tags:  []string{"Campfire"},
-		Blurb: "Campfire chat: rooms, chat lines, uploads, and chatbots.",
+		Tags:  []string{"Campfire", "Pings"},
+		Blurb: "Campfire chat: rooms, chat lines, uploads, and chatbots, and Pings: private conversations, direct or group, each held in its own Campfire.",
 	},
 	{
 		Key:   "boosts",
 		Tags:  []string{"Boosts"},
-		Blurb: "Boosts (emoji reactions) on recordings and their events: list, get, create, and delete.",
+		Blurb: "Boosts (emoji reactions) on recordings and their events: list, get, create, update, and delete.",
 	},
 	{
 		Key:   "schedules",

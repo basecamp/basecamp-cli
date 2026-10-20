@@ -114,7 +114,7 @@ The date accepts natural language dates:
 				Date: parsedDate,
 			}
 
-			if err := app.Account().Lineup().CreateMarker(cmd.Context(), req); err != nil {
+			if _, err := app.Account().Lineup().CreateMarker(cmd.Context(), req); err != nil {
 				return convertSDKError(err)
 			}
 
@@ -193,7 +193,7 @@ You can pass either a marker ID or a Basecamp URL:
 				req.Date = parsedDate
 			}
 
-			if err := app.Account().Lineup().UpdateMarker(cmd.Context(), markerID, req); err != nil {
+			if _, err := app.Account().Lineup().UpdateMarker(cmd.Context(), markerID, req); err != nil {
 				return convertSDKError(err)
 			}
 

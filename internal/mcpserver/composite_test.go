@@ -220,6 +220,8 @@ func TestSummarizeFallsBackToTheAccountCampfireListing(t *testing.T) {
 	session, log := compositeSession(t, map[string]http.HandlerFunc{
 		// Not a project: the dock source has nothing to offer.
 		"/999/projects/": serveJSON(t, http.StatusNotFound, `{"error":"not found"}`),
+		// Nor a Ping, which the SDK tries next for a bucket with no dock.
+		"/999/circles/": serveJSON(t, http.StatusNotFound, `{"error":"not found"}`),
 		"/999/chats.json": serveJSON(t, http.StatusOK, `[
 		  {"id": 800, "title": "Elsewhere", "bucket": {"id": 12, "name": "Other", "type": "Project"}},
 		  {"id": 901, "title": "Ping", "bucket": {"id": 77, "name": "Connector", "type": "Project"}},
