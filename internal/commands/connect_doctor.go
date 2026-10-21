@@ -175,13 +175,14 @@ func connectUnsupportedOSCheck(goos string) setup.Check {
 		Hint:    "Run the connector on Linux or macOS; the rest of the CLI runs here."}
 }
 
-// pingsCheck says whether the profile's connector, started with neither
-// --pings, --no-pings nor --project, hears the agent's Pings, and warns when
-// another connector on this computer answers them too. Only one should; the
-// ones on other computers can't be seen from here.
+// pingsCheck says whether the profile's connector hears the agent's Pings —
+// the one running now, as its lock says, else a start with neither --pings,
+// --no-pings nor --project — and warns when another connector on this
+// computer answers them too. Only one should; the ones on other computers
+// can't be seen from here.
 func pingsCheck(ctx context.Context, p connectProfile) setup.Check {
 	c := setup.Check{Name: "Pings"}
-	pings, ok, err := connectProfilePings(ctx, p.app, p.name, p.file)
+	pings, running, ok, err := connectProfilePings(ctx, p.app, p.name, p.file)
 	switch {
 	case err != nil:
 		c.Status, c.Message = setup.StatusFail, "Whether it hears the agent's Pings was saved, and can't be read: "+errorMessage(err)
@@ -190,14 +191,25 @@ func pingsCheck(ctx context.Context, p connectProfile) setup.Check {
 	case !ok:
 		c.Status, c.Message = setup.StatusSkip, "Whether it hears the agent's Pings can't be told without the profile's credential"
 		return c
-	case !pings.Hears:
+	}
+	who := "It"
+	if running {
+		who = "The connector running now"
+	}
+	if !pings.Hears {
 		c.Status = setup.StatusPass
-		c.Message = "Doesn't hear the agent's Pings: " + pings.Describe() + ". Only one connector should answer them; start this one with --pings if it's that one"
+		c.Message = who + " doesn't hear the agent's Pings: " + pings.Describe() + ". Only one connector should answer them; start this one with --pings if it's that one"
+		if running {
+			c.Message += connectNextPingsNote(ctx, p)
+		}
 		return c
 	}
 	peers := connectPingsPeers(p.name, p.file)
 	if len(peers) == 0 {
-		c.Status, c.Message = setup.StatusPass, "Hears the agent's Pings: "+pings.Describe()
+		c.Status, c.Message = setup.StatusPass, who+" hears the agent's Pings: "+pings.Describe()
+		if running {
+			c.Message += connectNextPingsNote(ctx, p)
+		}
 		return c
 	}
 	others := make([]string, 0, len(peers))
@@ -209,7 +221,21 @@ func pingsCheck(ctx context.Context, p connectProfile) setup.Check {
 		}
 	}
 	c.Status = setup.StatusWarn
-	c.Message = fmt.Sprintf("Hears the agent's Pings (%s), and so does %s on this computer: each Ping would be answered twice", pings.Describe(), strings.Join(others, ", "))
+	c.Message = fmt.Sprintf("%s hears the agent's Pings (%s), and so does %s on this computer: each Ping is answered twice", who, pings.Describe(), strings.Join(others, ", "))
 	c.Hint = hint
 	return c
+}
+
+// connectNextPingsNote is what a restart with neither flag nor --project
+// would do, when it differs from the connector running now.
+func connectNextPingsNote(ctx context.Context, p connectProfile) string {
+	live, _ := connectRunningPings(p.name, p.file)
+	next, ok, err := connectNextPings(ctx, p.app, p.name, p.file)
+	if err != nil || !ok || next.Hears == live.Hears {
+		return ""
+	}
+	if next.Hears {
+		return "; restarted without --project, it would hear them (" + next.Describe() + ")"
+	}
+	return "; restarted, it would hear none (" + next.Describe() + ")"
 }

@@ -22,12 +22,15 @@ func TestTheLockSaysWhetherItsConnectorHearsPings(t *testing.T) {
 
 	for _, hears := range []bool{true, false} {
 		dir := t.TempDir()
-		lock, err := AcquireConnectorLock(dir, account, agent, now, hears)
+		lock, err := AcquireInstanceLock(dir, account, agent, now)
 		require.NoError(t, err)
+		lock.NotePings(hears, "chosen")
 		holder, ok := InstanceHolder(dir, account, agent)
 		require.True(t, ok)
 		require.NotNil(t, holder.Pings, "a connector always says")
 		assert.Equal(t, hears, *holder.Pings)
+		assert.Equal(t, "chosen", holder.PingsBecause)
+		assert.Equal(t, os.Getpid(), holder.PID, "and still says who holds the lock")
 		require.NoError(t, lock.Release())
 		_, ok = InstanceHolder(dir, account, agent)
 		assert.False(t, ok, "a released lock says nothing")

@@ -228,9 +228,10 @@ type connectLockHolder struct {
 	// platform can give one. Present says a process has that pid, not that it
 	// is that connector.
 	PIDStatus string `json:"pid_status"`
-	// Pings is whether that connector hears the agent's Pings, as it wrote;
-	// absent when an older build wrote the file.
-	Pings *bool `json:"pings,omitempty"`
+	// Pings is whether that connector hears the agent's Pings, as it wrote,
+	// and PingsBecause why; absent when an older build wrote the file.
+	Pings        *bool  `json:"pings,omitempty"`
+	PingsBecause string `json:"pings_because,omitempty"`
 }
 
 func runConnectStatus(cmd *cobra.Command, shadow bool) error {
@@ -263,9 +264,13 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	}
 	report := connectStatusReport{Profile: p.name, Shadow: shadow, Status: status}
 	if holder, ok := connector.InstanceHolder(dir, p.file.AccountID, p.file.Agent.PersonID); ok {
-		report.LockHolder = &connectLockHolder{PID: holder.PID, StartedAt: holder.StartedAt, PIDStatus: processPresence(holder.PID), Pings: holder.Pings}
+		report.LockHolder = &connectLockHolder{PID: holder.PID, StartedAt: holder.StartedAt, PIDStatus: processPresence(holder.PID), Pings: holder.Pings, PingsBecause: holder.PingsBecause}
 	}
-	if saved, ok, err := connector.LoadPingsChoice(dir); err != nil {
+	// The choice is the profile's, in its connector's state: a shadow reads
+	// it there and saves none of its own.
+	if normal, err := connectStatePath(p.name, p.file, false); err != nil {
+		report.Pings.Error = errorMessage(err)
+	} else if saved, ok, err := connector.LoadPingsChoice(normal); err != nil {
 		report.Pings.Error = errorMessage(err)
 	} else if ok {
 		report.Pings.Saved = &saved
@@ -850,11 +855,12 @@ func renderConnectStatusPings(w io.Writer, r connectStatusReport) {
 		fmt.Fprintf(w, "  Pings          %s\n", connectPingsWords(connectPings{Hears: p.Saved.Hears, Because: p.Saved.Because}))
 	}
 	if h := r.LockHolder; h != nil && h.Pings != nil && h.PIDStatus != pidAbsent && (p.Saved == nil || *h.Pings != p.Saved.Hears) {
+		now := connectPings{Hears: *h.Pings, Because: h.PingsBecause}
 		heard := "hears none"
-		if *h.Pings {
+		if now.Hears {
 			heard = "hears them"
 		}
-		fmt.Fprintf(w, "                 the connector running now %s\n", heard)
+		fmt.Fprintf(w, "                 the connector running now %s: %s\n", heard, now.Describe())
 	}
 	for _, other := range p.Others {
 		fmt.Fprintf(w, "  Pings          also heard by %s (pid %d) on this computer: only one connector should answer them\n", other.Words(), other.PID)

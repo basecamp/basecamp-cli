@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -158,12 +159,17 @@ func connectPingsPeers(profile string, file setup.File) []connectPingsPeer {
 	}
 	prefix := strings.TrimSuffix(connector.StateDirName(file.AccountID, file.Agent.PersonID, ""), "-")
 	legacy := connector.LegacyStateDirName(file.AccountID, file.Agent.PersonID)
-	own := connector.StateDirName(file.AccountID, file.Agent.PersonID, profile)
+	// This profile's own state is its profile directory, or, until a run of
+	// this build adopts it, the legacy one status and doctor read as its own.
+	own := map[string]bool{connector.StateDirName(file.AccountID, file.Agent.PersonID, profile): true}
+	if dir, err := connectStatePath(profile, file, false); err == nil {
+		own[filepath.Base(dir)] = true
+	}
 	var peers []connectPingsPeer
 	for _, entry := range entries {
 		name := entry.Name()
 		other, isProfile := strings.CutPrefix(name, prefix+"-")
-		if name == own || !entry.IsDir() || (name != legacy && (!isProfile || !isValidProfileName(other))) {
+		if own[name] || !entry.IsDir() || (name != legacy && (!isProfile || !isValidProfileName(other))) {
 			continue
 		}
 		holder, ok := connector.InstanceHolder(filepath.Join(root, name), file.AccountID, file.Agent.PersonID)
@@ -180,12 +186,39 @@ func connectPingsPeers(profile string, file setup.File) []connectPingsPeer {
 	return peers
 }
 
-// connectProfilePings is whether a start of the profile with neither flag
-// nor --project would hear Pings: its saved choice, else the default for the
-// credential it holds. It reads only this computer. It reports false when
-// the credential can't be read, and a saved choice that can't be read as the
-// error the start would refuse with.
-func connectProfilePings(ctx context.Context, app *appctx.App, profile string, file setup.File) (connectPings, bool, error) {
+// connectProfilePings is whether the profile's connector hears Pings: the
+// one running now, as its lock says (running true), else what a start with
+// neither flag nor --project would decide, from the saved choice or the
+// default for the credential the profile holds. It reads only this computer.
+// It reports false when it can't say, and a saved choice that can't be read
+// as the error the next start would refuse with.
+func connectProfilePings(ctx context.Context, app *appctx.App, profile string, file setup.File) (pings connectPings, running, ok bool, err error) {
+	if live, ok := connectRunningPings(profile, file); ok {
+		return live, true, true, nil
+	}
+	next, ok, err := connectNextPings(ctx, app, profile, file)
+	return next, false, ok, err
+}
+
+// connectRunningPings is whether the profile's connector running now hears
+// Pings, as it said beside its lock; false when none runs, or an older build
+// runs it and doesn't say.
+func connectRunningPings(profile string, file setup.File) (connectPings, bool) {
+	dir, err := connectStatePath(profile, file, false)
+	if err != nil {
+		return connectPings{}, false
+	}
+	holder, ok := connector.InstanceHolder(dir, file.AccountID, file.Agent.PersonID)
+	if !ok || holder.Pings == nil || !holderStillRuns(holder) {
+		return connectPings{}, false
+	}
+	return connectPings{Hears: *holder.Pings, Because: holder.PingsBecause}, true
+}
+
+// connectNextPings is whether a start with neither flag nor --project would
+// hear Pings: the profile's saved choice, else the default for its
+// credential.
+func connectNextPings(ctx context.Context, app *appctx.App, profile string, file setup.File) (connectPings, bool, error) {
 	dir, err := connectStatePath(profile, file, false)
 	if err != nil {
 		return connectPings{}, false, err
@@ -205,33 +238,41 @@ func connectProfilePings(ctx context.Context, app *appctx.App, profile string, f
 }
 
 // connectPingsFlag is the start's --pings or --no-pings, nil when neither was
-// given. It refuses both at once, and --pings on a run given --project,
-// whose feed brings no Ping to hear.
+// given. A flag given false is the other choice: --pings=false is
+// --no-pings. It refuses both at once, and hearing Pings on a run given
+// --project, whose feed brings no Ping to hear.
 func connectPingsFlag(f *connectRunFlags, narrowed bool, profile string) (*bool, error) {
+	var hears bool
 	switch {
-	case f.pings && f.noPings:
+	case f.pingsSet && f.noPingsSet:
 		return nil, output.ErrUsage("--pings and --no-pings are one choice: pass one of them")
-	case f.pings && narrowed:
+	case f.pingsSet:
+		hears = f.pings
+	case f.noPingsSet:
+		hears = !f.noPings
+	default:
+		return nil, nil
+	}
+	if hears && narrowed {
 		return nil, output.ErrUsageHint("--pings can't be used with --project: a run given --project hears no Pings",
 			"To answer Pings here, serve this connector's projects with basecamp connect setup -P "+richtext.ShellQuote(profile)+" --serve <project-id>, and start it without --project.")
-	case f.pings:
-		hears := true
-		return &hears, nil
-	case f.noPings:
-		hears := false
-		return &hears, nil
 	}
-	return nil, nil
+	return &hears, nil
 }
 
 // connectRunPings decides whether this start hears Pings, from its flag, the
 // profile's saved choice and its credential, and whether it saves the answer.
-// The choice is the profile's, kept in its connector's state directory: a
-// shadow reads it, so it admits what the connector it watches beside would,
-// and never saves one. A saved choice that cannot be read refuses the start
-// unless the start doesn't need it: guessing either way answers Pings twice
-// or not at all.
-func connectRunPings(profile string, file setup.File, shadow bool, flag *bool, narrowed bool, creds *auth.Credentials) (connectPings, bool, error) {
+// It takes the run's instance lock as proof it is held: a start of the same
+// profile that saved another choice while this one waited must not be
+// overruled by a choice read before. The choice is the profile's, kept in its
+// connector's state directory: a shadow reads it, so it admits what the
+// connector it watches beside would, and never saves one. A saved choice that
+// cannot be read refuses the start unless the start doesn't need it: guessing
+// either way answers Pings twice or not at all.
+func connectRunPings(held *connector.InstanceLock, profile string, file setup.File, shadow bool, flag *bool, narrowed bool, creds *auth.Credentials) (connectPings, bool, error) {
+	if held == nil {
+		return connectPings{}, false, errors.New("whether the connector hears Pings is decided only under its instance lock")
+	}
 	dir, err := connectStatePath(profile, file, false)
 	if err != nil {
 		return connectPings{}, false, output.ErrUsage("The connector's state directory cannot be used: " + err.Error())

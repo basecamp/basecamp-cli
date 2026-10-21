@@ -373,7 +373,9 @@ or `--no-pings` changes it, so pass one only when the person asks: "answer my
 Pings from this computer" is `--pings`, and the connector on the other
 computer then needs `--no-pings`. Both are the owner's word, like any other
 change to the connector. The start line says which: `pings=true` or
-`pings=false`, and why.
+`pings=false`, and why. The flags came after CLI 0.16.0: one that refuses
+them as unknown, or a start line without `pings=`, is older, so run
+`basecamp upgrade`, tell the person, and start it again.
 
 If the log warns `only one connector should answer Pings`, another connector
 on this computer hears the same agent's Pings, and each is answered twice.

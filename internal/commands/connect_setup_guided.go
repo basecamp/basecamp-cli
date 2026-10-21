@@ -167,11 +167,12 @@ func runGuidedConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupF
 	return nil
 }
 
-// guidedHearsPings is whether the profile's connector, started as the summary
-// says to start it, would answer the agent's Pings. One that can't be told
-// is said as before: every connector heard Pings until it could choose.
+// guidedHearsPings is whether the profile's connector answers the agent's
+// Pings: the one running now, else one started as the summary says to start
+// it. One that can't be told is said as before: every connector heard Pings
+// until it could choose.
 func guidedHearsPings(ctx context.Context, app *appctx.App, name string, file setup.File) bool {
-	pings, ok, err := connectProfilePings(ctx, app, name, file)
+	pings, _, ok, err := connectProfilePings(ctx, app, name, file)
 	return err != nil || !ok || pings.Hears
 }
 

@@ -7,9 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -241,8 +243,97 @@ func TestStatusAndDoctorSayWhoHearsPings(t *testing.T) {
 
 	b.stop(t)
 	doctor = f.doctorStyled(t)
-	assert.Contains(t, doctor, "Hears the agent's Pings: the agent's first connection")
+	assert.Contains(t, doctor, "The connector running now hears the agent's Pings: the agent's first connection")
 	assert.NotContains(t, doctor, `profile "laptop"`)
+
+	a.stop(t)
+	doctor = f.doctorStyled(t)
+	assert.Contains(t, doctor, "It hears the agent's Pings: the agent's first connection", "with none running, what the next start does")
+}
+
+// A connector running with --project hears no Pings whatever the profile's
+// saved choice says, and doctor, status and guided setup say what it does
+// now, not what the next un-narrowed start would: a narrowed run beside the
+// one that answers Pings is no second answerer.
+func TestDiagnosticsSayWhatTheRunningConnectorDoes(t *testing.T) {
+	f := newOperatorFixture(t)
+	setUpSecondProfile(t, f.s, "laptop")
+	r := startProfileConnector(t, f.s, "agent")
+	r.awaitRunning(t)
+	r.stop(t)
+
+	narrowed := startProfileConnector(t, f.s, "agent", "--project", fmt.Sprint(setupProject))
+	narrowed.awaitRunning(t)
+	other := startProfileConnector(t, f.s, "laptop")
+	other.awaitRunning(t)
+
+	doctor := f.doctorStyled(t)
+	assert.Contains(t, doctor, "The connector running now doesn't hear the agent's Pings: --project narrows this run to projects")
+	assert.Contains(t, doctor, "restarted without --project, it would hear them (the agent's first connection)")
+	assert.NotContains(t, doctor, "answered twice", "the one answering Pings is the only one")
+
+	styled, err := f.run(t, output.FormatStyled, "status")
+	require.NoError(t, err)
+	assert.Contains(t, styled, "Pings          heard: the agent's first connection", "the saved choice")
+	assert.Contains(t, styled, "the connector running now hears none: --project narrows this run to projects")
+
+	assert.False(t, guidedHearsPings(context.Background(), newConnectSetupApp(t, f.s, "agent"), "agent", f.file),
+		"guided setup doesn't suggest pinging a connector that can't hear it")
+}
+
+// --pings=false is --no-pings, and --no-pings=false is --pings: a flag given
+// false is a choice, never the flag's absence.
+func TestAPingsFlagGivenFalseIsTheOtherChoice(t *testing.T) {
+	f := newOperatorFixture(t)
+	for _, step := range []struct {
+		arg   string
+		hears bool
+	}{
+		{"--pings=false", false},
+		{"--no-pings=false", true},
+	} {
+		r := startProfileConnector(t, f.s, "agent", step.arg)
+		r.awaitRunning(t)
+		assert.Contains(t, r.out.String(), fmt.Sprintf("pings=%t", step.hears), step.arg)
+		choice, ok := savedPingsChoice(t, f, "agent")
+		require.True(t, ok)
+		assert.Equal(t, step.hears, choice.Hears, step.arg)
+		assert.Equal(t, pingsBecauseChosen, choice.Because, step.arg)
+		r.stop(t)
+	}
+
+	_, err := f.run(t, output.FormatJSON, "--no-pings=false", "--project", fmt.Sprint(setupProject))
+	require.Error(t, err, "hearing Pings is refused on a narrowed run however it is spelled")
+	assert.Contains(t, err.Error(), "--project")
+	_, err = f.run(t, output.FormatJSON, "--pings=false", "--no-pings")
+	require.Error(t, err, "two flags are two choices, even when they agree")
+}
+
+// A profile whose state is still in the legacy directory reads that state as
+// its own, so an older build's connector running on it is this profile's,
+// not a second one; to another profile of the agent it is a second one.
+func TestAProfilesLegacyConnectorIsNotItsOwnPeer(t *testing.T) {
+	f := newOperatorFixture(t)
+	setUpSecondProfile(t, f.s, "laptop")
+	stateHome, err := connectStateHome()
+	require.NoError(t, err)
+	legacy, err := ensurePrivateChain(stateHome, "basecamp", "connect", connector.LegacyStateDirName(f.file.AccountID, f.file.Agent.PersonID))
+	require.NoError(t, err)
+	lock, err := connector.AcquireInstanceLock(legacy, f.file.AccountID, f.file.Agent.PersonID, time.Now().Add(-time.Minute))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lock.Release() })
+	older, err := json.Marshal(map[string]any{"pid": os.Getpid(), "started_at": time.Now().Add(time.Minute).UTC().Format(time.RFC3339),
+		"account_id": f.file.AccountID, "agent_person_id": f.file.Agent.PersonID})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(lock.Path()+".json", older, 0o600), "as an older build writes it: nothing about Pings")
+	_, err = ensurePrivateChain(stateHome, "basecamp", "connect", connector.StateDirName(f.file.AccountID, f.file.Agent.PersonID, "laptop"))
+	require.NoError(t, err)
+
+	assert.Empty(t, connectPingsPeers("agent", f.file), "the legacy state is agent's own until a run adopts it")
+	peers := connectPingsPeers("laptop", f.file)
+	require.Len(t, peers, 1)
+	assert.True(t, peers[0].Older)
+	assert.Empty(t, peers[0].Profile)
 }
 
 // doctorStyled is doctor's styled report. The fake Basecamp serves no
@@ -316,4 +407,8 @@ func TestAShadowHearsPingsAsItsConnectorWould(t *testing.T) {
 	_, saved, err := connector.LoadPingsChoice(shadowDir)
 	require.NoError(t, err)
 	assert.False(t, saved, "and a shadow saves none of its own")
+
+	styled, err := f.run(t, output.FormatStyled, "status", "--shadow")
+	require.NoError(t, err)
+	assert.Contains(t, styled, "Pings          not heard: chosen with --no-pings", "status --shadow shows the choice the shadow reads")
 }

@@ -39,6 +39,10 @@ type connectRunFlags struct {
 	hold     bool
 	pings    bool
 	noPings  bool
+	// pingsSet and noPingsSet say the flag was given, true or false:
+	// --pings=false is a choice, not the flag's absence.
+	pingsSet   bool
+	noPingsSet bool
 }
 
 func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
@@ -169,6 +173,7 @@ func connectStateParts(profile string, file setup.File, shadow bool) []string {
 }
 
 func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
+	f.pingsSet, f.noPingsSet = cmd.Flags().Changed("pings"), cmd.Flags().Changed("no-pings")
 	if !connectSupportedOS(runtime.GOOS) {
 		return connectUnsupportedOSError(runtime.GOOS)
 	}
@@ -286,7 +291,12 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	case err != nil:
 		return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
 	}
-	pings, savePings, err := connectRunPings(name, file, f.shadow, pingsFlag, len(buckets) > 0, creds)
+	lock, err := acquireConnectLock(stateDir, account, agentID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Release() }()
+	pings, savePings, err := connectRunPings(lock, name, file, f.shadow, pingsFlag, len(buckets) > 0, creds)
 	if err != nil {
 		return err
 	}
@@ -300,11 +310,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	// the run hears Pings from the policy, so the line says what admission
 	// was given.
 	heard := connectPings{Hears: policy.HearsPings, Because: pings.Because}
-	lock, err := acquireConnectorLock(stateDir, account, agentID, policy.HearsPings)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = lock.Release() }()
+	lock.NotePings(heard.Hears, heard.Because)
 	if savePings {
 		// Under the lock: no other start of this profile writes it at once.
 		if err := connector.SavePingsChoice(stateDir, connector.PingsChoice{Hears: pings.Hears, Because: pings.Because, At: time.Now().UTC()}); err != nil {
@@ -496,19 +502,10 @@ func connectorStoppedBy(err error, agent, profile string, refused func() bool) (
 	return connector.ConnectionDisconnected, e.Message, e
 }
 
-// acquireConnectLock takes the connector's instance lock, or says another
-// connector for this profile already holds it.
+// acquireConnectLock takes the connector's instance lock for the run, or
+// says another connector for this profile already holds it.
 func acquireConnectLock(stateDir, account string, agentID int64) (*connector.InstanceLock, error) {
-	return lockUnavailable(connector.AcquireInstanceLock(stateDir, account, agentID, time.Now()))
-}
-
-// acquireConnectorLock is acquireConnectLock for the run, which says beside
-// the lock whether it hears the agent's Pings.
-func acquireConnectorLock(stateDir, account string, agentID int64, pings bool) (*connector.InstanceLock, error) {
-	return lockUnavailable(connector.AcquireConnectorLock(stateDir, account, agentID, time.Now(), pings))
-}
-
-func lockUnavailable(lock *connector.InstanceLock, err error) (*connector.InstanceLock, error) {
+	lock, err := connector.AcquireInstanceLock(stateDir, account, agentID, time.Now())
 	if errors.Is(err, connector.ErrAlreadyRunning) {
 		return nil, &output.Error{Code: output.CodeLockUnavailable, Message: err.Error()}
 	}
