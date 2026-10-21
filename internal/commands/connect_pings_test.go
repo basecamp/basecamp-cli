@@ -19,6 +19,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/connector"
+	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -519,6 +520,70 @@ func TestAnUnusableSavedChoiceSaysHowToRecover(t *testing.T) {
 	choice, ok := savedPingsChoice(t, f, "agent")
 	require.True(t, ok)
 	assert.False(t, choice.Hears, "and once it's gone, the flag chooses")
+}
+
+// guidedSummary is guided setup's closing summary for the agent profile, as
+// runGuidedConnectSetup renders it from what this computer says now: for
+// connect.json as set up, or with its projects taken out.
+func (f operatorFixture) guidedSummary(t *testing.T, serving bool) string {
+	t.Helper()
+	file := f.file
+	if !serving {
+		file.Projects = nil
+	}
+	agent := guidedAgent{Me: setup.Person{Name: "Marie Chef"}, Projects: []guidedProject{{ID: setupProject, Name: "Connector"}}}
+	pings := guidedPings(context.Background(), newConnectSetupApp(t, f.s, "agent"), "agent", file)
+	var buf bytes.Buffer
+	renderGuidedSummary(&buf, output.NewRenderer(&buf, false), agent, file, connectorRunning("agent", file), pings, "agent")
+	return buf.String()
+}
+
+// Guided setup says how to recover a saved choice it can't read whether or
+// not a connector runs, and whatever the running one hears: the next start
+// refuses either way. It suggests a ping only where the profile's connector
+// hears them, which a running one still does and a start that refuses
+// doesn't.
+func TestGuidedSetupAlwaysSaysHowToRecoverAnUnreadableChoice(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		runs  bool
+		pings bool
+	}{
+		{name: "none running"},
+		{name: "running and hearing Pings", runs: true, pings: true},
+		{name: "running with --no-pings", args: []string{"--no-pings"}, runs: true},
+		{name: "running with --project", args: []string{"--project", fmt.Sprint(setupProject)}, runs: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newOperatorFixture(t)
+			r := startProfileConnector(t, f.s, "agent", tc.args...)
+			r.awaitRunning(t)
+			if !tc.runs {
+				r.stop(t)
+			}
+			dir, err := connectStatePath("agent", f.file, false)
+			require.NoError(t, err)
+			path := filepath.Join(dir, connector.PingsFile)
+			require.NoError(t, os.WriteFile(path, []byte("{hears"), 0o600))
+
+			for _, serving := range []bool{true, false} {
+				out := f.guidedSummary(t, serving)
+				assert.Contains(t, out, "Remove "+path, "serving=%t:\n%s", serving, out)
+				assert.Contains(t, out, "its next start will refuse", "serving=%t", serving)
+				assert.NotContains(t, out, "leaves Pings to another connection", "serving=%t: nothing says who answers them", serving)
+				ping := "or ping it"
+				if !serving {
+					ping = "only your pings reach it"
+				}
+				if tc.pings {
+					assert.Contains(t, out, ping, "serving=%t: the connector running now hears them", serving)
+				} else {
+					assert.NotContains(t, out, ping, "serving=%t", serving)
+				}
+			}
+		})
+	}
 }
 
 // A lock file left behind by a connector that has stopped, whose pid now
