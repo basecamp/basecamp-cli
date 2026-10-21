@@ -30,11 +30,29 @@ type instanceHolder struct {
 	StartedAt string `json:"started_at"`
 	AccountID string `json:"account_id"`
 	AgentID   int64  `json:"agent_person_id"`
+	// Pings is whether the holder hears the agent's Pings: true only for a
+	// connector that answers them. Every holder this build writes says, so
+	// nil is a holder an older build wrote, which does not.
+	Pings *bool `json:"pings,omitempty"`
 }
 
 // AcquireInstanceLock takes the lock in a profile's state directory, or refuses.
 // The account and agent name the file; the containing directory isolates profiles.
+// The holder it describes hears no Pings: it is for a command that needs the
+// connector stopped, not for the connector.
 func AcquireInstanceLock(dir, accountID string, agentPersonID int64, now time.Time) (*InstanceLock, error) {
+	return acquireInstanceLock(dir, accountID, agentPersonID, now, false)
+}
+
+// AcquireConnectorLock is AcquireInstanceLock for the running connector,
+// which says beside the lock whether it hears the agent's Pings: another
+// connector for the agent on this computer reads it to warn that two answer
+// them (InstanceHolder).
+func AcquireConnectorLock(dir, accountID string, agentPersonID int64, now time.Time, pings bool) (*InstanceLock, error) {
+	return acquireInstanceLock(dir, accountID, agentPersonID, now, pings)
+}
+
+func acquireInstanceLock(dir, accountID string, agentPersonID int64, now time.Time, pings bool) (*InstanceLock, error) {
 	account, err := strconv.ParseUint(accountID, 10, 64)
 	if err != nil || account == 0 || agentPersonID <= 0 {
 		return nil, errors.New("connector: the instance lock needs a numeric account id and an agent person id")
@@ -67,6 +85,7 @@ func AcquireInstanceLock(dir, accountID string, agentPersonID int64, now time.Ti
 		StartedAt: now.UTC().Format(time.RFC3339),
 		AccountID: accountID,
 		AgentID:   agentPersonID,
+		Pings:     &pings,
 	})
 	if err == nil {
 		// Best effort, and deliberately after the lock is held: a connector
@@ -102,6 +121,9 @@ func describeHolder(path string) string {
 type InstanceHolderInfo struct {
 	PID       int
 	StartedAt string
+	// Pings is whether it hears the agent's Pings; nil when an older build
+	// wrote it, which does not say.
+	Pings *bool
 }
 
 // InstanceHolder reads what a connector holding the lock in dir wrote about
@@ -121,5 +143,5 @@ func InstanceHolder(dir, accountID string, agentPersonID int64) (InstanceHolderI
 	if err := json.Unmarshal(raw, &holder); err != nil || holder.PID <= 0 {
 		return InstanceHolderInfo{}, false
 	}
-	return InstanceHolderInfo{PID: holder.PID, StartedAt: holder.StartedAt}, true
+	return InstanceHolderInfo{PID: holder.PID, StartedAt: holder.StartedAt, Pings: holder.Pings}, true
 }

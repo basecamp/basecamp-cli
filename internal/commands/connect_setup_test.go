@@ -84,6 +84,9 @@ type connectSetupServer struct {
 	rateLimitMints bool
 	// mints counts the agent token mints.
 	mints int
+	// connectionSecret is the secret a connection hands over; "" means
+	// fakeConnectSecret, shaped like the agent client's own.
+	connectionSecret string
 }
 
 func startConnectSetupServer(t *testing.T) *connectSetupServer {
@@ -112,7 +115,11 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 		if scope == "" {
 			scope = "full"
 		}
-		writeJSON(w, map[string]any{"client_id": "agent-client", "client_secret": fakeConnectSecret, "account_id": "999", "scope": scope})
+		secret := s.connectionSecret
+		if secret == "" {
+			secret = fakeConnectSecret
+		}
+		writeJSON(w, map[string]any{"client_id": "agent-client", "client_secret": secret, "account_id": "999", "scope": scope})
 	})
 	mux.HandleFunc("/oauth/tokens", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()

@@ -280,7 +280,26 @@ Basecamp's HTTP handshake. Do not reconnect just to upgrade the CLI.
 Each profile has its own projects, ledger, cursor, hold and local lock. When
 two connections serve the same project, a request both admit can be answered
 twice, so serve each project from one. Use a distinct `--device-name` for each
-profile on the same computer. Where Basecamp lists several connections, you
+profile on the same computer.
+
+Only one computer should answer an agent's Pings. A Ping is in no project, so
+every connector for the agent sees all of them, and each one that heard them
+would answer. A connector started with `--pings` hears Pings, and anything
+else outside a project; one started with `--no-pings` hears only its projects.
+Without either, the agent's first connection hears them, a connection added
+after it doesn't, and a bot user's login does, as it always has. A run given
+`--project` hears none. The first start saves the choice for the profile, and
+restarts keep it until you pass the other flag:
+
+```bash
+basecamp connect -P desktop --pings        # this computer answers Pings
+basecamp connect -P laptop --no-pings      # this one leaves them to the desktop
+```
+
+A connector that hears Pings warns when another one on the same computer hears
+the same agent's. It can't see other computers, so starting just one there is
+yours to arrange. `basecamp connect status` and `basecamp connect doctor` say
+whether a profile's connector answers them, and why. Where Basecamp lists several connections, you
 can rename them and disconnect one without using Disconnect all. Reconnecting
 a profile on an add-capable server leaves its old connection live until you
 disconnect it; older credential files can remain live too. Do not delete them

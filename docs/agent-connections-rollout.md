@@ -39,6 +39,44 @@ the approval page; do not reconnect merely to upgrade the CLI.
    A second run of the same profile is refused. Deliberate project overlap is
    allowed; requests admitted by both can be answered twice. There is no lease
    or cross-profile claim.
+6. Decide which one computer answers the agent's Pings (see below), and start
+   every other connector for the agent with `--no-pings` once.
+
+## Only one computer answers Pings
+
+A Ping is in no project, so serving projects can't divide Pings between
+connections: every connector for the agent sees all of them, and each one
+that heard them would answer. Only one computer should answer Pings, and the
+person running the agent arranges it; the CLI picks a default, keeps the
+choice, and warns about a second it can see on the same computer.
+
+- `--pings` hears Pings and anything else outside a project. `--no-pings`
+  hears only the connector's projects.
+- With neither, the agent's first connection (its credential is the agent
+  client's own secret) hears them, and a connection added after it (its
+  secret starts `bcac_`) doesn't. A profile that holds a person's login, a
+  bot user's, hears them as every connector did before this build. A run
+  given `--project` hears none, as before, and `--pings` with `--project` is
+  refused.
+- The first start on this build saves the answer in the profile's state
+  directory (`pings.json`, beside the ledger), and every restart keeps it
+  until `--pings` or `--no-pings` changes it. A profile that heard Pings keeps
+  hearing them after a reconnect turns its credential into an added
+  connection. An unreadable `pings.json` refuses the start until a flag
+  chooses again.
+- `basecamp connect status` and `basecamp connect doctor` say whether the
+  profile's connector answers Pings and why. A connector that hears them
+  warns when another for the same agent on this computer does too, an older
+  build's included (it hears them unless started with `--project`).
+  Connectors on other computers can't be seen.
+- Upgrading changes nothing for one connection per agent: it is the first
+  connection, or a bot user's login, and it still hears Pings. Where an agent
+  already runs several connectors that hear Pings (a bot user on three
+  computers, say), choose one, and restart the others with `--no-pings`.
+
+Downgrading drops the choice: older builds ignore `pings.json` and every
+connector they run hears Pings unless given `--project`. The file stays, and
+the next start on this build reads it again.
 
 State is under `$XDG_STATE_HOME/basecamp/connect` and `connect-shadow` (default
 `~/.local/state/basecamp`). New profile directories canonicalize numeric account

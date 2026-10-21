@@ -84,6 +84,13 @@
 // conversation is the Ping (PingConversationKey), answered in its one
 // Campfire.
 //
+// Serving can't divide Pings between an agent's connectors, so only the one
+// that hears them admits a line there (Policy.HearsPings, the run's
+// --pings): every other one discards it as pings_not_heard once the Ping read
+// says the bucket is a Ping, and reads nothing more. Outside a served project
+// nothing but a Ping's line is ever admitted, so the flag decides everything
+// there.
+//
 // # Invariants
 //
 // Every rule below is held by a test that fails without it.

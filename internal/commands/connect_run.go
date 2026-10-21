@@ -37,13 +37,17 @@ type connectRunFlags struct {
 	shadow   bool
 	since    int64
 	hold     bool
+	pings    bool
+	noPings  bool
 }
 
 func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
 	fl := cmd.Flags()
 	// --project shadows the global flag of the same name and keeps its type,
 	// so the flag reads the same everywhere; here it may be repeated.
-	fl.Var((*repeatedString)(&f.projects), "project", "Only hear events in this project id (repeatable; default every project and ping the agent can see, and a run given one hears no ping)")
+	fl.Var((*repeatedString)(&f.projects), "project", "Only hear events in this project id (repeatable; default every project the agent can see, and a run given one hears no Ping)")
+	fl.BoolVar(&f.pings, "pings", false, "Answer the agent's Pings, and anything else outside a project, from this connector; only one should (the default for an agent's first connection; kept for the profile)")
+	fl.BoolVar(&f.noPings, "no-pings", false, "Leave the agent's Pings to the connector that answers them, and hear only projects (the default for a connection added after the first; kept for the profile)")
 	fl.BoolVar(&f.shadow, "shadow", false, "Admit and log in an isolated state directory; dispatch and post nothing")
 	fl.Int64Var(&f.since, "since", 0, "Enter the feed just after this event id, whatever the ledger holds")
 	fl.BoolVar(&f.hold, "hold", false, "Set this profile's durable hold: intake and admission run, nothing is dispatched or posted until release, and earlier records wait for review")
@@ -191,6 +195,10 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if err != nil {
 		return err
 	}
+	pingsFlag, err := connectPingsFlag(f, len(buckets) > 0, name)
+	if err != nil {
+		return err
+	}
 
 	path, err := setup.Path(config.GlobalConfigDir(), name)
 	if err != nil {
@@ -278,17 +286,31 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	case err != nil:
 		return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
 	}
-	lock, err := acquireConnectLock(stateDir, account, agentID)
+	pings, savePings, err := connectRunPings(name, file, f.shadow, pingsFlag, len(buckets) > 0, creds)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = lock.Release() }()
-
 	policy, err := file.Policy(agentID)
 	if err != nil {
 		return output.ErrUsage(err.Error())
 	}
 	policy.Buckets = buckets
+	policy.HearsPings = pings.Hears
+	// Admission, the handoff, the lock and the start line all read whether
+	// the run hears Pings from the policy, so the line says what admission
+	// was given.
+	heard := connectPings{Hears: policy.HearsPings, Because: pings.Because}
+	lock, err := acquireConnectorLock(stateDir, account, agentID, policy.HearsPings)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Release() }()
+	if savePings {
+		// Under the lock: no other start of this profile writes it at once.
+		if err := connector.SavePingsChoice(stateDir, connector.PingsChoice{Hears: pings.Hears, Because: pings.Because, At: time.Now().UTC()}); err != nil {
+			return fmt.Errorf("the choice of whether this connector hears Pings could not be saved, so a restart would not keep it: %w", err)
+		}
+	}
 
 	if _, err := os.Lstat(filepath.Join(stateDir, connector.LedgerFile)); errors.Is(err, os.ErrNotExist) {
 		warnConnectSiblingState(logger, stateDir, file, name)
@@ -384,7 +406,10 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		// Whatever ended the run, status says it is not running any more.
 		_ = ledger.NoteConnection(context.WithoutCancel(ctx), stopState, stopDetail)
 	}()
-	logger.Info("connector: running", connectRunningAttrs(name, account, agentID, f.shadow, len(file.Projects), buckets, stateDir)...)
+	if !f.shadow {
+		warnConnectPingsPeers(logger, heard, name, file)
+	}
+	logger.Info("connector: running", connectRunningAttrs(name, account, agentID, f.shadow, len(file.Projects), buckets, heard, stateDir)...)
 
 	var (
 		wg       sync.WaitGroup
@@ -427,7 +452,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		started := time.Now()
 		runPart("handoff", func(ctx context.Context) error {
 			return connector.RunHandoff(ctx, connector.HandoffOptions{
-				Ledger: ledger, Served: served.Current, Buckets: buckets, AgentID: agentID,
+				Ledger: ledger, Served: served.Current, Buckets: buckets, Pings: policy.HearsPings, AgentID: agentID,
 				Lines: lines, Logger: logger, Started: started,
 				AckContent: file.Ack().Content, Booster: connector.SDKBooster{Client: accountClient},
 			})
@@ -471,10 +496,19 @@ func connectorStoppedBy(err error, agent, profile string, refused func() bool) (
 	return connector.ConnectionDisconnected, e.Message, e
 }
 
-// acquireConnectLock takes the connector's instance lock for the run, or
-// says another connector for this profile already holds it.
+// acquireConnectLock takes the connector's instance lock, or says another
+// connector for this profile already holds it.
 func acquireConnectLock(stateDir, account string, agentID int64) (*connector.InstanceLock, error) {
-	lock, err := connector.AcquireInstanceLock(stateDir, account, agentID, time.Now())
+	return lockUnavailable(connector.AcquireInstanceLock(stateDir, account, agentID, time.Now()))
+}
+
+// acquireConnectorLock is acquireConnectLock for the run, which says beside
+// the lock whether it hears the agent's Pings.
+func acquireConnectorLock(stateDir, account string, agentID int64, pings bool) (*connector.InstanceLock, error) {
+	return lockUnavailable(connector.AcquireConnectorLock(stateDir, account, agentID, time.Now(), pings))
+}
+
+func lockUnavailable(lock *connector.InstanceLock, err error) (*connector.InstanceLock, error) {
 	if errors.Is(err, connector.ErrAlreadyRunning) {
 		return nil, &output.Error{Code: output.CodeLockUnavailable, Message: err.Error()}
 	}
@@ -749,12 +783,13 @@ func (r *repeatedString) Type() string { return "string" }
 // many projects the agent serves, and, only when --project narrowed the run,
 // which ones this run is limited to: a bare count of the narrowing read as
 // "serving nothing" when there was none.
-func connectRunningAttrs(profile, account string, agentID int64, shadow bool, served int, only []int64, stateDir string) []any {
+func connectRunningAttrs(profile, account string, agentID int64, shadow bool, served int, only []int64, pings connectPings, stateDir string) []any {
 	attrs := []any{"profile", richtext.SanitizeSingleLine(profile), "account", account,
 		"agent_person_id", agentID, "shadow", shadow, "served_projects", served}
 	if len(only) > 0 {
 		attrs = append(attrs, "only_projects", only)
 	}
+	attrs = append(attrs, "pings", pings.Hears, "pings_because", pings.Describe())
 	return append(attrs, "state", richtext.SanitizeSingleLine(stateDir))
 }
 

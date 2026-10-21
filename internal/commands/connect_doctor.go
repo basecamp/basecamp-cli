@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,9 +26,10 @@ func newConnectDoctorCmd() *cobra.Command {
 		Use:   "doctor",
 		Short: "Check what the connector needs to run",
 		Long: `Check the connector for a set-up profile: connect.json, the token, the agent's
-identity, the stream ticket mint, the account feed, and the ledger (its gaps,
-open losses, hold, and lifecycle messages an older connector left waiting for
-a person).
+identity, the stream ticket mint, the account feed, whether it hears the
+agent's Pings (and whether another connector on this computer does too), and
+the ledger (its gaps, open losses, hold, and lifecycle messages an older
+connector left waiting for a person).
 
 It writes nothing to the connector's ledger and posts nothing to Basecamp.
 Renewing the profile's own credential, which every command does when its token
@@ -65,6 +67,7 @@ func runConnectDoctor(cmd *cobra.Command, _ []string) error {
 			feedCheck(ctx, agent.client.ForAccount(agent.account)),
 		)
 	}
+	checks = append(checks, pingsCheck(ctx, p))
 	checks = append(checks, ledgerChecks(ctx, p)...)
 
 	result := summarizeChecks(asDoctorChecks(checks))
@@ -170,4 +173,43 @@ func connectUnsupportedOSCheck(goos string) setup.Check {
 	return setup.Check{Name: "Platform", Status: setup.StatusFail,
 		Message: fmt.Sprintf("The connector does not run on %s: %s", goos, connectSupportedOSReason),
 		Hint:    "Run the connector on Linux or macOS; the rest of the CLI runs here."}
+}
+
+// pingsCheck says whether the profile's connector, started with neither
+// --pings, --no-pings nor --project, hears the agent's Pings, and warns when
+// another connector on this computer answers them too. Only one should; the
+// ones on other computers can't be seen from here.
+func pingsCheck(ctx context.Context, p connectProfile) setup.Check {
+	c := setup.Check{Name: "Pings"}
+	pings, ok, err := connectProfilePings(ctx, p.app, p.name, p.file)
+	switch {
+	case err != nil:
+		c.Status, c.Message = setup.StatusFail, "Whether it hears the agent's Pings was saved, and can't be read: "+errorMessage(err)
+		c.Hint = "Choose again: basecamp connect -P " + richtext.ShellQuote(p.name) + " --pings, or --no-pings to leave them to another connector."
+		return c
+	case !ok:
+		c.Status, c.Message = setup.StatusSkip, "Whether it hears the agent's Pings can't be told without the profile's credential"
+		return c
+	case !pings.Hears:
+		c.Status = setup.StatusPass
+		c.Message = "Doesn't hear the agent's Pings: " + pings.Describe() + ". Only one connector should answer them; start this one with --pings if it's that one"
+		return c
+	}
+	peers := connectPingsPeers(p.name, p.file)
+	if len(peers) == 0 {
+		c.Status, c.Message = setup.StatusPass, "Hears the agent's Pings: "+pings.Describe()
+		return c
+	}
+	others := make([]string, 0, len(peers))
+	hint := "Only one connector should answer Pings. Start one of them with --no-pings: basecamp connect -P " + richtext.ShellQuote(p.name) + " --no-pings"
+	for _, peer := range peers {
+		others = append(others, fmt.Sprintf("%s (pid %d)", peer.Words(), peer.PID))
+		if peer.Older {
+			hint = "Only one connector should answer Pings, and an older build can't be told: upgrade it, or start this one with --no-pings: basecamp connect -P " + richtext.ShellQuote(p.name) + " --no-pings"
+		}
+	}
+	c.Status = setup.StatusWarn
+	c.Message = fmt.Sprintf("Hears the agent's Pings (%s), and so does %s on this computer: each Ping would be answered twice", pings.Describe(), strings.Join(others, ", "))
+	c.Hint = hint
+	return c
 }

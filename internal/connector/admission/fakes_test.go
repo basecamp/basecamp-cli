@@ -29,8 +29,9 @@ const (
 
 func basePolicy() Policy {
 	return Policy{
-		AgentID: agentID,
-		Trust:   Trust{Mode: TrustOperator, OperatorID: operatorID},
+		AgentID:    agentID,
+		HearsPings: true,
+		Trust:      Trust{Mode: TrustOperator, OperatorID: operatorID},
 		Projects: map[int64]Project{
 			servedProj:  {Class: "internal"},
 			watchedProj: {Class: "internal", WatchCompletions: true},

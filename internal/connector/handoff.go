@@ -135,6 +135,10 @@ type HandoffOptions struct {
 	Served func() (map[int64]admission.Project, error)
 	// Buckets narrows the served projects to a run's --project, when given.
 	Buckets []int64
+	// Pings hands off a Ping's requests: only the connector that hears the
+	// agent's Pings does (admission.Policy.HearsPings). A run narrowed by
+	// Buckets hands off none, whatever this says, as its feed brings none.
+	Pings bool
 	// AgentID is the agent's Person id, whose mentions are stripped.
 	AgentID int64
 	Lines   *ndjson.Writer
@@ -220,7 +224,7 @@ func handOffReady(ctx context.Context, opts HandoffOptions) error {
 			buckets = slices.DeleteFunc(buckets, func(b int64) bool { return !slices.Contains(opts.Buckets, b) })
 		}
 		// A Ping is in no project, so a run narrowed to projects hears none.
-		pings := len(opts.Buckets) == 0
+		pings := opts.Pings && len(opts.Buckets) == 0
 		records, err := opts.Ledger.handoffRecords(ctx, buckets, pings, 50)
 		if err != nil {
 			return err

@@ -123,6 +123,10 @@ const (
 	ReasonDelegated Reason = "delegated"
 	// ReasonOutOfScope: the bucket is outside the --project scope.
 	ReasonOutOfScope Reason = "out_of_scope"
+	// ReasonPingsNotHeard: a line in a Ping, read by a connector that does
+	// not hear Pings (Policy.HearsPings). The connector that hears them
+	// answers it, from its own ledger.
+	ReasonPingsNotHeard Reason = "pings_not_heard"
 	// ReasonUntrustedPerformer: the performer is not in the trust set.
 	ReasonUntrustedPerformer Reason = "untrusted_performer"
 	// ReasonAssignmentNotOperator: an assignment performed by anyone other

@@ -1,0 +1,319 @@
+//go:build unix
+
+package commands
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/auth"
+	"github.com/basecamp/basecamp-cli/internal/connector"
+	"github.com/basecamp/basecamp-cli/internal/output"
+)
+
+// addedConnectionSecret is shaped as Basecamp shapes an added connection's
+// secret, and is not one.
+const addedConnectionSecret = "bcac_" + "1111111111111111111111111111111111111111111"
+
+// pingsWarning is the start's warning that another connector on this
+// computer hears the agent's Pings too.
+const pingsWarning = "only one connector should answer Pings"
+
+// asAddedConnection gives a profile the credential of a connection added
+// after the agent's first: the same agent, with a secret of its own.
+func asAddedConnection(t *testing.T, s *connectSetupServer, profile string) {
+	t.Helper()
+	app := newConnectSetupApp(t, s, profile)
+	key := auth.ProfileCredentialKey(profile)
+	creds, err := app.Auth.GetStore().Load(key)
+	require.NoError(t, err)
+	require.Equal(t, "agent", creds.OAuthType)
+	creds.ClientSecret = addedConnectionSecret
+	require.NoError(t, app.Auth.GetStore().Save(key, creds))
+}
+
+func savedPingsChoice(t *testing.T, f operatorFixture, profile string) (connector.PingsChoice, bool) {
+	t.Helper()
+	dir := filepath.Join(connectStateRoot(t), connector.StateDirName(f.file.AccountID, f.file.Agent.PersonID, profile))
+	choice, ok, err := connector.LoadPingsChoice(dir)
+	require.NoError(t, err)
+	return choice, ok
+}
+
+func holderPings(t *testing.T, f operatorFixture, profile string) *bool {
+	t.Helper()
+	dir := filepath.Join(connectStateRoot(t), connector.StateDirName(f.file.AccountID, f.file.Agent.PersonID, profile))
+	holder, ok := connector.InstanceHolder(dir, f.file.AccountID, f.file.Agent.PersonID)
+	require.True(t, ok, "%s's connector holds its lock", profile)
+	return holder.Pings
+}
+
+func (r runningConnector) stop(t *testing.T) {
+	t.Helper()
+	r.cancel()
+	_ = r.awaitExit(t)
+}
+
+// The agent's first connection hears its Pings, as every connector did
+// before, and its first start saves that, beside the lock too.
+func TestAnAgentsFirstConnectionHearsPings(t *testing.T) {
+	f := newOperatorFixture(t)
+
+	r := startProfileConnector(t, f.s, "agent")
+	r.awaitRunning(t)
+
+	assert.Contains(t, r.out.String(), "pings=true")
+	choice, ok := savedPingsChoice(t, f, "agent")
+	require.True(t, ok, "the first start saves what it found")
+	assert.True(t, choice.Hears)
+	assert.Equal(t, pingsBecauseFirstConnection, choice.Because)
+	assert.False(t, choice.At.IsZero())
+	hears := holderPings(t, f, "agent")
+	require.NotNil(t, hears)
+	assert.True(t, *hears)
+	assert.NotContains(t, r.out.String(), pingsWarning, "nobody else hears them")
+}
+
+// A connection added after the first hears no Pings until started with
+// --pings, and a restart keeps whatever was chosen last.
+func TestAnAddedConnectionHearsPingsOnlyWhenStartedWithThem(t *testing.T) {
+	f := newOperatorFixture(t)
+	setUpSecondProfile(t, f.s, "laptop")
+	asAddedConnection(t, f.s, "laptop")
+
+	for _, step := range []struct {
+		args    []string
+		hears   bool
+		because string
+	}{
+		{nil, false, pingsBecauseAddedConnection},
+		{[]string{"--pings"}, true, pingsBecauseChosen},
+		{nil, true, pingsBecauseChosen},
+		{[]string{"--no-pings"}, false, pingsBecauseChosen},
+		{nil, false, pingsBecauseChosen},
+	} {
+		r := startProfileConnector(t, f.s, "laptop", step.args...)
+		r.awaitRunning(t)
+		assert.Contains(t, r.out.String(), fmt.Sprintf("pings=%t", step.hears), "started with %v", step.args)
+		choice, ok := savedPingsChoice(t, f, "laptop")
+		require.True(t, ok)
+		assert.Equal(t, step.hears, choice.Hears, "started with %v", step.args)
+		assert.Equal(t, step.because, choice.Because, "started with %v", step.args)
+		hears := holderPings(t, f, "laptop")
+		require.NotNil(t, hears)
+		assert.Equal(t, step.hears, *hears)
+		r.stop(t)
+	}
+}
+
+// A run given --project hears no Ping, as before, and leaves the profile's
+// saved choice for the next run that isn't narrowed. --pings can't make a
+// narrowed run hear one: its feed brings none, so it is refused rather than
+// taken.
+func TestARunGivenProjectsHearsNoPings(t *testing.T) {
+	f := newOperatorFixture(t)
+	r := startProfileConnector(t, f.s, "agent")
+	r.awaitRunning(t)
+	r.stop(t)
+
+	r = startProfileConnector(t, f.s, "agent", "--project", fmt.Sprint(setupProject))
+	r.awaitRunning(t)
+	assert.Contains(t, r.out.String(), "pings=false")
+	hears := holderPings(t, f, "agent")
+	require.NotNil(t, hears)
+	assert.False(t, *hears)
+	choice, ok := savedPingsChoice(t, f, "agent")
+	require.True(t, ok)
+	assert.True(t, choice.Hears, "the saved choice is the next un-narrowed run's")
+	assert.Equal(t, pingsBecauseFirstConnection, choice.Because)
+	r.stop(t)
+
+	_, err := f.run(t, output.FormatJSON, "--pings", "--project", fmt.Sprint(setupProject))
+	require.Error(t, err)
+	assert.Equal(t, output.CodeUsage, usageError(t, err).Code)
+	assert.Contains(t, err.Error(), "--project")
+}
+
+func TestPingsAndNoPingsAreOneChoice(t *testing.T) {
+	f := newOperatorFixture(t)
+	_, err := f.run(t, output.FormatJSON, "--pings", "--no-pings")
+	require.Error(t, err)
+	assert.Equal(t, output.CodeUsage, usageError(t, err).Code)
+	_, ok := savedPingsChoice(t, f, "agent")
+	assert.False(t, ok, "a refused start saves nothing")
+}
+
+// Two connectors on this computer that both hear the agent's Pings answer
+// each one twice. The second to start says so, naming the first; one that
+// doesn't hear them, and a shadow, which answers nothing, say nothing.
+func TestASecondConnectorThatHearsPingsHereWarns(t *testing.T) {
+	f := newOperatorFixture(t)
+	// A second profile on the same agent's first connection: Basecamp that
+	// cannot add connections replaces the first one's secret, and the CLI
+	// can't tell from here.
+	setUpSecondProfile(t, f.s, "laptop")
+
+	first := startProfileConnector(t, f.s, "agent")
+	first.awaitRunning(t)
+
+	second := startProfileConnector(t, f.s, "laptop")
+	second.awaitRunning(t)
+	warning := lineContaining(second.out.String(), pingsWarning)
+	require.NotEmpty(t, warning, "the second warned before it ran: %s", second.out.String())
+	assert.Contains(t, warning, "level=WARN")
+	assert.Contains(t, warning, "profile=agent", "it names the other")
+	assert.NotContains(t, first.out.String(), pingsWarning, "the first saw nobody")
+	second.stop(t)
+
+	quiet := startProfileConnector(t, f.s, "laptop", "--no-pings")
+	quiet.awaitRunning(t)
+	assert.NotContains(t, quiet.out.String(), pingsWarning)
+	quiet.stop(t)
+
+	shadow := startProfileConnector(t, f.s, "laptop", "--shadow", "--pings")
+	shadow.awaitRunning(t)
+	assert.NotContains(t, shadow.out.String(), pingsWarning, "a shadow answers nothing")
+	shadow.stop(t)
+
+	first.stop(t)
+	again := startProfileConnector(t, f.s, "laptop", "--pings")
+	again.awaitRunning(t)
+	assert.NotContains(t, again.out.String(), pingsWarning, "and a stopped connector is nobody")
+}
+
+// status and doctor say whether the profile's connector hears Pings, why,
+// and who else on this computer does.
+func TestStatusAndDoctorSayWhoHearsPings(t *testing.T) {
+	f := newOperatorFixture(t)
+	setUpSecondProfile(t, f.s, "laptop")
+	a := startProfileConnector(t, f.s, "agent")
+	a.awaitRunning(t)
+	b := startProfileConnector(t, f.s, "laptop")
+	b.awaitRunning(t)
+
+	out, err := f.run(t, output.FormatJSON, "status")
+	require.NoError(t, err, out)
+	var envelope struct {
+		Data struct {
+			LockHolder *struct {
+				Pings *bool `json:"pings"`
+			} `json:"lock_holder"`
+			Pings struct {
+				Saved *struct {
+					Hears   bool   `json:"hears"`
+					Because string `json:"because"`
+				} `json:"saved"`
+				Others []struct {
+					Profile string `json:"profile"`
+					PID     int    `json:"pid"`
+				} `json:"others"`
+			} `json:"pings"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &envelope), out)
+	require.NotNil(t, envelope.Data.LockHolder)
+	require.NotNil(t, envelope.Data.LockHolder.Pings)
+	assert.True(t, *envelope.Data.LockHolder.Pings, "the running connector hears them")
+	require.NotNil(t, envelope.Data.Pings.Saved)
+	assert.True(t, envelope.Data.Pings.Saved.Hears)
+	assert.Equal(t, pingsBecauseFirstConnection, envelope.Data.Pings.Saved.Because)
+	require.Len(t, envelope.Data.Pings.Others, 1)
+	assert.Equal(t, "laptop", envelope.Data.Pings.Others[0].Profile)
+
+	styled, err := f.run(t, output.FormatStyled, "status")
+	require.NoError(t, err)
+	assert.Contains(t, styled, "Pings          heard: the agent's first connection")
+	assert.Contains(t, styled, `profile "laptop"`)
+
+	doctor := f.doctorStyled(t)
+	assert.Contains(t, doctor, "Pings")
+	assert.Contains(t, doctor, `profile "laptop"`)
+	assert.Contains(t, doctor, "--no-pings")
+
+	b.stop(t)
+	doctor = f.doctorStyled(t)
+	assert.Contains(t, doctor, "Hears the agent's Pings: the agent's first connection")
+	assert.NotContains(t, doctor, `profile "laptop"`)
+}
+
+// doctorStyled is doctor's styled report. The fake Basecamp serves no
+// account feed, so doctor fails that check; the report is printed first.
+func (f operatorFixture) doctorStyled(t *testing.T) string {
+	t.Helper()
+	app := newConnectSetupApp(t, f.s, "agent")
+	var buf bytes.Buffer
+	app.Output = output.New(output.Options{Format: output.FormatStyled, Writer: &buf})
+	cmd := NewConnectCmd()
+	cmd.SetArgs([]string{"doctor"})
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SilenceErrors, cmd.SilenceUsage = true, true
+	_ = cmd.Execute()
+	return buf.String()
+}
+
+func lineContaining(out, needle string) string {
+	for line := range strings.SplitSeq(out, "\n") {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	return ""
+}
+
+// Guided setup tells a person whether this computer will answer the agent's
+// Pings. A connection added after the first leaves them to the first, so
+// "ping it" is no way to try it here.
+func TestGuidedSetupOnAnAddedConnectionSaysWhoAnswersPings(t *testing.T) {
+	s := startConnectSetupServer(t)
+	ownedByTheOperator(s)
+	s.agentProjects = projectsNamed(setupProject)
+	s.connectionSecret = addedConnectionSecret
+	guided(t, &scriptedPrompter{confirms: []bool{true}})
+
+	out, err := runConnectSetupCmd(t, bareSetupApp(t, s, "agent"))
+	require.NoError(t, err, out)
+
+	assert.Contains(t, out, "Once it's running, mention Marie Chef in one of those projects to try it.")
+	assert.NotContains(t, out, "or ping it")
+	assert.Contains(t, out, "only one computer should answer")
+	assert.Contains(t, out, "basecamp connect -P agent --pings")
+}
+
+// A shadow admits what the connector it watches beside would: it reads the
+// profile's choice, and never saves one of its own.
+func TestAShadowHearsPingsAsItsConnectorWould(t *testing.T) {
+	f := newOperatorFixture(t)
+	r := startProfileConnector(t, f.s, "agent", "--no-pings")
+	r.awaitRunning(t)
+	r.stop(t)
+
+	shadow := startProfileConnector(t, f.s, "agent", "--shadow")
+	shadow.awaitRunning(t)
+	assert.Contains(t, shadow.out.String(), "pings=false", "the profile's choice")
+	shadow.stop(t)
+
+	shadow = startProfileConnector(t, f.s, "agent", "--shadow", "--pings")
+	shadow.awaitRunning(t)
+	assert.Contains(t, shadow.out.String(), "pings=true", "a flag is the shadow run's own")
+	shadow.stop(t)
+
+	choice, ok := savedPingsChoice(t, f, "agent")
+	require.True(t, ok)
+	assert.False(t, choice.Hears, "a shadow's flag doesn't change the profile's choice")
+	shadowDir, err := connectStatePath("agent", f.file, true)
+	require.NoError(t, err)
+	_, saved, err := connector.LoadPingsChoice(shadowDir)
+	require.NoError(t, err)
+	assert.False(t, saved, "and a shadow saves none of its own")
+}
