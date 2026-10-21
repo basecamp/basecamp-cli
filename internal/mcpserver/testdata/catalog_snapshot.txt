@@ -169,7 +169,7 @@ ACTIONS (RO = read-only):
 - update_timesheet_entry: Update a timesheet entry
 
 == basecamp_files
-Docs & Files: vaults (folders), documents, uploads, attachments, cloud file links, Google documents, and home-screen project folders.
+Docs & Files: vaults (folders), documents, uploads, attachments, embeds for rich text (videos, charts), cloud file links, Google documents, and home-screen project folders.
 
 Gateway tool: call with {"action": "...", "params": {...}}.
 Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
@@ -177,6 +177,7 @@ Call {"action": "describe", "params": {"action": "NAME"}} for an action's full p
 ACTIONS (RO = read-only):
 - create_cloud_file: Create a new cloud file in a vault
 - create_document: Create a new document in a vault
+- create_embed: Create an embed for a URL, or return the one Basecamp already has for it
 - create_folder: Create a folder for the authenticated user and file the given projects into it
 - create_google_document: Create a new Google document in a vault
 - create_upload: Create a new upload in a vault
@@ -185,6 +186,7 @@ ACTIONS (RO = read-only):
 - delete_folder: Delete a folder and unpin its projects from the home screen (returns 204 No Content)
 - get_cloud_file (RO): Get a single cloud file by id
 - get_document (RO): Get a single document by id
+- get_embed (RO): Get an embed by its sgid
 - get_folder (RO): Get one folder, with the projects grouped inside it expanded under `projects`
 - get_google_document (RO): Get a single Google document by id
 - get_upload (RO): Get a single upload by id

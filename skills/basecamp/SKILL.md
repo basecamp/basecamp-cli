@@ -253,6 +253,23 @@ flowchart LR
 EOF
 ````
 
+To embed a video, a Dash chart, or anything else Basecamp's editor embeds when
+a link is pasted, put the URL on a line by itself in Markdown content. The CLI
+asks Basecamp for the embed and waits for it. A URL Basecamp can't embed stays
+a link, and so does a URL inside a sentence, a list, a quote, or code. To keep
+a link to something Basecamp could embed, write `[title](url)`.
+
+```bash
+basecamp cards create "Checkout latency" - --in "<project>" --json <<'EOF'
+p99 since the deploy:
+
+https://dash.37signals.com/widgets/abc
+EOF
+```
+
+With `--format html` nothing is embedded for you: run
+`basecamp embeds create <url> --json` and put its `attachment` tag in the HTML.
+
 For deterministic mentions, prefer the machine-provided mention syntax from
 people or comment results, for example `[@Name](mention:SGID)`. Mention support
 varies by field; leaf help is authoritative.

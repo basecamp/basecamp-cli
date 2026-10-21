@@ -6,12 +6,14 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 53 | 207 |
+| ✅ Implemented | 54 | 209 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **57** | **219** |
+| **Total tracked** | **58** | **221** |
 
-**207 of 207 tracked in-scope endpoints.** The three Pings endpoints bc3#13943
+**209 of 209 tracked in-scope endpoints.** The two embed endpoints bc3 documents
+in `embeds.md` — `POST /embeds.json` and `GET /embeds/:sgid.json` — land as
+`embeds`. The three Pings endpoints bc3#13943
 documented — `GET /circles.json`, `GET /circles/:id.json` and `POST
 /circles.json` — land as `pings`. Moving a document, upload or folder
 between folders (`POST /recordings/:id/filing.json`, documented by bc3#13644 and
@@ -238,6 +240,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | vaults (move) | 1 | `files move` | ✅ | BC5 | - | `POST /recordings/:id/filing.json`: moves a document, upload or folder into another folder in the same project, in place (same id and comments). `--to` takes a folder ID or URL; `--position` is 1-indexed. Flat route, so no `--in` |
 | documents | 8 | `files`, `docs` | ✅ | BC4 | - | list, show, create, update. Create supports `--subscribe`/`--no-subscribe`, `--visible-to-clients` (root vault only) |
 | attachments | 1 | `uploads`, `attachments` | ✅ | BC4 | - | Upload via `attach`; list embedded attachments via `attachments list` (parses `<bc-attachment>` from content) |
+| embeds | 2 | `embeds` | ✅ | BC5 | - | create, show. Rich-text commands also embed a URL that stands alone on its line in Markdown content, through the same create |
 | **Schedule** |
 | calendars | 2 | `calendars` | ✅ | BC5 | - | show, update (color only). No index endpoint, so there is no `calendars list` — address one by id or pasted URL. The eleven colors are validated client-side for an immediate answer that names the alternatives; since v0.13.0 the SDK also carries the server's field-keyed 422 message |
 | schedules | 2 | `schedule` | ✅ | BC4 | - | Schedule container + settings |

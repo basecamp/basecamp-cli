@@ -42,7 +42,7 @@ func (f *richTextFormat) Type() string { return "string" }
 // addRichTextFormatFlag gives cmd the --format flag richTextToHTML reads.
 func addRichTextFormatFlag(cmd *cobra.Command) {
 	cmd.Flags().Var(new(richTextFormat), "format",
-		"Rich-text input format: markdown (converted to HTML) or html (sent without conversion)")
+		"Rich-text input format: markdown (converted to HTML; a URL alone on its line becomes an embed) or html (sent without conversion)")
 	_ = cmd.RegisterFlagCompletionFunc("format",
 		cobra.FixedCompletions([]string{string(richTextMarkdown), string(richTextHTML)}, cobra.ShellCompDirectiveNoFileComp))
 }
@@ -68,5 +68,5 @@ func richTextToHTML(cmd *cobra.Command, content string) string {
 			"Supported tags are kept and the Markdown around them is converted. "+
 			"To send HTML without Markdown conversion, pass --format html.")
 	}
-	return richtext.MarkdownToHTML(content)
+	return richtext.MarkdownToHTMLWithEmbeds(content, embedLinks(cmd))
 }

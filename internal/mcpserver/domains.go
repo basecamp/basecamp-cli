@@ -56,8 +56,8 @@ var DomainSpecs = []catalog.DomainSpec{
 	},
 	{
 		Key:   "files",
-		Tags:  []string{"Files", "Folders"},
-		Blurb: "Docs & Files: vaults (folders), documents, uploads, attachments, cloud file links, Google documents, and home-screen project folders.",
+		Tags:  []string{"Files", "Folders", "Embeds"},
+		Blurb: "Docs & Files: vaults (folders), documents, uploads, attachments, embeds for rich text (videos, charts), cloud file links, Google documents, and home-screen project folders.",
 	},
 	{
 		Key:   "people",

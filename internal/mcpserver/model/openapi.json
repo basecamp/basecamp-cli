@@ -9014,6 +9014,224 @@
         }
       }
     },
+    "/{accountId}/embeds.json": {
+      "post": {
+        "description": "Create an embed for a URL, or return the one Basecamp already has for it.\n\nAnswers `200 OK` with the embed either way. A new embed's status is\n`pending`; get it about once a second until its status is `active` or\n`not_found`.\n\nAnswers `422` (`{\"error\": \"Basecamp can't embed this URL. Link to it\ninstead.\"}`) for a URL no provider embeds. Past 100 new embeds in an hour,\ncreating another answers `429` (`{\"error\": \"Too many new embeds. Try again\nlater.\"}`) with no Retry-After; asking for an embed Basecamp already has\nstill works. That 429 is a verdict for the rest of the hour, not\nthrottling, so this operation declares `retryOn: [503]` and the 429\nsurfaces on the first attempt.",
+        "operationId": "CreateEmbed",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEmbedRequestContent"
+              }
+            }
+          },
+          "required": true
+        },
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CreateEmbed 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateEmbedResponseContent"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "BadRequestError 400 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestErrorResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ValidationError 422 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Embeds"
+        ],
+        "x-basecamp-idempotent": {
+          "natural": true
+        },
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            503
+          ]
+        }
+      }
+    },
+    "/{accountId}/embeds/{sgid}": {
+      "get": {
+        "description": "Get an embed by its sgid.\n\nAnswers `404 Not Found` for an sgid that does not name an embed.",
+        "operationId": "GetEmbed",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "sgid",
+            "in": "path",
+            "description": "An embed's signed global id, an opaque string.",
+            "schema": {
+              "type": "string",
+              "description": "An embed's signed global id, an opaque string."
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GetEmbed 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetEmbedResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Embeds"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
     "/{accountId}/events.json": {
       "get": {
         "description": "Poll the account event feed for events after a position (oldest first, strict event-id order, up to 100 per page).\n\n**Entry.** With neither `since` nor `position` the feed begins at the present\n(equivalent to `since=now`). `since=<event id>` starts after that id and\n`since=0` replays all served history back to the feed's epoch; `since` is a\nsigned 64-bit integer written in decimal, or the literal `now`. `position`\nresumes from a token a previous page issued \u2014 signed, opaque, bound to the\naccount and the filter set.\n\n**Pagination**: cursor style \u2014 the body envelope, not the Link header.\n`position` is the durable cursor (persist it only after processing the\npage's events); `next` is an absolute continuation URL present only while\nthis walk has more to serve. One call answers one page; no generator emits\na walk for the cursor style \u2014 see the section note.\n\n**Errors.** 400 (FeedRequestError) for a malformed position (resume with\n`since=`) or a malformed filter (fix the filters; a position reset will not\nhelp), told apart by its optional `reason` and undifferentiated when `reason`\nis absent. 409 (FeedFilterMismatchError) when the position was minted for a\ndifferent filter set. 410 (FeedPositionGoneError) when the position predates\nthe feed's epoch; its `resume` re-enters at the epoch.",
@@ -15297,7 +15515,7 @@
     },
     "/{accountId}/projects/{projectId}/people/client_users.json": {
       "put": {
-        "description": "Update project client access (grant/revoke/create client users)\n\nThe client-side counterpart to UpdateProjectAccess: `grant` adds existing\nclient users by id, `revoke` removes client users, and `create` invites\nbrand-new clients by email (`name` optional, defaulting to the address).\nOnly client users are eligible \u2014 a `grant` id belonging to a team member is\nrejected (omitted from `granted`) rather than cross-graded, and `revoke` never removes a team\nmember. The response mirrors UpdateProjectAccess: `granted` and `revoked`\npeople, each with `client: true`.\n\nRequires clients to be enabled on the project (EnableProjectClients);\notherwise 403. Invitations are all-or-nothing: an invalid `create` row\n(including one with no email address) answers 422 with the rejected\naddresses and nobody is invited; new addresses that would exceed the\naccount's user limit answer 429 and nobody is invited. Addresses already on\nthe account take no seat and a repeated address counts once.\n\nThe seat-limit 429 is a verdict, not throttling: it carries no Retry-After\nand re-asking cannot change the answer, so this operation declares\n`retryOn: [503]` and a 429 surfaces on the first attempt (status-mapped to\n`rate_limit`, since the wire status is the only signal). Every other\noperation retries on 429.",
+        "description": "Update project client access (grant/revoke/create client users)\n\nThe client-side counterpart to UpdateProjectAccess: `grant` adds existing\nclient users by id, `revoke` removes client users, and `create` invites\nbrand-new clients by email (`name` optional, defaulting to the address).\nOnly client users are eligible \u2014 a `grant` id belonging to a team member is\nrejected (omitted from `granted`) rather than cross-graded, and `revoke` never removes a team\nmember. The response mirrors UpdateProjectAccess: `granted` and `revoked`\npeople, each with `client: true`.\n\nRequires clients to be enabled on the project (EnableProjectClients);\notherwise 403. Invitations are all-or-nothing: an invalid `create` row\n(including one with no email address) answers 422 with the rejected\naddresses and nobody is invited; new addresses that would exceed the\naccount's user limit answer 429 and nobody is invited. Addresses already on\nthe account take no seat and a repeated address counts once.\n\nThe seat-limit 429 is a verdict, not throttling: it carries no Retry-After\nand re-asking cannot change the answer, so this operation declares\n`retryOn: [503]` and a 429 surfaces on the first attempt (status-mapped to\n`rate_limit`, since the wire status is the only signal). Every other\noperation but CreateEmbed retries on 429.",
         "operationId": "UpdateProjectClientAccess",
         "requestBody": {
           "content": {
@@ -31809,6 +32027,21 @@
       "CreateDocumentResponseContent": {
         "$ref": "#/components/schemas/Document"
       },
+      "CreateEmbedRequestContent": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The URL of the content to embed."
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "CreateEmbedResponseContent": {
+        "$ref": "#/components/schemas/Embed"
+      },
       "CreateEventBoostRequestContent": {
         "type": "object",
         "properties": {
@@ -32902,6 +33135,45 @@
           "app_url",
           "id",
           "title"
+        ]
+      },
+      "Embed": {
+        "type": "object",
+        "description": "Content from another site, such as a YouTube video, that rich text shows\ninline. Put it in rich text as `<bc-attachment sgid=\"SGID\"></bc-attachment>`\nonce its status is `active`; an embed that is not active shows as a link to\nits URL.",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "`pending` while Basecamp asks the provider about the URL, then `active`,\nor `not_found` when the provider has nothing to embed."
+          },
+          "sgid": {
+            "type": "string",
+            "description": "An embed's signed global id, an opaque string."
+          },
+          "type": {
+            "type": "string",
+            "description": "The provider's oEmbed type, such as `video`, `rich` or `photo`. Present\nonly when the embed is active."
+          },
+          "content_type": {
+            "type": "string",
+            "description": "Such as `embed/youtube-video`. Present only when the embed is active."
+          },
+          "image_url": {
+            "type": "string",
+            "description": "Present only when the embed is active, and null when the provider gave no\nimage.",
+            "nullable": true
+          },
+          "content": {
+            "type": "string",
+            "description": "The provider's HTML, sanitized. Present only when the embed is active and\nthe provider gave HTML; may be empty."
+          }
+        },
+        "required": [
+          "sgid",
+          "status",
+          "url"
         ]
       },
       "EnableCardColumnOnHoldResponseContent": {
@@ -34006,6 +34278,9 @@
       },
       "GetDocumentResponseContent": {
         "$ref": "#/components/schemas/Document"
+      },
+      "GetEmbedResponseContent": {
+        "$ref": "#/components/schemas/Embed"
       },
       "GetEverythingCheckinsResponseContent": {
         "type": "array",

@@ -111,6 +111,7 @@ func buildRootWithAllCommands() *cobra.Command {
 	root.AddCommand(commands.NewUpgradeCmd())
 	root.AddCommand(commands.NewMigrateCmd())
 	root.AddCommand(commands.NewAttachmentsCmd())
+	root.AddCommand(commands.NewEmbedsCmd())
 	root.AddCommand(commands.NewAttachCmd())
 	root.AddCommand(commands.NewUploadCmd())
 	root.AddCommand(commands.NewSkillCmd())
