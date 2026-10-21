@@ -179,37 +179,50 @@ func connectUnsupportedOSCheck(goos string) setup.Check {
 // the one running now, as its lock says, else a start with neither --pings,
 // --no-pings nor --project — and warns when another connector on this
 // computer answers them too. Only one should; the ones on other computers
-// can't be seen from here.
+// can't be seen from here. The saved choice is read either way: a running
+// connector doesn't make an unreadable one the next start's to discover.
 func pingsCheck(ctx context.Context, p connectProfile) setup.Check {
 	c := setup.Check{Name: "Pings"}
-	pings, running, ok, err := connectProfilePings(ctx, p.app, p.name, p.file)
-	switch {
-	case err != nil:
-		c.Status, c.Message = setup.StatusFail, "Whether it hears the agent's Pings was saved, and can't be read: "+errorMessage(err)
+	next, nextOK, err := connectNextPings(ctx, p.app, p.name, p.file)
+	if err != nil {
+		c.Status, c.Message = setup.StatusFail, "Whether it hears the agent's Pings was saved, and can't be read, so the next start without a flag refuses: "+errorMessage(err)
 		c.Hint = "Choose again: basecamp connect -P " + richtext.ShellQuote(p.name) + " --pings, or --no-pings to leave them to another connector."
 		return c
-	case !ok:
+	}
+	running := connectRunningPings(p.name, p.file)
+	var who, why string
+	var hears bool
+	switch {
+	case running.Running:
+		who, why, hears = "The connector running now", running.Describe(), running.MayHear()
+	case nextOK:
+		who, why, hears = "It", next.Describe(), next.Hears
+	default:
 		c.Status, c.Message = setup.StatusSkip, "Whether it hears the agent's Pings can't be told without the profile's credential"
 		return c
 	}
-	who := "It"
-	if running {
-		who = "The connector running now"
-	}
-	if !pings.Hears {
-		c.Status = setup.StatusPass
-		c.Message = who + " doesn't hear the agent's Pings: " + pings.Describe() + ". Only one connector should answer them; start this one with --pings if it's that one"
-		if running {
-			c.Message += connectNextPingsNote(ctx, p)
+	// What a restart without flags or --project would do, when it differs.
+	note := ""
+	if running.Running && nextOK && next.Hears != hears {
+		if next.Hears {
+			note = "; restarted without --project, it would hear them (" + next.Describe() + ")"
+		} else {
+			note = "; restarted, it would hear none (" + next.Describe() + ")"
 		}
+	}
+	switch {
+	case !hears:
+		c.Status = setup.StatusPass
+		c.Message = who + " doesn't hear the agent's Pings: " + why + note + ". Only one connector should answer them; start this one with --pings if it's that one"
 		return c
+	case running.Running && running.Pings == nil:
+		c.Message = who + " may hear the agent's Pings: " + why + note
+	default:
+		c.Message = who + " hears the agent's Pings: " + why + note
 	}
 	peers := connectPingsPeers(p.name, p.file)
 	if len(peers) == 0 {
-		c.Status, c.Message = setup.StatusPass, who+" hears the agent's Pings: "+pings.Describe()
-		if running {
-			c.Message += connectNextPingsNote(ctx, p)
-		}
+		c.Status = setup.StatusPass
 		return c
 	}
 	others := make([]string, 0, len(peers))
@@ -221,21 +234,7 @@ func pingsCheck(ctx context.Context, p connectProfile) setup.Check {
 		}
 	}
 	c.Status = setup.StatusWarn
-	c.Message = fmt.Sprintf("%s hears the agent's Pings (%s), and so does %s on this computer: each Ping is answered twice", who, pings.Describe(), strings.Join(others, ", "))
+	c.Message += fmt.Sprintf(", and so does %s on this computer: each Ping is answered twice", strings.Join(others, ", "))
 	c.Hint = hint
 	return c
-}
-
-// connectNextPingsNote is what a restart with neither flag nor --project
-// would do, when it differs from the connector running now.
-func connectNextPingsNote(ctx context.Context, p connectProfile) string {
-	live, _ := connectRunningPings(p.name, p.file)
-	next, ok, err := connectNextPings(ctx, p.app, p.name, p.file)
-	if err != nil || !ok || next.Hears == live.Hears {
-		return ""
-	}
-	if next.Hears {
-		return "; restarted without --project, it would hear them (" + next.Describe() + ")"
-	}
-	return "; restarted, it would hear none (" + next.Describe() + ")"
 }

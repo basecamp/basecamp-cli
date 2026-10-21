@@ -862,6 +862,9 @@ func renderConnectStatusPings(w io.Writer, r connectStatusReport) {
 		}
 		fmt.Fprintf(w, "                 the connector running now %s: %s\n", heard, now.Describe())
 	}
+	if h := r.LockHolder; h != nil && h.Pings == nil && h.PIDStatus == pidPresent {
+		fmt.Fprintf(w, "                 the connector running now may hear them: %s\n", connectRunning{Running: true}.Describe())
+	}
 	for _, other := range p.Others {
 		fmt.Fprintf(w, "  Pings          also heard by %s (pid %d) on this computer: only one connector should answer them\n", other.Words(), other.PID)
 	}

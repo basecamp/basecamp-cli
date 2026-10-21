@@ -172,8 +172,11 @@ func runGuidedConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupF
 // it. One that can't be told is said as before: every connector heard Pings
 // until it could choose.
 func guidedHearsPings(ctx context.Context, app *appctx.App, name string, file setup.File) bool {
-	pings, _, ok, err := connectProfilePings(ctx, app, name, file)
-	return err != nil || !ok || pings.Hears
+	if running := connectRunningPings(name, file); running.Running {
+		return running.MayHear()
+	}
+	next, ok, err := connectNextPings(ctx, app, name, file)
+	return err != nil || !ok || next.Hears
 }
 
 // checkGuidedScope refuses a credential that can't reply or acknowledge, as

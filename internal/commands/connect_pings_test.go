@@ -412,3 +412,52 @@ func TestAShadowHearsPingsAsItsConnectorWould(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, styled, "Pings          not heard: chosen with --no-pings", "status --shadow shows the choice the shadow reads")
 }
+
+// A running connector doesn't hide a saved choice the next start can't read:
+// doctor reads it either way, and fails the check.
+func TestDoctorReadsTheSavedChoiceWhileAConnectorRuns(t *testing.T) {
+	f := newOperatorFixture(t)
+	r := startProfileConnector(t, f.s, "agent", "--project", fmt.Sprint(setupProject))
+	r.awaitRunning(t)
+	dir, err := connectStatePath("agent", f.file, false)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, connector.PingsFile), []byte("{hears"), 0o600))
+
+	doctor := f.doctorStyled(t)
+	assert.Contains(t, doctor, "can't be read, so the next start without a flag refuses")
+	assert.Contains(t, doctor, "basecamp connect -P agent --pings")
+}
+
+// A connector an older build runs on this profile's state doesn't say
+// whether it hears Pings, and hears them unless given --project: it is
+// reported as one that may, whatever choice this build saved, which the
+// older build ignores.
+func TestAnOlderBuildsRunningConnectorMayHearPings(t *testing.T) {
+	f := newOperatorFixture(t)
+	setUpSecondProfile(t, f.s, "laptop")
+	r := startProfileConnector(t, f.s, "agent", "--no-pings")
+	r.awaitRunning(t)
+	r.stop(t)
+
+	dir, err := connectStatePath("agent", f.file, false)
+	require.NoError(t, err)
+	lock, err := connector.AcquireInstanceLock(dir, f.file.AccountID, f.file.Agent.PersonID, time.Now())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lock.Release() })
+	older, err := json.Marshal(map[string]any{"pid": os.Getpid(), "started_at": time.Now().Add(time.Minute).UTC().Format(time.RFC3339),
+		"account_id": f.file.AccountID, "agent_person_id": f.file.Agent.PersonID})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(lock.Path()+".json", older, 0o600), "as an older build writes it: nothing about Pings")
+	other := startProfileConnector(t, f.s, "laptop")
+	other.awaitRunning(t)
+
+	doctor := f.doctorStyled(t)
+	assert.Contains(t, doctor, "The connector running now may hear the agent's Pings: an older build runs it")
+	assert.Contains(t, doctor, `and so does profile "laptop"`, "and a second one beside it is warned about")
+	assert.NotContains(t, doctor, "doesn't hear the agent's Pings", "the saved --no-pings is not what's running")
+
+	styled, err := f.run(t, output.FormatStyled, "status")
+	require.NoError(t, err)
+	assert.Contains(t, styled, "the connector running now may hear them: an older build runs it")
+	assert.True(t, guidedHearsPings(context.Background(), newConnectSetupApp(t, f.s, "agent"), "agent", f.file))
+}

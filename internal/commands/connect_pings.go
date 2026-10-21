@@ -186,33 +186,41 @@ func connectPingsPeers(profile string, file setup.File) []connectPingsPeer {
 	return peers
 }
 
-// connectProfilePings is whether the profile's connector hears Pings: the
-// one running now, as its lock says (running true), else what a start with
-// neither flag nor --project would decide, from the saved choice or the
-// default for the credential the profile holds. It reads only this computer.
-// It reports false when it can't say, and a saved choice that can't be read
-// as the error the next start would refuse with.
-func connectProfilePings(ctx context.Context, app *appctx.App, profile string, file setup.File) (pings connectPings, running, ok bool, err error) {
-	if live, ok := connectRunningPings(profile, file); ok {
-		return live, true, true, nil
-	}
-	next, ok, err := connectNextPings(ctx, app, profile, file)
-	return next, false, ok, err
+// connectRunning is the profile's connector running now, as it said beside
+// its lock. Pings is nil when an older build runs it, which doesn't say, and
+// hears Pings unless it was given --project.
+type connectRunning struct {
+	Running bool
+	Pings   *connectPings
 }
 
-// connectRunningPings is whether the profile's connector running now hears
-// Pings, as it said beside its lock; false when none runs, or an older build
-// runs it and doesn't say.
-func connectRunningPings(profile string, file setup.File) (connectPings, bool) {
+// MayHear reports whether the running connector hears Pings, or may.
+func (r connectRunning) MayHear() bool { return r.Running && (r.Pings == nil || r.Pings.Hears) }
+
+// Describe is why, in a person's words.
+func (r connectRunning) Describe() string {
+	if r.Pings == nil {
+		return "an older build runs it, which doesn't say, and hears them unless given --project"
+	}
+	return r.Pings.Describe()
+}
+
+// connectRunningPings reads the profile's connector running now from its
+// lock, without taking it.
+func connectRunningPings(profile string, file setup.File) connectRunning {
 	dir, err := connectStatePath(profile, file, false)
 	if err != nil {
-		return connectPings{}, false
+		return connectRunning{}
 	}
 	holder, ok := connector.InstanceHolder(dir, file.AccountID, file.Agent.PersonID)
-	if !ok || holder.Pings == nil || !holderStillRuns(holder) {
-		return connectPings{}, false
+	if !ok || !holderStillRuns(holder) {
+		return connectRunning{}
 	}
-	return connectPings{Hears: *holder.Pings, Because: holder.PingsBecause}, true
+	r := connectRunning{Running: true}
+	if holder.Pings != nil {
+		r.Pings = &connectPings{Hears: *holder.Pings, Because: holder.PingsBecause}
+	}
+	return r
 }
 
 // connectNextPings is whether a start with neither flag nor --project would
