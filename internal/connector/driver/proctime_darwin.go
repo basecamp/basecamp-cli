@@ -19,7 +19,7 @@ func processStartTime(pid int) (time.Time, error) {
 		}
 		return time.Time{}, err
 	}
-	if info.Proc.P_pid != int32(pid) {
+	if int(info.Proc.P_pid) != pid {
 		return time.Time{}, os.ErrNotExist
 	}
 	if info.Proc.P_stat == sZomb {
@@ -27,7 +27,7 @@ func processStartTime(pid int) (time.Time, error) {
 		return time.Time{}, os.ErrNotExist
 	}
 	tv := info.Proc.P_starttime
-	return time.Unix(int64(tv.Sec), int64(tv.Usec)*1000), nil
+	return time.Unix(tv.Sec, int64(tv.Usec)*1000), nil
 }
 
 // sZomb is SZOMB from sys/proc.h.
