@@ -353,7 +353,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0
         with:
-          ruby-version: '3.3'
+          ruby-version: '3.4'
 
       - name: Compile the skill-eval patterns
         run: make check-eval-patterns
@@ -494,7 +494,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@e81a8fa391b11a595c1b7ed84177cc0fe02faf83 # v1.328.0
         with:
-          ruby-version: '3.3'
+          ruby-version: '3.4'
 
       - name: Run skill evals
         env:
