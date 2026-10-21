@@ -586,6 +586,42 @@ func TestGuidedSetupAlwaysSaysHowToRecoverAnUnreadableChoice(t *testing.T) {
 	}
 }
 
+// With this connector and two others on this computer hearing the agent's
+// Pings, each is answered more than once, not twice: doctor says so, and so
+// does the start that finds the other two, in one warning naming both, not
+// one per connector. Beside a single other, it is twice.
+func TestThreeConnectorsHearingPingsAnswerEachMoreThanOnce(t *testing.T) {
+	f := newOperatorFixture(t)
+	setUpSecondProfile(t, f.s, "laptop")
+	setUpSecondProfile(t, f.s, "desk")
+	laptop := startProfileConnector(t, f.s, "laptop")
+	laptop.awaitRunning(t)
+	desk := startProfileConnector(t, f.s, "desk")
+	desk.awaitRunning(t)
+	assert.Contains(t, lineContaining(desk.out.String(), pingsWarning), "answered twice", "beside one other")
+
+	agent := startProfileConnector(t, f.s, "agent")
+	agent.awaitRunning(t)
+	out := agent.out.String()
+	assert.Equal(t, 1, strings.Count(out, pingsWarning), "one warning, not one per connector:\n%s", out)
+	warning := lineContaining(out, pingsWarning)
+	assert.Contains(t, warning, "level=WARN")
+	assert.Contains(t, warning, "more than once")
+	assert.NotContains(t, warning, "twice")
+	assert.Contains(t, warning, "desk")
+	assert.Contains(t, warning, "laptop")
+
+	doctor := f.doctorStyled(t)
+	assert.Contains(t, doctor, "each Ping is answered more than once")
+	assert.NotContains(t, doctor, "answered twice")
+	assert.Contains(t, doctor, `profile "desk"`)
+	assert.Contains(t, doctor, `profile "laptop"`)
+
+	desk.stop(t)
+	assert.Contains(t, f.doctorStyled(t), `and so does profile "laptop"`)
+	assert.Contains(t, f.doctorStyled(t), "each Ping is answered twice", "this one and one other")
+}
+
 // A lock file left behind by a connector that has stopped, whose pid now
 // belongs to a process that started after it, describes nothing running.
 func TestStaleLockMetadataIsNoRunningConnector(t *testing.T) {

@@ -379,11 +379,11 @@ them as unknown, or a start line without `pings=`, is older, so run
 `basecamp upgrade`, tell the person, and start it again.
 
 If the log warns `only one connector should answer Pings`, another connector
-on this computer hears the same agent's Pings, and each is answered twice.
-Tell the person, name the profile the warning names, and ask which should
-answer them. Connectors on other computers can't be seen from here, so if the
-person runs this agent elsewhere too, remind them once that only one computer
-should answer Pings.
+on this computer hears the same agent's Pings, and each is answered twice, or
+more than once beside two or more. Tell the person, name the profiles the
+warning names, and ask which should answer them. Connectors on other
+computers can't be seen from here, so if the person runs this agent elsewhere
+too, remind them once that only one computer should answer Pings.
 
 ## Invocation
 

@@ -216,9 +216,12 @@ func pingsCheck(ctx context.Context, p connectProfile) setup.Check {
 		}
 	}
 	switch {
-	case v.Twice() && hears:
+	case v.Twice() && hears && len(v.Others) == 1:
 		c.Status = setup.StatusWarn
 		c.Message += ", and so does " + peerList(v.Others) + " on this computer: each Ping is answered twice"
+	case v.Twice() && hears:
+		c.Status = setup.StatusWarn
+		c.Message += ", and so do " + peerList(v.Others) + " on this computer: each Ping is answered more than once"
 	case v.Twice():
 		c.Status = setup.StatusWarn
 		c.Message += ", and " + peerList(v.Others) + " on this computer all do: each Ping is answered more than once"

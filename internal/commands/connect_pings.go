@@ -278,20 +278,29 @@ func connectRunPings(held *connector.InstanceLock, profile string, file setup.Fi
 }
 
 // warnConnectPingsPeers says, as a connector that hears Pings starts, that
-// another connector on this computer hears the same agent's Pings, so each is
-// answered twice. One that hears none says what it leaves to whom.
+// other connectors on this computer hear the same agent's Pings, in one
+// warning: beside one, each is answered twice; beside two or more, more than
+// once. One that hears none says what it leaves to whom.
 func warnConnectPingsPeers(logger *slog.Logger, pings connectPings, profile string, file setup.File) {
 	if !pings.Hears {
 		logger.Info("connector: hearing no Pings, and leaving them to the one connector that answers them; start with --pings to answer them here",
 			"pings_because", pings.Describe())
 		return
 	}
-	for _, peer := range connectPingsPeers(profile, file) {
-		msg := "connector: another connector on this computer hears this agent's Pings too, so each is answered twice; only one connector should answer Pings: restart one of them with --no-pings"
-		if peer.Older {
-			msg = "connector: an older connector on this computer may hear this agent's Pings too, so each would be answered twice; only one connector should answer Pings: upgrade it, or restart this one with --no-pings"
+	peers := connectPingsPeers(profile, file)
+	switch {
+	case len(peers) == 1 && peers[0].Older:
+		logger.Warn("connector: an older connector on this computer may hear this agent's Pings too, so each would be answered twice; only one connector should answer Pings: upgrade it, or restart this one with --no-pings",
+			"profile", richtext.SanitizeSingleLine(peers[0].Profile), "pid", peers[0].PID)
+	case len(peers) == 1:
+		logger.Warn("connector: another connector on this computer hears this agent's Pings too, so each is answered twice; only one connector should answer Pings: restart one of them with --no-pings",
+			"profile", richtext.SanitizeSingleLine(peers[0].Profile), "pid", peers[0].PID)
+	case len(peers) > 1:
+		msg := "connector: other connectors on this computer hear this agent's Pings too, so each is answered more than once; only one connector should answer Pings: restart all but one of them with --no-pings"
+		if slices.ContainsFunc(peers, func(p connectPingsPeer) bool { return p.Older }) {
+			msg = "connector: other connectors on this computer hear this agent's Pings too, or may, so each is answered more than once; only one connector should answer Pings: upgrade any older one, and restart all but one of them with --no-pings"
 		}
-		logger.Warn(msg, "profile", richtext.SanitizeSingleLine(peer.Profile), "pid", peer.PID)
+		logger.Warn(msg, "others", peerList(peers))
 	}
 }
 
