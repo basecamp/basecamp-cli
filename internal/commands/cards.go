@@ -7,7 +7,6 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -904,6 +903,7 @@ func resolvePersonRoleID(ctx context.Context, app *appctx.App, input, role strin
 func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 	var column string
 	var assignee string
+	var due string
 	var attachFiles []string
 
 	cmd := &cobra.Command{
@@ -914,6 +914,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 Use - as the body argument to read the body from stdin:
   printf 'Card body' | basecamp cards create "My card" - --in myproject`,
 		Example: `  basecamp cards create "My card" --in myproject
+  basecamp cards create "Launch review" --due "next friday" --in myproject
   basecamp cards create --in myproject -- "--title with dashes"`,
 		// Bounded so a stray third token is a usage error rather than being
 		// silently dropped after "-" has already drained stdin.
@@ -929,9 +930,9 @@ Use - as the body argument to read the body from stdin:
 				return cmd.Help()
 			}
 			// A named column needs --card-table to resolve against, and that is
-			// knowable from the flags alone. Attachment paths are readable or
-			// not regardless of the body. Both precede the read, so a doomed
-			// invocation never costs the caller a drained pipe.
+			// knowable from the flags alone. Attachment paths and the due date
+			// are valid or not regardless of the body. All precede the read, so
+			// a doomed invocation never costs the caller a drained pipe.
 			if column != "" && !isNumericID(column) && *cardTable == "" {
 				return output.ErrUsage("--card-table is required when using --column with a name")
 			}
@@ -940,6 +941,15 @@ Use - as the body argument to read the body from stdin:
 			}
 			if err := validateAttachPaths(attachFiles); err != nil {
 				return err
+			}
+			// Every non-empty value is parsed, so a whitespace-only --due is
+			// rejected rather than creating a card without the date asked for.
+			var parsedDue string
+			if due != "" {
+				var err error
+				if parsedDue, err = parseDueDate(due); err != nil {
+					return err
+				}
 			}
 
 			var content string
@@ -1060,6 +1070,7 @@ Use - as the body argument to read the body from stdin:
 			req := &basecamp.CreateCardRequest{
 				Title:   title,
 				Content: content,
+				DueOn:   parsedDue,
 			}
 
 			card, err := app.Account().Cards().Create(cmd.Context(), columnID, req)
@@ -1125,6 +1136,7 @@ Use - as the body argument to read the body from stdin:
 	cmd.Flags().StringVarP(&column, "column", "c", "", "Column ID or name (defaults to first column)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee ID or name")
 	cmd.Flags().StringVar(&assignee, "to", "", "Assignee (alias for --assignee)")
+	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date (natural language or YYYY-MM-DD)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
 	allowDash(cmd, "arg:1")
@@ -1166,11 +1178,8 @@ You can pass either a card ID or a Basecamp URL:
 				return output.ErrUsage("Invalid card ID")
 			}
 
-			// Attachment paths are readable or not regardless of the body, so
-			// check them before the pipe is drained. The due date too:
-			// dateparse.Parse returns unrecognized input unchanged, so a bad
-			// value fails only at the server, after the producer is spent.
-			// todos update already rejects it locally; match that.
+			// Attachment paths and the due date are valid or not regardless of
+			// the body, so check both before the pipe is drained.
 			if err := validateAttachPaths(attachFiles); err != nil {
 				return err
 			}
@@ -1178,13 +1187,11 @@ You can pass either a card ID or a Basecamp URL:
 			// no-change guard above tests due == "", so a whitespace-only
 			// --due passes it, and dateparse.Parse trims that to an empty
 			// date. Parsing it here answers "Invalid due date" instead of
-			// sending an update with nothing in it. Surrounding whitespace on
-			// a real date is already handled by the parser.
+			// sending an update with nothing in it.
 			var parsedDue string
 			if due != "" {
-				parsedDue = dateparse.Parse(due)
-				if _, err := time.Parse("2006-01-02", parsedDue); err != nil {
-					return output.ErrUsage(fmt.Sprintf("Invalid due date: %q", due))
+				if parsedDue, err = parseDueDate(due); err != nil {
+					return err
 				}
 			}
 

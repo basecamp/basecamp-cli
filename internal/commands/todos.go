@@ -1589,9 +1589,8 @@ Set or clear the people notified when the todo is completed:
 			// rather than re-derived below.
 			var parsedDue string
 			if !clearDue && strings.TrimSpace(due) != "" {
-				parsedDue = dateparse.Parse(due)
-				if _, err := time.Parse("2006-01-02", parsedDue); err != nil {
-					return output.ErrUsage(fmt.Sprintf("Invalid due date: %q", due))
+				if parsedDue, err = parseDueDate(due); err != nil {
+					return err
 				}
 			}
 			var parsedStarts string

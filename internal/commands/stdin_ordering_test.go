@@ -106,7 +106,8 @@ func deterministicCheck(call *ast.CallExpr) bool {
 	if id, ok := call.Fun.(*ast.Ident); ok {
 		switch id.Name {
 		case "validateAttachPaths", "validateUploadPath", "validateScheduleTimestamp",
-			"rejectSubscribeConflict", "rejectForeignAPIPath", "requireNumericID":
+			"rejectSubscribeConflict", "rejectForeignAPIPath", "requireNumericID",
+			"parseDueDate":
 			return true
 		}
 	}

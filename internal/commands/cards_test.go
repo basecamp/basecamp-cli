@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -1590,6 +1591,87 @@ func TestCardsCreateContentIsHTML(t *testing.T) {
 	content, ok := body["content"].(string)
 	require.True(t, ok)
 	assert.Contains(t, content, "<strong>bold</strong>")
+}
+
+// cardsCreateDueApp serves exactly the card create endpoint for a numeric
+// column, so any other request (a follow-up update included) fails the
+// command instead of passing silently.
+func cardsCreateDueApp(t *testing.T) (*appctx.App, *recordingTransport) {
+	t.Helper()
+	transport := &recordingTransport{routes: []stubRoute{
+		projectsRoute(),
+		{
+			method: http.MethodPost,
+			path:   "/99999/card_tables/lists/12345/cards.json",
+			status: http.StatusCreated,
+			body:   `{"id": 999, "title": "Title", "status": "active"}`,
+		},
+	}}
+	return setupCardsMockApp(t, transport), transport
+}
+
+// createdCardBody runs cards create and returns the one POST body it sent,
+// failing if the card took anything other than a single create request.
+func createdCardBody(t *testing.T, args ...string) map[string]any {
+	t.Helper()
+	app, transport := cardsCreateDueApp(t)
+
+	err := executeCommand(NewCardsCmd(), app, append([]string{"create", "Title", "--column", "12345"}, args...)...)
+	require.NoError(t, err)
+
+	var writes []recordedCall
+	for _, call := range transport.recorded() {
+		if call.Method != http.MethodGet {
+			writes = append(writes, call)
+		}
+	}
+	require.Len(t, writes, 1, "the card is created in one write")
+	require.Equal(t, http.MethodPost, writes[0].Method)
+	require.Equal(t, "/99999/card_tables/lists/12345/cards.json", writes[0].Path)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal([]byte(writes[0].Body), &body))
+	return body
+}
+
+func TestCardsCreateSendsDueDate(t *testing.T) {
+	body := createdCardBody(t, "--due", "2026-07-04")
+	assert.Equal(t, "2026-07-04", body["due_on"])
+}
+
+func TestCardsCreateShortDueFlag(t *testing.T) {
+	body := createdCardBody(t, "-d", "2026-07-04")
+	assert.Equal(t, "2026-07-04", body["due_on"])
+}
+
+func TestCardsCreateResolvesNaturalLanguageDueDate(t *testing.T) {
+	before := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	body := createdCardBody(t, "--due", "tomorrow")
+	after := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+
+	assert.Contains(t, []string{before, after}, body["due_on"])
+}
+
+func TestCardsCreateWithoutDueSendsNoDueDate(t *testing.T) {
+	body := createdCardBody(t)
+	assert.Equal(t, "Title", body["title"])
+	assert.NotContains(t, body, "due_on")
+}
+
+// A named column needs the card table fetched, so a due date checked any later
+// than the flag-only checks would show up as a request here.
+func TestCardsCreateRejectsInvalidDueDate(t *testing.T) {
+	for _, due := range []string{"not-a-date", " "} {
+		t.Run(fmt.Sprintf("%q", due), func(t *testing.T) {
+			transport := &countingTransport{}
+			app := setupCardsMockApp(t, transport)
+
+			err := executeCommand(NewCardsCmd(), app, "create", "Title", "--column", "Backlog", "--card-table", "777", "--due", due)
+			outErr := requireUsageErr(t, err)
+			assert.Contains(t, outErr.Message, "Invalid due date")
+			assert.Zero(t, transport.calls, "no request may be issued")
+		})
+	}
 }
 
 func TestCardsUpdateContentIsHTML(t *testing.T) {

@@ -8,11 +8,13 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/names"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
@@ -241,6 +243,17 @@ func requireNumericID(value, label string) error {
 		return output.ErrUsage("Invalid " + label)
 	}
 	return nil
+}
+
+// parseDueDate resolves a --due value to the YYYY-MM-DD date Basecamp stores.
+// dateparse.Parse returns input it does not recognize unchanged, so without
+// this check a bad value would fail only at the server.
+func parseDueDate(raw string) (string, error) {
+	parsed := dateparse.Parse(raw)
+	if _, err := time.Parse("2006-01-02", parsed); err != nil {
+		return "", output.ErrUsage(fmt.Sprintf("Invalid due date: %q", raw))
+	}
+	return parsed, nil
 }
 
 // getDockToolID retrieves a dock tool ID from a project, handling the multi-dock case.

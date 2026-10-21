@@ -3348,6 +3348,7 @@ FLAG basecamp cards create --cache-dir type=string
 FLAG basecamp cards create --card-table type=string
 FLAG basecamp cards create --column type=string
 FLAG basecamp cards create --count type=bool
+FLAG basecamp cards create --due type=string
 FLAG basecamp cards create --format type=string
 FLAG basecamp cards create --help type=bool
 FLAG basecamp cards create --hints type=bool
