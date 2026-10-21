@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"time"
 
@@ -237,11 +238,18 @@ func pingsCheck(ctx context.Context, p connectProfile) setup.Check {
 		c.Status = setup.StatusPass
 		return c
 	}
-	c.Hint = "Only one connector should answer Pings. Start all but one of them with --no-pings: basecamp connect -P " + richtext.ShellQuote(p.name) + " --no-pings"
-	for _, peer := range v.Others {
-		if peer.Older {
-			c.Hint = "Only one connector should answer Pings, and an older build can't be told: upgrade it, or start this one with --no-pings: basecamp connect -P " + richtext.ShellQuote(p.name) + " --no-pings"
-		}
+	// A profile that hears none can only point at the others: restarting it
+	// with --no-pings changes nothing.
+	older := slices.ContainsFunc(v.Others, func(o connectPingsPeer) bool { return o.Older })
+	switch {
+	case !hears && older:
+		c.Hint = "Only one connector should answer Pings, and this one doesn't: upgrade any older one, then restart all but one of the others with --no-pings: basecamp connect -P <profile> --no-pings"
+	case !hears:
+		c.Hint = "Only one connector should answer Pings, and this one doesn't: restart all but one of the others with --no-pings: basecamp connect -P <profile> --no-pings"
+	case older:
+		c.Hint = "Only one connector should answer Pings, and an older build can't be told: upgrade it, or start this one with --no-pings: basecamp connect -P " + richtext.ShellQuote(p.name) + " --no-pings"
+	default:
+		c.Hint = "Only one connector should answer Pings. Start all but one of them with --no-pings: basecamp connect -P " + richtext.ShellQuote(p.name) + " --no-pings"
 	}
 	return c
 }

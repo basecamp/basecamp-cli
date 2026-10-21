@@ -622,6 +622,52 @@ func TestThreeConnectorsHearingPingsAnswerEachMoreThanOnce(t *testing.T) {
 	assert.Contains(t, f.doctorStyled(t), "each Ping is answered twice", "this one and one other")
 }
 
+// Doctor on a profile that hears no Pings, beside two others here that do,
+// points at those two: restarting this one with --no-pings changes nothing.
+// An older one among them is upgraded first, since it can't be told.
+func TestDoctorBesideTwoAnswerersPointsAtThem(t *testing.T) {
+	for _, older := range []bool{false, true} {
+		t.Run(fmt.Sprintf("older=%t", older), func(t *testing.T) {
+			f := newOperatorFixture(t)
+			setUpSecondProfile(t, f.s, "laptop")
+			agent := startProfileConnector(t, f.s, "agent", "--no-pings")
+			agent.awaitRunning(t)
+			laptop := startProfileConnector(t, f.s, "laptop")
+			laptop.awaitRunning(t)
+			if older {
+				stateHome, err := connectStateHome()
+				require.NoError(t, err)
+				legacy, err := ensurePrivateChain(stateHome, "basecamp", "connect", connector.LegacyStateDirName(f.file.AccountID, f.file.Agent.PersonID))
+				require.NoError(t, err)
+				lock, err := connector.AcquireInstanceLock(legacy, f.file.AccountID, f.file.Agent.PersonID, time.Now().Add(-time.Minute))
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = lock.Release() })
+				meta, err := json.Marshal(map[string]any{"pid": os.Getpid(), "started_at": time.Now().Add(time.Minute).UTC().Format(time.RFC3339),
+					"account_id": f.file.AccountID, "agent_person_id": f.file.Agent.PersonID})
+				require.NoError(t, err)
+				require.NoError(t, os.WriteFile(lock.Path()+".json", meta, 0o600), "as an older build writes it: nothing about Pings")
+			} else {
+				setUpSecondProfile(t, f.s, "desk")
+				desk := startProfileConnector(t, f.s, "desk")
+				desk.awaitRunning(t)
+			}
+
+			doctor := f.doctorStyled(t)
+			require.Contains(t, doctor, "each Ping is answered more than once", doctor)
+			hint := lineContaining(doctor, "Only one connector should answer Pings")
+			assert.Contains(t, hint, "this one doesn't", doctor)
+			assert.Contains(t, hint, "restart all but one of the others with --no-pings")
+			assert.NotContains(t, hint, "basecamp connect -P agent", "this profile already leaves them to another")
+			assert.NotContains(t, hint, "start this one with --no-pings")
+			if older {
+				assert.Contains(t, hint, "upgrade any older one")
+			} else {
+				assert.NotContains(t, hint, "older")
+			}
+		})
+	}
+}
+
 // A lock file left behind by a connector that has stopped, whose pid now
 // belongs to a process that started after it, describes nothing running.
 func TestStaleLockMetadataIsNoRunningConnector(t *testing.T) {
