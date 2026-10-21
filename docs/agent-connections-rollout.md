@@ -58,12 +58,14 @@ choice, and warns about a second it can see on the same computer.
   bot user's, hears them as every connector did before this build. A run
   given `--project` hears none, as before, and `--pings` with `--project` is
   refused.
-- The first start on this build saves the answer in the profile's state
-  directory (`pings.json`, beside the ledger), and every restart keeps it
-  until `--pings` or `--no-pings` changes it. A profile that heard Pings keeps
+- The first start on this build without `--project` saves the answer in the
+  profile's state directory (`pings.json`, beside the ledger), as `--pings`
+  and `--no-pings` save theirs, and every restart keeps it until one of them
+  changes it. A run given `--project` saves nothing, so a narrowed first run
+  leaves the choice to the first one that isn't. A profile that heard Pings keeps
   hearing them after a reconnect turns its credential into an added
-  connection. An unreadable `pings.json` refuses the start until a flag
-  chooses again.
+  connection. An unreadable `pings.json` refuses the start: remove it, then
+  choose again with a flag.
 - `basecamp connect status` and `basecamp connect doctor` say whether the
   profile's connector answers Pings and why. A connector that hears them
   warns when another for the same agent on this computer does too, an older

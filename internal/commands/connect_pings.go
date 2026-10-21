@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -223,28 +224,6 @@ func connectRunningPings(profile string, file setup.File) connectRunning {
 	return r
 }
 
-// connectNextPings is whether a start with neither flag nor --project would
-// hear Pings: the profile's saved choice, else the default for its
-// credential.
-func connectNextPings(ctx context.Context, app *appctx.App, profile string, file setup.File) (connectPings, bool, error) {
-	dir, err := connectStatePath(profile, file, false)
-	if err != nil {
-		return connectPings{}, false, err
-	}
-	saved, ok, err := connector.LoadPingsChoice(dir)
-	switch {
-	case err != nil:
-		return connectPings{}, false, err
-	case ok:
-		return connectPings{Hears: saved.Hears, Because: saved.Because}, true, nil
-	}
-	creds, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
-	if err != nil {
-		return connectPings{}, false, nil //nolint:nilerr // the token checks report an unreadable credential
-	}
-	return connectPingsDefault(creds.OAuthType, creds.ClientSecret), true, nil
-}
-
 // connectPingsFlag is the start's --pings or --no-pings, nil when neither was
 // given. A flag given false is the other choice: --pings=false is
 // --no-pings. It refuses both at once, and hearing Pings on a run given
@@ -290,7 +269,7 @@ func connectRunPings(held *connector.InstanceLock, profile string, file setup.Fi
 	switch {
 	case err != nil && flag == nil && !narrowed:
 		return connectPings{}, false, output.ErrUsageHint("Whether this connector hears Pings was saved, and can't be read: "+setup.ErrorText(err),
-			"Choose again: basecamp connect -P "+richtext.ShellQuote(profile)+" --pings, or --no-pings to leave them to another connector.")
+			connectPingsRemedy(filepath.Join(dir, connector.PingsFile), profile))
 	case ok:
 		saved = &choice
 	}
@@ -314,4 +293,94 @@ func warnConnectPingsPeers(logger *slog.Logger, pings connectPings, profile stri
 		}
 		logger.Warn(msg, "profile", richtext.SanitizeSingleLine(peer.Profile), "pid", peer.PID)
 	}
+}
+
+// connectPingsView is what this computer can say about who answers an
+// agent's Pings, for one profile: the choice its next start makes, its
+// connector running now, and the other connectors here that hear them.
+// status, doctor and guided setup all read it, so they tell one story.
+type connectPingsView struct {
+	// Path is the profile's saved choice, pings.json.
+	Path string
+	// Saved is that choice, nil when none is saved; SavedErr why it can't be
+	// read, which refuses the next start without a flag.
+	Saved    *connector.PingsChoice
+	SavedErr error
+	// Next is what a start with neither flag nor --project decides: the
+	// saved choice, else the credential's default. Nil when it can't be told.
+	Next *connectPings
+	// Running is the profile's connector running now, from its lock.
+	Running connectRunning
+	// Others are the other connectors running here for the agent that hear
+	// its Pings, or may.
+	Others []connectPingsPeer
+}
+
+// readConnectPingsView reads the view. With no app it reads no credential,
+// and a profile that has saved no choice has no Next.
+func readConnectPingsView(ctx context.Context, app *appctx.App, profile string, file setup.File) connectPingsView {
+	v := connectPingsView{Running: connectRunningPings(profile, file), Others: connectPingsPeers(profile, file)}
+	dir, err := connectStatePath(profile, file, false)
+	if err != nil {
+		v.SavedErr = err
+		return v
+	}
+	v.Path = filepath.Join(dir, connector.PingsFile)
+	saved, ok, err := connector.LoadPingsChoice(dir)
+	switch {
+	case err != nil:
+		v.SavedErr = err
+	case ok:
+		v.Saved = &saved
+		v.Next = &connectPings{Hears: saved.Hears, Because: saved.Because}
+	case app != nil:
+		if creds, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey()); err == nil {
+			next := connectPingsDefault(creds.OAuthType, creds.ClientSecret)
+			v.Next = &next
+		}
+	}
+	return v
+}
+
+// Hears is whether the profile's connector answers Pings, or may: the one
+// running now, else the next start. It reports false when it can't be told.
+func (v connectPingsView) Hears() (hears, known bool) {
+	switch {
+	case v.Running.Running:
+		return v.Running.MayHear(), true
+	case v.Next != nil:
+		return v.Next.Hears, true
+	}
+	return false, false
+}
+
+// Twice reports whether two connectors on this computer answer, or may
+// answer, the agent's Pings.
+func (v connectPingsView) Twice() bool {
+	hears, _ := v.Hears()
+	return len(v.Others) > 1 || (hears && len(v.Others) > 0)
+}
+
+// Remedy is how to recover from a saved choice that can't be read. The flag
+// alone may not: a choice is never written over something that isn't this
+// user's own file, so the file goes first. It holds nothing else.
+func (v connectPingsView) Remedy(profile string) string {
+	return connectPingsRemedy(v.Path, profile)
+}
+
+func connectPingsRemedy(path, profile string) string {
+	remove := "Remove the profile's pings.json"
+	if path != "" {
+		remove = "Remove " + richtext.SanitizeSingleLine(path)
+	}
+	return remove + ", then choose again: basecamp connect -P " + richtext.ShellQuote(profile) + " --pings, or --no-pings to leave them to another connector."
+}
+
+// peerList names other connectors for a line.
+func peerList(peers []connectPingsPeer) string {
+	words := make([]string, 0, len(peers))
+	for _, peer := range peers {
+		words = append(words, fmt.Sprintf("%s (pid %d)", peer.Words(), peer.PID))
+	}
+	return strings.Join(words, ", ")
 }

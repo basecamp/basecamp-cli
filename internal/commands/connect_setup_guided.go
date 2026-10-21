@@ -163,20 +163,27 @@ func runGuidedConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupF
 		file = &loaded
 	}
 
-	renderGuidedSummary(w, r, agent, *file, connectorRunning(name, *file), guidedHearsPings(ctx, app, name, *file), name)
+	renderGuidedSummary(w, r, agent, *file, connectorRunning(name, *file), guidedPings(ctx, app, name, *file), name)
 	return nil
 }
 
-// guidedHearsPings is whether the profile's connector answers the agent's
-// Pings: the one running now, else one started as the summary says to start
-// it. One that can't be told is said as before: every connector heard Pings
-// until it could choose.
-func guidedHearsPings(ctx context.Context, app *appctx.App, name string, file setup.File) bool {
-	if running := connectRunningPings(name, file); running.Running {
-		return running.MayHear()
+// guidedPings is what the summary says about the agent's Pings: whether the
+// profile's connector answers them — the one running now, else one started
+// as the summary says to start it — and, when the saved choice can't be
+// read, how to recover, since that start would refuse. One that can't be
+// told is said as before: every connector heard Pings until it could choose.
+type guidedPingsSummary struct {
+	hears  bool
+	remedy string
+}
+
+func guidedPings(ctx context.Context, app *appctx.App, name string, file setup.File) guidedPingsSummary {
+	v := readConnectPingsView(ctx, app, name, file)
+	if v.SavedErr != nil && !v.Running.Running {
+		return guidedPingsSummary{remedy: v.Remedy(name)}
 	}
-	next, ok, err := connectNextPings(ctx, app, name, file)
-	return err != nil || !ok || next.Hears
+	hears, known := v.Hears()
+	return guidedPingsSummary{hears: hears || !known}
 }
 
 // checkGuidedScope refuses a credential that can't reply or acknowledge, as
@@ -622,7 +629,8 @@ func runGuidedSetupAgain(name string) string {
 	return "Then run this again: basecamp connect setup -P " + richtext.ShellQuote(name)
 }
 
-func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, file setup.File, running, hearsPings bool, name string) {
+func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, file setup.File, running bool, pings guidedPingsSummary, name string) {
+	hearsPings := pings.hears
 	names := make(map[int64]string, len(agent.Projects))
 	for _, p := range agent.Projects {
 		names[p.ID] = richtext.SanitizeSingleLine(p.Name)
@@ -658,7 +666,7 @@ func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, fil
 			fmt.Fprintf(w, "It isn't working in any projects, so only your pings reach it. To add one: basecamp connect setup -P %s --serve <project-id>\n", quoted)
 		} else {
 			fmt.Fprintf(w, "It isn't working in any projects, and it leaves Pings to another connection, so nothing reaches it yet. To add one: basecamp connect setup -P %s --serve <project-id>\n", quoted)
-			renderGuidedPingsElsewhere(w, quoted)
+			renderGuidedPingsElsewhere(w, quoted, pings.remedy)
 		}
 		return
 	}
@@ -677,17 +685,23 @@ func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, fil
 		fmt.Fprintf(w, "\nOnce it's running, %s\n", try)
 	}
 	if !hearsPings {
-		renderGuidedPingsElsewhere(w, quoted)
+		renderGuidedPingsElsewhere(w, quoted, pings.remedy)
 	}
 }
 
 // renderGuidedPingsElsewhere says a connection that hears no Pings leaves
-// them to another, and how to make it the one that answers them.
-func renderGuidedPingsElsewhere(w io.Writer, quoted string) {
+// them to another, and how to make it the one that answers them; or, when
+// its saved choice can't be read, how to choose again.
+func renderGuidedPingsElsewhere(w io.Writer, quoted, remedy string) {
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "It leaves Pings to the agent's first connection: only one computer should answer")
-	fmt.Fprintln(w, "Pings. To answer them from this one, start it with --pings, and start the other")
-	fmt.Fprintln(w, "with --no-pings:")
+	if remedy != "" {
+		fmt.Fprintln(w, "Whether it answers Pings was saved, and can't be read, so it won't start until")
+		fmt.Fprintln(w, "you choose again. "+remedy)
+		return
+	}
+	fmt.Fprintln(w, "It leaves Pings to another connection: only one computer should answer Pings.")
+	fmt.Fprintln(w, "To answer them from this one, start it with --pings, and start the other with")
+	fmt.Fprintln(w, "--no-pings:")
 	fmt.Fprintln(w, "  basecamp connect -P "+quoted+" --pings")
 }
 

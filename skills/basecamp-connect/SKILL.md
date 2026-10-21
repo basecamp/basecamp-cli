@@ -367,9 +367,10 @@ project, so only one computer should answer them. A connector started with
 `--pings` hears Pings and anything else outside a project; one started with
 `--no-pings` hears only the projects it serves. Without either, the agent's
 first connection hears them, a connection added after it doesn't, and a bot
-user's login does, as before. A run given `--project` hears none. The first
-start saves the choice for the profile, and restarts keep it until `--pings`
-or `--no-pings` changes it, so pass one only when the person asks: "answer my
+user's login does, as before. A run given `--project` hears none and saves
+nothing. The first start without `--project` saves the choice for the
+profile, as either flag saves its own, and restarts keep it until one changes
+it, so pass one only when the person asks: "answer my
 Pings from this computer" is `--pings`, and the connector on the other
 computer then needs `--no-pings`. Both are the owner's word, like any other
 change to the connector. The start line says which: `pings=true` or

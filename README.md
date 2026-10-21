@@ -288,8 +288,9 @@ would answer. A connector started with `--pings` hears Pings, and anything
 else outside a project; one started with `--no-pings` hears only its projects.
 Without either, the agent's first connection hears them, a connection added
 after it doesn't, and a bot user's login does, as it always has. A run given
-`--project` hears none. The first start saves the choice for the profile, and
-restarts keep it until you pass the other flag:
+`--project` hears none and saves nothing. The first start without `--project`
+saves the choice for the profile, as either flag saves its own, and restarts
+keep it until you pass the other flag:
 
 ```bash
 basecamp connect -P desktop --pings        # this computer answers Pings

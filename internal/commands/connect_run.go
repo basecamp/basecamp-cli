@@ -314,7 +314,8 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if savePings {
 		// Under the lock: no other start of this profile writes it at once.
 		if err := connector.SavePingsChoice(stateDir, connector.PingsChoice{Hears: pings.Hears, Because: pings.Because, At: time.Now().UTC()}); err != nil {
-			return fmt.Errorf("the choice of whether this connector hears Pings could not be saved, so a restart would not keep it: %w", err)
+			return output.ErrUsageHint("Whether this connector hears Pings could not be saved, so a restart would not keep it: "+setup.ErrorText(err),
+				connectPingsRemedy(filepath.Join(stateDir, connector.PingsFile), name))
 		}
 	}
 

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -177,64 +176,67 @@ func connectUnsupportedOSCheck(goos string) setup.Check {
 
 // pingsCheck says whether the profile's connector hears the agent's Pings —
 // the one running now, as its lock says, else a start with neither --pings,
-// --no-pings nor --project — and warns when another connector on this
-// computer answers them too. Only one should; the ones on other computers
-// can't be seen from here. The saved choice is read either way: a running
-// connector doesn't make an unreadable one the next start's to discover.
+// --no-pings nor --project — and warns when two connectors on this computer
+// answer them. Only one should; the ones on other computers can't be seen
+// from here. The saved choice is read either way: a running connector
+// doesn't make an unreadable one the next start's to discover.
 func pingsCheck(ctx context.Context, p connectProfile) setup.Check {
 	c := setup.Check{Name: "Pings"}
-	next, nextOK, err := connectNextPings(ctx, p.app, p.name, p.file)
-	if err != nil {
-		c.Status, c.Message = setup.StatusFail, "Whether it hears the agent's Pings was saved, and can't be read, so the next start without a flag refuses: "+errorMessage(err)
-		c.Hint = "Choose again: basecamp connect -P " + richtext.ShellQuote(p.name) + " --pings, or --no-pings to leave them to another connector."
+	v := readConnectPingsView(ctx, p.app, p.name, p.file)
+	if v.SavedErr != nil {
+		c.Status, c.Message = setup.StatusFail, "Whether it hears the agent's Pings was saved, and can't be read, so the next start without a flag refuses: "+errorMessage(v.SavedErr)
+		c.Hint = v.Remedy(p.name)
 		return c
 	}
-	running := connectRunningPings(p.name, p.file)
-	var who, why string
-	var hears bool
-	switch {
-	case running.Running:
-		who, why, hears = "The connector running now", running.Describe(), running.MayHear()
-	case nextOK:
-		who, why, hears = "It", next.Describe(), next.Hears
-	default:
+	hears, known := v.Hears()
+	if !known {
 		c.Status, c.Message = setup.StatusSkip, "Whether it hears the agent's Pings can't be told without the profile's credential"
 		return c
 	}
-	// What a restart without flags or --project would do, when it differs.
-	note := ""
-	if running.Running && nextOK && next.Hears != hears {
-		if next.Hears {
-			note = "; restarted without --project, it would hear them (" + next.Describe() + ")"
-		} else {
-			note = "; restarted, it would hear none (" + next.Describe() + ")"
-		}
+	who, why := "It", v.Next.Describe()
+	if v.Running.Running {
+		who, why = "The connector running now", v.Running.Describe()
 	}
 	switch {
 	case !hears:
-		c.Status = setup.StatusPass
-		c.Message = who + " doesn't hear the agent's Pings: " + why + note + ". Only one connector should answer them; start this one with --pings if it's that one"
-		return c
-	case running.Running && running.Pings == nil:
-		c.Message = who + " may hear the agent's Pings: " + why + note
+		c.Message = who + " doesn't hear the agent's Pings: " + why
+	case v.Running.Running && v.Running.Pings == nil:
+		c.Message = who + " may hear the agent's Pings: " + why
 	default:
-		c.Message = who + " hears the agent's Pings: " + why + note
+		c.Message = who + " hears the agent's Pings: " + why
 	}
-	peers := connectPingsPeers(p.name, p.file)
-	if len(peers) == 0 {
-		c.Status = setup.StatusPass
-		return c
-	}
-	others := make([]string, 0, len(peers))
-	hint := "Only one connector should answer Pings. Start one of them with --no-pings: basecamp connect -P " + richtext.ShellQuote(p.name) + " --no-pings"
-	for _, peer := range peers {
-		others = append(others, fmt.Sprintf("%s (pid %d)", peer.Words(), peer.PID))
-		if peer.Older {
-			hint = "Only one connector should answer Pings, and an older build can't be told: upgrade it, or start this one with --no-pings: basecamp connect -P " + richtext.ShellQuote(p.name) + " --no-pings"
+	// What a restart without flags or --project would do, when it differs.
+	if v.Running.Running && v.Next != nil && v.Next.Hears != hears {
+		if v.Next.Hears {
+			c.Message += "; restarted without --project, it would hear them (" + v.Next.Describe() + ")"
+		} else {
+			c.Message += "; restarted, it would hear none (" + v.Next.Describe() + ")"
 		}
 	}
-	c.Status = setup.StatusWarn
-	c.Message += fmt.Sprintf(", and so does %s on this computer: each Ping is answered twice", strings.Join(others, ", "))
-	c.Hint = hint
+	switch {
+	case v.Twice() && hears:
+		c.Status = setup.StatusWarn
+		c.Message += ", and so does " + peerList(v.Others) + " on this computer: each Ping is answered twice"
+	case v.Twice():
+		c.Status = setup.StatusWarn
+		c.Message += ", and " + peerList(v.Others) + " on this computer all do: each Ping is answered more than once"
+	case len(v.Others) == 1:
+		c.Status = setup.StatusPass
+		c.Message += "; " + peerList(v.Others) + " answers them on this computer"
+		return c
+	case !hears:
+		c.Status = setup.StatusPass
+		c.Message += ". Only one connector should answer them; start this one with --pings if it's that one"
+		return c
+	default:
+		c.Status = setup.StatusPass
+		return c
+	}
+	c.Hint = "Only one connector should answer Pings. Start all but one of them with --no-pings: basecamp connect -P " + richtext.ShellQuote(p.name) + " --no-pings"
+	for _, peer := range v.Others {
+		if peer.Older {
+			c.Hint = "Only one connector should answer Pings, and an older build can't be told: upgrade it, or start this one with --no-pings: basecamp connect -P " + richtext.ShellQuote(p.name) + " --no-pings"
+		}
+	}
 	return c
 }

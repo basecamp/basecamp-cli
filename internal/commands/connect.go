@@ -74,9 +74,10 @@ the agent sees all of them, since a Ping is in no project. A connector started
 with --pings hears Pings, and anything else outside a project; one started
 with --no-pings hears only projects. Without either, the agent's first
 connection hears them, a connection added after it doesn't, and a person's
-login (a bot user's) does, as before. A run given --project hears none. The
-first start saves the choice for the profile, and every restart keeps it until
---pings or --no-pings changes it. A connector that hears Pings warns when
+login (a bot user's) does, as before. A run given --project hears none, and
+saves nothing. The first start without --project saves the choice for the
+profile, as --pings and --no-pings save theirs, and every restart keeps it
+until one of them changes it. A connector that hears Pings warns when
 another one on this computer hears the same agent's; ones on other computers
 can't be seen, so starting just one is yours to arrange. basecamp connect
 status and doctor say which this profile's does.

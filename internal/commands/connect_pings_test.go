@@ -277,7 +277,7 @@ func TestDiagnosticsSayWhatTheRunningConnectorDoes(t *testing.T) {
 	assert.Contains(t, styled, "Pings          heard: the agent's first connection", "the saved choice")
 	assert.Contains(t, styled, "the connector running now hears none: --project narrows this run to projects")
 
-	assert.False(t, guidedHearsPings(context.Background(), newConnectSetupApp(t, f.s, "agent"), "agent", f.file),
+	assert.False(t, guidedPings(context.Background(), newConnectSetupApp(t, f.s, "agent"), "agent", f.file).hears,
 		"guided setup doesn't suggest pinging a connector that can't hear it")
 }
 
@@ -459,5 +459,85 @@ func TestAnOlderBuildsRunningConnectorMayHearPings(t *testing.T) {
 	styled, err := f.run(t, output.FormatStyled, "status")
 	require.NoError(t, err)
 	assert.Contains(t, styled, "the connector running now may hear them: an older build runs it")
-	assert.True(t, guidedHearsPings(context.Background(), newConnectSetupApp(t, f.s, "agent"), "agent", f.file))
+	assert.True(t, guidedPings(context.Background(), newConnectSetupApp(t, f.s, "agent"), "agent", f.file).hears)
+}
+
+// The one connector that answers the agent's Pings, beside one that leaves
+// them to it, is the arrangement wanted: status and doctor name the
+// answerer, and warn about nothing.
+func TestOneAnswererBesideAConnectorThatLeavesPingsIsNoConflict(t *testing.T) {
+	f := newOperatorFixture(t)
+	setUpSecondProfile(t, f.s, "laptop")
+	a := startProfileConnector(t, f.s, "agent", "--no-pings")
+	a.awaitRunning(t)
+	b := startProfileConnector(t, f.s, "laptop")
+	b.awaitRunning(t)
+
+	styled, err := f.run(t, output.FormatStyled, "status")
+	require.NoError(t, err)
+	assert.Contains(t, styled, `answered on this computer by profile "laptop"`)
+	assert.NotContains(t, styled, "only one connector should answer them")
+
+	doctor := f.doctorStyled(t)
+	assert.Contains(t, doctor, `The connector running now doesn't hear the agent's Pings: chosen with --no-pings; profile "laptop"`)
+	assert.NotContains(t, doctor, "answered twice")
+}
+
+// A saved choice that can't be read, or that isn't this user's own file,
+// is recovered by removing it and choosing again: a flag alone can't write
+// over a file it won't trust. Every place that meets it says so, with its
+// path.
+func TestAnUnusableSavedChoiceSaysHowToRecover(t *testing.T) {
+	f := newOperatorFixture(t)
+	r := startProfileConnector(t, f.s, "agent")
+	r.awaitRunning(t)
+	r.stop(t)
+	dir, err := connectStatePath("agent", f.file, false)
+	require.NoError(t, err)
+	path := filepath.Join(dir, connector.PingsFile)
+	require.NoError(t, os.Remove(path))
+	require.NoError(t, os.Symlink(filepath.Join(t.TempDir(), "elsewhere.json"), path))
+
+	for _, args := range [][]string{nil, {"--no-pings"}} {
+		_, err := f.run(t, output.FormatJSON, args...)
+		require.Error(t, err, "started with %v", args)
+		e := usageError(t, err)
+		assert.Equal(t, output.CodeUsage, e.Code)
+		assert.Contains(t, e.Hint, "Remove "+path, "started with %v", args)
+	}
+	g := guidedPings(context.Background(), newConnectSetupApp(t, f.s, "agent"), "agent", f.file)
+	assert.False(t, g.hears, "guided setup doesn't advertise Pings a start would refuse")
+	assert.Contains(t, g.remedy, "Remove "+path)
+	styled, err := f.run(t, output.FormatStyled, "status")
+	require.NoError(t, err)
+	assert.Contains(t, styled, "Remove "+path)
+	assert.Contains(t, f.doctorStyled(t), "Remove "+path)
+
+	require.NoError(t, os.Remove(path))
+	again := startProfileConnector(t, f.s, "agent", "--no-pings")
+	again.awaitRunning(t)
+	choice, ok := savedPingsChoice(t, f, "agent")
+	require.True(t, ok)
+	assert.False(t, choice.Hears, "and once it's gone, the flag chooses")
+}
+
+// A lock file left behind by a connector that has stopped, whose pid now
+// belongs to a process that started after it, describes nothing running.
+func TestStaleLockMetadataIsNoRunningConnector(t *testing.T) {
+	f := newOperatorFixture(t)
+	r := startProfileConnector(t, f.s, "agent")
+	r.awaitRunning(t)
+	r.stop(t)
+	dir, err := connectStatePath("agent", f.file, false)
+	require.NoError(t, err)
+	stale, err := json.Marshal(map[string]any{"pid": os.Getpid(), "started_at": "2020-01-01T00:00:00Z",
+		"account_id": f.file.AccountID, "agent_person_id": f.file.Agent.PersonID, "pings": false, "pings_because": pingsBecauseProject})
+	require.NoError(t, err)
+	holder := filepath.Join(dir, fmt.Sprintf("instance-%s-%d.lock.json", f.file.AccountID, f.file.Agent.PersonID))
+	require.NoError(t, os.WriteFile(holder, stale, 0o600))
+
+	styled, err := f.run(t, output.FormatStyled, "status")
+	require.NoError(t, err)
+	assert.Contains(t, styled, "Pings          heard: the agent's first connection")
+	assert.NotContains(t, styled, "the connector running now", "this pid's process started after the lock was taken")
 }
