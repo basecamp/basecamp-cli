@@ -17,19 +17,24 @@ most), never a fixed string, retrying only on the two errors the loop names:
 ```bash
 landed=false
 for i in 1 2 3; do
-  if out=$(basecamp boost create '<recording.url>' '<ack>' --profile '<profile>' 2>&1); then
+  if out=$(basecamp boost create '<recording.url>' '<ack>' --ids-only --profile '<profile>' 2>&1); then
     landed=true; break
   fi
   echo "$out" | grep -qE 'Not authenticated for|token refresh failed' || break   # anything else: no retry
   sleep 2
 done
 [ "$landed" = true ] || { echo "boost did not verifiably land: $out" >&2; false; }
+printf '%s\n' "$out" | grep -xE '[0-9]+' | tail -1   # the boost's id; $out may carry warnings too
 ```
 
 If it didn't verifiably land, go on and say so in your report. Skip it for
 `subscribed`, `completed` and `boosted`. It is owed only when no boost
 landed: a request line with `ack` was already boosted by the connector, which
 acknowledges it even when the session couldn't reword it.
+
+Keep the id of the boost that landed, `<boost_id>` below: the one that loop
+prints when it was yours, else the one the handoff names. Steps 4 and 5 use
+it; with none, skip what they say about the boost.
 
 **2. Read the context.** The event is the trigger. Basecamp holds the context:
 
@@ -92,6 +97,12 @@ there. "no repo" means the request needs none (a summary, a question about the
 project): do it from Basecamp alone. Work that changes code goes in a fresh git
 worktree off the default branch, never in the main checkout.
 
+When the work will take more than a moment, say so on the boost first, once,
+in a phrase led by an emoji that fits the work (`🛠 Drafting it`, 16
+characters at most): `basecamp boost update <boost_id> '<phrase>' --profile
+'<profile>'`. It's a status, not a running commentary, and a failed update
+changes nothing: go on.
+
 **Read the code before you answer anything about it.** Open the files the
 request is about, and answer from what's there, not from what the request or
 the names suggest. If what it asks about isn't in the code, say so. If a
@@ -140,6 +151,34 @@ basecamp pings post <bucket_id> - --profile '<profile>' < reply.md
   unsure it landed: read the thread or room to check instead. Basecamp
   doesn't let agents delete what they post, so a duplicate stays until a
   person removes it.
+- **Clear the boost just before the reply, in the same command**, so nothing
+  moves once the reply lands: removing the boost reflows the request, and
+  done after the reply it jolts the thread while the reply is being read. A
+  boost left behind shows in the Boost report as the request's final state.
+  If the reply then fails, boost the request again so it still reads as taken:
+
+  ```bash
+  basecamp boost delete <boost_id> --profile '<profile>'
+  <the reply command above> \
+    || basecamp boost create '<recording.url>' '⚠️ Reply failed' --ids-only --profile '<profile>'
+  ```
+
+  Run it as one command, with no turn between the delete and the reply. A
+  failed delete gets no retry and doesn't stop the reply; say so in your
+  report. A failed reply prints the new boost's id: it is the `<boost_id>` for
+  any later post (the reply without a mention, below), which goes out the
+  same way and clears it first. When the reply is an ask (*Ask the operator*
+  below), nothing may come between the post and its declaration, so the
+  delete still goes first:
+
+  ```bash
+  basecamp boost delete <boost_id> --profile '<profile>'
+  if url=$(<the reply command above> --jq '.data.app_url'); then
+    basecamp connect ask "$url" -P '<profile>'
+  else
+    basecamp boost create '<recording.url>' '⚠️ Reply failed' --ids-only --profile '<profile>'
+  fi
+  ```
 - **Lead with the answer.** The first line says what happened. Detail goes
   under it.
 - **Success**: the results, where the request was written.
@@ -296,5 +335,5 @@ Never run `basecamp auth login` in response, and never report the profile as
 missing.
 
 **6. Report back in one line**: posted or failed, the line or comment id,
-and any refusal the main session must pass on. Don't repeat the reply: the
+whether the boost was cleared, and any refusal the main session must pass on. Don't repeat the reply: the
 person reads it in Basecamp.
