@@ -88,15 +88,21 @@ func cardsJSON(firstID, count int) string {
 
 func runCardTableList(t *testing.T, format output.Format, args ...string) (*cardTableTransport, *bytes.Buffer, error) {
 	t.Helper()
+	transport, buf, _, err := runCardTableListStderr(t, format, args...)
+	return transport, buf, err
+}
+
+func runCardTableListStderr(t *testing.T, format output.Format, args ...string) (*cardTableTransport, *bytes.Buffer, *bytes.Buffer, error) {
+	t.Helper()
 	transport := &cardTableTransport{}
 	app, _ := newTestAppWithTransport(t, transport)
-	buf := &bytes.Buffer{}
-	app.Output = output.New(output.Options{Format: format, Writer: buf, ErrWriter: &bytes.Buffer{}})
+	buf, errBuf := &bytes.Buffer{}, &bytes.Buffer{}
+	app.Output = output.New(output.Options{Format: format, Writer: buf, ErrWriter: errBuf})
 	if format == output.FormatCount {
 		app.Flags.Count = true
 	}
 	err := executeCommand(NewCardsCmd(), app, append([]string{"list", "--in", "123", "--card-table", "777"}, args...)...)
-	return transport, buf, err
+	return transport, buf, errBuf, err
 }
 
 // TestCardsListAcrossColumnsCapsEachColumn pins that listing a whole card table
@@ -117,6 +123,53 @@ func TestCardsListAcrossColumnsCapsEachColumn(t *testing.T) {
 	assert.Contains(t, resp.Notice, "Done (140 total)")
 	assert.NotContains(t, resp.Notice, "Triage")
 	assert.Contains(t, resp.Notice, "--all")
+}
+
+// TestCardsListAcrossColumnsCapIsMachineReadable pins that the JSON envelope
+// names every column the cap cut short, with what it showed and the total, so
+// a script can tell a capped listing from a complete one without parsing prose.
+func TestCardsListAcrossColumnsCapIsMachineReadable(t *testing.T) {
+	_, buf, err := runCardTableList(t, output.FormatJSON)
+	require.NoError(t, err)
+
+	var resp struct {
+		Meta struct {
+			TruncatedColumns []map[string]any `json:"truncated_columns"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+	require.Len(t, resp.Meta.TruncatedColumns, 1, "only Done is cut short")
+	done := resp.Meta.TruncatedColumns[0]
+	assert.EqualValues(t, 2, done["id"])
+	assert.Equal(t, "Done", done["title"])
+	assert.EqualValues(t, cardsPerColumnLimit, done["shown"])
+	assert.EqualValues(t, doneColumnCards, done["total"])
+}
+
+// TestCardsListAcrossColumnsCapIsLoudInQuietModes pins that --agent and --quiet,
+// which print the data alone, still say on stderr that the list was cut short,
+// while stdout stays the bare card array.
+func TestCardsListAcrossColumnsCapIsLoudInQuietModes(t *testing.T) {
+	_, buf, errBuf, err := runCardTableListStderr(t, output.FormatQuiet)
+	require.NoError(t, err)
+
+	assert.Contains(t, errBuf.String(), "notice: Showing the first 100 cards of Done (140 total)")
+
+	var data []map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &data), "stdout must stay data-only")
+	assert.Len(t, data, 3+cardsPerColumnLimit)
+}
+
+// TestCardsListAcrossColumnsUncappedIsQuiet pins that a listing nothing cut
+// short carries no notice and no truncated_columns, in either channel.
+func TestCardsListAcrossColumnsUncappedIsQuiet(t *testing.T) {
+	_, _, errBuf, err := runCardTableListStderr(t, output.FormatQuiet, "--all")
+	require.NoError(t, err)
+	assert.Empty(t, errBuf.String())
+
+	_, buf, err := runCardTableList(t, output.FormatJSON, "--all")
+	require.NoError(t, err)
+	assert.NotContains(t, buf.String(), "truncated_columns")
 }
 
 // TestCardsListAcrossColumnsAllWalksEveryPage pins that --all, now accepted

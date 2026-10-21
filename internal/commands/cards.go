@@ -97,8 +97,10 @@ func newCardsListCmd(project, cardTable *string) *cobra.Command {
 		Use:   "list",
 		Short: "List cards",
 		Long: "List the cards in a project's card table, or across every project with --all-projects.\n\n" +
-			"Without --column the listing covers every column, up to 100 cards from each; --all lifts\n" +
-			"that cap. --column lists one column in full unless --limit or --page narrows it.\n\n" +
+			"Without --column the listing covers every column but stops at 100 cards from each, leaving\n" +
+			"the rest out; --all lifts that cap. A capped listing says so in every output mode: a notice\n" +
+			"(on stderr with --agent or --quiet) and meta.truncated_columns in the JSON envelope.\n" +
+			"--column lists one column in full unless --limit or --page narrows it.\n\n" +
 			"With --all-projects the listing comes from the account-wide card aggregates, grouped by\n" +
 			"project. --status completed, --unassigned, --no-due-date, --not-now, and --overdue each\n" +
 			"select a different aggregate and are account-wide only.\n\n" +
@@ -626,6 +628,7 @@ func runCardsListInProject(cmd *cobra.Command, app *appctx.App, opts cardsListOp
 			perColumn = nil
 		}
 		var truncated []string
+		var truncatedColumns []map[string]any
 		for _, col := range cardTableData.Lists {
 			cardsResult, err := app.Account().Cards().List(cmd.Context(), col.ID, perColumn)
 			if err != nil {
@@ -634,6 +637,7 @@ func runCardsListInProject(cmd *cobra.Command, app *appctx.App, opts cardsListOp
 			allCards = append(allCards, cardsResult.Cards...)
 			if cardsResult.Meta.Truncated {
 				truncated = append(truncated, truncatedColumnLabel(col, cardsResult.Meta.TotalCount))
+				truncatedColumns = append(truncatedColumns, truncatedColumnMeta(col, len(cardsResult.Cards), cardsResult.Meta.TotalCount))
 			}
 		}
 
@@ -641,10 +645,16 @@ func runCardsListInProject(cmd *cobra.Command, app *appctx.App, opts cardsListOp
 			sortCards(allCards, opts.sortField, opts.reverse)
 		}
 
+		// The cap drops cards the caller didn't ask to drop, so it is a
+		// diagnostic, not an informational notice: --agent and --quiet print
+		// data alone and would otherwise hand back a short list in silence.
 		if len(truncated) > 0 {
-			respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
-				"Showing the first %d cards of %s; use --column <id> --all for every card in one column, or --all for every column",
-				cardsPerColumnLimit, strings.Join(truncated, ", "))))
+			respOpts = append(respOpts,
+				output.WithDiagnostic(fmt.Sprintf(
+					"Showing the first %d cards of %s; use --column <id> --all for every card in one column, or --all for every column",
+					cardsPerColumnLimit, strings.Join(truncated, ", "))),
+				output.WithMeta("truncated_columns", truncatedColumns),
+			)
 		}
 	}
 
@@ -671,6 +681,16 @@ func truncatedColumnLabel(col basecamp.CardColumn, total int) string {
 		return fmt.Sprintf("%s (%d total)", col.Title, total)
 	}
 	return col.Title
+}
+
+// truncatedColumnMeta describes a column the aggregate listing cut short for
+// meta.truncated_columns; total is omitted when the API didn't report one.
+func truncatedColumnMeta(col basecamp.CardColumn, shown, total int) map[string]any {
+	m := map[string]any{"id": col.ID, "title": col.Title, "shown": shown}
+	if total > 0 {
+		m["total"] = total
+	}
+	return m
 }
 
 // countAccountWideCards totals the cards inside the project groups.
