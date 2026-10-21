@@ -193,9 +193,11 @@ func pingsCheck(ctx context.Context, p connectProfile) setup.Check {
 		c.Status, c.Message = setup.StatusSkip, "Whether it hears the agent's Pings can't be told without the profile's credential"
 		return c
 	}
-	who, why := "It", v.Next.Describe()
-	if v.Running.Running {
-		who, why = "The connector running now", v.Running.Describe()
+	// A running connector is described by its lock; Next may be unknown
+	// then, with no saved choice and no credential to read a default from.
+	who, why := "The connector running now", v.Running.Describe()
+	if !v.Running.Running {
+		who, why = "It", v.Next.Describe()
 	}
 	switch {
 	case !hears:

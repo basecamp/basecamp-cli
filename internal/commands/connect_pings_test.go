@@ -541,3 +541,18 @@ func TestStaleLockMetadataIsNoRunningConnector(t *testing.T) {
 	assert.Contains(t, styled, "Pings          heard: the agent's first connection")
 	assert.NotContains(t, styled, "the connector running now", "this pid's process started after the lock was taken")
 }
+
+// A running connector says what it does even when the profile has saved no
+// choice and its credential can't be read, so nothing can say what the next
+// start would do: doctor reports the run, and doesn't crash on the rest.
+func TestDoctorReportsARunningConnectorWithoutACredential(t *testing.T) {
+	f := newOperatorFixture(t)
+	r := startProfileConnector(t, f.s, "agent", "--project", fmt.Sprint(setupProject))
+	r.awaitRunning(t)
+	_, saved := savedPingsChoice(t, f, "agent")
+	require.False(t, saved, "a narrowed first run saves nothing")
+	require.NoError(t, newConnectSetupApp(t, f.s, "agent").Auth.GetStore().Delete(auth.ProfileCredentialKey("agent")))
+
+	doctor := f.doctorStyled(t)
+	assert.Contains(t, doctor, "The connector running now doesn't hear the agent's Pings: --project narrows this run to projects")
+}
