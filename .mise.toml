@@ -17,4 +17,4 @@ zizmor = "1.30.0"
 # .github/workflows/test.yml. make check compiles the skill-eval patterns under
 # Ruby's own regex engine, so bin/ci needs the same Ruby CI uses — a different
 # engine would answer a different question.
-ruby = "3.3"
+ruby = "3.4"

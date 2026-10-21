@@ -41,7 +41,7 @@
               # Keep in sync with .mise.toml and the ruby/setup-ruby pins in
               # .github/workflows/test.yml: make check compiles the skill-eval
               # patterns under Ruby's own regex engine.
-              ruby_3_3
+              ruby_3_4
               zizmor
             ];
           };
