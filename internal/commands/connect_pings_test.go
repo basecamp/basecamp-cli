@@ -154,12 +154,15 @@ func TestAnAddedConnectionThatBecomesTheFirstHearsPings(t *testing.T) {
 // next start would have saved, once the old credential still mints. One a
 // newer approval replaced held the first connection no longer and answered
 // nothing, so the profile leaves Pings to the one that does; when it can't be
-// told, the reconnect says how to keep them here. A choice made with a flag
-// stays, and a reconnect that hands over the first connection saves nothing.
+// told, the reconnect says how to keep them here. It asks once the
+// connection is handed over: the old one may be replaced while the approval
+// waits. A choice made with a flag stays, and a reconnect that hands over the
+// first connection saves nothing.
 func TestAReconnectOffTheFirstConnectionKeepsItAnsweringPings(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args    []string // the profile's last start before the reconnect
 		answer  int      // Basecamp's answer to a mint with the old secret
+		waited  int      // its answer once the approval has waited
 		secret  string   // the secret the reconnect hands over
 		saved   *connectPings
 		hears   bool
@@ -172,6 +175,10 @@ func TestAReconnectOffTheFirstConnectionKeepsItAnsweringPings(t *testing.T) {
 		},
 		"a newer approval replaced it": {
 			answer: http.StatusUnauthorized, secret: addedConnectionSecret,
+			because: pingsBecauseAddedConnection,
+		},
+		"a newer approval replaced it while this one waited": {
+			waited: http.StatusUnauthorized, secret: addedConnectionSecret,
 			because: pingsBecauseAddedConnection,
 		},
 		"whether it still works can't be told": {
@@ -200,6 +207,13 @@ func TestAReconnectOffTheFirstConnectionKeepsItAnsweringPings(t *testing.T) {
 			f.s.mu.Lock()
 			f.s.secretAnswers = map[string]int{fakeConnectSecret: tc.answer}
 			f.s.connectionSecret = tc.secret
+			f.s.duringHandover = func() {
+				if tc.waited != 0 {
+					f.s.mu.Lock()
+					f.s.secretAnswers[fakeConnectSecret] = tc.waited
+					f.s.mu.Unlock()
+				}
+			}
 			f.s.mu.Unlock()
 			out, err := runAgentConnect(t, newConnectSetupApp(t, f.s, "agent"))
 			require.NoError(t, err, out)
@@ -238,23 +252,30 @@ func TestKeepingPingsTakesAConnectionAddedForTheSameAgent(t *testing.T) {
 	require.NoError(t, os.Chmod(state, 0o700))
 	t.Setenv("XDG_STATE_HOME", state)
 	file := setup.File{AccountID: "999", Agent: setup.Agent{PersonID: setupAgentPerson}}
-	carry := &connectPingsCarry{profile: "agent", file: file, clientID: "agent-client", live: true}
+	asked := 0
+	live := func(context.Context, *auth.Credentials) (bool, error) {
+		asked++
+		return true, nil
+	}
+	carry := &connectPingsCarry{profile: "agent", file: file, old: auth.Credentials{OAuthType: "agent", ClientID: "agent-client"}, live: live}
 	added := &auth.AgentConnection{ClientID: "agent-client", ClientSecret: addedConnectionSecret}
+	ctx := context.Background()
 
 	for name, conn := range map[string]auth.AgentConnection{
 		"the first connection again": {ClientID: "agent-client", ClientSecret: fakeConnectSecret},
 		"another agent's":            {ClientID: "another-client", ClientSecret: addedConnectionSecret},
 	} {
-		assert.Equal(t, connectPingsKept{}, carry.keep(&conn), name)
+		assert.Equal(t, connectPingsKept{}, carry.keep(ctx, &conn), name)
 	}
 	var none *connectPingsCarry
-	assert.Equal(t, connectPingsKept{}, none.keep(added))
+	assert.Equal(t, connectPingsKept{}, none.keep(ctx, added))
+	assert.Zero(t, asked, "nothing is asked of Basecamp unless the connection was added beside the old one")
 
 	dir, err := connectStateDir("agent", file, false)
 	require.NoError(t, err)
 	chosen := connector.PingsChoice{Hears: false, Because: pingsBecauseChosen, At: time.Now().UTC()}
 	require.NoError(t, connector.SavePingsChoice(dir, chosen))
-	assert.Equal(t, connectPingsKept{}, carry.keep(added))
+	assert.Equal(t, connectPingsKept{}, carry.keep(ctx, added))
 	choice, ok, err := connector.LoadPingsChoice(dir)
 	require.NoError(t, err)
 	require.True(t, ok)
@@ -263,7 +284,7 @@ func TestKeepingPingsTakesAConnectionAddedForTheSameAgent(t *testing.T) {
 	notADir := filepath.Join(t.TempDir(), "file")
 	require.NoError(t, os.WriteFile(notADir, nil, 0o600))
 	t.Setenv("XDG_STATE_HOME", notADir)
-	kept := carry.keep(added)
+	kept := carry.keep(ctx, added)
 	require.Error(t, kept.unsaved)
 	words := kept.Words("agent")
 	assert.Contains(t, words, "couldn't be saved")

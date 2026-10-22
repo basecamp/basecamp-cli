@@ -92,6 +92,9 @@ type connectSetupServer struct {
 	// refuses the agent's first connection once a newer approval replaced
 	// it; any other status is bare.
 	secretAnswers map[string]int
+	// duringHandover runs as the poll hands a connection over, after the
+	// approval page waited, as another approval's change would land.
+	duringHandover func()
 }
 
 func startConnectSetupServer(t *testing.T) *connectSetupServer {
@@ -116,6 +119,9 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 		})
 	})
 	mux.HandleFunc("/oauth/agent_connection_tokens", func(w http.ResponseWriter, _ *http.Request) {
+		if s.duringHandover != nil {
+			s.duringHandover()
+		}
 		scope := s.grantScope
 		if scope == "" {
 			scope = "full"

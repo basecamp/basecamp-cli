@@ -297,16 +297,18 @@ func connectRunPings(held *connector.InstanceLock, profile string, file setup.Fi
 // one a newer approval replaced elsewhere was the first connection no
 // longer and answered nothing, and the profile that holds it now does.
 type connectPingsCarry struct {
-	profile  string
-	file     setup.File
-	clientID string
-	// live is whether the old credential still minted; unknown is why that
-	// couldn't be told.
-	live    bool
-	unknown error
+	profile string
+	file    setup.File
+	old     auth.Credentials
+	// live asks whether a credential still mints: Manager.AgentCredentialLive.
+	live func(context.Context, *auth.Credentials) (bool, error)
 }
 
-// prepareConnectPingsCarry asks, before the approval, what a reconnect of
+// connectPingsProbeTimeout bounds asking whether the old credential still
+// mints. The handover waits on the answer to be stored.
+const connectPingsProbeTimeout = 10 * time.Second
+
+// prepareConnectPingsCarry reads, before the approval, what a reconnect of
 // the profile needs to keep it answering Pings: nil unless the profile is
 // set up as a connector, on a computer it runs on, and its next start would
 // save the first connection's default from the credential it holds now.
@@ -344,24 +346,29 @@ func prepareConnectPingsCarry(ctx context.Context, app *appctx.App, profile stri
 	if !save || next.Because != pingsBecauseFirstConnection {
 		return nil
 	}
-	c := &connectPingsCarry{profile: profile, file: file, clientID: creds.ClientID}
-	c.live, c.unknown = app.Auth.AgentCredentialLive(ctx, creds)
-	return c
+	return &connectPingsCarry{profile: profile, file: file, old: *creds, live: app.Auth.AgentCredentialLive}
 }
 
 // keep runs once the connection is approved and before its credential is
 // stored, so a start that reads the new credential finds the choice saved.
 // It saves that the profile hears Pings when Basecamp added the connection
-// beside the old one, for the same agent, and the old one still minted. It
-// never fails the connection, whose handover can't be had twice: what it
-// couldn't do is said instead.
-func (c *connectPingsCarry) keep(conn *auth.AgentConnection) connectPingsKept {
-	switch {
-	case c == nil || !strings.HasPrefix(conn.ClientSecret, agentConnectionSecretPrefix) || conn.ClientID != c.clientID:
+// beside the old one, for the same agent, and the old one still mints now,
+// after the approval: a wait at the approval page can outlast it. It never
+// fails the connection, whose handover can't be had twice: what it couldn't
+// do is said instead.
+func (c *connectPingsCarry) keep(ctx context.Context, conn *auth.AgentConnection) connectPingsKept {
+	if c == nil || !strings.HasPrefix(conn.ClientSecret, agentConnectionSecretPrefix) || conn.ClientID != c.old.ClientID {
 		return connectPingsKept{}
-	case c.unknown != nil:
-		return connectPingsKept{unknown: c.unknown}
-	case !c.live:
+	}
+	// Any verdict the probe meets is the old credential's, which is about
+	// to be replaced, so none is remembered, as a login remembers none.
+	probeCtx, cancel := context.WithTimeout(ctx, connectPingsProbeTimeout)
+	live, err := c.live(probeCtx, &c.old)
+	cancel()
+	switch {
+	case err != nil:
+		return connectPingsKept{unknown: err}
+	case !live:
 		return connectPingsKept{}
 	}
 	// Found again, not reused: a start may have adopted a legacy directory,

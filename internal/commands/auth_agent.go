@@ -224,8 +224,8 @@ func connectAgentProfile(cmd *cobra.Command, app *appctx.App, f agentConnectFlag
 	var isDefault bool
 	var pings connectPingsKept
 	ctx, stop := loginContext(cmd)
-	// Asked before the approval, of a profile on the agent's first
-	// connection that the reconnect could leave not answering Pings.
+	// Read before the approval: a profile on the agent's first connection
+	// that the reconnect could leave not answering Pings.
 	carry := prepareConnectPingsCarry(ctx, app, target.name)
 	result, err := app.Auth.ConnectAgent(ctx, auth.AgentConnectOptions{
 		DeviceName:   connectDeviceName(f.deviceName),
@@ -240,7 +240,7 @@ func connectAgentProfile(cmd *cobra.Command, app *appctx.App, f agentConnectFlag
 			registered, commitErr := target.commit(app, conn)
 			isDefault = registered
 			if commitErr == nil {
-				pings = carry.keep(conn)
+				pings = carry.keep(ctx, conn)
 			}
 			return commitErr
 		},
