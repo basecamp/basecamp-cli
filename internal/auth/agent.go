@@ -529,6 +529,29 @@ func (m *Manager) agentMintRefusal(resp *http.Response, body []byte, mint *agent
 // disconnected in Basecamp or replaced by a newer approval.
 var ErrAgentCredentialRefused = errors.New("the agent's credential was refused")
 
+// AgentCredentialLive reports whether an agent credential still mints a
+// token: true when the token endpoint answers with one, false when it
+// refuses the credential itself (ErrAgentCredentialRefused), as it does once
+// the connection is disconnected or replaced. Any other failure, a rate
+// limit or the server's own trouble, can't tell, and is returned. A refusal
+// the credential already remembers answers without asking.
+//
+// Nothing is stored, the token and any refusal's hold included: the caller
+// asks about a credential it is about to replace.
+func (m *Manager) AgentCredentialLive(ctx context.Context, creds *Credentials) (bool, error) {
+	mint, err := m.resolveAgentMint(creds)
+	if err == nil {
+		_, _, err = m.mintAgentToken(ctx, mint)
+	}
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, ErrAgentCredentialRefused):
+		return false, nil
+	}
+	return false, err
+}
+
 // clientRefusalCodes are the RFC 6749 §5.2 codes that say THE CREDENTIALS
 // PRESENTED are wrong, which is the only thing piping the secret in again
 // can repair.

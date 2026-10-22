@@ -87,6 +87,11 @@ type connectSetupServer struct {
 	// connectionSecret is the secret a connection hands over; "" means
 	// fakeConnectSecret, shaped like the agent client's own.
 	connectionSecret string
+	// secretAnswers answers a mint presenting one of these secrets with its
+	// status in place of a token: 401 names invalid_client, as Basecamp
+	// refuses the agent's first connection once a newer approval replaced
+	// it; any other status is bare.
+	secretAnswers map[string]int
 }
 
 func startConnectSetupServer(t *testing.T) *connectSetupServer {
@@ -121,17 +126,23 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 		}
 		writeJSON(w, map[string]any{"client_id": "agent-client", "client_secret": secret, "account_id": "999", "scope": scope})
 	})
-	mux.HandleFunc("/oauth/tokens", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/oauth/tokens", func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
 		s.mu.Lock()
 		s.mints++
 		rateLimited := s.rateLimitMints
+		answer := s.secretAnswers[r.PostForm.Get("client_secret")]
 		s.mu.Unlock()
 		if rateLimited {
 			w.Header().Set("Retry-After", "3600")
 			w.WriteHeader(http.StatusTooManyRequests)
 			return
 		}
-		if s.refuseSecret {
+		if answer != 0 && answer != http.StatusUnauthorized {
+			w.WriteHeader(answer)
+			return
+		}
+		if s.refuseSecret || answer == http.StatusUnauthorized {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"error":"invalid_client"}`))

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,6 +117,157 @@ func TestAnAddedConnectionHearsPingsOnlyWhenStartedWithThem(t *testing.T) {
 		assert.Equal(t, step.hears, *hears)
 		r.stop(t)
 	}
+}
+
+// A profile that first started on a connection added after the agent's
+// first leaves Pings to another. Reconnected where the agent has no live
+// first connection, it is handed that one, and hears them again: doctor
+// says so before it starts, and the start saves it.
+func TestAnAddedConnectionThatBecomesTheFirstHearsPings(t *testing.T) {
+	f := newOperatorFixture(t)
+	setUpSecondProfile(t, f.s, "laptop")
+	asAddedConnection(t, f.s, "laptop")
+	r := startProfileConnector(t, f.s, "laptop")
+	r.awaitRunning(t)
+	r.stop(t)
+	choice, ok := savedPingsChoice(t, f, "laptop")
+	require.True(t, ok)
+	require.Equal(t, pingsBecauseAddedConnection, choice.Because)
+
+	out, err := runAgentConnect(t, newConnectSetupApp(t, f.s, "laptop"))
+	require.NoError(t, err, out)
+	assert.Contains(t, f.doctorStyledFor(t, "laptop"), "It hears the agent's Pings: the agent's first connection", "what the next start does")
+
+	r = startProfileConnector(t, f.s, "laptop")
+	r.awaitRunning(t)
+	assert.Contains(t, r.out.String(), "pings=true")
+	choice, ok = savedPingsChoice(t, f, "laptop")
+	require.True(t, ok)
+	assert.True(t, choice.Hears)
+	assert.Equal(t, pingsBecauseFirstConnection, choice.Because)
+}
+
+// A reconnect where Basecamp adds connections moves a profile off the
+// agent's first connection, which stays live beside the one added. A profile
+// that held it keeps answering Pings, even one that has never started on
+// this build, as one 0.16.0 ran hasn't: the reconnect saves first what its
+// next start would have saved, once the old credential still mints. One a
+// newer approval replaced held the first connection no longer and answered
+// nothing, so the profile leaves Pings to the one that does; when it can't be
+// told, the reconnect says how to keep them here. A choice made with a flag
+// stays, and a reconnect that hands over the first connection saves nothing.
+func TestAReconnectOffTheFirstConnectionKeepsItAnsweringPings(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args    []string // the profile's last start before the reconnect
+		answer  int      // Basecamp's answer to a mint with the old secret
+		secret  string   // the secret the reconnect hands over
+		saved   *connectPings
+		hears   bool
+		because string
+		says    string
+	}{
+		"its first connection is live": {
+			secret: addedConnectionSecret, saved: &connectPings{Hears: true, Because: pingsBecauseFirstConnection},
+			hears: true, because: pingsBecauseFirstConnection, says: "keeps answering the agent's Pings",
+		},
+		"a newer approval replaced it": {
+			answer: http.StatusUnauthorized, secret: addedConnectionSecret,
+			because: pingsBecauseAddedConnection,
+		},
+		"whether it still works can't be told": {
+			answer: http.StatusServiceUnavailable, secret: addedConnectionSecret,
+			because: pingsBecauseAddedConnection, says: "basecamp connect -P agent --pings",
+		},
+		"it was started with --no-pings": {
+			args: []string{"--no-pings"}, secret: addedConnectionSecret, saved: &connectPings{Hears: false, Because: pingsBecauseChosen},
+			because: pingsBecauseChosen,
+		},
+		"the reconnect hands over the first connection": {
+			hears: true, because: pingsBecauseFirstConnection,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newOperatorFixture(t)
+			r := startProfileConnector(t, f.s, "agent", tc.args...)
+			r.awaitRunning(t)
+			r.stop(t)
+			if tc.args == nil {
+				dir, err := connectStatePath("agent", f.file, false)
+				require.NoError(t, err)
+				require.NoError(t, os.Remove(filepath.Join(dir, connector.PingsFile)), "as a profile 0.16.0 ran has none")
+			}
+
+			f.s.mu.Lock()
+			f.s.secretAnswers = map[string]int{fakeConnectSecret: tc.answer}
+			f.s.connectionSecret = tc.secret
+			f.s.mu.Unlock()
+			out, err := runAgentConnect(t, newConnectSetupApp(t, f.s, "agent"))
+			require.NoError(t, err, out)
+			if tc.says != "" {
+				assert.Contains(t, out, tc.says)
+			} else {
+				assert.NotContains(t, out, "Pings")
+			}
+			choice, ok := savedPingsChoice(t, f, "agent")
+			if tc.saved == nil {
+				assert.False(t, ok, "the reconnect saves nothing")
+			} else {
+				require.True(t, ok, "the reconnect saved the choice")
+				assert.Equal(t, *tc.saved, connectPings{Hears: choice.Hears, Because: choice.Because})
+			}
+
+			r = startProfileConnector(t, f.s, "agent")
+			r.awaitRunning(t)
+			assert.Contains(t, r.out.String(), fmt.Sprintf("pings=%t", tc.hears))
+			choice, ok = savedPingsChoice(t, f, "agent")
+			require.True(t, ok)
+			assert.Equal(t, tc.hears, choice.Hears)
+			assert.Equal(t, tc.because, choice.Because)
+		})
+	}
+}
+
+// A reconnect keeps a profile answering Pings only when Basecamp added the
+// connection beside the old one, for the same agent, and only over a choice
+// that still follows the credential: one saved while the approval waited,
+// with a flag, stays. A save that fails doesn't fail the connection, whose
+// handover can't be had twice: it says how to keep answering them here
+// instead.
+func TestKeepingPingsTakesAConnectionAddedForTheSameAgent(t *testing.T) {
+	state := t.TempDir()
+	require.NoError(t, os.Chmod(state, 0o700))
+	t.Setenv("XDG_STATE_HOME", state)
+	file := setup.File{AccountID: "999", Agent: setup.Agent{PersonID: setupAgentPerson}}
+	carry := &connectPingsCarry{profile: "agent", file: file, clientID: "agent-client", live: true}
+	added := &auth.AgentConnection{ClientID: "agent-client", ClientSecret: addedConnectionSecret}
+
+	for name, conn := range map[string]auth.AgentConnection{
+		"the first connection again": {ClientID: "agent-client", ClientSecret: fakeConnectSecret},
+		"another agent's":            {ClientID: "another-client", ClientSecret: addedConnectionSecret},
+	} {
+		assert.Equal(t, connectPingsKept{}, carry.keep(&conn), name)
+	}
+	var none *connectPingsCarry
+	assert.Equal(t, connectPingsKept{}, none.keep(added))
+
+	dir, err := connectStateDir("agent", file, false)
+	require.NoError(t, err)
+	chosen := connector.PingsChoice{Hears: false, Because: pingsBecauseChosen, At: time.Now().UTC()}
+	require.NoError(t, connector.SavePingsChoice(dir, chosen))
+	assert.Equal(t, connectPingsKept{}, carry.keep(added))
+	choice, ok, err := connector.LoadPingsChoice(dir)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, pingsBecauseChosen, choice.Because, "a --no-pings saved while the approval waited stays")
+
+	notADir := filepath.Join(t.TempDir(), "file")
+	require.NoError(t, os.WriteFile(notADir, nil, 0o600))
+	t.Setenv("XDG_STATE_HOME", notADir)
+	kept := carry.keep(added)
+	require.Error(t, kept.unsaved)
+	words := kept.Words("agent")
+	assert.Contains(t, words, "couldn't be saved")
+	assert.Contains(t, words, "basecamp connect -P agent --pings")
 }
 
 // A run given --project hears no Ping, as before, and leaves the profile's
@@ -341,7 +493,12 @@ func TestAProfilesLegacyConnectorIsNotItsOwnPeer(t *testing.T) {
 // account feed, so doctor fails that check; the report is printed first.
 func (f operatorFixture) doctorStyled(t *testing.T) string {
 	t.Helper()
-	app := newConnectSetupApp(t, f.s, "agent")
+	return f.doctorStyledFor(t, "agent")
+}
+
+func (f operatorFixture) doctorStyledFor(t *testing.T, profile string) string {
+	t.Helper()
+	app := newConnectSetupApp(t, f.s, profile)
 	var buf bytes.Buffer
 	app.Output = output.New(output.Options{Format: output.FormatStyled, Writer: &buf})
 	cmd := NewConnectCmd()

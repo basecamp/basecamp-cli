@@ -64,7 +64,9 @@ The device name defaults to this computer's name. Give each profile its own
 --device-name when several on this computer connect the same agent.
 Reconnecting a profile stores its new credential in place of the old one.
 Where approval adds, the old connection stays live until disconnected in
-Basecamp; other credential files are not removed or revoked by this CLI.
+Basecamp; other credential files are not removed or revoked by this CLI. A
+profile moved off the agent's first connection this way keeps answering the
+agent's Pings, unless it was started with --no-pings.
 
 The account comes from the agent you approve — pass --account only to
 insist on one, and the connection is refused if the agent belongs to
@@ -220,7 +222,11 @@ func connectAgentProfile(cmd *cobra.Command, app *appctx.App, f agentConnectFlag
 	r := output.NewRendererWithTheme(human, false, tui.ResolveTheme(tui.DetectDark()))
 
 	var isDefault bool
+	var pings connectPingsKept
 	ctx, stop := loginContext(cmd)
+	// Asked before the approval, of a profile on the agent's first
+	// connection that the reconnect could leave not answering Pings.
+	carry := prepareConnectPingsCarry(ctx, app, target.name)
 	result, err := app.Auth.ConnectAgent(ctx, auth.AgentConnectOptions{
 		DeviceName:   connectDeviceName(f.deviceName),
 		SoftwareName: f.softwareName,
@@ -233,6 +239,9 @@ func connectAgentProfile(cmd *cobra.Command, app *appctx.App, f agentConnectFlag
 		BeforeStore: func(conn *auth.AgentConnection) error {
 			registered, commitErr := target.commit(app, conn)
 			isDefault = registered
+			if commitErr == nil {
+				pings = carry.keep(conn)
+			}
 			return commitErr
 		},
 	})
@@ -243,6 +252,9 @@ func connectAgentProfile(cmd *cobra.Command, app *appctx.App, f agentConnectFlag
 	}
 
 	if f.machine {
+		if words := pings.Words(target.name); words != "" {
+			fmt.Fprintln(human, words)
+		}
 		data := map[string]any{
 			"profile":         target.name,
 			"account_id":      result.AccountID,
@@ -269,6 +281,9 @@ func connectAgentProfile(cmd *cobra.Command, app *appctx.App, f agentConnectFlag
 			line += " (default)"
 		}
 		fmt.Fprintln(w, r.Muted.Render(line))
+	}
+	if words := pings.Words(target.name); words != "" {
+		fmt.Fprintln(w, r.Muted.Render(words))
 	}
 	fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("Check it any time: basecamp auth status -P %s", target.name)))
 	return nil

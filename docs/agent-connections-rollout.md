@@ -61,16 +61,33 @@ choice, and warns about a second it can see on the same computer.
 - The first start on this build without `--project` saves the answer in the
   profile's state directory (`pings.json`, beside the ledger), as `--pings`
   and `--no-pings` save theirs, and every restart keeps it until one of them
-  changes it. A run given `--project` saves nothing, so a narrowed first run
-  leaves the choice to the first one that isn't. A profile that heard Pings keeps
-  hearing them after a reconnect turns its credential into an added
-  connection. An unreadable `pings.json` refuses the start: remove it, then
-  choose again with a flag.
+  changes it, or a reconnect does as below. A run given `--project` saves
+  nothing, so a narrowed first run leaves the choice to the first one that
+  isn't. An unreadable `pings.json` refuses the start: remove it, then choose
+  again with a flag.
+- A reconnect that changes which connection a profile holds carries the
+  answer with it, unless a flag chose it. Where Basecamp adds connections, it
+  adds one only beside a live first connection, which stays live; without
+  one, the approval hands over the first connection itself.
+  - A profile moved off the first connection onto an added one keeps hearing
+    Pings: it was the one answering them, and the first connection it left is
+    now unused. One that saved the first connection's answer keeps it, and
+    `basecamp auth agent connect` saves it, before storing the new
+    credential, for one that saved nothing yet (one that last ran 0.16.0,
+    say), once the old credential still mints a token. If a newer approval
+    elsewhere had replaced the old credential, the profile answered nothing
+    and the first connection is someone else's, so it leaves Pings to them.
+    When the reconnect can't tell, it says so, and how to keep them here with
+    `--pings`.
+  - A profile that saved an added connection's answer hears Pings once a
+    reconnect hands it the first connection, which Basecamp does only when
+    no other connection is the first.
 - `basecamp connect status` and `basecamp connect doctor` say whether the
-  profile's connector answers Pings and why. A connector that hears them
-  warns when another for the same agent on this computer does too, an older
-  build's included (it hears them unless started with `--project`).
-  Connectors on other computers can't be seen.
+  profile's connector answers Pings and why: status the saved answer, and
+  doctor what the next start makes of it with the profile's credential. A
+  connector that hears them warns when another for the same agent on this
+  computer does too, an older build's included (it hears them unless started
+  with `--project`). Connectors on other computers can't be seen.
 - Upgrading changes nothing for one connection per agent: it is the first
   connection, or a bot user's login, and it still hears Pings. Where an agent
   already runs several connectors that hear Pings (a bot user on three

@@ -979,3 +979,61 @@ func TestAStoredButUnusableCredentialIsNotAbsence(t *testing.T) {
 	assert.Contains(t, output.AsError(err).Hint, "--with-client-credentials")
 	assert.Contains(t, output.AsError(err).Hint, "--client-id agent-client")
 }
+
+// TestAgentCredentialLiveAsksOnceAndStoresNothing: whether a credential
+// still mints is the token endpoint's to say. It says yes with a token, and
+// no by refusing the credential itself; a fault of its own, or a rate limit,
+// says neither. Nothing is stored either way: the caller asks about a
+// credential it is about to replace.
+func TestAgentCredentialLiveAsksOnceAndStoresNothing(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status int
+		body   string
+		live   bool
+		told   bool
+	}{
+		"it mints":             {status: http.StatusOK, body: mintedToken, live: true, told: true},
+		"invalid_client":       {status: http.StatusUnauthorized, body: `{"error":"invalid_client"}`, told: true},
+		"a bare 401":           {status: http.StatusUnauthorized, told: true},
+		"the server's trouble": {status: http.StatusServiceUnavailable},
+		"a rate limit":         {status: http.StatusTooManyRequests},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := startMintEndpoint(t)
+			e.respond(tc.status, tc.body)
+			m, key, _ := heldManager(t, e)
+			before, err := m.store.Load(key)
+			require.NoError(t, err)
+
+			live, err := m.AgentCredentialLive(context.Background(), before)
+			if tc.told {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+			assert.Equal(t, tc.live, live)
+			assert.EqualValues(t, 1, e.calls.Load())
+
+			after, err := m.store.Load(key)
+			require.NoError(t, err)
+			assert.Equal(t, before, after, "nothing is stored")
+		})
+	}
+}
+
+// TestAgentCredentialLiveAnswersARememberedRefusal: a refusal the store
+// already remembers is the answer, and nothing is asked.
+func TestAgentCredentialLiveAnswersARememberedRefusal(t *testing.T) {
+	e := startMintEndpoint(t)
+	e.respond(http.StatusOK, mintedToken)
+	m, key, _ := heldManager(t, e)
+	creds, err := m.store.Load(key)
+	require.NoError(t, err)
+	creds.RenewalHold = &RenewalHold{Kind: renewalHoldRefused, Detail: "token error: invalid_client",
+		Client: agentClientFingerprint(creds.ClientID, creds.ClientSecret)}
+
+	live, err := m.AgentCredentialLive(context.Background(), creds)
+	require.NoError(t, err)
+	assert.False(t, live)
+	assert.Zero(t, e.calls.Load())
+}

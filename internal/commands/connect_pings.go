@@ -7,11 +7,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/auth"
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -71,21 +74,25 @@ type connectPings struct {
 //   - --project: a narrowed run's feed brings no Ping, so it hears none, as
 //     before. Nothing is saved; the profile's choice is the next un-narrowed
 //     run's.
-//   - the profile's saved choice.
+//   - the profile's saved choice, unless it is an added connection's default
+//     and the profile now holds the agent's first connection: Basecamp hands
+//     that over only when the agent has no live first connection, so no
+//     other connector answers Pings as one.
 //   - the default for its credential, saved, so a restart keeps it even
 //     after the credential changes: a profile reconnected where Basecamp adds
 //     connections holds an added connection afterwards, and the person who
 //     had it answering Pings still does.
 func resolveConnectPings(flag *bool, saved *connector.PingsChoice, narrowed bool, oauthType, secret string) (connectPings, bool) {
+	byDefault := connectPingsDefault(oauthType, secret)
 	switch {
 	case flag != nil:
 		return connectPings{Hears: *flag, Because: pingsBecauseChosen}, true
 	case narrowed:
 		return connectPings{Hears: false, Because: pingsBecauseProject}, false
-	case saved != nil:
+	case saved != nil && (saved.Because != pingsBecauseAddedConnection || byDefault.Because != pingsBecauseFirstConnection):
 		return connectPings{Hears: saved.Hears, Because: saved.Because}, false
 	}
-	return connectPingsDefault(oauthType, secret), true
+	return byDefault, true
 }
 
 // connectPingsDefault is whether a profile that has chosen nothing hears
@@ -277,6 +284,142 @@ func connectRunPings(held *connector.InstanceLock, profile string, file setup.Fi
 	return pings, save && !shadow, nil
 }
 
+// connectPingsCarry keeps a profile answering the agent's Pings across a
+// reconnect that moves it off the agent's first connection. Where Basecamp
+// adds connections it adds one only beside a live first connection, which
+// stays live, unused: the profile that held it is the one that answered
+// Pings, and its next start, on the added connection, would leave them to
+// another, which may be none. So the reconnect saves first what that start
+// would have saved on the old credential: that it hears them, as the
+// agent's first connection. Only while the profile's choice still follows
+// its credential (none saved, or an added connection's default), and only
+// once the old credential still mints, as a start saves only after a mint:
+// one a newer approval replaced elsewhere was the first connection no
+// longer and answered nothing, and the profile that holds it now does.
+type connectPingsCarry struct {
+	profile  string
+	file     setup.File
+	clientID string
+	// live is whether the old credential still minted; unknown is why that
+	// couldn't be told.
+	live    bool
+	unknown error
+}
+
+// prepareConnectPingsCarry asks, before the approval, what a reconnect of
+// the profile needs to keep it answering Pings: nil unless the profile is
+// set up as a connector, on a computer it runs on, and its next start would
+// save the first connection's default from the credential it holds now.
+func prepareConnectPingsCarry(ctx context.Context, app *appctx.App, profile string) *connectPingsCarry {
+	if !connectSupportedOS(runtime.GOOS) {
+		return nil
+	}
+	path, err := setup.Path(config.GlobalConfigDir(), profile)
+	if err != nil {
+		return nil
+	}
+	file, err := setup.Load(path)
+	if err != nil {
+		return nil
+	}
+	dir, err := connectStatePath(profile, file, false)
+	if err != nil {
+		return nil
+	}
+	// A choice that can't be read refuses the next start until it is
+	// removed, and isn't written over.
+	saved, ok, err := connector.LoadPingsChoice(dir)
+	if err != nil {
+		return nil
+	}
+	creds, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
+	if err != nil {
+		return nil
+	}
+	var choice *connector.PingsChoice
+	if ok {
+		choice = &saved
+	}
+	next, save := resolveConnectPings(nil, choice, false, creds.OAuthType, creds.ClientSecret)
+	if !save || next.Because != pingsBecauseFirstConnection {
+		return nil
+	}
+	c := &connectPingsCarry{profile: profile, file: file, clientID: creds.ClientID}
+	c.live, c.unknown = app.Auth.AgentCredentialLive(ctx, creds)
+	return c
+}
+
+// keep runs once the connection is approved and before its credential is
+// stored, so a start that reads the new credential finds the choice saved.
+// It saves that the profile hears Pings when Basecamp added the connection
+// beside the old one, for the same agent, and the old one still minted. It
+// never fails the connection, whose handover can't be had twice: what it
+// couldn't do is said instead.
+func (c *connectPingsCarry) keep(conn *auth.AgentConnection) connectPingsKept {
+	switch {
+	case c == nil || !strings.HasPrefix(conn.ClientSecret, agentConnectionSecretPrefix) || conn.ClientID != c.clientID:
+		return connectPingsKept{}
+	case c.unknown != nil:
+		return connectPingsKept{unknown: c.unknown}
+	case !c.live:
+		return connectPingsKept{}
+	}
+	// Found again, not reused: a start may have adopted a legacy directory,
+	// or saved a choice, while the approval waited.
+	dir, err := connectStatePath(c.profile, c.file, false)
+	if err == nil {
+		if _, statErr := os.Lstat(dir); errors.Is(statErr, os.ErrNotExist) {
+			// Never started here: the directory its first start would make.
+			var stateHome string
+			if stateHome, err = connectStateHome(); err == nil {
+				dir, err = ensurePrivateChain(stateHome, connectStateParts(c.profile, c.file, false)...)
+			}
+		}
+	}
+	if err != nil {
+		return connectPingsKept{unsaved: err}
+	}
+	saved, ok, err := connector.LoadPingsChoice(dir)
+	switch {
+	case err != nil:
+		// Not written over; the next start refuses it and says how to
+		// recover.
+		return connectPingsKept{}
+	case ok && saved.Because == pingsBecauseFirstConnection:
+		return connectPingsKept{kept: true}
+	case ok && saved.Because != pingsBecauseAddedConnection:
+		return connectPingsKept{}
+	}
+	if err := connector.SavePingsChoice(dir, connector.PingsChoice{Hears: true, Because: pingsBecauseFirstConnection, At: time.Now().UTC()}); err != nil {
+		return connectPingsKept{unsaved: err}
+	}
+	return connectPingsKept{kept: true}
+}
+
+// connectPingsKept is what a reconnect did to keep its profile answering
+// Pings: kept them, couldn't tell whether to, or couldn't save that it had.
+type connectPingsKept struct {
+	kept    bool
+	unknown error
+	unsaved error
+}
+
+// Words is what the reconnect says about it, or "" when it did nothing.
+func (k connectPingsKept) Words(profile string) string {
+	again := "basecamp connect -P " + richtext.ShellQuote(profile) + " --pings"
+	switch {
+	case k.kept:
+		return "Its connector keeps answering the agent's Pings, as it did on the agent's first connection; start it with --no-pings to leave them to another computer."
+	case k.unknown != nil:
+		return "Whether its last connection, the agent's first, still works couldn't be told (" + richtext.SanitizeSingleLine(errorMessage(k.unknown)) +
+			"), so its connector will leave the agent's Pings to another connection. If this computer answers them, start it with --pings: " + again
+	case k.unsaved != nil:
+		return "That its connector keeps answering the agent's Pings couldn't be saved (" + richtext.SanitizeSingleLine(errorMessage(k.unsaved)) +
+			"), so it will leave them to another connection. To answer them here, start it with --pings: " + again
+	}
+	return ""
+}
+
 // warnConnectPingsPeers says, as a connector that hears Pings starts, that
 // other connectors on this computer hear the same agent's Pings, in one
 // warning: beside one, each is answered twice; beside two or more, more than
@@ -315,8 +458,10 @@ type connectPingsView struct {
 	// read, which refuses the next start without a flag.
 	Saved    *connector.PingsChoice
 	SavedErr error
-	// Next is what a start with neither flag nor --project decides: the
-	// saved choice, else the credential's default. Nil when it can't be told.
+	// Next is what a start with neither flag nor --project decides, from
+	// the saved choice and the credential as resolveConnectPings does. With
+	// no credential read, it is the saved choice; nil when nothing is saved
+	// either.
 	Next *connectPings
 	// Running is the profile's connector running now, from its lock.
 	Running connectRunning
@@ -326,7 +471,8 @@ type connectPingsView struct {
 }
 
 // readConnectPingsView reads the view. With no app it reads no credential,
-// and a profile that has saved no choice has no Next.
+// so Next is the saved choice, and a profile that has saved none has no
+// Next.
 func readConnectPingsView(ctx context.Context, app *appctx.App, profile string, file setup.File) connectPingsView {
 	v := connectPingsView{Running: connectRunningPings(profile, file), Others: connectPingsPeers(profile, file)}
 	dir, err := connectStatePath(profile, file, false)
@@ -339,12 +485,14 @@ func readConnectPingsView(ctx context.Context, app *appctx.App, profile string, 
 	switch {
 	case err != nil:
 		v.SavedErr = err
+		return v
 	case ok:
 		v.Saved = &saved
 		v.Next = &connectPings{Hears: saved.Hears, Because: saved.Because}
-	case app != nil:
+	}
+	if app != nil {
 		if creds, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey()); err == nil {
-			next := connectPingsDefault(creds.OAuthType, creds.ClientSecret)
+			next, _ := resolveConnectPings(nil, v.Saved, false, creds.OAuthType, creds.ClientSecret)
 			v.Next = &next
 		}
 	}

@@ -370,9 +370,12 @@ first connection hears them, a connection added after it doesn't, and a bot
 user's login does, as before. A run given `--project` hears none and saves
 nothing. The first start without `--project` saves the choice for the
 profile, as either flag saves its own, and restarts keep it until one changes
-it, so pass one only when the person asks: "answer my
-Pings from this computer" is `--pings`, and the connector on the other
-computer then needs `--no-pings`. Both are the owner's word, like any other
+it. A reconnect carries a choice no flag made: a profile moved off the
+agent's first connection onto an added one keeps answering Pings, and the
+reconnect says so (when it can't tell, it says to start the connector with
+`--pings`); one handed the first connection starts answering them. Pass a
+flag only when the person asks: "answer my Pings from this computer" is
+`--pings`, and the connector on the other computer then needs `--no-pings`. Both are the owner's word, like any other
 change to the connector. The start line says which: `pings=true` or
 `pings=false`, and why. The flags came after CLI 0.16.0: one that refuses
 them as unknown, or a start line without `pings=`, is older, so run

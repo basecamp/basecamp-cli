@@ -16,7 +16,11 @@ import (
 // whose secret Basecamp starts with bcac_. A profile that is no agent
 // connection — a person's login, such as a bot user's — hears them as it
 // always has. Either flag overrides any of it, and a profile's first start
-// saves what it found, so a restart keeps it.
+// saves what it found, so a restart keeps it: a first connection reconnected
+// as an added one still answers them. The added connection's default is the
+// one thing a restart doesn't keep, once the profile holds the agent's first
+// connection: Basecamp hands that over only when no first connection is
+// live, so nothing else answers Pings as one.
 func TestWhichConnectorHearsPings(t *testing.T) {
 	yes, no := true, false
 	added := "bcac_" + "1111111111111111111111111111111111111111111"
@@ -57,8 +61,20 @@ func TestWhichConnectorHearsPings(t *testing.T) {
 			want: connectPings{Hears: false, Because: pingsBecauseChosen}, save: true,
 		},
 		"a restart keeps what the first start found": {
-			saved: saved(false, pingsBecauseAddedConnection), oauthType: "agent", secret: "not-a-real-secret",
+			saved: saved(false, pingsBecauseAddedConnection), oauthType: "agent", secret: added,
 			want: connectPings{Hears: false, Because: pingsBecauseAddedConnection},
+		},
+		"a first connection reconnected as an added one keeps hearing them": {
+			saved: saved(true, pingsBecauseFirstConnection), oauthType: "agent", secret: added,
+			want: connectPings{Hears: true, Because: pingsBecauseFirstConnection},
+		},
+		"an added connection that became the first hears them": {
+			saved: saved(false, pingsBecauseAddedConnection), oauthType: "agent", secret: "not-a-real-secret",
+			want: connectPings{Hears: true, Because: pingsBecauseFirstConnection}, save: true,
+		},
+		"--no-pings stays on a connection that became the first": {
+			saved: saved(false, pingsBecauseChosen), oauthType: "agent", secret: "not-a-real-secret",
+			want: connectPings{Hears: false, Because: pingsBecauseChosen},
 		},
 		"a restart keeps what a flag chose": {
 			saved: saved(true, pingsBecauseChosen), oauthType: "agent", secret: added,
