@@ -356,6 +356,7 @@ ARG basecamp schedule update 00 <id|url>
 ARG basecamp search 00 <query>
 ARG basecamp show 00 [type]
 ARG basecamp show 01 <id|url>
+ARG basecamp spotlight 00 <id|url>
 ARG basecamp subscriptions add 00 <id|url>
 ARG basecamp subscriptions add 01 [person_ids]
 ARG basecamp subscriptions remove 00 <id|url>
@@ -463,6 +464,7 @@ ARG basecamp tools update 00 <id>
 ARG basecamp tools update 01 <title>
 ARG basecamp tui 00 [url]
 ARG basecamp unassign 00 <id|url>...
+ARG basecamp unspotlight 00 <id|url>
 ARG basecamp upload 00 <file>
 ARG basecamp uploads create 00 <file>
 ARG basecamp uploads show 00 <id|url>
@@ -1066,6 +1068,7 @@ CMD basecamp setup grok
 CMD basecamp show
 CMD basecamp skill
 CMD basecamp skill install
+CMD basecamp spotlight
 CMD basecamp subscriptions
 CMD basecamp subscriptions add
 CMD basecamp subscriptions remove
@@ -1183,6 +1186,7 @@ CMD basecamp tools trash
 CMD basecamp tools update
 CMD basecamp tui
 CMD basecamp unassign
+CMD basecamp unspotlight
 CMD basecamp upgrade
 CMD basecamp upload
 CMD basecamp uploads
@@ -14171,6 +14175,27 @@ FLAG basecamp skill install --stats type=bool
 FLAG basecamp skill install --styled type=bool
 FLAG basecamp skill install --todolist type=string
 FLAG basecamp skill install --verbose type=count
+FLAG basecamp spotlight --account type=string
+FLAG basecamp spotlight --agent type=bool
+FLAG basecamp spotlight --cache-dir type=string
+FLAG basecamp spotlight --count type=bool
+FLAG basecamp spotlight --help type=bool
+FLAG basecamp spotlight --hints type=bool
+FLAG basecamp spotlight --ids-only type=bool
+FLAG basecamp spotlight --in type=string
+FLAG basecamp spotlight --jq type=string
+FLAG basecamp spotlight --json type=bool
+FLAG basecamp spotlight --markdown type=bool
+FLAG basecamp spotlight --md type=bool
+FLAG basecamp spotlight --no-hints type=bool
+FLAG basecamp spotlight --no-stats type=bool
+FLAG basecamp spotlight --profile type=string
+FLAG basecamp spotlight --project type=string
+FLAG basecamp spotlight --quiet type=bool
+FLAG basecamp spotlight --stats type=bool
+FLAG basecamp spotlight --styled type=bool
+FLAG basecamp spotlight --todolist type=string
+FLAG basecamp spotlight --verbose type=count
 FLAG basecamp subscriptions --account type=string
 FLAG basecamp subscriptions --agent type=bool
 FLAG basecamp subscriptions --cache-dir type=string
@@ -16845,6 +16870,27 @@ FLAG basecamp unassign --step type=bool
 FLAG basecamp unassign --styled type=bool
 FLAG basecamp unassign --todolist type=string
 FLAG basecamp unassign --verbose type=count
+FLAG basecamp unspotlight --account type=string
+FLAG basecamp unspotlight --agent type=bool
+FLAG basecamp unspotlight --cache-dir type=string
+FLAG basecamp unspotlight --count type=bool
+FLAG basecamp unspotlight --help type=bool
+FLAG basecamp unspotlight --hints type=bool
+FLAG basecamp unspotlight --ids-only type=bool
+FLAG basecamp unspotlight --in type=string
+FLAG basecamp unspotlight --jq type=string
+FLAG basecamp unspotlight --json type=bool
+FLAG basecamp unspotlight --markdown type=bool
+FLAG basecamp unspotlight --md type=bool
+FLAG basecamp unspotlight --no-hints type=bool
+FLAG basecamp unspotlight --no-stats type=bool
+FLAG basecamp unspotlight --profile type=string
+FLAG basecamp unspotlight --project type=string
+FLAG basecamp unspotlight --quiet type=bool
+FLAG basecamp unspotlight --stats type=bool
+FLAG basecamp unspotlight --styled type=bool
+FLAG basecamp unspotlight --todolist type=string
+FLAG basecamp unspotlight --verbose type=count
 FLAG basecamp upgrade --account type=string
 FLAG basecamp upgrade --agent type=bool
 FLAG basecamp upgrade --cache-dir type=string
@@ -19865,6 +19911,7 @@ SUB basecamp setup grok
 SUB basecamp show
 SUB basecamp skill
 SUB basecamp skill install
+SUB basecamp spotlight
 SUB basecamp subscriptions
 SUB basecamp subscriptions add
 SUB basecamp subscriptions remove
@@ -19982,6 +20029,7 @@ SUB basecamp tools trash
 SUB basecamp tools update
 SUB basecamp tui
 SUB basecamp unassign
+SUB basecamp unspotlight
 SUB basecamp upgrade
 SUB basecamp upload
 SUB basecamp uploads

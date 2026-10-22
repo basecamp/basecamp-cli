@@ -6,12 +6,14 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 54 | 209 |
+| ✅ Implemented | 55 | 211 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **58** | **221** |
+| **Total tracked** | **59** | **223** |
 
-**209 of 209 tracked in-scope endpoints.** The two embed endpoints bc3 documents
+**211 of 211 tracked in-scope endpoints.** Spotlighting a recording on its
+project or template home page (`POST`/`DELETE /recordings/:id/spotlight.json`,
+SDK v0.27.0) lands as `spotlight` and `unspotlight`. The two embed endpoints bc3 documents
 in `embeds.md` — `POST /embeds.json` and `GET /embeds/:sgid.json` — land as
 `embeds`. The three Pings endpoints bc3#13943
 documented — `GET /circles.json`, `GET /circles/:id.json` and `POST
@@ -218,6 +220,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | boosts | 7 | `boost`, `react` | ✅ | BC4 | - | list (recording + event), show, create (recording + event), update (`PUT /boosts/{id}`, the creator only; same 16-character cap as create), delete. No account-wide listing — BC5 withdrew `/boosts.json` (basecamp/bc3#12464); temporary, returns via basecamp/bc3#12463 |
 | notifications | 2 | `notifications` | ✅ | BC4 | - | list, mark as read (BC5: `bubble_ups`/`scheduled_bubble_ups` sections; `memories` is BC4-only) |
 | bubble_ups | 3 | `bubble-up`, `notifications bubbleups` | ✅ | BC5 | - | `bubble-up add`/`remove` create and delete a per-recording bubble-up (`POST`/`DELETE /recordings/{id}/bubble_up.json`); `add --at` schedules. Dedicated list is `notifications bubbleups` (`GET /my/readings/bubble_ups.json`, paginated) plus the `limit_bubble_ups` variant behind `notifications list --limit-bubble-ups`. Per-recording GET is an unrenderable API gap, so there is no `check`. |
+| spotlights | 2 | `spotlight`, `unspotlight` | ✅ | BC5 | - | `POST`/`DELETE /recordings/{id}/spotlight.json` put a recording's card on, or take it off, its project or template home page; both idempotent. No endpoint reads spotlight state or lists spotlights, so there is no `check` or list. Reordering spotlights (`PUT /recordings/:id/spotlight/position`) has no SDK operation, so it is not covered |
 | **Cards (Kanban)** |
 | card_tables | 3 | `cards` | ✅ | BC4 | - | Accessed via project dock |
 | card_table_cards | 9 | `cards` | ✅ | BC4 | - | list, show, create, update, move |

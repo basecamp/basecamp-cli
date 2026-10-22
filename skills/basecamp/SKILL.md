@@ -20,6 +20,7 @@ triggers:
   - basecamp document
   - basecamp bookmarks
   - basecamp bubble-up
+  - basecamp spotlight
   - basecamp drafts
   - basecamp notes
   - basecamp calendars

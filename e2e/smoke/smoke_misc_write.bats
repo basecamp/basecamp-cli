@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# smoke_misc_write.bats - Level 1: Schedule settings, recordings trash/restore
+# smoke_misc_write.bats - Level 1: Schedule settings, recordings trash/restore, spotlight
 
 load smoke_helper
 
@@ -81,4 +81,22 @@ setup_file() {
   run_smoke basecamp recordings visibility "$todo_id" --visible -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
+}
+
+@test "spotlight spotlights a recording" {
+  ensure_todolist || return 0
+
+  run_smoke basecamp spotlight "$QA_TODOLIST" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.id' "$QA_TODOLIST"
+}
+
+@test "unspotlight removes a recording's spotlight" {
+  ensure_todolist || return 0
+
+  run_smoke basecamp unspotlight "$QA_TODOLIST" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.spotlighted' 'false'
 }
