@@ -204,17 +204,38 @@ func (m *Manager) SessionAccessToken(ctx context.Context, id, label string) (str
 	token, hold, err := m.mintAgentToken(ctx, mint)
 	if err != nil {
 		if hold != nil {
-			lockErr := m.store.withKeyLock(ctx, credKey, func() error {
-				m.rememberRenewalHold(credKey, hold)
-				return nil
-			})
-			if lockErr != nil {
-				m.warnf("warning: could not lock the credential for %s to remember the token endpoint's refusal, so the next command will ask again: %v", credKey, lockErr)
-			}
+			err = m.rememberSessionHold(ctx, credKey, hold, err)
 		}
 		return "", forSession(launch, m.hintLogin(err))
 	}
 	return token.AccessToken, nil
+}
+
+// rememberSessionHold writes the hold a session mint's refusal leaves, under
+// the credential lock, and returns what the mint answers with: its own
+// refusal, or the verdict that stood instead.
+//
+// With no lock across the round trip, another launch's verdict on the same
+// secret can land while this mint is in flight, and one that outlasts this
+// mint's stands (rememberRenewalHold). Its answer is then this mint's too,
+// so the wait a caller is told is the one the next mint will meet.
+func (m *Manager) rememberSessionHold(ctx context.Context, credKey string, hold *RenewalHold, refusal error) error {
+	var stood *Credentials
+	lockErr := m.store.withKeyLock(ctx, credKey, func() error {
+		stood, _ = m.rememberRenewalHold(credKey, hold.Client, hold)
+		return nil
+	})
+	if lockErr != nil {
+		m.warnf("warning: could not lock the credential for %s to remember the token endpoint's refusal, so the next command will ask again: %v", credKey, lockErr)
+	}
+	if stood == nil {
+		return refusal
+	}
+	held := m.heldRenewal(stood)
+	if held == nil {
+		return refusal
+	}
+	return m.agentRemedy(held, stood.ClientID, stood.Scope)
 }
 
 // forSession names the session in a failed session mint's message, keeping

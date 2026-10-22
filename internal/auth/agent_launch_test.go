@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -178,6 +179,100 @@ func TestSessionTokenRefusalOfTheCredentialIsHeld(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errRenewalHeld)
 	assert.Len(t, as.tokenCalls(), 1, "a held credential was presented again")
+}
+
+// TestConcurrentVerdictsOnTheSecretKeepTheLongerHold: a session mint holds
+// no lock across its round trip, so another mint's verdict on the same
+// secret can land while it is in flight. Whichever is written last, the
+// hold that stands is the one that holds longer, and the session is told
+// that one: a dead secret is not sent again a minute later because a 429
+// from the abuse tracker it tripped landed after its invalid_client.
+func TestConcurrentVerdictsOnTheSecretKeepTheLongerHold(t *testing.T) {
+	type answer struct {
+		status int
+		header http.Header
+		body   string
+	}
+	invalidClient := answer{http.StatusUnauthorized, nil, `{"error":"invalid_client"}`}
+	invalidGrant := answer{http.StatusBadRequest, nil, `{"error":"invalid_grant"}`}
+	rateLimited := func(seconds string) answer {
+		return answer{http.StatusTooManyRequests, http.Header{"Retry-After": {seconds}}, `{}`}
+	}
+
+	for name, tc := range map[string]struct {
+		// early is the verdict that lands while the session's mint is in
+		// flight, from another launch, or from the shared path when
+		// shared; late is the session's own.
+		early, late answer
+		shared      bool
+
+		kind  string
+		until time.Duration // from now; zero is never
+		// stood is whether the session is answered with the earlier
+		// verdict rather than its own; retryAfter is the wait it is told.
+		stood      bool
+		retryAfter int
+	}{
+		"a 429 after invalid_client":               {early: invalidClient, late: rateLimited("60"), kind: renewalHoldRefused, stood: true},
+		"a 429 after the shared path's refusal":    {early: invalidClient, late: rateLimited("60"), shared: true, kind: renewalHoldRefused, stood: true},
+		"a 429 after invalid_grant":                {early: invalidGrant, late: rateLimited("60"), kind: renewalHoldRefused, until: time.Hour, stood: true},
+		"a shorter 429 after a longer one":         {early: rateLimited("1800"), late: rateLimited("60"), kind: renewalHoldRateLimited, until: 30 * time.Minute, stood: true, retryAfter: 1800},
+		"invalid_client after a 429":               {early: rateLimited("60"), late: invalidClient, kind: renewalHoldRefused},
+		"a longer 429 after a shorter one":         {early: rateLimited("60"), late: rateLimited("1800"), kind: renewalHoldRateLimited, until: 30 * time.Minute, retryAfter: 1800},
+		"invalid_client after the shared path 429": {early: rateLimited("60"), late: invalidClient, shared: true, kind: renewalHoldRefused},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := startMintEndpoint(t)
+			first, key, now := heldManager(t, e)
+			second := newDeviceTestManager(t, e.srv.URL)
+			second.store, second.clock = first.store, first.clock
+			start := *now
+
+			e.answer = func(call int) (int, http.Header, string) {
+				a := tc.early
+				if call == 0 {
+					// The session's mint is in flight: the other verdict
+					// lands, and is written, before it is answered.
+					var err error
+					if tc.shared {
+						_, err = first.AccessToken(context.Background())
+					} else {
+						_, err = first.SessionAccessToken(context.Background(), "fedcba9876543210fedcba9876543210", "")
+					}
+					assert.Error(t, err)
+					a = tc.late
+				}
+				return a.status, a.header, a.body
+			}
+
+			_, err := second.SessionAccessToken(context.Background(), testSessionID, "coworker@box")
+			require.Error(t, err)
+			require.EqualValues(t, 2, e.calls.Load())
+			assert.Contains(t, err.Error(), testSessionID)
+			assert.Equal(t, tc.stood, errors.Is(err, errRenewalHeld), "whether the session was answered by the hold that stood")
+			assert.Equal(t, tc.retryAfter, RetryAfter(err), "the wait the session is told")
+			if tc.kind == renewalHoldRefused {
+				assert.ErrorIs(t, err, ErrAgentCredentialRefused)
+			}
+
+			stored, loadErr := second.store.Load(key)
+			require.NoError(t, loadErr)
+			require.NotNil(t, stored.RenewalHold)
+			assert.Equal(t, tc.kind, stored.RenewalHold.Kind)
+			var until int64
+			if tc.until != 0 {
+				until = start.Add(tc.until).Unix()
+			}
+			assert.Equal(t, until, stored.RenewalHold.Until)
+
+			// Past the shorter hold, nothing goes out from either launch.
+			*now = now.Add(2 * time.Minute)
+			_, err = second.SessionAccessToken(context.Background(), testSessionID, "coworker@box")
+			require.Error(t, err)
+			assert.ErrorIs(t, err, errRenewalHeld)
+			assert.EqualValues(t, 2, e.calls.Load(), "the shorter hold was written over the longer one")
+		})
+	}
 }
 
 // TestSessionTokenNeedsAnAgentProfile: only an agent credential mints for
