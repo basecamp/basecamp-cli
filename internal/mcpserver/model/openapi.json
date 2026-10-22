@@ -8517,7 +8517,7 @@
     },
     "/{accountId}/dock/tools/{toolId}": {
       "delete": {
-        "description": "Delete a tool (trash it)",
+        "description": "Remove a tool from the dock: deletes an external link or an empty extra tool, and disables any other tool (returns 204 No Content either way).\nDeleted: an external link, or a tool that is empty while the project has another\ntool of the same type, enabled or disabled. Empty means nothing inside it is still\nin place: items already in the trash don't count, archived and draft items do, and\nfor a Card Table only cards count, not columns. A deleted tool does not go to the\ntrash: Basecamp permanently destroys it, with everything inside it, about five days\nlater. Until then, a deleted external link can be restored in the Basecamp web app.\nDisabled: every other tool, such as the only tool of its type or a tool with\ncontent, exactly as DisableTool does. It keeps its content, and EnableTool restores it.\nTo tell which happened, get the tool afterwards: a deleted tool has status \"deleted\",\nwhile a disabled one keeps its status and has no position.",
         "operationId": "DeleteTool",
         "parameters": [
           {

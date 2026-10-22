@@ -31,6 +31,7 @@ Disabling a tool hides it from the dock but preserves its content.`,
 		Annotations: map[string]string{"agent_notes": fmt.Sprintf(
 			"Dock tools are the sidebar navigation items in a project\n"+
 				"Enable/disable controls visibility without deleting\n"+
+				"trash deletes an external link or an empty extra tool of a type, disables any other tool, and never uses the trash\n"+
 				"Create by type with --type: %s (create-by-type is BC5-only)",
 			strings.Join(toolTypeFriendlyNames(), ", "))},
 	}
@@ -121,15 +122,23 @@ func newToolsShowCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			posStr := "disabled"
-			if tool.Position != nil {
-				posStr = fmt.Sprintf("%d", *tool.Position)
-			}
 			// Name is nil for the Get projection in SDK v0.15.0; only render
 			// the parenthetical when there is something to put in it.
-			summary := fmt.Sprintf("%s at position %s", tool.Title, posStr)
+			label := tool.Title
 			if tool.Name != nil {
-				summary = fmt.Sprintf("%s (%s) at position %s", tool.Title, *tool.Name, posStr)
+				label = fmt.Sprintf("%s (%s)", tool.Title, *tool.Name)
+			}
+			// tools trash points here to tell its two outcomes apart. A
+			// deleted tool has no position either, so check status first:
+			// reading it as disabled would report the opposite outcome.
+			var summary string
+			switch {
+			case tool.Status == "deleted":
+				summary = fmt.Sprintf("%s: deleted, not in the trash", label)
+			case tool.Position != nil:
+				summary = fmt.Sprintf("%s at position %d", label, *tool.Position)
+			default:
+				summary = fmt.Sprintf("%s at position disabled", label)
 			}
 
 			crumbs := []output.Breadcrumb{
@@ -433,10 +442,24 @@ func newToolsTrashCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "trash <id>",
 		Aliases: []string{"delete"},
-		Short:   "Permanently trash a dock tool",
-		Long: `Permanently trash a dock tool.
+		Short:   "Remove a dock tool (deletes or disables it, never trashes it)",
+		Long: `Remove a tool from the project dock. Despite the command's name, the tool
+never goes to the trash. Basecamp either deletes it or disables it:
 
-WARNING: This permanently removes the tool and all its content.`,
+  Deleted   An external link, or a tool that is empty while the project has
+            another tool of the same type. Empty means nothing inside it is
+            still in place: items already in the trash don't count, archived
+            and draft items do, and for a Card Table only cards count, not
+            columns. Basecamp permanently destroys a deleted tool, with
+            everything inside it, about five days later. Until then, a
+            deleted external link can be restored in the Basecamp web app.
+
+  Disabled  Every other tool, such as the only tool of its type or a tool
+            with content. This is the same as 'basecamp tools disable': the
+            content is kept, and 'basecamp tools enable' restores it.
+
+Basecamp answers both cases the same way. To see which happened, run
+'basecamp tools show <id>': a deleted tool has status "deleted".`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -460,7 +483,11 @@ WARNING: This permanently removes the tool and all its content.`,
 				return convertSDKError(err)
 			}
 
-			var crumbs []output.Breadcrumb
+			crumbs := []output.Breadcrumb{{
+				Action:      "show",
+				Cmd:         fmt.Sprintf("basecamp tools show %d%s", toolID, toolBreadcrumbFlag(resolvedProjectID)),
+				Description: "See whether the tool was deleted or disabled",
+			}}
 			if resolvedProjectID != "" {
 				crumbs = append(crumbs, output.Breadcrumb{
 					Action:      "project",
@@ -469,8 +496,10 @@ WARNING: This permanently removes the tool and all its content.`,
 				})
 			}
 
+			// "trashed" stays as the data key for existing scripts. Basecamp
+			// deletes or disables the tool; it never trashes it.
 			return app.OK(map[string]any{"trashed": true},
-				output.WithSummary(fmt.Sprintf("Tool %d trashed", toolID)),
+				output.WithSummary(fmt.Sprintf("Tool %d removed from the dock (deleted or disabled)", toolID)),
 				output.WithBreadcrumbs(crumbs...),
 			)
 		},

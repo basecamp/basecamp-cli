@@ -1,9 +1,9 @@
 {
   "sdk": {
     "module": "github.com/basecamp/basecamp-sdk/go",
-    "version": "v0.27.0",
-    "revision": "5e6961286780",
-    "updated_at": "2026-10-21T16:35:15Z"
+    "version": "v0.27.1-0.20261022210749-d69e9669709e",
+    "revision": "d69e9669709e",
+    "updated_at": "2026-10-22T21:07:49Z"
   },
   "api": {
     "repo": "basecamp/bc3",
