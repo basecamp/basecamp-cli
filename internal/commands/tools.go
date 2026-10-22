@@ -439,10 +439,12 @@ func newToolsTrashCmd(project *string) *cobra.Command {
 never goes to the trash. Basecamp either deletes it or disables it:
 
   Deleted   An external link, or a tool that is empty while the project has
-            another tool of the same type. Items already in the trash don't
-            count as content. Basecamp permanently destroys a deleted tool,
-            with everything inside it, about five days later. It can't be
-            restored.
+            another tool of the same type. Empty means nothing inside it is
+            still in place: items already in the trash don't count, archived
+            and draft items do, and for a Card Table only cards count, not
+            columns. Basecamp permanently destroys a deleted tool, with
+            everything inside it, about five days later. Until then, a
+            deleted external link can be restored in the Basecamp web app.
 
   Disabled  Every other tool, such as the only tool of its type or a tool
             with content. This is the same as 'basecamp tools disable': the
