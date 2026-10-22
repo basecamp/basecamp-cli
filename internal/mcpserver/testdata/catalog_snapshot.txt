@@ -252,7 +252,7 @@ ACTIONS (RO = read-only):
 - create_webhook: Create a new webhook for a project
 - delete_lineup_marker: Delete a lineup marker
 - delete_template: Delete a template (trash it)
-- delete_tool: Delete a tool (trash it)
+- delete_tool: Remove a tool from the dock: deletes an external link or an empty extra tool, and disables any other tool (returns 204 No Content either way)
 - delete_webhook: Delete a webhook
 - disable_tool: Disable a tool (hide it from the project dock)
 - enable_tool: Enable a tool (show it on the project dock)
