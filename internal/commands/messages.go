@@ -814,6 +814,9 @@ You can pass either a message ID or a Basecamp URL:
 	return cmd
 }
 
+const messagesPinAgentNotes = "Pinning is not spotlighting: a pin keeps a message at the top of its message board; " +
+	"basecamp spotlight puts any recording on its project's home page, and basecamp unspotlight takes it off"
+
 func newMessagesPinCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "pin <id|url>",
@@ -823,7 +826,8 @@ func newMessagesPinCmd() *cobra.Command {
 You can pass either a message ID or a Basecamp URL:
   basecamp messages pin 789
   basecamp messages pin https://3.basecamp.com/123/buckets/456/messages/789`,
-		Args: cobra.ExactArgs(1),
+		Annotations: map[string]string{"agent_notes": messagesPinAgentNotes},
+		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -876,7 +880,8 @@ func newMessagesUnpinCmd() *cobra.Command {
 You can pass either a message ID or a Basecamp URL:
   basecamp messages unpin 789
   basecamp messages unpin https://3.basecamp.com/123/buckets/456/messages/789`,
-		Args: cobra.ExactArgs(1),
+		Annotations: map[string]string{"agent_notes": messagesPinAgentNotes},
+		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 

@@ -319,6 +319,8 @@ func Execute() {
 	cmd.AddCommand(commands.NewCommentsCmd())
 	cmd.AddCommand(commands.NewAssignCmd())
 	cmd.AddCommand(commands.NewUnassignCmd())
+	cmd.AddCommand(commands.NewSpotlightCmd())
+	cmd.AddCommand(commands.NewUnspotlightCmd())
 	cmd.AddCommand(commands.NewMessagesCmd())
 	cmd.AddCommand(commands.NewCardsCmd())
 	cmd.AddCommand(commands.NewURLCmd())

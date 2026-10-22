@@ -20,6 +20,7 @@ triggers:
   - basecamp document
   - basecamp bookmarks
   - basecamp bubble-up
+  - basecamp spotlight
   - basecamp drafts
   - basecamp notes
   - basecamp calendars
@@ -215,6 +216,20 @@ basecamp pings messages "Jane Smith" --agent
 - A message URL (`/circles/<id>@<line>`) works with `basecamp show` and
   `chat line`; edit or delete such a message with `chat update` or `chat delete`
   on that URL.
+
+## Spotlights
+
+A spotlight puts a recording's card in the Spotlights area of its project's home
+page. It is not a pin: `messages pin` only keeps a message at the top of its
+Message Board. `spotlight` is a top-level command, outside every recording
+type's group, and takes the ID or URL of a message, document, file, to-do list,
+to-do, card, card column, check-in question, schedule entry and more.
+`unspotlight` removes it, as "Remove Spotlight" does in Basecamp.
+
+```bash
+basecamp spotlight <id|url> --agent
+basecamp unspotlight <id|url> --agent
+```
 
 ## Content and stdin
 

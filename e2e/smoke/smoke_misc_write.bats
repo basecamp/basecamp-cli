@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# smoke_misc_write.bats - Level 1: Schedule settings, recordings trash/restore
+# smoke_misc_write.bats - Level 1: Schedule settings, recordings trash/restore, spotlight
 
 load smoke_helper
 
@@ -81,4 +81,31 @@ setup_file() {
   run_smoke basecamp recordings visibility "$todo_id" --visible -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
+}
+
+@test "spotlight and unspotlight a recording" {
+  ensure_todolist || mark_unverifiable "Cannot discover todolist for spotlight"
+
+  # A throwaway todo: unspotlight would otherwise remove a spotlight someone
+  # set, and there is no read API to put it back.
+  local todo_out
+  todo_out=$(basecamp todos create "Spotlight target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json 2>/dev/null) || {
+    mark_unverifiable "Cannot create todo for spotlight test"
+    return
+  }
+  local todo_id
+  todo_id=$(echo "$todo_out" | jq -r '.data.id // empty')
+  [[ -n "$todo_id" ]] || mark_unverifiable "No todo ID returned"
+
+  run_smoke basecamp spotlight "$todo_id" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.id' "$todo_id"
+
+  run_smoke basecamp unspotlight "$todo_id" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.spotlighted' 'false'
+
+  basecamp recordings trash "$todo_id" -p "$QA_PROJECT" --json >/dev/null 2>&1 || true
 }

@@ -56,6 +56,8 @@ func CommandCategories() []CommandCategory {
 			Commands: []CommandInfo{
 				{Name: "assign", Category: "shortcut", Description: "Assign someone to a to-do, card, or step"},
 				{Name: "unassign", Category: "shortcut", Description: "Remove assignment from a to-do, card, or step"},
+				{Name: "spotlight", Category: "shortcut", Description: "Spotlight a recording on its project page"},
+				{Name: "unspotlight", Category: "shortcut", Description: "Remove a recording's spotlight"},
 				{Name: "attach", Category: "shortcut", Description: "Upload and stage an attachment"},
 				{Name: "upload", Category: "shortcut", Description: "Upload a file to Docs & Files"},
 			},

@@ -70,6 +70,8 @@ func buildRootWithAllCommands() *cobra.Command {
 	root.AddCommand(commands.NewCommentsCmd())
 	root.AddCommand(commands.NewAssignCmd())
 	root.AddCommand(commands.NewUnassignCmd())
+	root.AddCommand(commands.NewSpotlightCmd())
+	root.AddCommand(commands.NewUnspotlightCmd())
 	root.AddCommand(commands.NewMessagesCmd())
 	root.AddCommand(commands.NewCardsCmd())
 	root.AddCommand(commands.NewURLCmd())
