@@ -122,15 +122,23 @@ func newToolsShowCmd(project *string) *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			posStr := "disabled"
-			if tool.Position != nil {
-				posStr = fmt.Sprintf("%d", *tool.Position)
-			}
 			// Name is nil for the Get projection in SDK v0.15.0; only render
 			// the parenthetical when there is something to put in it.
-			summary := fmt.Sprintf("%s at position %s", tool.Title, posStr)
+			label := tool.Title
 			if tool.Name != nil {
-				summary = fmt.Sprintf("%s (%s) at position %s", tool.Title, *tool.Name, posStr)
+				label = fmt.Sprintf("%s (%s)", tool.Title, *tool.Name)
+			}
+			// tools trash points here to tell its two outcomes apart. A
+			// deleted tool has no position either, so check status first:
+			// reading it as disabled would report the opposite outcome.
+			var summary string
+			switch {
+			case tool.Status == "deleted":
+				summary = fmt.Sprintf("%s: deleted, not in the trash", label)
+			case tool.Position != nil:
+				summary = fmt.Sprintf("%s at position %d", label, *tool.Position)
+			default:
+				summary = fmt.Sprintf("%s at position disabled", label)
 			}
 
 			crumbs := []output.Breadcrumb{

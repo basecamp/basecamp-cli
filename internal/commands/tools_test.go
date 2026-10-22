@@ -529,6 +529,16 @@ func (t *mockToolTransport) RoundTrip(req *http.Request) (*http.Response, error)
 		body = `{"id": 556, "title": "Chat", "enabled": true, "position": 2,` +
 			`"status": "active", "url": "https://example.com", "app_url": "https://example.com",` +
 			`"created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z"}`
+	case strings.HasSuffix(req.URL.Path, "/tools/558"):
+		// A tool DELETE took down: status deleted, no position.
+		body = `{"id": 558, "title": "Chat", "name": "chat", "enabled": false, "position": null,` +
+			`"status": "deleted", "url": "https://example.com", "app_url": "https://example.com",` +
+			`"created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z"}`
+	case strings.HasSuffix(req.URL.Path, "/tools/559"):
+		// A tool DELETE disabled: still active, no position.
+		body = `{"id": 559, "title": "Chat", "name": "chat", "enabled": false, "position": null,` +
+			`"status": "active", "url": "https://example.com", "app_url": "https://example.com",` +
+			`"created_at": "2024-01-01T00:00:00Z", "updated_at": "2024-01-01T00:00:00Z"}`
 	case strings.HasSuffix(req.URL.Path, "/tools/555"):
 		body = `{"id": 555, "title": "Chat", "name": "chat", "enabled": true, "position": 2,` +
 			`"status": "active", "url": "https://example.com", "app_url": "https://example.com",` +
@@ -707,4 +717,29 @@ func TestToolsTrashSummaryDoesNotClaimTrash(t *testing.T) {
 	require.NotEmpty(t, envelope.Breadcrumbs)
 	assert.Equal(t, "show", envelope.Breadcrumbs[0].Action)
 	assert.Equal(t, "basecamp tools show 557 --in 123", envelope.Breadcrumbs[0].Cmd)
+}
+
+// TestToolsShowSummaryTellsDeletedFromDisabled pins the distinction tools
+// trash's breadcrumb sends people here for. Both outcomes leave the tool with
+// no position; only status tells them apart.
+func TestToolsShowSummaryTellsDeletedFromDisabled(t *testing.T) {
+	for _, tc := range []struct{ id, want string }{
+		{"558", "Chat (chat): deleted, not in the trash"},
+		{"559", "Chat (chat) at position disabled"},
+	} {
+		t.Run("tool "+tc.id, func(t *testing.T) {
+			app, buf := newTestAppWithTransport(t, &mockToolTransport{})
+			app.Config.ProjectID = ""
+
+			project := ""
+			cmd := newToolsShowCmd(&project)
+			require.NoError(t, executeCommand(cmd, app, tc.id))
+
+			var envelope struct {
+				Summary string `json:"summary"`
+			}
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+			assert.Equal(t, tc.want, envelope.Summary)
+		})
+	}
 }
