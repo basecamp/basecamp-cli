@@ -1,6 +1,6 @@
 task: Spotlight message 789 on its project page
 tags: [semantics]
 accept:
-  - '^spotlight (?!.*--help)(?=.*\b789\b)'
+  - '^spotlight (?!.*--help)(?:-\S+ )*789(?:\s|$)'
 reject:
   - '^messages (un)?pin(?!.*--help)'

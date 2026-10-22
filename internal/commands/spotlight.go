@@ -3,13 +3,16 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // NewSpotlightCmd creates the spotlight command, which puts a recording's card
@@ -113,19 +116,45 @@ nothing. Requires edit access to the project.`,
 	}
 }
 
-// spotlightTarget reads the recording a spotlight command acts on. A comment
-// link names its parent, since comments cannot be spotlighted, and a project
-// link names no recording at all, so its project ID must not go out as one.
+// spotlightKinds are the URL types of the items bc3 can spotlight. bc3 still
+// decides each case; the list keeps a URL for something else (a person, a
+// Campfire, a path the router only matched by shape) from sending its ID out
+// as a recording's.
+var spotlightKinds = []string{
+	"cards", "cloud_files", "columns", "documents", "google_documents", "messages",
+	"questions", "schedule_entries", "todolists", "todos", "uploads", "vaults",
+}
+
+// spotlightTarget reads the recording a spotlight command acts on: an ID, or
+// the URL of a single item on a trusted host. The URL router is host-agnostic,
+// so the host check keeps a look-alike URL from retargeting the configured
+// account. A comment's URL names the item it sits on, since comments cannot be
+// spotlighted.
 func spotlightTarget(cmd *cobra.Command, app *appctx.App, arg string) (int64, error) {
-	if err := ensureAccount(cmd, app); err != nil {
-		return 0, err
+	idStr := arg
+	if urlarg.IsURL(arg) {
+		if !hostutil.IsTrustedBasecampHost(arg, app.Config.BaseURL) {
+			return 0, spotlightUsage(cmd, "not a Basecamp URL")
+		}
+		parsed := urlarg.Parse(arg)
+		if parsed == nil || parsed.IsCollection || !slices.Contains(spotlightKinds, parsed.Type) {
+			return 0, spotlightUsage(cmd, "the URL names something else")
+		}
+		idStr = parsed.RecordingID
 	}
-	recordingIDStr, _ := extractWithProject(arg)
-	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
+	recordingID, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		return 0, output.ErrUsage("Invalid ID")
 	}
+	if err := ensureAccount(cmd, app); err != nil {
+		return 0, err
+	}
 	return recordingID, nil
+}
+
+func spotlightUsage(cmd *cobra.Command, reason string) error {
+	return output.ErrUsageHint(cmd.Name()+" takes a single item: "+reason,
+		"Pass its ID or its own URL (…/messages/<id>, …/todos/<id>, …); basecamp spotlight --help lists the types")
 }
 
 // spotlightError says why bc3 refused a spotlight. Its 422 carries no reason

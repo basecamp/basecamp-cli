@@ -77,14 +77,21 @@ func TestUnspotlightDeletesTheSpotlight(t *testing.T) {
 	}
 }
 
-// A project URL names no recording, so its project ID must never go out as one.
+// None of these names a single item, so no ID from them may go out as a
+// recording's: a project, a look-alike host, a to-do list's to-dos, a person.
 func TestSpotlightRefusesANonRecordingArgument(t *testing.T) {
 	cmds := map[string]func() *cobra.Command{
 		"spotlight":   NewSpotlightCmd,
 		"unspotlight": NewUnspotlightCmd,
 	}
 	for name, newCmd := range cmds {
-		for _, arg := range []string{"abc", "https://app.basecamp.com/99999/projects/123"} {
+		for _, arg := range []string{
+			"abc",
+			"https://app.basecamp.com/99999/projects/123",
+			"https://evil.example/99999/buckets/123/messages/456",
+			"https://app.basecamp.com/99999/buckets/123/todolists/456/todos",
+			"https://app.basecamp.com/99999/people/456",
+		} {
 			t.Run(name+" "+arg, func(t *testing.T) {
 				app, transport := setupRecordingTestApp(t)
 
