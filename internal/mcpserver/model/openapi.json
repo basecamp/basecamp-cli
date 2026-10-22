@@ -30740,12 +30740,18 @@
           "completed": {
             "type": "boolean"
           },
+          "completion": {
+            "$ref": "#/components/schemas/RecordingCompletion"
+          },
           "completed_at": {
             "type": "string",
+            "deprecated": true,
+            "description": "This shape is deprecated since 2026-10: Never sent by Basecamp; read completion.created_at instead",
             "x-go-type": "time.Time",
             "x-go-type-import": {
               "path": "time"
-            }
+            },
+            "x-deprecated-reason": "This shape is deprecated since 2026-10: Never sent by Basecamp; read completion.created_at instead"
           },
           "comments_count": {
             "type": "integer",
@@ -30767,7 +30773,10 @@
             "$ref": "#/components/schemas/Person"
           },
           "completer": {
-            "$ref": "#/components/schemas/Person"
+            "$ref": "#/components/schemas/Person",
+            "deprecated": true,
+            "description": "This shape is deprecated since 2026-10: Never sent by Basecamp; read completion.creator instead",
+            "x-deprecated-reason": "This shape is deprecated since 2026-10: Never sent by Basecamp; read completion.creator instead"
           },
           "assignees": {
             "type": "array",
@@ -37247,6 +37256,26 @@
           "name"
         ]
       },
+      "RecordingCompletion": {
+        "type": "object",
+        "description": "Who completed a to-do, card or subtask, and when.",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "x-go-type": "time.Time",
+            "x-go-type-import": {
+              "path": "time"
+            }
+          },
+          "creator": {
+            "$ref": "#/components/schemas/Person"
+          }
+        },
+        "required": [
+          "created_at",
+          "creator"
+        ]
+      },
       "RecordingParent": {
         "type": "object",
         "properties": {
@@ -38341,12 +38370,18 @@
           "completed": {
             "type": "boolean"
           },
+          "completion": {
+            "$ref": "#/components/schemas/RecordingCompletion"
+          },
           "completed_at": {
             "type": "string",
+            "deprecated": true,
+            "description": "This shape is deprecated since 2026-10: Never sent by Basecamp; read completion.created_at instead",
             "x-go-type": "time.Time",
             "x-go-type-import": {
               "path": "time"
-            }
+            },
+            "x-deprecated-reason": "This shape is deprecated since 2026-10: Never sent by Basecamp; read completion.created_at instead"
           },
           "parent": {
             "$ref": "#/components/schemas/RecordingParent"
@@ -38358,7 +38393,10 @@
             "$ref": "#/components/schemas/Person"
           },
           "completer": {
-            "$ref": "#/components/schemas/Person"
+            "$ref": "#/components/schemas/Person",
+            "deprecated": true,
+            "description": "This shape is deprecated since 2026-10: Never sent by Basecamp; read completion.creator instead",
+            "x-deprecated-reason": "This shape is deprecated since 2026-10: Never sent by Basecamp; read completion.creator instead"
           },
           "assignees": {
             "type": "array",
@@ -39031,6 +39069,9 @@
           },
           "completed": {
             "type": "boolean"
+          },
+          "completion": {
+            "$ref": "#/components/schemas/RecordingCompletion"
           },
           "content": {
             "type": "string"
@@ -39883,6 +39924,7 @@
           },
           "due_on": {
             "type": "string",
+            "x-basecamp-clearable": {},
             "x-go-type": "types.Date",
             "x-go-type-import": {
               "path": "github.com/basecamp/basecamp-sdk/go/pkg/types"
@@ -39908,6 +39950,7 @@
           },
           "due_on": {
             "type": "string",
+            "x-basecamp-clearable": {},
             "x-go-type": "types.Date",
             "x-go-type-import": {
               "path": "github.com/basecamp/basecamp-sdk/go/pkg/types"
@@ -40353,6 +40396,7 @@
           },
           "due_on": {
             "type": "string",
+            "x-basecamp-clearable": {},
             "x-go-type": "types.Date",
             "x-go-type-import": {
               "path": "github.com/basecamp/basecamp-sdk/go/pkg/types"
