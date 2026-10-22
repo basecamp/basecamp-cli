@@ -31,6 +31,7 @@ Disabling a tool hides it from the dock but preserves its content.`,
 		Annotations: map[string]string{"agent_notes": fmt.Sprintf(
 			"Dock tools are the sidebar navigation items in a project\n"+
 				"Enable/disable controls visibility without deleting\n"+
+				"trash deletes an external link or an empty extra tool of a type, disables any other tool, and never uses the trash\n"+
 				"Create by type with --type: %s (create-by-type is BC5-only)",
 			strings.Join(toolTypeFriendlyNames(), ", "))},
 	}
@@ -433,10 +434,22 @@ func newToolsTrashCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "trash <id>",
 		Aliases: []string{"delete"},
-		Short:   "Permanently trash a dock tool",
-		Long: `Permanently trash a dock tool.
+		Short:   "Remove a dock tool (deletes or disables it, never trashes it)",
+		Long: `Remove a tool from the project dock. Despite the command's name, the tool
+never goes to the trash. Basecamp either deletes it or disables it:
 
-WARNING: This permanently removes the tool and all its content.`,
+  Deleted   An external link, or a tool that is empty while the project has
+            another tool of the same type. Items already in the trash don't
+            count as content. Basecamp permanently destroys a deleted tool,
+            with everything inside it, about five days later. It can't be
+            restored.
+
+  Disabled  Every other tool, such as the only tool of its type or a tool
+            with content. This is the same as 'basecamp tools disable': the
+            content is kept, and 'basecamp tools enable' restores it.
+
+Basecamp answers both cases the same way. To see which happened, run
+'basecamp tools show <id>': a deleted tool has status "deleted".`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -460,7 +473,11 @@ WARNING: This permanently removes the tool and all its content.`,
 				return convertSDKError(err)
 			}
 
-			var crumbs []output.Breadcrumb
+			crumbs := []output.Breadcrumb{{
+				Action:      "show",
+				Cmd:         fmt.Sprintf("basecamp tools show %d%s", toolID, toolBreadcrumbFlag(resolvedProjectID)),
+				Description: "See whether the tool was deleted or disabled",
+			}}
 			if resolvedProjectID != "" {
 				crumbs = append(crumbs, output.Breadcrumb{
 					Action:      "project",
@@ -469,8 +486,10 @@ WARNING: This permanently removes the tool and all its content.`,
 				})
 			}
 
+			// "trashed" stays as the data key for existing scripts. Basecamp
+			// deletes or disables the tool; it never trashes it.
 			return app.OK(map[string]any{"trashed": true},
-				output.WithSummary(fmt.Sprintf("Tool %d trashed", toolID)),
+				output.WithSummary(fmt.Sprintf("Tool %d removed from the dock (deleted or disabled)", toolID)),
 				output.WithBreadcrumbs(crumbs...),
 			)
 		},

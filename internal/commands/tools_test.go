@@ -678,3 +678,33 @@ func TestToolsShowSummaryOmitsMissingName(t *testing.T) {
 		})
 	}
 }
+
+// TestToolsTrashSummaryDoesNotClaimTrash pins the outcome wording. DELETE on a
+// dock tool deletes or disables it and answers 204 either way, so the summary
+// must not claim the tool went to the trash, and a breadcrumb must point at
+// `tools show`, which tells the two outcomes apart.
+func TestToolsTrashSummaryDoesNotClaimTrash(t *testing.T) {
+	app, buf := newTestAppWithTransport(t, &mockToolTransport{})
+	app.Config.ProjectID = ""
+	app.Flags.Hints = true
+
+	project := "123"
+	cmd := newToolsTrashCmd(&project)
+	require.NoError(t, executeCommand(cmd, app, "557"))
+
+	var envelope struct {
+		Summary     string `json:"summary"`
+		Breadcrumbs []struct {
+			Action string `json:"action"`
+			Cmd    string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+
+	assert.Equal(t, "Tool 557 removed from the dock (deleted or disabled)", envelope.Summary)
+	assert.NotContains(t, strings.ToLower(envelope.Summary), "trash")
+
+	require.NotEmpty(t, envelope.Breadcrumbs)
+	assert.Equal(t, "show", envelope.Breadcrumbs[0].Action)
+	assert.Equal(t, "basecamp tools show 557 --in 123", envelope.Breadcrumbs[0].Cmd)
+}
