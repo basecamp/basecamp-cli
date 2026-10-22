@@ -118,7 +118,8 @@ func TestOnlyServedProjectsAreHandedOff(t *testing.T) {
 
 // A Ping is in no project connect.json serves, and its operator's line is
 // handed off all the same, saying it is a Ping's, even with no project
-// served. A run narrowed to projects hears no Ping.
+// served — by the one connector that hears Pings. Any other connector, and a
+// run narrowed to projects, hands off none.
 func TestAPingsRequestIsHandedOffWithNoServedProject(t *testing.T) {
 	const ping int64 = 2085958521
 	ping1 := func(t *testing.T, ledger *Ledger, id int64) {
@@ -142,6 +143,7 @@ func TestAPingsRequestIsHandedOffWithNoServedProject(t *testing.T) {
 		var out bytes.Buffer
 		opts := handoffOptions(ledger, &out)
 		opts.Served = func() (map[int64]admission.Project, error) { return map[int64]admission.Project{}, nil }
+		opts.Pings = true
 
 		require.NoError(t, handOffReady(context.Background(), opts))
 
@@ -167,16 +169,32 @@ func TestAPingsRequestIsHandedOffWithNoServedProject(t *testing.T) {
 		assert.False(t, lines[0].Ping)
 	})
 
+	t.Run("a connector that does not hear Pings", func(t *testing.T) {
+		ledger := newTestLedger(t)
+		ping1(t, ledger, 1)
+		admitOn(t, ledger, 2, "recording:1")
+		var out bytes.Buffer
+		opts := handoffOptions(ledger, &out)
+
+		require.NoError(t, handOffReady(context.Background(), opts))
+
+		lines := handedOffLines(t, &out)
+		require.Len(t, lines, 1, "its served project's request is still handed off")
+		assert.Equal(t, int64(2), lines[0].EventID)
+		assert.Equal(t, StateAdmitted, getRecord(t, ledger, 1).State, "the Ping's is not")
+	})
+
 	t.Run("a run narrowed to projects", func(t *testing.T) {
 		ledger := newTestLedger(t)
 		ping1(t, ledger, 1)
 		var out bytes.Buffer
 		opts := handoffOptions(ledger, &out)
 		opts.Buckets = []int64{adapterBucketID}
+		opts.Pings = true
 
 		require.NoError(t, handOffReady(context.Background(), opts))
 
-		assert.Empty(t, out.String())
+		assert.Empty(t, out.String(), "a narrowed run hears no Ping, whatever it was told")
 		assert.Equal(t, StateAdmitted, getRecord(t, ledger, 1).State)
 	})
 }

@@ -378,6 +378,12 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		if reason != "" {
 			return v.end(StateBlocked, reason), nil
 		}
+		if ping != nil && !policy.HearsPings {
+			// Another connector answers the agent's Pings. Every connector
+			// sees every Ping, so one that admitted the line too would
+			// answer it twice.
+			return v.end(StateDiscarded, ReasonPingsNotHeard), nil
+		}
 		if ping != nil && gate.Role != RoleOperator && !gate.InPing {
 			// Project trust's participants are a project's members, and a
 			// Ping is no project. An allowed agent never gets here: the gate

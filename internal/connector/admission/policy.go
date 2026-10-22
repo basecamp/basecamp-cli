@@ -316,6 +316,18 @@ type Policy struct {
 	// Buckets is the --project scope. Empty means every project the agent can
 	// see.
 	Buckets []int64 `json:"-"`
+	// HearsPings says this connector answers the agent's Pings, and anything
+	// else outside a project (--pings). Only one connector should: every
+	// connector for the agent sees every Ping, and each one that admits a
+	// line answers it. One that does not hear them discards a line once the
+	// Ping read says its bucket is a Ping, whoever wrote it. Like Buckets it
+	// is the run's, never connect.json's, and its zero value hears none.
+	//
+	// "Anything else outside a project" is a rule for what is added later
+	// rather than a second check today: outside a served project, only a
+	// Ping's line is ever admitted (TestNothingOutsideAServedProjectIsAdmittedWithoutPings),
+	// so a trigger that admits elsewhere outside a project must ask this too.
+	HearsPings bool `json:"-"`
 
 	Trust Trust `json:"trust"`
 	// Projects maps a bucket id to the entry for the project it serves.

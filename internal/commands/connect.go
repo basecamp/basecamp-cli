@@ -50,9 +50,9 @@ the agent.
 Connect the agent to a profile first (basecamp auth agent connect -P <profile>),
 then run setup on that profile: it records who may drive the agent, maps
 which Basecamp projects it serves, and checks the connector is
-ready. Pings need no setup: an operator's ping is handed off too. Show prints what setup recorded. Then run the connector on it:
+ready. Show prints what setup recorded. Then run the connector on it:
 
-  basecamp connect -P <profile> [--project <id>]... [--shadow]
+  basecamp connect -P <profile> [--project <id>]... [--pings | --no-pings] [--shadow]
 
 It runs in the foreground until interrupted. Stdout is one JSON object per
 line: events seen, admission's verdicts, and a "type":"request" line for each
@@ -69,6 +69,19 @@ a new approval replaces the existing connection. Each profile
 serves its own projects and has its own hold. When two connections serve the
 same project, a request both admit can be answered twice.
 
+Pings. Only one computer should answer an agent's Pings: every connector for
+the agent sees all of them, since a Ping is in no project. A connector started
+with --pings hears Pings, and anything else outside a project; one started
+with --no-pings hears only projects. Without either, the agent's first
+connection hears them, a connection added after it doesn't, and a person's
+login (a bot user's) does, as before. A run given --project hears none, and
+saves nothing. The first start without --project saves the choice for the
+profile, as --pings and --no-pings save theirs, and every restart keeps it
+until one of them changes it. A connector that hears Pings warns when
+another one on this computer hears the same agent's; ones on other computers
+can't be seen, so starting just one is yours to arrange. basecamp connect
+status and doctor say which this profile's does.
+
   basecamp connect status             what it heard and holds
   basecamp connect doctor             what it needs to run
   basecamp connect discard <id>       close a record without running it
@@ -78,6 +91,7 @@ same project, a request both admit can be answered twice.
   basecamp connect import <file>      apply a cutover reconciliation file`,
 		Example: `  basecamp connect setup -P agent --operator-profile me --serve 12345
   basecamp connect -P agent
+  basecamp connect -P laptop --no-pings
   basecamp connect -P agent --project 12345 --shadow`,
 		Args: cobra.NoArgs,
 		Annotations: map[string]string{
@@ -401,7 +415,9 @@ The list is this profile's own. When two connections of one agent serve the
 same project, a request both admit there can be answered twice, so serve
 each project from one of them.
 
-Pings. A Ping is in no project, so it is never served and needs no setup.
+Pings. A Ping is in no project, so it is never served and needs no setup,
+and only the connector started to hear Pings answers them (see basecamp
+connect --help: only one computer should answer Pings).
 An operator (the operator, or a person passed with --allow) gives the agent
 work by Ping in every trust mode: every line of theirs in a direct Ping with
 the agent is a request, and in a group Ping a line that @mentions it.

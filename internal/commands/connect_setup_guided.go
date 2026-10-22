@@ -163,8 +163,31 @@ func runGuidedConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupF
 		file = &loaded
 	}
 
-	renderGuidedSummary(w, r, agent, *file, connectorRunning(name, *file), name)
+	renderGuidedSummary(w, r, agent, *file, connectorRunning(name, *file), guidedPings(ctx, app, name, *file), name)
 	return nil
+}
+
+// guidedPings is what the summary says about the agent's Pings, for this
+// profile alone: whether its connector answers them — the one running now,
+// else one started as the summary says to start it — and, when its saved
+// choice can't be read, how to recover, running or not, since the next start
+// refuses. A start that refuses hears nothing; one that can't be told is said
+// as before: every connector heard Pings until it could choose. Other
+// connectors, and whether two answer, are the start's warning, status and
+// doctor's to say.
+type guidedPingsSummary struct {
+	hears  bool
+	remedy string
+}
+
+func guidedPings(ctx context.Context, app *appctx.App, name string, file setup.File) guidedPingsSummary {
+	v := readConnectPingsView(ctx, app, name, file)
+	hears, known := v.Hears()
+	g := guidedPingsSummary{hears: hears || (!known && v.SavedErr == nil)}
+	if v.SavedErr != nil {
+		g.remedy = v.Remedy(name)
+	}
+	return g
 }
 
 // checkGuidedScope refuses a credential that can't reply or acknowledge, as
@@ -610,7 +633,8 @@ func runGuidedSetupAgain(name string) string {
 	return "Then run this again: basecamp connect setup -P " + richtext.ShellQuote(name)
 }
 
-func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, file setup.File, running bool, name string) {
+func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, file setup.File, running bool, pings guidedPingsSummary, name string) {
+	hearsPings := pings.hears
 	names := make(map[int64]string, len(agent.Projects))
 	for _, p := range agent.Projects {
 		names[p.ID] = richtext.SanitizeSingleLine(p.Name)
@@ -626,6 +650,12 @@ func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, fil
 	slices.Sort(served)
 
 	agentName := richtext.SanitizeSingleLine(agent.Me.Name)
+	quoted := richtext.ShellQuote(name)
+	// How to try it: a mention, and a ping where this computer answers them.
+	try := fmt.Sprintf("mention %s in one of those projects, or ping it, to try it.", agentName)
+	if !hearsPings {
+		try = fmt.Sprintf("mention %s in one of those projects to try it.", agentName)
+	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, r.Success.Render(fmt.Sprintf("%s is set up on this computer", agentName)))
 	if agent.HasOwner {
@@ -636,13 +666,21 @@ func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, fil
 		// try it.
 		fmt.Fprintln(w, "  Works in:  no projects")
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "It isn't working in any projects, so only your pings reach it. To add one: basecamp connect setup -P %s --serve <project-id>\n", richtext.ShellQuote(name))
+		switch {
+		case hearsPings:
+			fmt.Fprintf(w, "It isn't working in any projects, so only your pings reach it. To add one: basecamp connect setup -P %s --serve <project-id>\n", quoted)
+		case pings.remedy != "":
+			fmt.Fprintf(w, "It isn't working in any projects, so nothing reaches it yet. To add one: basecamp connect setup -P %s --serve <project-id>\n", quoted)
+		default:
+			fmt.Fprintf(w, "It isn't working in any projects, and it leaves Pings to another connection, so nothing reaches it yet. To add one: basecamp connect setup -P %s --serve <project-id>\n", quoted)
+		}
+		renderGuidedPingsNote(w, quoted, pings)
 		return
 	}
 	fmt.Fprintf(w, "  Works in:  %s\n", strings.Join(served, ", "))
 	if running {
 		fmt.Fprintln(w, "  Running:   yes")
-		fmt.Fprintf(w, "\nMention %s in one of those projects, or ping it, to try it.\n", agentName)
+		fmt.Fprintf(w, "\n%s\n", capitalizeFirst(try))
 	} else {
 		// The connector only listens: the person's own Claude Code session
 		// does the work, through the basecamp-connect skill.
@@ -650,7 +688,35 @@ func renderGuidedSummary(w io.Writer, r *output.Renderer, agent guidedAgent, fil
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "To start it, run /basecamp-connect in your Claude Code session. It starts the")
 		fmt.Fprintln(w, "connector and handles each request with your own setup. The connector on its own:")
-		fmt.Fprintln(w, "  basecamp connect -P "+richtext.ShellQuote(name))
-		fmt.Fprintf(w, "\nOnce it's running, mention %s in one of those projects, or ping it, to try it.\n", agentName)
+		fmt.Fprintln(w, "  basecamp connect -P "+quoted)
+		fmt.Fprintf(w, "\nOnce it's running, %s\n", try)
 	}
+	renderGuidedPingsNote(w, quoted, pings)
+}
+
+// renderGuidedPingsNote says, when the profile's saved choice can't be read,
+// how to choose again, whether or not a connector runs now: its next start
+// refuses either way. Otherwise a connection that hears no Pings leaves them
+// to another, and it says how to make it the one that answers them.
+func renderGuidedPingsNote(w io.Writer, quoted string, pings guidedPingsSummary) {
+	switch {
+	case pings.remedy != "":
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Whether it answers Pings was saved, and can't be read, so its next start will refuse.")
+		fmt.Fprintln(w, pings.remedy)
+	case !pings.hears:
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "It leaves Pings to another connection: only one computer should answer Pings.")
+		fmt.Fprintln(w, "To answer them from this one, start it with --pings, and start the other with")
+		fmt.Fprintln(w, "--no-pings:")
+		fmt.Fprintln(w, "  basecamp connect -P "+quoted+" --pings")
+	}
+}
+
+// capitalizeFirst upper-cases a sentence's first letter.
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }

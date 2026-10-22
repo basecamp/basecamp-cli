@@ -175,7 +175,9 @@ func newConnectStatusCmd() *cobra.Command {
 feed position (whether one is held, never the position), the last poll-served id,
 gaps and losses, queue depths, live tasks, lifecycle
 messages waiting for a person, held records, and the last 20 dispatches with
-their outcomes.
+their outcomes. It also says whether the profile's connector answers the
+agent's Pings and why, and which other connectors on this computer answer
+them too: only one should.
 
 It reads the ledger read-only and takes no lock, so it works while the
 connector runs. It shows no content, no feed position and no token; a held
@@ -196,7 +198,37 @@ type connectStatusReport struct {
 	Profile    string             `json:"profile"`
 	Shadow     bool               `json:"shadow"`
 	LockHolder *connectLockHolder `json:"lock_holder,omitempty"`
+	Pings      connectStatusPings `json:"pings"`
 	Status     connector.Status   `json:"status"`
+}
+
+// connectStatusPings is whether the profile's connector hears the agent's
+// Pings: the choice its starts keep, the connector running now, and the
+// other connectors on this computer that hear them. It is the profile's,
+// read the same with --shadow: a shadow uses the profile's choice and
+// answers nothing.
+type connectStatusPings struct {
+	// Saved is the choice the profile's starts keep; nil before one has.
+	Saved *connector.PingsChoice `json:"saved,omitempty"`
+	// Error is why the saved choice can't be read, when it can't, and Hint
+	// how to recover.
+	Error string `json:"error,omitempty"`
+	Hint  string `json:"hint,omitempty"`
+	// Running is the profile's connector running now, as its lock says; nil
+	// when none runs.
+	Running *connectStatusRunning `json:"running,omitempty"`
+	// Others are the connectors running on this computer for the same agent,
+	// under other profiles, that hear its Pings, or may.
+	Others []connectPingsPeer `json:"others,omitempty"`
+	// Twice says two connectors on this computer answer them.
+	Twice bool `json:"twice,omitempty"`
+}
+
+// connectStatusRunning is the profile's connector running now. Hears is nil
+// when an older build runs it, which doesn't say.
+type connectStatusRunning struct {
+	Hears   *bool  `json:"hears,omitempty"`
+	Because string `json:"because,omitempty"`
 }
 
 // connectLockHolder is what a connector wrote beside its instance lock. It is
@@ -210,6 +242,10 @@ type connectLockHolder struct {
 	// platform can give one. Present says a process has that pid, not that it
 	// is that connector.
 	PIDStatus string `json:"pid_status"`
+	// Pings is whether that connector hears the agent's Pings, as it wrote,
+	// and PingsBecause why; absent when an older build wrote the file.
+	Pings        *bool  `json:"pings,omitempty"`
+	PingsBecause string `json:"pings_because,omitempty"`
 }
 
 func runConnectStatus(cmd *cobra.Command, shadow bool) error {
@@ -242,7 +278,20 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	}
 	report := connectStatusReport{Profile: p.name, Shadow: shadow, Status: status}
 	if holder, ok := connector.InstanceHolder(dir, p.file.AccountID, p.file.Agent.PersonID); ok {
-		report.LockHolder = &connectLockHolder{PID: holder.PID, StartedAt: holder.StartedAt, PIDStatus: processPresence(holder.PID)}
+		report.LockHolder = &connectLockHolder{PID: holder.PID, StartedAt: holder.StartedAt, PIDStatus: processPresence(holder.PID), Pings: holder.Pings, PingsBecause: holder.PingsBecause}
+	}
+	// Status reads no credential, so a profile that has saved no choice has
+	// none to show.
+	pings := readConnectPingsView(cmd.Context(), nil, p.name, p.file)
+	report.Pings = connectStatusPings{Saved: pings.Saved, Others: pings.Others, Twice: pings.Twice()}
+	if pings.SavedErr != nil {
+		report.Pings.Error, report.Pings.Hint = errorMessage(pings.SavedErr), pings.Remedy(p.name)
+	}
+	if r := pings.Running; r.Running {
+		report.Pings.Running = &connectStatusRunning{}
+		if r.Pings != nil {
+			report.Pings.Running.Hears, report.Pings.Running.Because = &r.Pings.Hears, r.Pings.Because
+		}
 	}
 	if p.app.Output.EffectiveFormat() == output.FormatStyled {
 		renderConnectStatus(cmd.OutOrStdout(), report)
@@ -299,6 +348,7 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 		}
 		fmt.Fprintln(w)
 	}
+	renderConnectStatusPings(w, r)
 	if s.Hold != nil {
 		fmt.Fprintf(w, "  Hold           set by %s at %s (%s, generation %d): nothing dispatches or posts until release\n",
 			clean(s.Hold.HeldBy), stamp(s.Hold.HeldAt), clean(s.Hold.Cause), s.Hold.Generation)
@@ -804,4 +854,47 @@ func readReconciliation(path string) ([]byte, error) {
 		return nil, output.ErrUsage("The reconciliation file is larger than 16 MB")
 	}
 	return data, nil
+}
+
+// renderConnectStatusPings is status's Pings lines: whether the profile's
+// connector hears them and why, what the running one does when that differs,
+// and who else on this computer hears them.
+func renderConnectStatusPings(w io.Writer, r connectStatusReport) {
+	p := r.Pings
+	switch {
+	case p.Error != "":
+		fmt.Fprintf(w, "  Pings          the saved choice can't be read (%s), so the next start without a flag refuses. %s\n", richtext.SanitizeSingleLine(p.Error), p.Hint)
+	case p.Saved == nil:
+		fmt.Fprintf(w, "  Pings          not chosen yet: the first start without --project chooses (an agent's first connection hears them, a connection added after it doesn't)\n")
+	default:
+		fmt.Fprintf(w, "  Pings          %s\n", connectPingsWords(connectPings{Hears: p.Saved.Hears, Because: p.Saved.Because}))
+	}
+	if run := p.Running; run != nil {
+		switch {
+		case run.Hears == nil:
+			fmt.Fprintf(w, "                 the connector running now may hear them: %s\n", connectRunning{Running: true}.Describe())
+		case p.Saved == nil || *run.Hears != p.Saved.Hears:
+			now := connectPings{Hears: *run.Hears, Because: run.Because}
+			heard := "hears none"
+			if now.Hears {
+				heard = "hears them"
+			}
+			fmt.Fprintf(w, "                 the connector running now %s: %s\n", heard, now.Describe())
+		}
+	}
+	for _, other := range p.Others {
+		if p.Twice {
+			fmt.Fprintf(w, "  Pings          heard by %s (pid %d) on this computer too: only one connector should answer them\n", other.Words(), other.PID)
+		} else {
+			fmt.Fprintf(w, "  Pings          answered on this computer by %s (pid %d)\n", other.Words(), other.PID)
+		}
+	}
+}
+
+// connectPingsWords is whether a connector hears Pings, and why, for a line.
+func connectPingsWords(p connectPings) string {
+	if p.Hears {
+		return "heard: " + p.Describe()
+	}
+	return "not heard: " + p.Describe() + "; start with --pings to answer them from here"
 }

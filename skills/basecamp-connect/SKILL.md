@@ -360,6 +360,31 @@ person, and run it again. Don't follow that error's hint.
 plainly, in the background, and read their output as it arrives, so you can
 show the link and code while they wait.
 
+## Pings: only one computer answers them
+
+Every connector for an agent sees all of its Pings, since a Ping is in no
+project, so only one computer should answer them. A connector started with
+`--pings` hears Pings and anything else outside a project; one started with
+`--no-pings` hears only the projects it serves. Without either, the agent's
+first connection hears them, a connection added after it doesn't, and a bot
+user's login does, as before. A run given `--project` hears none and saves
+nothing. The first start without `--project` saves the choice for the
+profile, as either flag saves its own, and restarts keep it until one changes
+it, so pass one only when the person asks: "answer my
+Pings from this computer" is `--pings`, and the connector on the other
+computer then needs `--no-pings`. Both are the owner's word, like any other
+change to the connector. The start line says which: `pings=true` or
+`pings=false`, and why. The flags came after CLI 0.16.0: one that refuses
+them as unknown, or a start line without `pings=`, is older, so run
+`basecamp upgrade`, tell the person, and start it again.
+
+If the log warns `only one connector should answer Pings`, another connector
+on this computer hears the same agent's Pings, and each is answered twice, or
+more than once beside two or more. Tell the person, name the profiles the
+warning names, and ask which should answer them. Connectors on other
+computers can't be seen from here, so if the person runs this agent elsewhere
+too, remind them once that only one computer should answer Pings.
+
 ## Invocation
 
 **The arguments are natural language, not a grammar.** Pull out the agent, the
@@ -388,6 +413,10 @@ Each becomes a flag on setup (*First-time setup*, step 4):
 | "don't boost my requests automatically" | `--no-ack-boost`: the connector no longer boosts, and this session acknowledges each request itself (*Acknowledge*). Restart the connector after changing it |
 | "also work in project X" | `--serve <id of X>` |
 | "stop working in X" | `--unserve <id of X>` |
+
+Whether this computer answers the agent's Pings is the connector's, not
+setup's: "answer my Pings here" starts it with `--pings`, and "don't answer
+Pings here" with `--no-pings` (*Pings: only one computer answers them*).
 
 Then:
 
@@ -502,7 +531,8 @@ members admitted only by `project` are **participants**: they reach the agent
 by mention, by commenting on a thread it follows, and by completing something
 it has a stake in (context, not a request), never by assignment or by Ping.
 Operators can also ping the agent with no setup: every line in a direct Ping
-with it is a request, and in a group Ping a mention is.
+with it is a request, and in a group Ping a mention is. Only the connector
+that answers Pings hears them (*Pings: only one computer answers them*).
 
 **Someone in one Ping only.** To let a person reach the agent in a single Ping
 (a group Ping you share with them, say) and nowhere else, pass
@@ -634,16 +664,22 @@ Requests that arrive while it's stopped are not picked up later.
 ## Checking on it
 
 - `basecamp connect doctor -P '<profile>'`: the credential, the identity, the
-  event feed and the ledger. Start here when something seems wrong. It posts
-  nothing.
+  event feed, whether it answers Pings (and whether another connector on this
+  computer does too), and the ledger. Start here when something seems wrong.
+  It posts nothing.
+- **"Why didn't it answer my Ping?"**: this connector may leave Pings to
+  another (`pings=false` in its start line, or doctor's Pings check). A
+  `"type":"event"` line with `reason` `pings_not_heard` is a Ping it left to
+  the connector that answers them.
 - **"Did that mention reach it?"**: the connector starts from the present, so
   anything asked more than a minute before it started is not picked up; check
   that first. Then search the connector's output file for the
   recording id. A `"type":"request"` line means it was handed to you. A
   `"type":"event"` line with a `reason` says why it was turned away (for
   example `untrusted_performer`). No line means the feed never delivered it.
-- `basecamp connect status -P '<profile>'`: the feed's position, holds and
-  losses. Read-only, and safe while the connector runs. Handed-off requests
+- `basecamp connect status -P '<profile>'`: the feed's position, holds,
+  losses, and whether it answers Pings. Read-only, and safe while the
+  connector runs. Handed-off requests
   don't appear here; the output file is the record of those.
 
 ## Stopping

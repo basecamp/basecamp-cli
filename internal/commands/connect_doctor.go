@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"time"
 
@@ -25,9 +26,10 @@ func newConnectDoctorCmd() *cobra.Command {
 		Use:   "doctor",
 		Short: "Check what the connector needs to run",
 		Long: `Check the connector for a set-up profile: connect.json, the token, the agent's
-identity, the stream ticket mint, the account feed, and the ledger (its gaps,
-open losses, hold, and lifecycle messages an older connector left waiting for
-a person).
+identity, the stream ticket mint, the account feed, whether it hears the
+agent's Pings (and whether another connector on this computer does too), and
+the ledger (its gaps, open losses, hold, and lifecycle messages an older
+connector left waiting for a person).
 
 It writes nothing to the connector's ledger and posts nothing to Basecamp.
 Renewing the profile's own credential, which every command does when its token
@@ -65,6 +67,7 @@ func runConnectDoctor(cmd *cobra.Command, _ []string) error {
 			feedCheck(ctx, agent.client.ForAccount(agent.account)),
 		)
 	}
+	checks = append(checks, pingsCheck(ctx, p))
 	checks = append(checks, ledgerChecks(ctx, p)...)
 
 	result := summarizeChecks(asDoctorChecks(checks))
@@ -170,4 +173,83 @@ func connectUnsupportedOSCheck(goos string) setup.Check {
 	return setup.Check{Name: "Platform", Status: setup.StatusFail,
 		Message: fmt.Sprintf("The connector does not run on %s: %s", goos, connectSupportedOSReason),
 		Hint:    "Run the connector on Linux or macOS; the rest of the CLI runs here."}
+}
+
+// pingsCheck says whether the profile's connector hears the agent's Pings —
+// the one running now, as its lock says, else a start with neither --pings,
+// --no-pings nor --project — and warns when two connectors on this computer
+// answer them. Only one should; the ones on other computers can't be seen
+// from here. The saved choice is read either way: a running connector
+// doesn't make an unreadable one the next start's to discover.
+func pingsCheck(ctx context.Context, p connectProfile) setup.Check {
+	c := setup.Check{Name: "Pings"}
+	v := readConnectPingsView(ctx, p.app, p.name, p.file)
+	if v.SavedErr != nil {
+		c.Status, c.Message = setup.StatusFail, "Whether it hears the agent's Pings was saved, and can't be read, so the next start without a flag refuses: "+errorMessage(v.SavedErr)
+		c.Hint = v.Remedy(p.name)
+		return c
+	}
+	hears, known := v.Hears()
+	if !known {
+		c.Status, c.Message = setup.StatusSkip, "Whether it hears the agent's Pings can't be told without the profile's credential"
+		return c
+	}
+	// A running connector is described by its lock; Next may be unknown
+	// then, with no saved choice and no credential to read a default from.
+	who, why := "The connector running now", v.Running.Describe()
+	if !v.Running.Running {
+		who, why = "It", v.Next.Describe()
+	}
+	switch {
+	case !hears:
+		c.Message = who + " doesn't hear the agent's Pings: " + why
+	case v.Running.Running && v.Running.Pings == nil:
+		c.Message = who + " may hear the agent's Pings: " + why
+	default:
+		c.Message = who + " hears the agent's Pings: " + why
+	}
+	// What a restart without flags or --project would do, when it differs.
+	if v.Running.Running && v.Next != nil && v.Next.Hears != hears {
+		if v.Next.Hears {
+			c.Message += "; restarted without --project, it would hear them (" + v.Next.Describe() + ")"
+		} else {
+			c.Message += "; restarted, it would hear none (" + v.Next.Describe() + ")"
+		}
+	}
+	switch {
+	case v.Twice() && hears && len(v.Others) == 1:
+		c.Status = setup.StatusWarn
+		c.Message += ", and so does " + peerList(v.Others) + " on this computer: each Ping is answered twice"
+	case v.Twice() && hears:
+		c.Status = setup.StatusWarn
+		c.Message += ", and so do " + peerList(v.Others) + " on this computer: each Ping is answered more than once"
+	case v.Twice():
+		c.Status = setup.StatusWarn
+		c.Message += ", and " + peerList(v.Others) + " on this computer all do: each Ping is answered more than once"
+	case len(v.Others) == 1:
+		c.Status = setup.StatusPass
+		c.Message += "; " + peerList(v.Others) + " answers them on this computer"
+		return c
+	case !hears:
+		c.Status = setup.StatusPass
+		c.Message += ". Only one connector should answer them; start this one with --pings if it's that one"
+		return c
+	default:
+		c.Status = setup.StatusPass
+		return c
+	}
+	// A profile that hears none can only point at the others: restarting it
+	// with --no-pings changes nothing.
+	older := slices.ContainsFunc(v.Others, func(o connectPingsPeer) bool { return o.Older })
+	switch {
+	case !hears && older:
+		c.Hint = "Only one connector should answer Pings, and this one doesn't: upgrade any older one, then restart all but one of the others with --no-pings: basecamp connect -P <profile> --no-pings"
+	case !hears:
+		c.Hint = "Only one connector should answer Pings, and this one doesn't: restart all but one of the others with --no-pings: basecamp connect -P <profile> --no-pings"
+	case older:
+		c.Hint = "Only one connector should answer Pings, and an older build can't be told: upgrade it, or start this one with --no-pings: basecamp connect -P " + richtext.ShellQuote(p.name) + " --no-pings"
+	default:
+		c.Hint = "Only one connector should answer Pings. Start all but one of them with --no-pings: basecamp connect -P " + richtext.ShellQuote(p.name) + " --no-pings"
+	}
+	return c
 }

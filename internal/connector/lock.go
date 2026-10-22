@@ -21,6 +21,7 @@ var ErrAlreadyRunning = errors.New("connector: another connector already runs fo
 type InstanceLock struct {
 	unlock func() error
 	path   string
+	holder instanceHolder
 }
 
 // instanceHolder is what a running connector writes beside its lock so the
@@ -30,10 +31,18 @@ type instanceHolder struct {
 	StartedAt string `json:"started_at"`
 	AccountID string `json:"account_id"`
 	AgentID   int64  `json:"agent_person_id"`
+	// Pings is whether the holder hears the agent's Pings: true only for a
+	// connector that answers them (NotePings). Every holder this build writes
+	// says, so nil is a holder an older build wrote, which does not.
+	Pings *bool `json:"pings,omitempty"`
+	// PingsBecause is why, in the run's own words for its reason.
+	PingsBecause string `json:"pings_because,omitempty"`
 }
 
 // AcquireInstanceLock takes the lock in a profile's state directory, or refuses.
 // The account and agent name the file; the containing directory isolates profiles.
+// The holder it describes hears no Pings until NotePings says otherwise: a
+// command that only needs the connector stopped answers nothing.
 func AcquireInstanceLock(dir, accountID string, agentPersonID int64, now time.Time) (*InstanceLock, error) {
 	account, err := strconv.ParseUint(accountID, 10, 64)
 	if err != nil || account == 0 || agentPersonID <= 0 {
@@ -62,19 +71,34 @@ func AcquireInstanceLock(dir, accountID string, agentPersonID int64, now time.Ti
 		return nil, fmt.Errorf("connector: take the instance lock: %w", err)
 	}
 
-	holder, err := json.Marshal(instanceHolder{
+	hears := false
+	lock := &InstanceLock{unlock: unlock, path: path, holder: instanceHolder{
 		PID:       os.Getpid(),
 		StartedAt: now.UTC().Format(time.RFC3339),
 		AccountID: accountID,
 		AgentID:   agentPersonID,
-	})
-	if err == nil {
-		// Best effort, and deliberately after the lock is held: a connector
-		// that cannot describe itself still must not be a second connector.
-		_ = os.WriteFile(path+".json", append(holder, '\n'), 0o600)
-	}
+		Pings:     &hears,
+	}}
+	// Best effort, and deliberately after the lock is held: a connector
+	// that cannot describe itself still must not be a second connector.
+	lock.describe()
+	return lock, nil
+}
 
-	return &InstanceLock{unlock: unlock, path: path}, nil
+// NotePings says beside the lock whether the connector holding it hears the
+// agent's Pings, and why. Another connector for the agent on this computer
+// reads it to warn that two answer them (InstanceHolder). The connector
+// decides it while it holds the lock, so a start of the same profile can't
+// change the choice between the decision and the run.
+func (l *InstanceLock) NotePings(hears bool, because string) {
+	l.holder.Pings, l.holder.PingsBecause = &hears, because
+	l.describe()
+}
+
+func (l *InstanceLock) describe() {
+	if holder, err := json.Marshal(l.holder); err == nil {
+		_ = os.WriteFile(l.path+".json", append(holder, '\n'), 0o600)
+	}
 }
 
 // Release drops the lock.
@@ -102,6 +126,10 @@ func describeHolder(path string) string {
 type InstanceHolderInfo struct {
 	PID       int
 	StartedAt string
+	// Pings is whether it hears the agent's Pings; nil when an older build
+	// wrote it, which does not say. PingsBecause is why.
+	Pings        *bool
+	PingsBecause string
 }
 
 // InstanceHolder reads what a connector holding the lock in dir wrote about
@@ -121,5 +149,5 @@ func InstanceHolder(dir, accountID string, agentPersonID int64) (InstanceHolderI
 	if err := json.Unmarshal(raw, &holder); err != nil || holder.PID <= 0 {
 		return InstanceHolderInfo{}, false
 	}
-	return InstanceHolderInfo{PID: holder.PID, StartedAt: holder.StartedAt}, true
+	return InstanceHolderInfo{PID: holder.PID, StartedAt: holder.StartedAt, Pings: holder.Pings, PingsBecause: holder.PingsBecause}, true
 }

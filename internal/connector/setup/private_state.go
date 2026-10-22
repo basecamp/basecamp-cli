@@ -3,6 +3,7 @@ package setup
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -207,5 +208,87 @@ func checkPrivateReadableFile(f *os.File, path string) error {
 	if perm := info.Mode().Perm(); perm&0o077 != 0 {
 		return fmt.Errorf("%w: %s can be read by other users (mode %04o); it must be 0600", ErrNotPrivate, path, perm)
 	}
+	return nil
+}
+
+// ReadPrivateStateFile reads a small file the connector keeps in its state,
+// held to CheckPrivateFile's rules through the descriptor it reads: the
+// directories on the way this user's alone, the file not a symlink, this
+// user's own, and readable by nobody else. A missing file is an error
+// satisfying errors.Is(err, os.ErrNotExist).
+func ReadPrivateStateFile(path string) ([]byte, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckPrivateDir(filepath.Dir(abs)); err != nil {
+		return nil, err
+	}
+	f, err := openNoFollow(abs)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if err := checkPrivateReadableFile(f, abs); err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxFileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", abs, err)
+	}
+	if len(data) > maxFileBytes {
+		return nil, fmt.Errorf("%s is larger than %d bytes", abs, maxFileBytes)
+	}
+	return data, nil
+}
+
+// WritePrivateStateFile replaces a small file the connector keeps in its
+// state, atomically and owner-only (0600), in a directory EnsurePrivateDir
+// vets. A file already there that is not this user's own regular file is
+// refused rather than replaced, as connect.json's is.
+func WritePrivateStateFile(path string, data []byte) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(abs)
+	if err := EnsurePrivateDir(dir); err != nil {
+		return err
+	}
+	switch f, err := openNoFollow(abs); {
+	case err == nil:
+		checkErr := checkPrivateFile(f, abs)
+		f.Close()
+		if checkErr != nil {
+			return checkErr
+		}
+	case !errors.Is(err, os.ErrNotExist):
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(abs)+"-*")
+	if err != nil {
+		return fmt.Errorf("write %s: %w", abs, err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // a no-op once renamed
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write %s: %w", abs, err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write %s: %w", abs, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write %s: %w", abs, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write %s: %w", abs, err)
+	}
+	if err := os.Rename(tmpName, abs); err != nil {
+		return fmt.Errorf("write %s: %w", abs, err)
+	}
+	syncDir(dir)
 	return nil
 }

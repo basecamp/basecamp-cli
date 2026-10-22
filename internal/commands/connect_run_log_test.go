@@ -11,7 +11,7 @@ import (
 func startLine(only []int64) string {
 	var out bytes.Buffer
 	slog.New(slog.NewTextHandler(&out, nil)).Info("connector: running",
-		connectRunningAttrs("agent", "181900405", 42, false, 3, only, "/state")...)
+		connectRunningAttrs("agent", "181900405", 42, false, 3, only, connectPings{Hears: true, Because: pingsBecauseFirstConnection}, "/state")...)
 	return out.String()
 }
 
