@@ -17,11 +17,13 @@ import (
 
 const spotlightPath = "/99999/recordings/456/spotlight.json"
 
-// Each argument names recording 456: a bare ID, the item's URL, and a comment's
-// URL on it, which must reach the item because comments cannot be spotlighted.
+// Each argument names recording 456: a bare ID, the item's URL, its generic
+// recording URL, and a comment's URL on it, which must reach the item because
+// comments cannot be spotlighted.
 var spotlightArgs = []string{
 	"456",
 	"https://app.basecamp.com/99999/buckets/123/messages/456",
+	"https://app.basecamp.com/99999/buckets/123/recordings/456",
 	"https://app.basecamp.com/99999/buckets/123/messages/456#__recording_789",
 }
 
@@ -77,8 +79,10 @@ func TestUnspotlightDeletesTheSpotlight(t *testing.T) {
 	}
 }
 
-// None of these names a single item, so no ID from them may go out as a
-// recording's: a project, a look-alike host, a to-do list's to-dos, a person.
+// No ID from these may go out as a recording's: a project, a look-alike host,
+// a to-do list's to-dos, a person, one occurrence of a recurring event, whose
+// URL carries the whole series' ID, and an item in another account than the
+// configured 99999.
 func TestSpotlightRefusesANonRecordingArgument(t *testing.T) {
 	cmds := map[string]func() *cobra.Command{
 		"spotlight":   NewSpotlightCmd,
@@ -91,6 +95,8 @@ func TestSpotlightRefusesANonRecordingArgument(t *testing.T) {
 			"https://evil.example/99999/buckets/123/messages/456",
 			"https://app.basecamp.com/99999/buckets/123/todolists/456/todos",
 			"https://app.basecamp.com/99999/people/456",
+			"https://app.basecamp.com/99999/buckets/123/schedule_entries/456/occurrences/20261022",
+			"https://app.basecamp.com/88888/buckets/123/messages/456",
 		} {
 			t.Run(name+" "+arg, func(t *testing.T) {
 				app, transport := setupRecordingTestApp(t)
@@ -103,6 +109,48 @@ func TestSpotlightRefusesANonRecordingArgument(t *testing.T) {
 				assert.Empty(t, transport.recorded())
 			})
 		}
+	}
+}
+
+// With no account configured, the URL's account is the one acted on, and the
+// follow-ups carry it so they run in a fresh process.
+func TestSpotlightAdoptsTheURLAccount(t *testing.T) {
+	cmds := map[string]struct {
+		newCmd   func() *cobra.Command
+		route    stubRoute
+		followUp string
+	}{
+		"spotlight": {
+			newCmd:   NewSpotlightCmd,
+			route:    stubRoute{method: http.MethodPost, path: spotlightPath, status: http.StatusCreated, body: `{"id":456}`},
+			followUp: "basecamp unspotlight 456 --account 99999",
+		},
+		"unspotlight": {
+			newCmd:   NewUnspotlightCmd,
+			route:    stubRoute{method: http.MethodDelete, path: spotlightPath, status: http.StatusNoContent},
+			followUp: "basecamp spotlight 456 --account 99999",
+		},
+	}
+	for name, c := range cmds {
+		t.Run(name, func(t *testing.T) {
+			app, transport := setupRecordingTestApp(t, c.route)
+			app.Config.AccountID = ""
+			buf := captureSpotlightOutput(app)
+
+			require.NoError(t, executeRecordingCommand(c.newCmd(), app,
+				"https://app.basecamp.com/99999/buckets/123/messages/456"))
+
+			calls := transport.recorded()
+			require.Len(t, calls, 1)
+			assert.Equal(t, c.route.method, calls[0].Method)
+			assert.Equal(t, spotlightPath, calls[0].Path)
+
+			var followUps []string
+			for _, b := range decodeSpotlightEnvelope(t, buf).Breadcrumbs {
+				followUps = append(followUps, b.Cmd)
+			}
+			assert.Contains(t, followUps, c.followUp)
+		})
 	}
 }
 

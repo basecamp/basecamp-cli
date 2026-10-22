@@ -39,6 +39,7 @@ nothing. Requires edit access to the project.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+			persistentAccount := hasPersistentAccount(app.Config)
 			recordingID, err := spotlightTarget(cmd, app, args[0])
 			if err != nil {
 				return err
@@ -49,17 +50,18 @@ nothing. Requires edit access to the project.`,
 				return spotlightError(err)
 			}
 
+			accountArg := replyAccountArg(persistentAccount, app.Config.AccountID)
 			return app.OK(recording,
 				output.WithSummary(fmt.Sprintf("Spotlighted #%d on its project page", recordingID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "unspotlight",
-						Cmd:         fmt.Sprintf("basecamp unspotlight %d", recordingID),
+						Cmd:         fmt.Sprintf("basecamp unspotlight %d%s", recordingID, accountArg),
 						Description: "Remove the spotlight",
 					},
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp show %d", recordingID),
+						Cmd:         fmt.Sprintf("basecamp show %d%s", recordingID, accountArg),
 						Description: "View item",
 					},
 				),
@@ -88,6 +90,7 @@ nothing. Requires edit access to the project.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+			persistentAccount := hasPersistentAccount(app.Config)
 			recordingID, err := spotlightTarget(cmd, app, args[0])
 			if err != nil {
 				return err
@@ -97,17 +100,18 @@ nothing. Requires edit access to the project.`,
 				return convertSDKError(err)
 			}
 
+			accountArg := replyAccountArg(persistentAccount, app.Config.AccountID)
 			return app.OK(map[string]any{"id": recordingID, "spotlighted": false},
 				output.WithSummary(fmt.Sprintf("Spotlight removed from #%d", recordingID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "spotlight",
-						Cmd:         fmt.Sprintf("basecamp spotlight %d", recordingID),
+						Cmd:         fmt.Sprintf("basecamp spotlight %d%s", recordingID, accountArg),
 						Description: "Spotlight it again",
 					},
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp show %d", recordingID),
+						Cmd:         fmt.Sprintf("basecamp show %d%s", recordingID, accountArg),
 						Description: "View item",
 					},
 				),
@@ -116,35 +120,52 @@ nothing. Requires edit access to the project.`,
 	}
 }
 
-// spotlightKinds are the URL types of the items bc3 can spotlight. bc3 still
-// decides each case; the list keeps a URL for something else (a person, a
-// Campfire, a path the router only matched by shape) from sending its ID out
-// as a recording's.
+// spotlightKinds are the URL types that name a recording bc3 may spotlight:
+// one of the spotlightable kinds, or a generic recordings/<id> URL, which is
+// as good as its bare ID. bc3 still decides each case; the list keeps a URL
+// for something else (a person, a Campfire, a path the router only matched by
+// shape) from sending its ID out as a recording's.
 var spotlightKinds = []string{
 	"cards", "cloud_files", "columns", "documents", "google_documents", "messages",
-	"questions", "schedule_entries", "todolists", "todos", "uploads", "vaults",
+	"questions", "recordings", "schedule_entries", "todolists", "todos", "uploads", "vaults",
 }
 
 // spotlightTarget reads the recording a spotlight command acts on: an ID, or
 // the URL of a single item on a trusted host. The URL router is host-agnostic,
 // so the host check keeps a look-alike URL from retargeting the configured
-// account. A comment's URL names the item it sits on, since comments cannot be
+// account. A URL's account is adopted when none is configured and refused when
+// it differs, so a same-numbered recording in another account is never
+// touched. A comment's URL names the item it sits on, since comments cannot be
 // spotlighted.
 func spotlightTarget(cmd *cobra.Command, app *appctx.App, arg string) (int64, error) {
-	idStr := arg
+	idStr, urlAccountID := arg, ""
 	if urlarg.IsURL(arg) {
 		if !hostutil.IsTrustedBasecampHost(arg, app.Config.BaseURL) {
-			return 0, spotlightUsage(cmd, "not a Basecamp URL")
+			return 0, spotlightUsage(cmd, "not a Basecamp URL", spotlightHint)
 		}
 		parsed := urlarg.Parse(arg)
 		if parsed == nil || parsed.IsCollection || !slices.Contains(spotlightKinds, parsed.Type) {
-			return 0, spotlightUsage(cmd, "the URL names something else")
+			return 0, spotlightUsage(cmd, "the URL names something else", spotlightHint)
 		}
-		idStr = parsed.RecordingID
+		// The URL's ID is the recurring event's, so acting on it would spotlight
+		// the whole series. The occurrence is a recording of its own.
+		if parsed.OccurrenceDate != "" {
+			return 0, spotlightUsage(cmd, "the URL names one occurrence of a recurring event",
+				"Pass the occurrence's own ID, which basecamp schedule show <url> prints, or the event's ID to act on the whole series")
+		}
+		idStr, urlAccountID = parsed.RecordingID, parsed.AccountID
 	}
 	recordingID, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		return 0, output.ErrUsage("Invalid ID")
+	}
+	if urlAccountID != "" {
+		switch {
+		case app.Config.AccountID == "":
+			app.Config.AccountID = urlAccountID
+		case urlAccountID != app.Config.AccountID:
+			return 0, output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", urlAccountID, app.Config.AccountID))
+		}
 	}
 	if err := ensureAccount(cmd, app); err != nil {
 		return 0, err
@@ -152,9 +173,10 @@ func spotlightTarget(cmd *cobra.Command, app *appctx.App, arg string) (int64, er
 	return recordingID, nil
 }
 
-func spotlightUsage(cmd *cobra.Command, reason string) error {
-	return output.ErrUsageHint(cmd.Name()+" takes a single item: "+reason,
-		"Pass its ID or its own URL (…/messages/<id>, …/todos/<id>, …); basecamp spotlight --help lists the types")
+const spotlightHint = "Pass its ID or its own URL (…/messages/<id>, …/todos/<id>, …); basecamp spotlight --help lists the types"
+
+func spotlightUsage(cmd *cobra.Command, reason, hint string) error {
+	return output.ErrUsageHint(cmd.Name()+" takes a single item: "+reason, hint)
 }
 
 // spotlightError says why bc3 refused a spotlight. Its 422 carries no reason
