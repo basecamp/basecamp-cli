@@ -12,10 +12,6 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
-const spotlightAgentNotes = "Idempotent: spotlighting a spotlighted recording, or unspotlighting one that is not, succeeds\n" +
-	"No API reads spotlight state or lists spotlights; only the project home page shows them\n" +
-	"Needs edit access to the project; a recording of another type, or one not active, is refused"
-
 // NewSpotlightCmd creates the spotlight command, which puts a recording's card
 // on its project or template home page.
 func NewSpotlightCmd() *cobra.Command {
@@ -37,8 +33,7 @@ comment sits on.
 
 Spotlighting a recording that is already spotlighted succeeds and changes
 nothing. Requires edit access to the project.`,
-		Annotations: map[string]string{"agent_notes": spotlightAgentNotes},
-		Args:        cobra.ExactArgs(1),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			recordingID, err := spotlightTarget(cmd, app, args[0])
@@ -87,8 +82,7 @@ A comment's URL (…#__recording_<id>) acts on the item the comment sits on.
 
 Removing the spotlight from a recording that has none succeeds and changes
 nothing. Requires edit access to the project.`,
-		Annotations: map[string]string{"agent_notes": spotlightAgentNotes},
-		Args:        cobra.ExactArgs(1),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			recordingID, err := spotlightTarget(cmd, app, args[0])
