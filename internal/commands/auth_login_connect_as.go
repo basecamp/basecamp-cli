@@ -127,15 +127,25 @@ func runLoginAsYourself(cmd *cobra.Command, app *appctx.App, l browserLogin) err
 	if l.expect != 0 && os.Getenv("BASECAMP_TOKEN") != "" {
 		return errEnvTokenShadows("--expect-identity cannot be checked while BASECAMP_TOKEN is set")
 	}
+	// A person's login needs its profile to exist already; an agent
+	// connection creates the one it is given. So a profile that doesn't
+	// exist yet is refused here only when nothing will be asked, and
+	// otherwise once the answer is yourself.
+	missing := ""
 	if name := app.Config.ActiveProfile; name != "" {
 		existing, ok := app.Config.Profiles[name]
-		if !ok {
-			return output.ErrUsageHint(fmt.Sprintf("Profile %q does not exist", name),
-				fmt.Sprintf("Create it with `basecamp profile create %s`, or import a token: `... | basecamp auth login --with-token -P %s --account <id>`.", name, name))
+		switch {
+		case !ok:
+			missing = name
+		default:
+			if err := requireProfileBinding(app, name, existing); err != nil {
+				return err
+			}
 		}
-		if err := requireProfileBinding(app, name, existing); err != nil {
-			return err
-		}
+	}
+	asks := shouldAskConnectAs(cmd.Context(), app, l)
+	if missing != "" && !asks {
+		return errLoginProfileMissing(missing)
 	}
 
 	remote := l.remote || l.deviceCode
@@ -150,7 +160,7 @@ func runLoginAsYourself(cmd *cobra.Command, app *appctx.App, l browserLogin) err
 		fmt.Fprintln(w, r.Summary.Render("Starting Basecamp authentication..."))
 	}
 
-	if shouldAskConnectAs(cmd.Context(), app, l) {
+	if asks {
 		provider, err := app.Auth.DiscoverProvider(cmd.Context(), logger)
 		if err != nil {
 			return err
@@ -166,6 +176,9 @@ func runLoginAsYourself(cmd *cobra.Command, app *appctx.App, l browserLogin) err
 				return runLoginAsAgent(cmd, app, l)
 			}
 		}
+	}
+	if missing != "" {
+		return errLoginProfileMissing(missing)
 	}
 
 	// With an expectation the login is assertive: the token is
@@ -207,6 +220,13 @@ func runLoginAsYourself(cmd *cobra.Command, app *appctx.App, l browserLogin) err
 	printAgentNudge(w, r)
 
 	return nil
+}
+
+// errLoginProfileMissing refuses a person's login under a profile that
+// doesn't exist: it has no base URL or account of its own to sign in to.
+func errLoginProfileMissing(name string) error {
+	return output.ErrUsageHint(fmt.Sprintf("Profile %q does not exist", name),
+		fmt.Sprintf("Create it with `basecamp profile create %s`, or import a token: `... | basecamp auth login --with-token -P %s --account <id>`.", name, name))
 }
 
 // shouldAskConnectAs reports whether the login asks who this computer
@@ -265,6 +285,15 @@ func runLoginAsAgent(cmd *cobra.Command, app *appctx.App, l browserLogin) error 
 		fmt.Fprintln(human, r.Muted.Render(fmt.Sprintf("Profile %q already holds an agent connection. Approving replaces the credential stored here.", name)))
 	}
 
+	// What was discovered was discovered for the base URL the login
+	// started on. A profile bound to another Basecamp has its own
+	// authorization server, so the ceremony discovers it again rather than
+	// connect against one Basecamp and store under another.
+	provider := l.provider
+	if config.NormalizeBaseURL(app.Config.BaseURL) != config.NormalizeBaseURL(before.BaseURL) {
+		provider = nil
+	}
+
 	err = connectAgentProfile(cmd, app, agentConnectFlags{
 		scope: l.scope,
 		// The ceremony always prints a link and a code, so the flags that
@@ -272,7 +301,7 @@ func runLoginAsAgent(cmd *cobra.Command, app *appctx.App, l browserLogin) error 
 		noBrowser:  l.noBrowser || l.remote || l.deviceCode,
 		local:      l.local,
 		machine:    machine,
-		provider:   l.provider,
+		provider:   provider,
 		sayDefault: true,
 	})
 	if !errors.Is(err, auth.ErrNoAgentConnection) {

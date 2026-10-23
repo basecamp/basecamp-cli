@@ -638,3 +638,67 @@ func TestAuthLoginAsAgentJSONKeepsTheCeremonyContract(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "machine output mode")
 }
+
+// At a terminal, `auth login -P <new>` asks before refusing the profile
+// that doesn't exist yet: the agent creates it, and only yourself needs it
+// to exist already.
+func TestAuthLoginAsksBeforeRefusingANewProfile(t *testing.T) {
+	t.Run("agent creates it", func(t *testing.T) {
+		s := startConnectAsServer(t)
+		app := connectAsApp(t, s, &config.Config{ActiveProfile: "new-agent"})
+		app.Flags.Profile = "new-agent"
+		prompter := answerLogin(t, &fakeLoginPrompter{choice: connectAsAgent})
+
+		out, err := runConnectAsLogin(t, app)
+		require.NoError(t, err, out)
+		assert.Equal(t, 1, prompter.asked)
+		assert.Contains(t, out, `Connected profile "new-agent" to a Basecamp agent`)
+		creds, err := app.Auth.GetStore().Load("profile:new-agent")
+		require.NoError(t, err)
+		assert.Equal(t, "agent", creds.OAuthType)
+	})
+	t.Run("yourself still needs it", func(t *testing.T) {
+		s := startConnectAsServer(t)
+		app := connectAsApp(t, s, &config.Config{ActiveProfile: "new-agent"})
+		app.Flags.Profile = "new-agent"
+		prompter := answerLogin(t, &fakeLoginPrompter{choice: connectAsMe})
+
+		_, err := runConnectAsLogin(t, app)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `Profile "new-agent" does not exist`)
+		assert.Equal(t, 1, prompter.asked)
+		intakes, deviceAuths, _ := s.counts()
+		assert.Zero(t, intakes+deviceAuths)
+	})
+	t.Run("nobody to ask", func(t *testing.T) {
+		s := startConnectAsServer(t)
+		app := connectAsApp(t, s, &config.Config{ActiveProfile: "new-agent"})
+		atATerminal(t, false)
+		answerLogin(t, &fakeLoginPrompter{})
+
+		_, err := runConnectAsLogin(t, app)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `Profile "new-agent" does not exist`)
+		assert.Empty(t, s.seenPaths(), "refused before any request, as before")
+	})
+}
+
+// The discovery the question was asked after belongs to the base URL the
+// login started on. When choosing the agent moves the login onto a profile
+// bound to another Basecamp, the ceremony discovers again for it.
+func TestAuthLoginRediscoversForAnAgentProfileOnAnotherBasecamp(t *testing.T) {
+	s := startConnectAsServer(t)
+	app := connectAsApp(t, s, &config.Config{})
+	other := strings.Replace(s.srv.URL, "127.0.0.1", "localhost", 1)
+	require.NotEqual(t, s.srv.URL, other)
+	require.NoError(t, os.MkdirAll(config.GlobalConfigDir(), 0o700))
+	require.NoError(t, os.WriteFile(config.GlobalConfigDir()+"/config.json",
+		[]byte(`{"profiles":{"agent":{"base_url":"`+other+`","account_id":"999"}}}`), 0o600))
+	app.Config.Profiles = map[string]*config.ProfileConfig{"agent": {BaseURL: other, AccountID: "999"}}
+	answerLogin(t, &fakeLoginPrompter{choice: connectAsAgent})
+
+	out, err := runConnectAsLogin(t, app)
+	require.NoError(t, err, out)
+	assert.Equal(t, 2, strings.Count(out, "Authenticating via"), "once for the question, again for the agent's Basecamp")
+	assert.Contains(t, out, `Connected profile "agent" to a Basecamp agent`)
+}
