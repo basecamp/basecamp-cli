@@ -622,11 +622,11 @@ const timelineLookbackDays = 7
 func fetchTimelineEvents(ctx context.Context, client *basecamp.AccountClient, acct AccountInfo) ([]TimelineEventInfo, error) {
 	var events []basecamp.TimelineEvent
 	seen := make(map[int64]bool)
-	today := hubNow()
+	today := basecamp.DateOf(hubNow())
 	for back := -1; back < timelineLookbackDays && len(events) < timelineFeedSize; back++ {
 		opts := &basecamp.ProgressOptions{Limit: timelineFeedSize - len(events)}
 		if back >= 0 {
-			opts.Date = basecamp.DateOf(today.AddDate(0, 0, -back))
+			opts.Date = today.AddDays(-back)
 		}
 		result, err := client.Timeline().Progress(ctx, opts)
 		if err != nil {

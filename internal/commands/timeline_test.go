@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -71,6 +72,7 @@ func TestTimelineWithoutDateReadsToday(t *testing.T) {
 func TestTimelineDateRefusals(t *testing.T) {
 	for name, args := range map[string][]string{
 		"not a date":  {"--date", "someday"},
+		"blank":       {"--date", " "},
 		"in future":   {"--date", "tomorrow"},
 		"for project": {"--date", "2026-08-30", "--in", "123"},
 		"for person":  {"--date", "2026-08-30", "me"},
@@ -87,4 +89,22 @@ func TestTimelineDateRefusals(t *testing.T) {
 			assert.Empty(t, transport.queries)
 		})
 	}
+}
+
+// Chile starts daylight saving at midnight on 2026-09-06, so that day has no
+// midnight and local-midnight arithmetic lands a day early.
+func TestTimelineDateBreadcrumbAcrossAMidnightClockChange(t *testing.T) {
+	santiago, err := time.LoadLocation("America/Santiago")
+	require.NoError(t, err)
+	originalLocal := time.Local
+	time.Local = santiago
+	t.Cleanup(func() { time.Local = originalLocal })
+
+	transport := &progressTransport{}
+	app, buf := newTestAppWithTransport(t, transport)
+	app.Flags.Hints = true
+
+	require.NoError(t, executeCommand(NewTimelineCmd(), app, "--date", "2026-09-06"))
+
+	assert.Equal(t, "basecamp timeline --date 2026-09-05", firstBreadcrumb(t, buf))
 }

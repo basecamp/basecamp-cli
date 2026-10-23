@@ -42,8 +42,13 @@ func (m *activityDaysTransport) RoundTrip(req *http.Request) (*http.Response, er
 
 func fetchActivityDays(t *testing.T, transport *activityDaysTransport) []int64 {
 	t.Helper()
+	return fetchActivityDaysAt(t, transport, time.Date(2026, 10, 23, 0, 30, 0, 0, time.Local))
+}
+
+func fetchActivityDaysAt(t *testing.T, transport *activityDaysTransport, now time.Time) []int64 {
+	t.Helper()
 	originalNow := hubNow
-	hubNow = func() time.Time { return time.Date(2026, 10, 23, 0, 30, 0, 0, time.Local) }
+	hubNow = func() time.Time { return now }
 	t.Cleanup(func() { hubNow = originalNow })
 
 	sdk := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, hubCheckinsTestTokenProvider{},
@@ -109,4 +114,19 @@ func TestFetchTimelineEventsMissesNoDayWhenBasecampIsAhead(t *testing.T) {
 	}}
 
 	assert.Equal(t, []int64{1, 2, 3}, fetchActivityDays(t, transport))
+}
+
+// Chile starts daylight saving at midnight on 2026-09-06, so that day has no
+// 00:30 and stepping a timestamp back a day from 2026-09-07 00:30 lands on
+// 2026-09-05.
+func TestFetchTimelineEventsMissesNoDayAcrossAMidnightClockChange(t *testing.T) {
+	santiago, err := time.LoadLocation("America/Santiago")
+	require.NoError(t, err)
+	transport := &activityDaysTransport{today: "2026-09-07", days: map[string][]int64{
+		"2026-09-07": {1},
+		"2026-09-06": {2},
+		"2026-09-05": {3},
+	}}
+
+	assert.Equal(t, []int64{1, 2, 3}, fetchActivityDaysAt(t, transport, time.Date(2026, 9, 7, 0, 30, 0, 0, santiago)))
 }

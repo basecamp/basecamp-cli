@@ -84,10 +84,10 @@ func timelineDay(date string, now time.Time) (basecamp.Date, error) {
 		return basecamp.Date{}, nil
 	}
 	day, err := basecamp.ParseDate(dateparse.ParseFrom(date, now))
-	if err != nil {
+	if err != nil || day.IsZero() {
 		return basecamp.Date{}, output.ErrUsageHint(fmt.Sprintf("invalid --date %q", date), "Use YYYY-MM-DD, today or yesterday.")
 	}
-	if day.In(time.Local).After(now) {
+	if day.After(basecamp.DateOf(now)) {
 		return basecamp.Date{}, output.ErrUsageHint(fmt.Sprintf("--date %s is in the future", day), "The activity feed has nothing after today.")
 	}
 	return day, nil
@@ -158,7 +158,7 @@ func runTimeline(cmd *cobra.Command, args []string, project, person, date string
 		summary = fmt.Sprintf("%d events on %s", len(result.Events), day)
 		earlier = output.Breadcrumb{
 			Action:      "previous",
-			Cmd:         fmt.Sprintf("basecamp timeline --date %s", basecamp.DateOf(day.In(time.Local).AddDate(0, 0, -1))),
+			Cmd:         fmt.Sprintf("basecamp timeline --date %s", day.AddDays(-1)),
 			Description: "View the day before",
 		}
 	}
