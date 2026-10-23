@@ -2033,6 +2033,20 @@ func TestRefresh_ARefusalThatCanPassIsNotTheLoginRefused(t *testing.T) {
 	}
 }
 
+func TestInvalidGrantOnAServerFaultDoesNotForgetTheLogin(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusServiceUnavailable} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			m, key := refreshRefusedBy(t, status, `{"error":"invalid_grant"}`)
+			err := m.Refresh(t.Context())
+			require.Error(t, err)
+			assert.NotErrorIs(t, err, ErrLoginRefused)
+			creds, loadErr := m.store.Load(key)
+			require.NoError(t, loadErr, "a server fault is not proof that the refresh token is dead")
+			assert.Equal(t, "old-ref", creds.RefreshToken)
+		})
+	}
+}
+
 // TestRefresh_PreservesIdentityAndBinding: a rotation replaces the tokens
 // and nothing else — the stored user, scope, and account binding survive a
 // token response that does not repeat them.

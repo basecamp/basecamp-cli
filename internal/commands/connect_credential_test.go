@@ -143,6 +143,53 @@ func TestObservedRevocationSurvivesConcurrentShutdown(t *testing.T) {
 	assert.Contains(t, problem.Hint, "basecamp auth login -P bot --expect-identity 4242")
 }
 
+func TestCancellationJoinsAConfirmationThatHasAlreadyRefusedTheCredential(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := newCredentialWatch()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		release := make(chan struct{})
+		started := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			done <- w.Run(ctx, func(context.Context) bool {
+				// The refused refresh has removed the credential, but this
+				// goroutine is preempted before publishing its answer.
+				close(started)
+				<-release
+				return true
+			})
+		}()
+		w.unauthorized()
+		<-started
+		synctest.Wait()
+		cancel() // A concurrent missing-credential read stops another part.
+		synctest.Wait()
+		assert.Empty(t, done, "the final snapshot must not precede confirmation publication")
+		close(release)
+		synctest.Wait()
+		require.ErrorIs(t, <-done, errCredentialNotTaken)
+		assert.ErrorIs(t, w.finalError(output.ErrAuth("credential missing")), errCredentialNotTaken)
+	})
+}
+
+func TestCancellationStopsACooperativeConfirmation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := newCredentialWatch()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			done <- w.Run(ctx, func(ctx context.Context) bool { <-ctx.Done(); return false })
+		}()
+		w.unauthorized()
+		synctest.Wait()
+		cancel()
+		synctest.Wait()
+		require.NoError(t, <-done)
+	})
+}
+
 func TestAnUnobservedRefusalDoesNotReplaceTheOriginalStop(t *testing.T) {
 	w := newCredentialWatch()
 	original := fmt.Errorf("feed stopped")

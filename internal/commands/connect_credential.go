@@ -64,8 +64,10 @@ func (w *credentialWatch) WrapTransport(inner http.RoundTripper) http.RoundTripp
 }
 
 // Run waits until the credential is refused, and returns why, or until ctx
-// ends, and returns nil. confirm asks Basecamp whether it still takes the
-// credential, and reports true when it does not.
+// ends, and returns any refusal already observed, otherwise nil. confirm
+// asks Basecamp whether it still takes the credential and must honor its
+// context. Cancellation joins an in-flight confirmation before taking the
+// final snapshot: it may already have deleted a refused credential.
 func (w *credentialWatch) Run(ctx context.Context, confirm func(context.Context) bool) error {
 	var confirming <-chan bool
 	var cancelConfirm context.CancelFunc
@@ -77,6 +79,13 @@ func (w *credentialWatch) Run(ctx context.Context, confirm func(context.Context)
 	for {
 		select {
 		case <-ctx.Done():
+			if refused := w.finalError(nil); refused != nil {
+				return refused
+			}
+			if confirming != nil {
+				cancelConfirm()
+				<-confirming
+			}
 			return w.finalError(nil)
 		case <-w.refused:
 			return w.finalError(nil)

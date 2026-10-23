@@ -499,7 +499,8 @@ const localClockLayout = "Jan 2 3:04 PM MST"
 // how an error happens to be phrased.
 func invalidGrant(err error) (string, bool) {
 	var refusal *basecamp.Error
-	if errors.As(err, &refusal) && refusal.OAuthError == "invalid_grant" {
+	if errors.As(err, &refusal) && refusal.OAuthError == "invalid_grant" &&
+		(refusal.HTTPStatus == http.StatusBadRequest || refusal.HTTPStatus == http.StatusUnauthorized) {
 		return refusal.OAuthErrorDescription, true
 	}
 	return "", false
