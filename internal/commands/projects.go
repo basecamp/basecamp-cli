@@ -3,6 +3,8 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -15,6 +17,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/completion"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // NewProjectsCmd creates the projects command group.
@@ -37,6 +40,7 @@ func NewProjectsCmd() *cobra.Command {
 		newProjectsCreateCmd(),
 		newProjectsUpdateCmd(),
 		newProjectsDeleteCmd(),
+		newProjectsWallpaperCmd(),
 	)
 
 	return cmd
@@ -425,6 +429,276 @@ func newProjectsDeleteCmd() *cobra.Command {
 			}, output.WithSummary("Project moved to trash"))
 		},
 	}
+}
+
+// wallpaperFormats are the image types a project wallpaper may be: the set the
+// web's picker offers, which the server holds the API to as well.
+var wallpaperFormats = []struct{ mime, name string }{
+	{"image/png", "PNG"},
+	{"image/jpeg", "JPEG"},
+	{"image/webp", "WebP"},
+	{"image/avif", "AVIF"},
+}
+
+const maxWallpaperMB = 10
+
+var wallpaperModes = []string{"fill", "tile"}
+
+func wallpaperAgentNotes() map[string]string {
+	return map[string]string{"agent_notes": "Agent profiles are refused (403): changing a wallpaper needs a person who can edit the project\n.data.wallpaper on the returned project is {url, mode}, absent when there is none"}
+}
+
+func newProjectsWallpaperCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:         "wallpaper",
+		Short:       "Manage a project's wallpaper",
+		Annotations: wallpaperAgentNotes(),
+		Long: `Set, lay out, or remove a project's wallpaper.
+
+The project comes from --project (or --in), then the configured default.
+Only people who can edit the project can change its wallpaper.`,
+		Example: `  $ basecamp projects wallpaper set skyline.jpg --mode fill --project 12345
+  $ basecamp projects wallpaper mode tile --project 12345
+  $ basecamp projects wallpaper remove --project 12345`,
+	}
+
+	cmd.AddCommand(
+		newProjectsWallpaperSetCmd(),
+		newProjectsWallpaperModeCmd(),
+		newProjectsWallpaperRemoveCmd(),
+	)
+
+	return cmd
+}
+
+func newProjectsWallpaperSetCmd() *cobra.Command {
+	var mode string
+
+	cmd := &cobra.Command{
+		Use:         "set <file>",
+		Annotations: wallpaperAgentNotes(),
+		Short:       "Upload or replace a project's wallpaper",
+		Long: fmt.Sprintf(`Upload or replace the project's wallpaper.
+
+Accepts %s files up to %d MB.
+--mode lays the image out (%s); without it the project keeps
+its current mode.`, wallpaperFormatNames(), maxWallpaperMB, strings.Join(wallpaperModes, " or ")),
+		Example: "  $ basecamp projects wallpaper set skyline.jpg --mode fill --project 12345",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<file>")
+			}
+			if mode != "" {
+				if err := validateWallpaperMode(mode); err != nil {
+					return err
+				}
+			}
+			path, contentType, err := wallpaperFile(args[0])
+			if err != nil {
+				return err
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			projectID, err := wallpaperProjectID(cmd, app)
+			if err != nil {
+				return err
+			}
+
+			f, err := os.Open(path)
+			if err != nil {
+				return fmt.Errorf("%s: %w", args[0], err)
+			}
+			defer f.Close()
+
+			filename := filepath.Base(path)
+			opts := &basecamp.UpdateProjectWallpaperOptions{Mode: mode}
+			if err := app.Account().Projects().UpdateWallpaper(cmd.Context(), projectID, f, filename, contentType, opts); err != nil {
+				return convertSDKError(err)
+			}
+
+			summary := "Wallpaper set: " + filename
+			if mode != "" {
+				summary += " (" + mode + ")"
+			}
+			return respondWithWallpaperProject(cmd, app, projectID, map[string]any{"id": projectID}, summary,
+				output.Breadcrumb{
+					Action:      "mode",
+					Cmd:         fmt.Sprintf("basecamp projects wallpaper mode <fill|tile> --project %d", projectID),
+					Description: "Change how the wallpaper is laid out",
+				},
+				output.Breadcrumb{
+					Action:      "remove",
+					Cmd:         fmt.Sprintf("basecamp projects wallpaper remove --project %d", projectID),
+					Description: "Remove the wallpaper",
+				},
+			)
+		},
+	}
+
+	cmd.Flags().StringVar(&mode, "mode", "", "Lay the image out: "+strings.Join(wallpaperModes, " or ")+" (default: keep the current mode)")
+	_ = cmd.RegisterFlagCompletionFunc("mode", cobra.FixedCompletions(wallpaperModes, cobra.ShellCompDirectiveNoFileComp))
+
+	return cmd
+}
+
+func newProjectsWallpaperModeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:         "mode <fill|tile>",
+		Annotations: wallpaperAgentNotes(),
+		Short:       "Change how a project's wallpaper is laid out",
+		Long: `Change how the project's wallpaper is laid out. fill scales one copy to
+cover the page; tile repeats the image at its own size.
+
+A project with no wallpaper keeps the mode for the next one uploaded.`,
+		Example:   "  $ basecamp projects wallpaper mode tile --project 12345",
+		Args:      cobra.MaximumNArgs(1),
+		ValidArgs: wallpaperModes,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<fill|tile>")
+			}
+			mode := args[0]
+			if err := validateWallpaperMode(mode); err != nil {
+				return err
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			projectID, err := wallpaperProjectID(cmd, app)
+			if err != nil {
+				return err
+			}
+
+			// The SDK's update requires a name, so send the current one back.
+			current, err := app.Account().Projects().Get(cmd.Context(), projectID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+			req := &basecamp.UpdateProjectRequest{Name: current.Name, WallpaperMode: mode}
+			project, err := app.Account().Projects().Update(cmd.Context(), projectID, req)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			return respondWithWallpaperProject(cmd, app, projectID, project, "Wallpaper mode set to "+mode,
+				output.Breadcrumb{
+					Action:      "set",
+					Cmd:         fmt.Sprintf("basecamp projects wallpaper set <file> --project %d", projectID),
+					Description: "Upload a wallpaper",
+				},
+			)
+		},
+	}
+}
+
+func newProjectsWallpaperRemoveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:         "remove",
+		Annotations: wallpaperAgentNotes(),
+		Short:       "Remove a project's wallpaper",
+		Long:        "Remove the project's wallpaper. Removing it from a project that has none succeeds.",
+		Example:     "  $ basecamp projects wallpaper remove --project 12345",
+		Args:        cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			projectID, err := wallpaperProjectID(cmd, app)
+			if err != nil {
+				return err
+			}
+
+			if err := app.Account().Projects().RemoveWallpaper(cmd.Context(), projectID); err != nil {
+				return convertSDKError(err)
+			}
+
+			return respondWithWallpaperProject(cmd, app, projectID, map[string]any{"id": projectID}, "Wallpaper removed",
+				output.Breadcrumb{
+					Action:      "set",
+					Cmd:         fmt.Sprintf("basecamp projects wallpaper set <file> --project %d", projectID),
+					Description: "Upload a new wallpaper",
+				},
+			)
+		},
+	}
+}
+
+// wallpaperFile refuses, before anything is sent, a file the server would
+// refuse for its size or type. The server sniffs the bytes, so a mislabeled
+// file still comes back as its 422.
+func wallpaperFile(arg string) (path, contentType string, err error) {
+	path = richtext.NormalizeDragPath(arg)
+	if err := richtext.ValidateFile(path); err != nil {
+		return "", "", fmt.Errorf("%s: %w", arg, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", "", fmt.Errorf("%s: %w", arg, err)
+	}
+	name := filepath.Base(path)
+	if info.Size() > maxWallpaperMB<<20 {
+		return "", "", output.ErrUsage(fmt.Sprintf("%s exceeds maximum wallpaper size of %d MB", name, maxWallpaperMB))
+	}
+	contentType = richtext.DetectMIME(path)
+	for _, f := range wallpaperFormats {
+		if f.mime == contentType {
+			return path, contentType, nil
+		}
+	}
+	return "", "", output.ErrUsage(fmt.Sprintf("%s: unsupported image type %s (use %s)", name, contentType, wallpaperFormatNames()))
+}
+
+// wallpaperFormatNames reads "PNG, JPEG, WebP, or AVIF".
+func wallpaperFormatNames() string {
+	names := make([]string, len(wallpaperFormats))
+	for i, f := range wallpaperFormats {
+		names[i] = f.name
+	}
+	return strings.Join(names[:len(names)-1], ", ") + ", or " + names[len(names)-1]
+}
+
+func validateWallpaperMode(mode string) error {
+	if slices.Contains(wallpaperModes, mode) {
+		return nil
+	}
+	return output.ErrUsageHint(fmt.Sprintf("unknown wallpaper mode %q", mode), "Use "+strings.Join(wallpaperModes, " or "))
+}
+
+func wallpaperProjectID(cmd *cobra.Command, app *appctx.App) (int64, error) {
+	if err := ensureAccount(cmd, app); err != nil {
+		return 0, err
+	}
+	resolved, err := resolveProjectID(cmd, app, "")
+	if err != nil {
+		return 0, err
+	}
+	projectID, err := strconv.ParseInt(resolved, 10, 64)
+	if err != nil {
+		return 0, output.ErrUsage("Invalid project ID")
+	}
+	return projectID, nil
+}
+
+// respondWithWallpaperProject answers with the project as it now stands, so
+// the output carries its wallpaper. The change has already happened, so a
+// failed read falls back to what the caller has, with a diagnostic, rather
+// than failing the command.
+func respondWithWallpaperProject(cmd *cobra.Command, app *appctx.App, projectID int64, fallback any, summary string, crumbs ...output.Breadcrumb) error {
+	opts := []output.ResponseOption{
+		output.WithEntity("project"),
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(append([]output.Breadcrumb{{
+			Action:      "show",
+			Cmd:         fmt.Sprintf("basecamp projects show %d", projectID),
+			Description: "View the project",
+		}}, crumbs...)...),
+	}
+	data := fallback
+	project, err := app.Account().Projects().Get(cmd.Context(), projectID)
+	if err != nil {
+		opts = append(opts, output.WithDiagnostic(fmt.Sprintf("%s, but fetching the latest project state failed: %v", summary, err)))
+	} else {
+		data = project
+	}
+	return app.OK(data, opts...)
 }
 
 // convertSDKError converts SDK errors to output errors for consistent CLI error handling.
