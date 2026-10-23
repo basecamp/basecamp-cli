@@ -1,0 +1,9 @@
+task: Use ./skyline.png as the wallpaper for project 55555, repeated as a tile
+tags: [domain, update]
+accept:
+  - 'projects? wallpaper set .*skyline\.png'
+  - '--mode tile'
+  - '(--in|--project|-p) 55555'
+reject:
+  - 'projects? update'
+  - 'basecamp api'

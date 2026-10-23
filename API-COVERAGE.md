@@ -6,12 +6,14 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 55 | 211 |
+| ✅ Implemented | 55 | 213 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **59** | **223** |
+| **Total tracked** | **59** | **225** |
 
-**211 of 211 tracked in-scope endpoints.** Spotlighting a recording on its
+**213 of 213 tracked in-scope endpoints.** Uploading and removing a project's
+wallpaper (`PUT`/`DELETE /projects/:id/wallpaper.json`, added by bc3#14062 and
+modelled by basecamp-sdk#1037) land as `projects wallpaper`. Spotlighting a recording on its
 project or template home page (`POST`/`DELETE /recordings/:id/spotlight.json`,
 SDK v0.27.0) lands as `spotlight` and `unspotlight`. The two embed endpoints bc3 documents
 in `embeds.md` — `POST /embeds.json` and `GET /embeds/:sgid.json` — land as
@@ -201,6 +203,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 |---------|-----------|-------------|--------|-------|----------|-------|
 | **Core** |
 | projects | 9 | `projects` | ✅ | BC4 | - | list, show, create, update, delete |
+| projects (wallpaper) | 2 | `projects wallpaper` | ✅ | BC5 | - | set (`PUT /projects/:id/wallpaper.json`, multipart `wallpaper` with an optional `mode`), remove (`DELETE` on the same route; 204 with or without a wallpaper). `mode` sends `wallpaper_mode` through the existing `PUT /projects/:id.json`, with the current name the SDK requires. PNG, JPEG, WebP or AVIF up to 10 MB, checked before the upload; the server sniffs the bytes and holds the web's rules (editors only, agents refused with 403). Project JSON carries `wallpaper {url, mode}` when one is attached, so `projects show` shows it. Project-scoped via `--in`/`--project` |
 | todos | 12 | `todos`, `todo`, `done`, `reopen` | ✅ | BC4 | - | list, show, create, update, complete, uncomplete, position (BC5: `steps` shown on `todos show`, plus `subtasks_count`/`subtasks_completed_count`/`subtasks_url`; edit via `subtasks`). `todos create --loose` creates on the to-do set, outside any list |
 | subtasks | 8 | `subtasks` | ✅ | BC5 | - | list (`GET /recordings/:id/subtasks.json`, paginated), show, create (`POST` on the same list route), update (partial; `--no-due`/`--no-assignees` clear), complete/uncomplete (`POST`/`DELETE /subtasks/:id/completion.json`), move (`PUT /subtasks/:id/position.json`, 1-based), delete. Account-scoped flat routes (bc3#12659), so no `--in`. Parents are to-dos and cards only. Same `Kanban::Step` records as `card_table_steps` |
 | todolists | 9 | `todolists` | ✅ | BC4 | - | list, show, create, update, position |
