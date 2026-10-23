@@ -40,7 +40,7 @@ func TestTheCredentialWatchStopsOnARefusedRenewal(t *testing.T) {
 	state, _, exit := connectorStoppedBy(stop, anAgent("Ryan Singer (agent)", "agent"), mustNotAsk(t))
 	var e *output.Error
 	require.ErrorAs(t, exit, &e)
-	assert.Equal(t, "Ryan Singer (agent) was disconnected in Basecamp, or connected on another computer", e.Message)
+	assert.Equal(t, "Profile \"agent\"'s connection to Ryan Singer (agent) was disconnected in Basecamp, or replaced by a newer connection", e.Message)
 	assert.Equal(t, connector.ConnectionDisconnected, state)
 }
 
