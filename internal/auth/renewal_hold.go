@@ -233,7 +233,7 @@ func refreshClientFingerprint(refreshToken, clientID, clientSecret string) strin
 // refresh token and client (refreshClientFingerprint); a login writes a
 // credential with no hold, and a changed client is not held.
 func (m *Manager) holdRefusedRefreshClient(origin string, creds *Credentials, clientID, clientSecret string, err error) error {
-	stored := m.rememberRenewalHold(origin, refreshTokenFingerprint(creds.RefreshToken), &RenewalHold{
+	_, stored := m.rememberRenewalHold(origin, refreshTokenFingerprint(creds.RefreshToken), &RenewalHold{
 		Kind:   renewalHoldRefused,
 		Detail: invalidClientDetail,
 		Client: refreshClientFingerprint(creds.RefreshToken, clientID, clientSecret),
@@ -462,8 +462,37 @@ func (hold *RenewalHold) holds(creds *Credentials, now time.Time) bool {
 	}
 }
 
+// outlasts reports whether hold, stored on creds, answers mints for at
+// least as long as next would: it holds now, and never ends or ends after
+// next does.
+//
+// Two mints of one secret can be in flight at once, and their verdicts land
+// in either order, so the later write is not the later word. An
+// invalid_client refusal says the secret is dead for good, and a 429 that
+// lands after it — the abuse tracker the first refusals tripped answers
+// every request after them with one, whatever the secret — must not cut
+// that to a minute, after which the dead secret goes out again. Nor may a
+// shorter rate limit cut short a longer one the server asked for.
+func (hold *RenewalHold) outlasts(next *RenewalHold, creds *Credentials, now time.Time) bool {
+	switch {
+	case !hold.holds(creds, now):
+		return false
+	case hold.Until == 0:
+		return true
+	default:
+		return next.Until != 0 && hold.Until > next.Until
+	}
+}
+
 // rememberRenewalHold records hold on the stored credential — if the stored
-// credential is still the one the verdict was about.
+// credential is still the one the verdict was about, and no verdict it
+// already carries on it outlasts this one.
+//
+// It returns the stored credential when such a verdict stands and nothing
+// was written, so the caller can answer with it; nil otherwise. Only a mint
+// that held no lock across its round trip meets one: a session mint
+// (agent_launch.go), or any mint on a host without the lock. Under the lock,
+// a standing hold answers the mint before anything is sent.
 //
 // The caller holds the credential key's cross-process lock, so no login can
 // land between the refusal and this write. The fingerprint is compared
@@ -481,7 +510,7 @@ func (hold *RenewalHold) holds(creds *Credentials, now time.Time) bool {
 // A failure to write is reported and otherwise changes nothing — the
 // refusal is what the caller sees either way. It reports whether the hold
 // was stored, for a caller whose message promises what later commands do.
-func (m *Manager) rememberRenewalHold(origin, about string, hold *RenewalHold) (stored bool) {
+func (m *Manager) rememberRenewalHold(origin, about string, hold *RenewalHold) (stood *Credentials, stored bool) {
 	current, err := m.store.Load(origin)
 	if err != nil {
 		// A credential removed since the mint (a logout) has nothing to
@@ -489,17 +518,20 @@ func (m *Manager) rememberRenewalHold(origin, about string, hold *RenewalHold) (
 		if !errors.Is(err, ErrNoCredential) {
 			m.warnf("warning: could not read the credential for %s to remember the token endpoint's refusal, so the next command will ask again: %v", origin, err)
 		}
-		return false
+		return nil, false
 	}
 	if renewalSubject(current) != about {
-		return false
+		return nil, false
+	}
+	if current.RenewalHold.outlasts(hold, current, m.now()) {
+		return current, false
 	}
 	current.RenewalHold = hold
 	if err := m.store.Save(origin, current); err != nil {
 		m.warnf("warning: could not remember the token endpoint's refusal for %s, so the next command will ask again: %v", origin, err)
-		return false
+		return nil, false
 	}
-	return true
+	return nil, true
 }
 
 // now is the Manager's clock: the clock field when a test set one.
