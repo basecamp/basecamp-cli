@@ -88,8 +88,10 @@ You can also pass a Basecamp URL directly:
 					)
 				} else if parsed.RecordingID != "" {
 					id = parsed.RecordingID
-					// Auto-detect type from URL if not specified
-					if recordType == "" && parsed.Type != "" {
+					// Auto-detect type from URL if not specified. Left open, an
+					// occurrence's type would be looked up by the event's ID and
+					// read the whole series, so it takes its type from the URL.
+					if parsed.Type != "" && (recordType == "" || (parsed.OccurrenceDate != "" && namesNoType(recordType))) {
 						recordType = parsed.Type
 						untypedLookup = false // URL carries the type
 					}

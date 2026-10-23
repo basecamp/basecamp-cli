@@ -327,21 +327,23 @@ func TestScheduleShowOccurrenceURLReadsItsComments(t *testing.T) {
 
 func TestShowOccurrenceURLReadsItsComments(t *testing.T) {
 	for _, target := range []string{occurrenceURL, occurrenceEditURL} {
-		t.Run(target, func(t *testing.T) {
-			requests, out, err := runOccurrenceCommand(t, NewShowCmd(), target)
+		for _, hint := range untypedHints {
+			t.Run(strings.Join(append([]string{target}, hint...), " "), func(t *testing.T) {
+				requests, out, err := runOccurrenceCommand(t, NewShowCmd(), append([]string{target}, hint...)...)
 
-			require.NoError(t, err, "requests: %v", requests)
-			assert.Equal(t, []string{
-				"GET /99999/schedule_entries/789/occurrences/20261022.json",
-				"GET /99999/recordings/1001/comments.json",
-			}, requests)
-			env := decodeOccurrenceEnvelope(t, out)
-			assert.Contains(t, env.Summary, "#1001")
-			assert.Contains(t, env.cmds(), "basecamp comments create 1001 <text>")
-			assert.Contains(t, env.cmds(), "basecamp comments list --all 1001")
-			for _, cmd := range env.cmds() {
-				assert.NotContains(t, cmd, "comments create 789", "a breadcrumb must not write to the series")
-			}
-		})
+				require.NoError(t, err, "requests: %v", requests)
+				assert.Equal(t, []string{
+					"GET /99999/schedule_entries/789/occurrences/20261022.json",
+					"GET /99999/recordings/1001/comments.json",
+				}, requests)
+				env := decodeOccurrenceEnvelope(t, out)
+				assert.Contains(t, env.Summary, "#1001")
+				assert.Contains(t, env.cmds(), "basecamp comments create 1001 <text>")
+				assert.Contains(t, env.cmds(), "basecamp comments list --all 1001")
+				for _, cmd := range env.cmds() {
+					assert.NotContains(t, cmd, "comments create 789", "a breadcrumb must not write to the series")
+				}
+			})
+		}
 	}
 }
