@@ -110,6 +110,25 @@ teardown() {
   [[ "$output" == *"can't use the handled file"* ]]
 }
 
+@test "watcher fails closed if the handled file vanishes after startup" {
+  mkdir "$WORK/bin"
+  printf '%s\n' '#!/usr/bin/env bash' 'rm -f "$WATCHER_HANDLED"' 'exec "$REAL_WC" "$@"' > "$WORK/bin/wc"
+  chmod +x "$WORK/bin/wc"
+  local real_wc
+  real_wc="$(command -v wc)"
+  printf '%s\n' '{"type":"request","event_id":101}' > "$OUT"
+  for mode in once polling; do
+    printf '%s\n' 101 > "$HANDLED"
+    local args=()
+    [ "$mode" != once ] || args+=(--once)
+    run env PATH="$WORK/bin:$PATH" WATCHER_HANDLED="$HANDLED" REAL_WC="$real_wc" \
+      bash "$WATCHER" "${args[@]}" "$OUT" "$HANDLED"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"cannot read the handled file"* ]]
+    [[ "$output" != *'"event_id":101'* ]]
+  done
+}
+
 @test "watcher wakes when a new complete request arrives" {
   bash "$WATCHER" "$OUT" "$HANDLED" > "$WORK/result" 2> "$WORK/errors" &
   WATCH_PID=$!

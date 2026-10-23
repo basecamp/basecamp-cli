@@ -32,19 +32,30 @@ unhandled() {
   lines=$(($(wc -l < "$out")))
   [ "$lines" -gt 0 ] || return 1
   head -n "$lines" "$out" | HANDLED=$handled awk '
-    BEGIN { while ((getline id < ENVIRON["HANDLED"]) > 0) seen[id] = 1 }
+    BEGIN {
+      while ((read = (getline id < ENVIRON["HANDLED"])) > 0) seen[id] = 1
+      if (read < 0) {
+        print "watch-requests: cannot read the handled file " ENVIRON["HANDLED"] > "/dev/stderr"
+        failed = 1
+        exit 2
+      }
+    }
     /"type":"request"/ && match($0, /"event_id":[0-9]+/) {
       id = substr($0, RSTART + 11, RLENGTH - 11)
       if (!(id in seen)) { print; seen[id] = 1; found = 1 }
     }
-    END { exit !found }'
+    END { if (failed) exit 2; exit !found }'
 }
 
-if [ "$once" = true ]; then
+while :; do
   unhandled
-  exit 0
-fi
-
-until unhandled; do
-  sleep 2
+  result=$?
+  case "$result" in
+    0) exit 0 ;;
+    1)
+      [ "$once" = false ] || exit 0
+      sleep 2
+      ;;
+    *) exit "$result" ;;
+  esac
 done
