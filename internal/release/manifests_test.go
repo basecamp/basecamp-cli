@@ -1,7 +1,8 @@
 // Package release_test verifies the agent plugin manifests and release wiring.
 //
 // The repository root is the live plugin payload for both Claude Code and
-// Codex: the 37signals marketplace sources basecamp/basecamp-cli directly.
+// Codex: the 37signals marketplace sources basecamp/basecamp-cli at its
+// `stable` branch, which the release workflow moves to each stable release.
 // These tests keep the two thin per-agent manifests consistent with each
 // other and with the files they reference. Marketplace-shape enforcement
 // (allowed fields, exact values) belongs to each agent's own validator.
@@ -20,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/basecamp/basecamp-cli/internal/harness"
 )
@@ -243,6 +245,31 @@ func TestReleaseWiringSkipsPluginStampsForPrereleases(t *testing.T) {
 	afterGuard := releaseScript[guard:]
 	assert.Contains(t, afterGuard, `scripts/stamp-plugin-version.sh "${VERSION}"`)
 	assert.Contains(t, afterGuard, `scripts/stamp-codex-plugin-version.sh "${VERSION}"`)
+}
+
+func TestReleaseWorkflowPromotesStableOnlyAfterAStableRelease(t *testing.T) {
+	root := repositoryRoot(t)
+	var workflow struct {
+		Jobs map[string]struct {
+			Needs       []string          `yaml:"needs"`
+			If          string            `yaml:"if"`
+			Permissions map[string]string `yaml:"permissions"`
+			Steps       []struct {
+				Run string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(readFile(t, filepath.Join(root, ".github", "workflows", "release.yml"))), &workflow))
+
+	job, ok := workflow.Jobs["promote-stable"]
+	require.True(t, ok, "the marketplace installs the plugin from stable, so each stable release must move it")
+	assert.Equal(t, []string{"release"}, job.Needs)
+	assert.Contains(t, job.If, "!contains(github.ref_name, '-')")
+	assert.Equal(t, "write", job.Permissions["contents"])
+
+	require.Len(t, job.Steps, 1)
+	assert.Contains(t, job.Steps[0].Run, `if [ "$TAG" != "$latest" ]`)
+	assert.Contains(t, job.Steps[0].Run, "-F force=false")
 }
 
 func repositoryRoot(t *testing.T) string {

@@ -39,6 +39,7 @@ make release VERSION=0.2.0 DRY_RUN=1
    - Updates Scoop manifest (`basecamp-cli`) in `basecamp/homebrew-tap` for stable tags
    - Updates AUR `basecamp-cli` package for stable tags when `AUR_KEY` is configured
    - Verifies Nix flake builds successfully for stable tags
+   - Fast-forwards the `stable` branch to the tag for the latest stable release, which is where the Claude Code and Codex plugin installs from
 
 ## Versioning
 
@@ -60,6 +61,7 @@ manager channels and agent distribution metadata on the latest stable version.
 | Nix flake | Updates `nix/package.nix` and verifies the flake. | Nix metadata remains on the latest stable version. |
 | Claude plugin metadata | Updates `.claude-plugin/plugin.json`. | Plugin metadata remains on the latest stable version. |
 | Codex plugin metadata | Updates `.codex-plugin/plugin.json`. | Plugin metadata remains on the latest stable version. |
+| Plugin install source | Fast-forwards the `stable` branch, which the marketplace installs from. | `stable` remains on the latest stable release. |
 | Skills distribution | Syncs skills to the distribution repo. | Uses the skill embedded in the prerelease binary. |
 
 The prerelease binary embeds the matching `skills/basecamp/SKILL.md`. Testers can
@@ -95,6 +97,17 @@ shipped, skips the sync instead of rolling it back. The script always clones the
 so there is no checkout to hand it. `scripts/test-sync-skills.sh` (`make test-sync-skills`,
 in `bin/ci`) pins the ownership contract by running the script as both CLIs against a
 local bare repository — real clones, commits and pushes, no network.
+
+## Plugin install source
+
+The 37signals marketplace ([basecamp/plugins](https://github.com/basecamp/plugins))
+installs the `basecamp-cli` plugin for Claude Code and Codex from this repository's
+`stable` branch, not `main`, so plugin users get the skills of a release rather than
+whatever has merged since. The `promote-stable` release job fast-forwards `stable` to
+the tag once the release has published, and only for the latest stable release, so an
+older release's late or rerun job leaves it alone. GitHub refuses the update unless it
+is a fast-forward. If the job fails, the release is still out but plugin users stay on
+the previous one: rerun the job once the cause is fixed.
 
 ## Requirements
 
@@ -185,6 +198,7 @@ make update-nix-hash
 | Homebrew cask (`basecamp-cli`) | `basecamp/homebrew-tap` Casks/ | GoReleaser (stable tags) |
 | Scoop (`basecamp-cli`) | `basecamp/homebrew-tap` root | GoReleaser (stable tags) |
 | AUR | `basecamp-cli` | `scripts/publish-aur.sh` (stable tags) |
+| Claude Code and Codex plugin | `basecamp-cli@37signals`, from the `stable` branch via [basecamp/plugins](https://github.com/basecamp/plugins) | `promote-stable` job in the release workflow (latest stable tag) |
 | deb/rpm/apk packages | GitHub Release assets | GoReleaser (nfpm) |
 | Nix flake | `flake.nix` in repo | Self-serve (`nix profile install github:basecamp/basecamp-cli`) |
 | go install | `go install github.com/basecamp/basecamp-cli/cmd/basecamp@latest` | Go module proxy |
