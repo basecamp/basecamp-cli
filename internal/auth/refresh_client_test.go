@@ -23,11 +23,15 @@ import (
 // endpoint and drew invalid_client on every command — and the refusal says
 // to upgrade.
 func TestRefresh_UnknownOAuthTypeRefusesWithoutSending(t *testing.T) {
-	for name, endpoint := range map[string]string{
-		"with its token endpoint": "https://3.basecampapi.com/oauth/tokens",
+	for name, tc := range map[string]struct{ endpoint, refreshToken string }{
+		"with its token endpoint": {"https://3.basecampapi.com/oauth/tokens", "old-ref"},
 		// Launchpad's migration would have filled one in.
-		"without one": "",
+		"without one": {"", "old-ref"},
+		// A newer type need not renew by refresh token at all, and is
+		// still named for what it is rather than as a missing token.
+		"without a refresh token": {"https://3.basecampapi.com/oauth/tokens", ""},
 	} {
+		endpoint := tc.endpoint
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("BASECAMP_OAUTH_CLIENT_ID", "")
 			t.Setenv("BASECAMP_OAUTH_CLIENT_SECRET", "")
@@ -37,7 +41,7 @@ func TestRefresh_UnknownOAuthTypeRefusesWithoutSending(t *testing.T) {
 			m := &Manager{cfg: cfg, httpClient: &http.Client{Transport: transport}, store: newTestStore(t, t.TempDir())}
 			creds := &Credentials{
 				AccessToken:   "old-tok",
-				RefreshToken:  "old-ref",
+				RefreshToken:  tc.refreshToken,
 				OAuthType:     "bc6\x1b[31m",
 				TokenEndpoint: endpoint,
 				ExpiresAt:     time.Now().Add(-time.Hour).Unix(),

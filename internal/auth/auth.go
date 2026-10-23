@@ -587,10 +587,6 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 // the credential's missing fields in place, checks what it holds, and
 // resolves the client and lane the request would go out through.
 func (m *Manager) prepareRefresh(creds *Credentials) (oauth.RefreshRequest, *oauth.Exchanger, error) {
-	if creds.RefreshToken == "" {
-		return oauth.RefreshRequest{}, nil, m.errAuth("No refresh token available")
-	}
-
 	// Migrate old credentials missing OAuthType
 	if creds.OAuthType == "" {
 		creds.OAuthType = oauthTypeLaunchpad
@@ -600,11 +596,17 @@ func (m *Manager) prepareRefresh(creds *Credentials) (oauth.RefreshRequest, *oau
 	// type it has never heard of was written by a newer CLI, whose client
 	// and token endpoint this one cannot know: refreshing it as Launchpad
 	// sends Launchpad's client to someone else's token endpoint, which
-	// answers invalid_client on every command, forever.
+	// answers invalid_client on every command, forever. Checked before
+	// anything the credential holds, since a newer type need not hold what
+	// this version's refresh asks for.
 	switch creds.OAuthType {
 	case "bc3", oauthTypeBC5, oauthTypeLaunchpad:
 	default:
 		return oauth.RefreshRequest{}, nil, m.errNewerCredential(creds.OAuthType)
+	}
+
+	if creds.RefreshToken == "" {
+		return oauth.RefreshRequest{}, nil, m.errAuth("No refresh token available")
 	}
 
 	// Migrate old credentials missing TokenEndpoint
