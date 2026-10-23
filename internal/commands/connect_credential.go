@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -37,15 +38,18 @@ var errCredentialNotTaken = errors.New("the agent's credential is no longer take
 // read too, so the connector stops, and its message then names the wrong
 // cause; stopping is still right, since no read can get through it.
 type credentialWatch struct {
-	// refused carries the first refused renewal.
-	refused chan error
+	mu      sync.Mutex
+	refusal error // retained even if cancellation wins a part's shutdown race
+
+	// refused wakes the watch after a refusal has been retained.
+	refused chan struct{}
 	// suspect is signaled by a read answered 401; signals that arrive
 	// while one is pending coalesce into it.
 	suspect chan struct{}
 }
 
 func newCredentialWatch() *credentialWatch {
-	return &credentialWatch{refused: make(chan error, 1), suspect: make(chan struct{}, 1)}
+	return &credentialWatch{refused: make(chan struct{}, 1), suspect: make(chan struct{}, 1)}
 }
 
 // Tokens is p, watched for a renewal the token endpoint refuses.
@@ -73,9 +77,9 @@ func (w *credentialWatch) Run(ctx context.Context, confirm func(context.Context)
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
-		case err := <-w.refused:
-			return err
+			return w.finalError(nil)
+		case <-w.refused:
+			return w.finalError(nil)
 		case <-w.suspect:
 			if confirming != nil {
 				continue
@@ -84,7 +88,13 @@ func (w *credentialWatch) Run(ctx context.Context, confirm func(context.Context)
 			cancelConfirm = cancel
 			done := make(chan bool, 1)
 			confirming = done
-			go func() { done <- confirm(checkCtx) }()
+			go func() {
+				refused := confirm(checkCtx)
+				if refused {
+					w.refuse(errCredentialNotTaken)
+				}
+				done <- refused
+			}()
 		case refused := <-confirming:
 			cancelConfirm()
 			confirming = nil
@@ -100,9 +110,25 @@ func (w *credentialWatch) Run(ctx context.Context, confirm func(context.Context)
 	}
 }
 
+// finalError keeps a refusal observed by any part even if another part's
+// missing-credential error canceled the run before the watch could return it.
+func (w *credentialWatch) finalError(other error) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.refusal != nil {
+		return w.refusal
+	}
+	return other
+}
+
 func (w *credentialWatch) refuse(err error) {
+	w.mu.Lock()
+	if w.refusal == nil {
+		w.refusal = err
+	}
+	w.mu.Unlock()
 	select {
-	case w.refused <- err:
+	case w.refused <- struct{}{}:
 	default:
 	}
 }

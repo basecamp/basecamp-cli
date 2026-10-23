@@ -482,6 +482,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		})
 	}
 	wg.Wait()
+	firstErr = watch.finalError(firstErr)
 
 	mu.Lock()
 	sig := received

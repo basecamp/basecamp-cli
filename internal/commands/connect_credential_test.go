@@ -123,6 +123,33 @@ func TestARefusedRenewalInterruptsAPendingConfirmation(t *testing.T) {
 	}
 }
 
+func TestObservedRevocationSurvivesConcurrentShutdown(t *testing.T) {
+	w := newCredentialWatch()
+	tokens := w.Tokens(tokenFunc(func() (string, error) { return "", refusedLogin() }))
+	_, err := tokens.AccessToken(t.Context())
+	require.ErrorIs(t, err, auth.ErrLoginRefused)
+
+	// Another read can now find no credential (the refused refresh deleted
+	// it) and cancel the run before the credential-watch part is selected.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	assert.ErrorIs(t, w.Run(ctx, mustNotConfirm(t)), auth.ErrLoginRefused)
+	terminal := w.finalError(output.ErrAuth("no stored credential"))
+	require.ErrorIs(t, terminal, auth.ErrLoginRefused)
+	state, _, exit := connectorStoppedBy(terminal, aBot("Triage Bot", "bot", 4242), mustNotAsk(t))
+	assert.Equal(t, connector.ConnectionSignedOut, state)
+	var problem *output.Error
+	require.ErrorAs(t, exit, &problem)
+	assert.Contains(t, problem.Hint, "basecamp auth login -P bot --expect-identity 4242")
+}
+
+func TestAnUnobservedRefusalDoesNotReplaceTheOriginalStop(t *testing.T) {
+	w := newCredentialWatch()
+	original := fmt.Errorf("feed stopped")
+	assert.Same(t, original, w.finalError(original))
+	assert.NoError(t, w.finalError(nil))
+}
+
 func TestUnauthorizedReadsShareOnePendingConfirmation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newCredentialWatch()
