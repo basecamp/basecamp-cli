@@ -89,13 +89,23 @@ func TestFetchTimelineEventsStopsAtTheLookback(t *testing.T) {
 	}}
 
 	assert.Empty(t, fetchActivityDays(t, transport))
-	assert.Equal(t, []string{"", "2026-10-22", "2026-10-21", "2026-10-20", "2026-10-19", "2026-10-18", "2026-10-17"}, transport.asked)
+	assert.Equal(t, []string{"", "2026-10-23", "2026-10-22", "2026-10-21", "2026-10-20", "2026-10-19", "2026-10-18", "2026-10-17"}, transport.asked)
 }
 
 func TestFetchTimelineEventsKeepsAnEventSeenTwiceOnce(t *testing.T) {
 	transport := &activityDaysTransport{today: "2026-10-22", days: map[string][]int64{
 		"2026-10-22": {1, 2},
 		"2026-10-21": {3},
+	}}
+
+	assert.Equal(t, []int64{1, 2, 3}, fetchActivityDays(t, transport))
+}
+
+func TestFetchTimelineEventsMissesNoDayWhenBasecampIsAhead(t *testing.T) {
+	transport := &activityDaysTransport{today: "2026-10-24", days: map[string][]int64{
+		"2026-10-24": {1},
+		"2026-10-23": {2},
+		"2026-10-22": {3},
 	}}
 
 	assert.Equal(t, []int64{1, 2, 3}, fetchActivityDays(t, transport))

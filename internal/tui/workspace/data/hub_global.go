@@ -608,22 +608,24 @@ func (h *Hub) Timeline() *Pool[[]TimelineEventInfo] {
 // timelineFeedSize is how many events the activity feed shows.
 const timelineFeedSize = 80
 
-// timelineLookbackDays is how many days a quiet account's feed reads back.
+// timelineLookbackDays is how many days, today included, a quiet account's
+// feed reads.
 const timelineLookbackDays = 7
 
 // fetchTimelineEvents fetches timeline events from a single account.
 // Basecamp serves the activity feed one day per request, so this asks for
-// today (undated, so in the person's Basecamp time zone) and then steps back
-// a day at a time from yesterday on this machine until the feed is full.
-// When the two time zones disagree on the date a day can come back twice,
-// so an event already seen is skipped.
+// today undated, which is today in the person's Basecamp time zone, then
+// steps back a day at a time from today on this machine until the feed is
+// full. Starting the dated walk at this machine's today, not yesterday, keeps
+// a day from being skipped when Basecamp's date is ahead; when the dates
+// agree that day comes back twice, so an event already seen is skipped.
 func fetchTimelineEvents(ctx context.Context, client *basecamp.AccountClient, acct AccountInfo) ([]TimelineEventInfo, error) {
 	var events []basecamp.TimelineEvent
 	seen := make(map[int64]bool)
 	today := hubNow()
-	for back := 0; back < timelineLookbackDays && len(events) < timelineFeedSize; back++ {
+	for back := -1; back < timelineLookbackDays && len(events) < timelineFeedSize; back++ {
 		opts := &basecamp.ProgressOptions{Limit: timelineFeedSize - len(events)}
-		if back > 0 {
+		if back >= 0 {
 			opts.Date = basecamp.DateOf(today.AddDate(0, 0, -back))
 		}
 		result, err := client.Timeline().Progress(ctx, opts)

@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -28,6 +30,18 @@ func (p *progressTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(strings.NewReader(`[]`)), Request: req}, nil
 }
 
+func firstBreadcrumb(t *testing.T, buf *bytes.Buffer) string {
+	t.Helper()
+	var envelope struct {
+		Breadcrumbs []struct {
+			Cmd string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	require.NotEmpty(t, envelope.Breadcrumbs)
+	return envelope.Breadcrumbs[0].Cmd
+}
+
 func TestTimelineDateReadsThatDay(t *testing.T) {
 	transport := &progressTransport{}
 	app, buf := newTestAppWithTransport(t, transport)
@@ -37,17 +51,21 @@ func TestTimelineDateReadsThatDay(t *testing.T) {
 
 	require.Len(t, transport.queries, 1)
 	assert.Equal(t, "2026-08-30", transport.queries[0].Get("date"))
-	assert.Contains(t, buf.String(), "basecamp timeline --date 2026-08-29")
+	assert.Equal(t, "basecamp timeline --date 2026-08-29", firstBreadcrumb(t, buf))
 }
 
 func TestTimelineWithoutDateReadsToday(t *testing.T) {
 	transport := &progressTransport{}
-	app, _ := newTestAppWithTransport(t, transport)
+	app, buf := newTestAppWithTransport(t, transport)
+	app.Flags.Hints = true
 
 	require.NoError(t, executeCommand(NewTimelineCmd(), app))
 
 	require.Len(t, transport.queries, 1)
 	assert.False(t, transport.queries[0].Has("date"))
+	// Undated, the day is Basecamp's today, which this machine's clock can't
+	// name, so the breadcrumb can't name the day before it either.
+	assert.Equal(t, "basecamp timeline --date <YYYY-MM-DD>", firstBreadcrumb(t, buf))
 }
 
 func TestTimelineDateRefusals(t *testing.T) {

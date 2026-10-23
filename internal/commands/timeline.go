@@ -150,21 +150,23 @@ func runTimeline(cmd *cobra.Command, args []string, project, person, date string
 		return convertSDKError(err)
 	}
 
+	// Undated, the day is today in the person's Basecamp time zone, which
+	// this machine's clock can't name, so neither can the day before it.
 	summary := fmt.Sprintf("%d events today", len(result.Events))
-	previous := basecamp.DateOf(time.Now().AddDate(0, 0, -1))
+	earlier := output.Breadcrumb{Action: "earlier", Cmd: "basecamp timeline --date <YYYY-MM-DD>", Description: "View an earlier day"}
 	if !day.IsZero() {
 		summary = fmt.Sprintf("%d events on %s", len(result.Events), day)
-		previous = basecamp.DateOf(day.In(time.Local).AddDate(0, 0, -1))
+		earlier = output.Breadcrumb{
+			Action:      "previous",
+			Cmd:         fmt.Sprintf("basecamp timeline --date %s", basecamp.DateOf(day.In(time.Local).AddDate(0, 0, -1))),
+			Description: "View the day before",
+		}
 	}
 
 	respOpts := []output.ResponseOption{
 		output.WithSummary(summary),
 		output.WithBreadcrumbs(
-			output.Breadcrumb{
-				Action:      "previous",
-				Cmd:         fmt.Sprintf("basecamp timeline --date %s", previous),
-				Description: "View the day before",
-			},
+			earlier,
 			output.Breadcrumb{
 				Action:      "project",
 				Cmd:         "basecamp timeline --in <project>",
