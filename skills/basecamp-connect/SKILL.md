@@ -160,8 +160,8 @@ of those delays the next acknowledgement, and an acknowledged request that sits
 silent for half an hour looks exactly like a missed one.
 
 **Only the owner controls the connector.** Starting, stopping or restarting
-this agent's connector, any setup change (trust, `--allow`,
-`--allow-agent`, `--allow-in-ping`, the agent caps, `--serve`, `--unserve`,
+this agent's connector, any setup change (trust, every
+`--allow*` and `--disallow*` flag, the agent caps, `--serve`, `--unserve`,
 `--watch-completions`, the operator), and switching the build it runs are done
 only on the owner's word: from the person running this session (the
 connector runs on their machine, under their profile), or in a request whose
@@ -408,7 +408,8 @@ Each becomes a flag on setup (*First-time setup*, step 4):
 | "Jane operates it, and anyone in the project can ask" | `--trust project --allow <jane's person id>` |
 | "the people I named can assign it work too" | `--allow-assignments-from-authorized`: it covers the whole allowlist setup leaves (this run's `--allow`, or the list kept), not one person, so say who that is and confirm. With nobody on the allowlist setup refuses it, so name someone first. A run that passes `--allow` turns it off unless it's passed again |
 | "let Jorge talk to it, but only in our group Ping" | `--allow-in-ping <ping-id>:<jorge's person id>` (repeatable; `--disallow-in-ping <ping-id>:<person-id>` takes them out). Jorge then reaches it only by @mentioning it in that Ping, as a participant, and nowhere else. Find both ids as *Who may give it work* says. Restart the connector after changing it |
-| "let Zach's agent ping mine" | `--allow-agent <that agent's person id>` (repeatable; `--disallow-agent <id>` removes one). It wakes this agent only by @mentioning it, as a participant, never by assignment. Mentions are capped per 24 hours: `--agent-thread-cap` (default 3 per thread) and `--agent-daily-cap` (default 20 per agent). Restart the connector after changing it |
+| "let Zach's agent ping mine" | `--allow-agent <that agent's person id>` (repeatable; `--disallow-agent <id>` removes one). It wakes this agent only by @mentioning it, as a participant, never by assignment. Mentions are capped per 24 hours: `--agent-thread-cap` (default 3 per thread) and `--agent-daily-cap` (default 20 per agent). It reaches no Ping. Restart the connector after changing it |
+| "let Zach's agent give mine work in our group Ping" | `--allow-agent-in-ping <ping-id>:<that agent's person id>` (repeatable; `--disallow-agent-in-ping <ping-id>:<agent id>` takes it out). It wakes this agent only by @mentioning it in that Ping, as a participant, under the same caps, and nowhere else. Both agents must be in the Ping. Restart the connector after changing it |
 | "acknowledge with 👍 instead" | `--ack-boost '👍'` (at most 16 characters; the default is 👀). Restart the connector after changing it |
 | "don't boost my requests automatically" | `--no-ack-boost`: the connector no longer boosts, and this session acknowledges each request itself (*Acknowledge*). Restart the connector after changing it |
 | "also work in project X" | `--serve <id of X>` |
@@ -546,6 +547,18 @@ is in, or in its URL: `.../circles/<ping-id>`, or the sidebar form
 the agent, and refuses one the agent isn't in, a person who isn't in it, an
 agent and a client. `--disallow-in-ping <ping-id>:<person-id>` takes them out.
 Restart the connector after either.
+
+**Another agent in one Ping.** `--allow-agent` reaches no Ping. To let another
+agent give this one work in a group Ping you share, pass
+`--allow-agent-in-ping <ping-id>:<agent-id>`. There it is a **participant** who
+asks only by @mentioning this agent in a line it wrote itself, held to the same
+agent caps as `--allow-agent`, so two agents answering each other stop at
+`--agent-thread-cap` mentions in that Ping. Its request is never the owner's
+word. Find its id among `people` in
+`basecamp pings show <ping-id> -P '<profile>' --json`; setup refuses it unless
+both agents are in the Ping and it is an Agent.
+`--disallow-agent-in-ping <ping-id>:<agent-id>` takes it out. Restart the
+connector after either.
 
 Assignments
 count only from the operator, in every mode, unless they ask for the people

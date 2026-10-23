@@ -15,8 +15,9 @@ type GateResult struct {
 	// participant when only membership can trust them.
 	Role Role
 	// Agent says the performer is an agent the policy allows to mention this
-	// one (Trust.AgentIDs). Only the mentioned rule is open to it, its role
-	// is participant, and the committer holds it to the agent caps.
+	// one (Trust.AgentIDs, or Policy.Pings in its Ping). Only the mentioned
+	// rule is open to it, its role is participant, and the committer holds it
+	// to the agent caps.
 	Agent bool
 	// InPing says the performer is trusted only as a participant of the Ping
 	// the event's bucket is keyed as (Policy.Pings): only once the Ping read
@@ -48,13 +49,14 @@ func Gate(ev Event, p Policy, m Matrix) GateResult {
 	switch {
 	case ev.CreatorID == p.AgentID, ev.Performer() == p.AgentID:
 		return GateResult{Reason: ReasonAgentAuthored}
-	case ev.PerformedByID == nil && p.Trust.allowsAgent(ev.CreatorID):
-		// An agent the operator named with --allow-agent, acting as itself.
+	case ev.PerformedByID == nil && (p.Trust.allowsAgent(ev.CreatorID) || p.pingAgent(ev.BucketID, ev.CreatorID)):
+		// An agent the operator named with --allow-agent or
+		// --allow-agent-in-ping, acting as itself.
 		// Checked by id rather than by actor type, which only the push lane
 		// carries: setup verified the id reads back as an Agent person.
 		return gateAgent(ev, p, rules)
 	case ev.ActorType == ActorTypeAgent:
-		if len(p.Trust.AgentIDs) > 0 {
+		if len(p.AllowedAgents()) > 0 {
 			// Agents are allowed, and this one was not named.
 			return GateResult{Reason: ReasonAgentNotAllowed}
 		}
@@ -130,13 +132,19 @@ func gateAgent(ev Event, p Policy, rules []Rule) GateResult {
 	if !p.inScope(ev.BucketID) {
 		return GateResult{Reason: ReasonOutOfScope}
 	}
-	if _, served := p.served(ev.BucketID); !served {
+	_, served := p.served(ev.BucketID)
+	inPing := !served && p.pingAgent(ev.BucketID, ev.CreatorID)
+	switch {
+	case inPing:
+	case !served:
 		// Discarded here, before any read, rather than blocked no_route as a
 		// person's mention is: nothing waits on another agent's mention in a
 		// project this one does not serve, and a blocked record would be
 		// retried and spend reads for it. A gate discard carries no trigger,
 		// so it is never counted against the agent caps.
 		return GateResult{Reason: ReasonNoRoute}
+	case !p.Trust.allowsAgent(ev.CreatorID):
+		return GateResult{Reason: ReasonAgentNotAllowed}
 	}
 	var open []Rule
 	reason := ReasonNotAddressed
@@ -151,5 +159,5 @@ func gateAgent(ev Event, p Policy, rules []Rule) GateResult {
 	if len(open) == 0 {
 		return GateResult{Reason: reason}
 	}
-	return GateResult{Rules: open, Role: RoleParticipant, Agent: true}
+	return GateResult{Rules: open, Role: RoleParticipant, Agent: true, InPing: inPing}
 }

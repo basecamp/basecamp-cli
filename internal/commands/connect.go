@@ -233,11 +233,14 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		"ack":      connectAckDisplay(f.Ack()),
 	}
 	for id, entry := range f.Pings {
-		ids := make([]string, len(entry.Participants))
-		for i, person := range entry.Participants {
-			ids[i] = strconv.FormatInt(person, 10)
+		var who []string
+		if len(entry.Participants) > 0 {
+			who = append(who, joinIDs(entry.Participants)+" by mention, as participants")
 		}
-		d[fmt.Sprintf("ping_%d", id)] = strings.Join(ids, ", ") + " by mention, as participants"
+		if len(entry.Agents) > 0 {
+			who = append(who, "agents "+joinIDs(entry.Agents)+" by mention")
+		}
+		d[fmt.Sprintf("ping_%d", id)] = strings.Join(who, "; ")
 	}
 	for id, r := range f.Projects {
 		settings := "served"
@@ -250,6 +253,14 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		d[fmt.Sprintf("project_%d", id)] = settings
 	}
 	return d
+}
+
+func joinIDs(ids []int64) string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = strconv.FormatInt(id, 10)
+	}
+	return strings.Join(out, ", ")
 }
 
 // connectAckDisplay says how the connector acknowledges a request.
@@ -331,6 +342,9 @@ type connectSetupFlags struct {
 	// out, each <ping-id>:<person-id>.
 	allowInPing    []string
 	disallowInPing []string
+
+	allowAgentInPing    []string
+	disallowAgentInPing []string
 
 	// ackBoost is --ack-boost, the boost the connector acknowledges a
 	// request with; noAckBoost turns it off.
@@ -427,9 +441,14 @@ anywhere else they are who they were. Setup reads the Ping as the agent: the
 agent and the person must both be in it, and the person can be neither an
 agent nor a client. --disallow-in-ping takes them out. Find the Ping's id
 with basecamp pings list, or in its URL (.../circles/<ping-id>), and the
-person's in basecamp pings show <ping-id> --json. Anyone else's line in a
-Ping is discarded, as is any agent's. Restart the connector after changing
-who is let into a Ping.
+person's in basecamp pings show <ping-id> --json.
+--allow-agent-in-ping <ping-id>:<agent-id> lets another agent wake this one in
+that one Ping, by @mention only, as a participant's request, held to the same
+agent caps as --allow-agent; --disallow-agent-in-ping takes it out. Setup
+reads the Ping as the agent: both agents must be in it, and the one let in
+must be an Agent. --allow-agent alone reaches no Ping. Anyone else's line in
+a Ping is discarded, as is any other agent's. Restart the connector after
+changing who is let into a Ping.
 
 Acknowledgement. When someone asks the agent for something (a mention, an
 assignment, a ping), the connector boosts that recording as the agent before
@@ -477,6 +496,7 @@ Examples:
   basecamp connect setup -P agent --class 12345=internal
   basecamp connect setup -P agent --allow-agent 333
   basecamp connect setup -P agent --allow-in-ping 2085958513:111
+  basecamp connect setup -P agent --allow-agent-in-ping 2085958513:333
   basecamp connect setup -P agent --agent-thread-cap 5 --agent-daily-cap 30
   basecamp connect setup -P agent --ack-boost 'On it'
   basecamp connect setup -P agent --no-ack-boost`,
@@ -506,6 +526,8 @@ Examples:
 	fl.StringArrayVar(&f.disallowAgents, "disallow-agent", nil, "Stop allowing an agent to wake this one by mention (repeatable)")
 	fl.StringArrayVar(&f.allowInPing, "allow-in-ping", nil, "Let a person reach the agent in one Ping alone, by mention, as a participant: <ping-id>:<person-id> (repeatable)")
 	fl.StringArrayVar(&f.disallowInPing, "disallow-in-ping", nil, "Take a person let into a Ping out of it: <ping-id>:<person-id> (repeatable)")
+	fl.StringArrayVar(&f.allowAgentInPing, "allow-agent-in-ping", nil, "Let another agent wake this one in one Ping alone, by mention, as a participant, within the agent caps: <ping-id>:<agent-id> (repeatable)")
+	fl.StringArrayVar(&f.disallowAgentInPing, "disallow-agent-in-ping", nil, "Take an agent let into a Ping out of it: <ping-id>:<agent-id> (repeatable)")
 	fl.Var(&f.threadCap, "agent-thread-cap", fmt.Sprintf("Allowed agents' mentions handed off per thread or Campfire in 24 hours (default %d; 0 restores it; at most %d)", admission.DefaultAgentThreadCap, admission.MaxAgentCap))
 	fl.Var(&f.dailyCap, "agent-daily-cap", fmt.Sprintf("One allowed agent's mentions handed off across all threads in 24 hours (default %d; 0 restores it; at most %d)", admission.DefaultAgentDailyCap, admission.MaxAgentCap))
 	fl.StringArrayVar(&f.serve, "serve", nil, "Serve a Basecamp project: <project-id> (repeatable)")
@@ -975,21 +997,24 @@ func (f *connectSetupFlags) changes() (setup.Changes, error) {
 	}
 	for _, list := range []struct {
 		flag string
+		want string
 		raw  []string
 		out  *[]setup.PingPerson
 	}{
-		{"--allow-in-ping", f.allowInPing, &ch.AllowInPing},
-		{"--disallow-in-ping", f.disallowInPing, &ch.DisallowInPing},
+		{"--allow-in-ping", "<ping-id>:<person-id>", f.allowInPing, &ch.AllowInPing},
+		{"--disallow-in-ping", "<ping-id>:<person-id>", f.disallowInPing, &ch.DisallowInPing},
+		{"--allow-agent-in-ping", "<ping-id>:<agent-id>", f.allowAgentInPing, &ch.AllowAgentInPing},
+		{"--disallow-agent-in-ping", "<ping-id>:<agent-id>", f.disallowAgentInPing, &ch.DisallowAgentInPing},
 	} {
 		for _, raw := range list.raw {
 			pingText, personText, ok := strings.Cut(raw, ":")
 			ping, err := parsePositiveID(list.flag, strings.TrimSpace(pingText))
 			if !ok || err != nil || ping == 0 {
-				return ch, output.ErrUsage(fmt.Sprintf("Invalid %s %q: expected <ping-id>:<person-id>", list.flag, raw))
+				return ch, output.ErrUsage(fmt.Sprintf("Invalid %s %q: expected %s", list.flag, raw, list.want))
 			}
 			person, err := parsePositiveID(list.flag, strings.TrimSpace(personText))
 			if err != nil || person == 0 {
-				return ch, output.ErrUsage(fmt.Sprintf("Invalid %s %q: expected <ping-id>:<person-id>", list.flag, raw))
+				return ch, output.ErrUsage(fmt.Sprintf("Invalid %s %q: expected %s", list.flag, raw, list.want))
 			}
 			*list.out = append(*list.out, setup.PingPerson{Ping: ping, Person: person})
 		}
