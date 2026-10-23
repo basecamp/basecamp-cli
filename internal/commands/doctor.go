@@ -22,6 +22,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -787,6 +788,12 @@ func checkStoredCredentials(ctx context.Context, app *appctx.App, verbose bool) 
 
 // checkAuthentication checks token validity.
 func checkAuthentication(ctx context.Context, app *appctx.App, verbose bool) Check {
+	return checkAuthenticationWith(ctx, app, verbose, app.Auth.GetStore().LoadContext, app.Auth.Refresh)
+}
+
+func checkAuthenticationWith(ctx context.Context, app *appctx.App, verbose bool,
+	load func(context.Context, string) (*auth.Credentials, error), refresh func(context.Context) error,
+) Check {
 	check := Check{
 		Name: "Authentication",
 	}
@@ -800,8 +807,7 @@ func checkAuthentication(ctx context.Context, app *appctx.App, verbose bool) Che
 
 	// Load credentials to check expiration
 	credKey := app.Auth.CredentialKey()
-	store := app.Auth.GetStore()
-	creds, err := store.Load(credKey)
+	creds, err := load(ctx, credKey)
 	if err != nil {
 		check.Status = "fail"
 		check.Message = "Cannot load credentials"
@@ -815,7 +821,7 @@ func checkAuthentication(ctx context.Context, app *appctx.App, verbose bool) Che
 
 		if expiresIn < 0 {
 			// Token expired - try to refresh
-			if err := app.Auth.Refresh(ctx); err != nil {
+			if err := refresh(ctx); err != nil {
 				check.Status = "fail"
 				check.Message = "Token expired and refresh failed"
 				// The failure's own remedy, not a blanket login: for an

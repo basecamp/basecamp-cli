@@ -6,6 +6,7 @@ import (
 	"debug/pe"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -398,6 +399,71 @@ func TestDoctorDoesNotCallAnUnreadableStoreAMissingLogin(t *testing.T) {
 	for _, crumb := range buildDoctorBreadcrumbs(checks, app.Auth.LoginCommand()) {
 		assert.NotEqual(t, "login", crumb.Action, "an unreadable store must not prescribe login through a breadcrumb either")
 	}
+}
+
+func TestDoctorAuthenticationPreservesLaterStoreTimeouts(t *testing.T) {
+	for _, failure := range []string{"authentication read", "refresh read", "refresh write"} {
+		t.Run(failure, func(t *testing.T) {
+			app, _ := setupDoctorTestApp(t, "12345")
+			t.Setenv("BASECAMP_TOKEN", "")
+			creds := &auth.Credentials{
+				AccessToken: "test-token", RefreshToken: "test-refresh",
+				OAuthType: "bc5", ExpiresAt: time.Now().Add(time.Hour).Unix(),
+			}
+			if failure != "authentication read" {
+				creds.ExpiresAt = time.Now().Add(-time.Hour).Unix()
+			}
+			require.NoError(t, app.Auth.GetStore().Save(app.Auth.CredentialKey(), creds))
+			initial, unreadable := checkStoredCredentials(context.Background(), app, false)
+			require.False(t, unreadable)
+			require.Equal(t, "pass", initial.Status)
+
+			operation := "read"
+			if failure == "refresh write" {
+				operation = "write"
+			}
+			timeout := fmt.Errorf("keyring %s timed out: %w; set BASECAMP_NO_KEYRING=1", operation, context.DeadlineExceeded)
+			loads, refreshes := 0, 0
+			load := func(context.Context, string) (*auth.Credentials, error) {
+				loads++
+				if failure == "authentication read" || (failure == "refresh read" && loads == 2) {
+					return nil, timeout
+				}
+				return creds, nil
+			}
+			refresh := func(ctx context.Context) error {
+				refreshes++
+				if _, err := load(ctx, app.Auth.CredentialKey()); err != nil {
+					return err
+				}
+				return timeout // The refresh read succeeded, but saving its result timed out.
+			}
+			check := checkAuthenticationWith(context.Background(), app, false, load, refresh)
+			assert.Equal(t, "fail", check.Status)
+			assert.Contains(t, check.Message, "keyring "+operation+" timed out")
+			assert.Contains(t, check.Message, "BASECAMP_NO_KEYRING=1")
+			assert.NotContains(t, check.Hint, app.Auth.LoginCommand())
+			assert.Empty(t, buildDoctorBreadcrumbs([]Check{initial, check}, app.Auth.LoginCommand()))
+			if failure == "authentication read" {
+				assert.Equal(t, 1, loads)
+				assert.Zero(t, refreshes)
+			} else {
+				assert.Equal(t, 2, loads)
+				assert.Equal(t, 1, refreshes)
+			}
+		})
+	}
+}
+
+func TestDoctorAuthenticationBreadcrumbRequiresLoginRemedy(t *testing.T) {
+	for _, status := range []string{"fail", "warn"} {
+		check := Check{Name: "Authentication", Status: status, Hint: "Try again later"}
+		assert.Empty(t, buildDoctorBreadcrumbs([]Check{check}, "basecamp auth login"))
+	}
+	check := Check{Name: "Authentication", Status: "fail", Hint: "Run: basecamp auth login"}
+	crumbs := buildDoctorBreadcrumbs([]Check{check}, "basecamp auth login")
+	require.Len(t, crumbs, 1)
+	assert.Equal(t, "basecamp auth login", crumbs[0].Cmd)
 }
 
 func TestDoctorLegacyKeyringProbeIsBounded(t *testing.T) {

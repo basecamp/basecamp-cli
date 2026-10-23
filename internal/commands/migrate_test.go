@@ -432,6 +432,59 @@ func TestMigrateKeyring_StalledKeyringIsBounded(t *testing.T) {
 	assert.EqualValues(t, 1, calls.Load())
 }
 
+func TestMigrateDeletionTimeoutDoesNotMarkCompletion(t *testing.T) {
+	for _, alreadyCopied := range []bool{false, true} {
+		t.Run(fmt.Sprintf("destination_exists=%t", alreadyCopied), func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("BASECAMP_NO_KEYRING", "")
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			cacheBase := t.TempDir()
+			t.Setenv("XDG_CACHE_HOME", cacheBase)
+			require.NoError(t, os.MkdirAll(filepath.Join(cacheBase, "bcq"), 0700))
+
+			fk := newFakeKeyring()
+			fk.store[fk.key("bcq", "bcq::https://3.basecampapi.com")] = "legacy-value"
+			if alreadyCopied {
+				fk.store[fk.key("basecamp", "basecamp::https://3.basecampapi.com")] = "current-value"
+			}
+			fk.install(t)
+			originalTimeout := legacyKeyringTimeout
+			legacyKeyringTimeout = 40 * time.Millisecond
+			t.Cleanup(func() { legacyKeyringTimeout = originalTimeout })
+			release, finished := make(chan struct{}), make(chan struct{})
+			keyringOps.delete = func(string, string) error {
+				defer close(finished)
+				<-release
+				return nil
+			}
+			t.Cleanup(func() { close(release); <-finished })
+
+			cmd := NewMigrateCmd()
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetArgs(nil)
+			require.NoError(t, cmd.Execute())
+			var result MigrateResult
+			require.NoError(t, json.Unmarshal(out.Bytes(), &result))
+			assert.True(t, result.CacheMoved, "even a successful cache move must not hide incomplete keyring cleanup")
+			assert.Zero(t, result.KeyringMigrated)
+			require.Len(t, result.KeyringErrors, 1)
+			assert.Contains(t, result.KeyringErrors[0], "delete")
+			assert.Contains(t, result.KeyringErrors[0], "timed out")
+			assert.Contains(t, result.KeyringErrors[0], "BASECAMP_NO_KEYRING=1")
+			_, err := os.Stat(filepath.Join(config.GlobalConfigDir(), migratedMarker))
+			assert.True(t, os.IsNotExist(err), "migration must stay discoverable after a deletion timeout")
+			value, err := fk.get("basecamp", "basecamp::https://3.basecampapi.com")
+			require.NoError(t, err)
+			if alreadyCopied {
+				assert.Equal(t, "current-value", value)
+			} else {
+				assert.Equal(t, "legacy-value", value)
+			}
+		})
+	}
+}
+
 func TestMigrateSkipsKeyringWhenNoKeyring(t *testing.T) {
 	t.Setenv("BASECAMP_NO_KEYRING", "1")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
