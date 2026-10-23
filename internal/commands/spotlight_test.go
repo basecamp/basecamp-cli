@@ -155,41 +155,40 @@ func TestSpotlightAdoptsTheURLAccount(t *testing.T) {
 	}
 }
 
-// A follow-up copied into a fresh shell must act on the same item. A profile
-// chosen with --profile lasts only for this run, so the follow-up names it. A
-// profile a fresh process picks again, from default_profile or an exported
-// BASECAMP_PROFILE, needs no flag: the command never sees which of the two
-// chose it, only that --profile did not.
+// A follow-up copied into a fresh shell must act on the same item. The shell
+// may resolve another profile, and a profile picked interactively is not picked
+// again, so the follow-up names the active profile however it was chosen. An
+// account that came from the URL or --account is named as well.
 func TestSpotlightFollowUpCarriesTheProfileAndAccount(t *testing.T) {
 	const itemURL = "https://app.basecamp.com/99999/buckets/123/messages/456"
 	cases := map[string]struct {
-		profileFlag   string
+		activeProfile string
 		accountSource string
 		arg           string
 		followUp      string
 	}{
-		"profile and account from config": {
-			accountSource: "profile",
+		"no profile, account from config": {
+			accountSource: string(config.SourceGlobal),
 			arg:           "456",
 			followUp:      "basecamp unspotlight 456",
 		},
-		"profile from --profile": {
-			profileFlag:   "staging",
+		"profile chosen without --profile": {
+			activeProfile: "staging",
 			accountSource: "profile",
 			arg:           "456",
 			followUp:      "basecamp unspotlight 456 --profile staging",
 		},
-		"account from the URL": {
+		"no profile, account from the URL": {
 			arg:      itemURL,
 			followUp: "basecamp unspotlight 456 --account 99999",
 		},
-		"account from the URL under --profile": {
-			profileFlag: "staging",
-			arg:         itemURL,
-			followUp:    "basecamp unspotlight 456 --profile staging --account 99999",
+		"profile, account from the URL": {
+			activeProfile: "staging",
+			arg:           itemURL,
+			followUp:      "basecamp unspotlight 456 --profile staging --account 99999",
 		},
-		"account from --account under --profile": {
-			profileFlag:   "staging",
+		"profile, account from --account": {
+			activeProfile: "staging",
 			accountSource: string(config.SourceFlag),
 			arg:           "456",
 			followUp:      "basecamp unspotlight 456 --profile staging --account 99999",
@@ -200,8 +199,7 @@ func TestSpotlightFollowUpCarriesTheProfileAndAccount(t *testing.T) {
 			app, _ := setupRecordingTestApp(t, stubRoute{
 				method: http.MethodPost, path: spotlightPath, status: http.StatusCreated, body: `{"id":456}`,
 			})
-			app.Flags.Profile = c.profileFlag
-			app.Config.ActiveProfile = "staging"
+			app.Config.ActiveProfile = c.activeProfile
 			app.Config.Sources = map[string]string{}
 			if c.accountSource == "" {
 				app.Config.AccountID = ""

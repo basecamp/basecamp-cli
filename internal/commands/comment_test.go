@@ -433,9 +433,10 @@ func TestCommentsShowRejectsZeroComment(t *testing.T) {
 // --- Iteration 2: account provenance in reply breadcrumbs -------------------
 
 func TestFollowUpScopeNamesWhatAFreshProcessLacks(t *testing.T) {
-	args := func(profileFlag, accountID, accountSource string) string {
-		app := &appctx.App{Config: &config.Config{AccountID: accountID, Sources: map[string]string{}}}
-		app.Flags.Profile = profileFlag
+	args := func(activeProfile, accountID, accountSource string) string {
+		app := &appctx.App{Config: &config.Config{
+			ActiveProfile: activeProfile, AccountID: accountID, Sources: map[string]string{},
+		}}
 		if accountSource != "" {
 			app.Config.Sources["account_id"] = accountSource
 		}
@@ -450,8 +451,7 @@ func TestFollowUpScopeNamesWhatAFreshProcessLacks(t *testing.T) {
 	assert.Equal(t, "", args("", "99999", string(config.SourceGlobal)))
 	assert.Equal(t, "", args("", "99999", string(config.SourceLocal)))
 	assert.Equal(t, "", args("", "99999", string(config.SourceEnv)))
-	assert.Equal(t, "", args("", "99999", "profile"))
-	// --profile is always named; its account is inherited through it.
+	// The active profile is always named; its account is inherited through it.
 	assert.Equal(t, " --profile staging", args("staging", "99999", "profile"))
 	assert.Equal(t, " --profile staging --account 99999", args("staging", "99999", string(config.SourceFlag)))
 	assert.Equal(t, " --profile 'my profile' --account 99999", args("my profile", "", ""))

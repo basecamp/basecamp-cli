@@ -350,10 +350,11 @@ func ensureAccount(cmd *cobra.Command, app *appctx.App) error {
 }
 
 // followUpScope is what an advertised follow-up command must name to act on the
-// same profile and account when run in a fresh process. A profile chosen with
-// --profile lasts only for this run, as does an account given with --account,
-// adopted from a URL or picked interactively. A fresh process resolves config,
-// default_profile and exported env vars again, so those are left out.
+// same profile and account when run in a fresh process. The active profile is
+// always named: the shell it is pasted into may have another BASECAMP_PROFILE,
+// and a profile picked interactively is not picked again. An account given with
+// --account, adopted from a URL or picked interactively lasts only for this run,
+// so it is named too. Any other account comes back with the profile or config.
 type followUpScope struct {
 	profile          string
 	accountInherited bool
@@ -361,15 +362,14 @@ type followUpScope struct {
 
 // newFollowUpScope reads the scope before the command resolves its account, so
 // an account adopted from a URL or picked interactively (empty at entry) reads
-// as process-local. An account from a --profile profile is inherited, because
-// the follow-up names that profile.
+// as process-local.
 func newFollowUpScope(app *appctx.App) followUpScope {
 	inherited := app.Config.AccountID != ""
 	switch app.Config.Sources["account_id"] {
 	case string(config.SourceFlag), string(config.SourcePrompt):
 		inherited = false
 	}
-	return followUpScope{profile: app.Flags.Profile, accountInherited: inherited}
+	return followUpScope{profile: app.Config.ActiveProfile, accountInherited: inherited}
 }
 
 // args returns the flags to append to a follow-up command, such as
