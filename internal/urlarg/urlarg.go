@@ -22,6 +22,9 @@ var pingAtRe = regexp.MustCompile(`/circles/(\d+)@(\d+)`)
 // Basecamp links to for the same Ping, and drops the my/sidebar prefix.
 var pingSidebarRe = regexp.MustCompile(`/my/sidebar(/circles/\d+)`)
 
+// slashRunRe matches a run of slashes, which Rails routes as one.
+var slashRunRe = regexp.MustCompile(`/{2,}`)
+
 // jsonSuffixRe matches the .json an API URL's path ends in.
 var jsonSuffixRe = regexp.MustCompile(`^([^?#]*)\.json([?#]|$)`)
 
@@ -36,16 +39,17 @@ var itemPaths = []*regexp.Regexp{
 	regexp.MustCompile(`/todolists/\d+(/todos/\d+)([/?#]|$)`),
 	regexp.MustCompile(`/questionnaires/\d+(/questions/\d+)([/?#]|$)`),
 	regexp.MustCompile(`(/uploads/\d+)(?:/versions/\d+)?/download/[^?#]+([?#]|$)`),
-	regexp.MustCompile(`(/uploads/\d+)/versions/\d+/representations/[^/?#]+/?([?#]|$)`),
+	regexp.MustCompile(`(/uploads/\d+)/versions/\d+/representations/[^/?#]+([?#]|$)`),
 }
 
 // structuralPath is the whole path of each shape the router's structural
 // fallback recognizes. The fallback matches only a prefix of the path.
 var structuralPath = regexp.MustCompile(`^/\d+(?:/projects/\d+|/buckets/\d+/(?:card_tables/[^/]+/\d+|[^/]+(?:/\d+)?))?$`)
 
-// trailingWords matches the segments after a path's last ID when none of them
-// is an ID: a page of that item, such as edit or dates/edit.
-var trailingWords = regexp.MustCompile(`(/\d+)(?:/[^/?#]*[^/?#0-9][^/?#]*)+/?([?#]|$)`)
+// trailingWords matches the segments after a path's last ID when each starts
+// with a letter: a page of that item, such as edit or dates/edit. A segment
+// that starts otherwise, such as 222.json or %32%32, may hold an ID.
+var trailingWords = regexp.MustCompile(`(/\d+)(?:/[A-Za-z][^/?#]*)+([?#]|$)`)
 
 // Parsed represents components extracted from a Basecamp URL.
 type Parsed struct {
@@ -71,10 +75,10 @@ func IsURL(input string) bool {
 }
 
 // normalize rewrites the web @-forms and itemPaths into routable URLs, and
-// drops a .json suffix. Chat lines become the slash form; a Ping line loses its
-// @line, which the second result returns.
+// drops a .json suffix and the slashes Rails ignores. Chat lines become the
+// slash form; a Ping line loses its @line, which the second result returns.
 func normalize(input string) (normalized, pingLineID string) {
-	normalized = chatAtRe.ReplaceAllString(input, "${1}/lines/${2}")
+	normalized = chatAtRe.ReplaceAllString(squeezeSlashes(input), "${1}/lines/${2}")
 	normalized = pingSidebarRe.ReplaceAllString(normalized, "${1}")
 	if m := pingAtRe.FindStringSubmatch(normalized); m != nil {
 		pingLineID = m[2]
@@ -87,8 +91,26 @@ func normalize(input string) (normalized, pingLineID string) {
 	return normalized, pingLineID
 }
 
+// squeezeSlashes collapses each run of slashes in a URL's path to one and drops
+// a trailing slash, as Rails does when routing, so that a suffix or ID before
+// them still ends the path.
+func squeezeSlashes(rawURL string) string {
+	end := strings.IndexAny(rawURL, "?#")
+	if end == -1 {
+		end = len(rawURL)
+	}
+	start := 0
+	if i := strings.Index(rawURL[:end], "://"); i != -1 {
+		start = i + len("://")
+	} else if strings.HasPrefix(rawURL, "//") {
+		start = len("//")
+	}
+	path := strings.TrimRight(slashRunRe.ReplaceAllString(rawURL[start:end], "/"), "/")
+	return rawURL[:start] + path + rawURL[end:]
+}
+
 // urlPath returns the path the router matches: the URL without its scheme,
-// host, query, fragment, or trailing slash.
+// host, query, or fragment.
 func urlPath(rawURL string) string {
 	path, _, _ := strings.Cut(rawURL, "#")
 	path, _, _ = strings.Cut(path, "?")
@@ -104,7 +126,7 @@ func urlPath(rawURL string) string {
 		}
 		path = path[slash:]
 	}
-	return strings.TrimRight(path, "/")
+	return path
 }
 
 // match routes a normalized URL, refusing a structural match that leaves an ID

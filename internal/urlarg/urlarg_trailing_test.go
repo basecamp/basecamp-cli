@@ -152,6 +152,41 @@ func TestParseTrailingSegments(t *testing.T) {
 			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "documents", RecordingID: "222", CommentID: "789"},
 		},
 		{
+			name:  "JSON document in a folder with a trailing slash, query and comment fragment names the comment",
+			input: base + "/vaults/111/documents/222.json/?x=1#__recording_789",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "documents", RecordingID: "222", CommentID: "789"},
+		},
+		{
+			name:  "JSON card column with a trailing slash, query and comment fragment names the column",
+			input: base + "/card_tables/lists/222.json/?x=1#__recording_789",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "columns", RecordingID: "222", CommentID: "789"},
+		},
+		{
+			name:  "document in a folder after a doubled slash names the document",
+			input: base + "/vaults/111//documents/222?x=1#__recording_789",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "documents", RecordingID: "222", CommentID: "789"},
+		},
+		{
+			name:  "to-do edit page after a doubled slash names the to-do",
+			input: base + "/todos/789//edit?x=1#__recording_5",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "todos", RecordingID: "789", CommentID: "5"},
+		},
+		{
+			name:  "to-do ID after a doubled slash names the to-do",
+			input: base + "/todos//789",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "todos", RecordingID: "789"},
+		},
+		{
+			name:  "download link with an all-digit filename and a trailing slash names the upload",
+			input: base + "/uploads/456/download/12345/?x=1#y",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "uploads", RecordingID: "456"},
+		},
+		{
+			name:  "version download link with a digit-leading filename and a trailing slash names the upload",
+			input: base + "/uploads/456/versions/7/download/222.json/?disposition=attachment",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "uploads", RecordingID: "456"},
+		},
+		{
 			name:  "download link with digits in the filename names the upload",
 			input: base + "/uploads/456/download/report2024.pdf",
 			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "uploads", RecordingID: "456"},
@@ -172,6 +207,11 @@ func TestParseTrailingSegments(t *testing.T) {
 			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "uploads", RecordingID: "456"},
 		},
 		{name: "upload version as JSON", input: base + "/uploads/456/versions/7.json"},
+		{name: "upload version as JSON with a trailing slash, query and fragment", input: base + "/uploads/456/versions/7.json/?x=1#__recording_5"},
+		{name: "document in a folder with another suffix", input: base + "/vaults/111/documents/222.html?x=1#y"},
+		{name: "document in a folder as uppercase JSON", input: base + "/vaults/111/documents/222.JSON"},
+		{name: "document in a folder with a percent-encoded ID", input: base + "/vaults/111/documents/%32%32%32"},
+		{name: "document in a folder with a signed ID", input: base + "/vaults/111/documents/+222"},
 		{name: "answers by a person end in the person's ID", input: base + "/questions/111/answers/by/789"},
 		{name: "a person's out-of-office ends in the person's ID", input: "https://app.basecamp.com/99999/people/5/out_of_office"},
 		{name: "to-dos assigned to a person end in the person's ID", input: "https://app.basecamp.com/99999/reports/todos/assigned/5"},
