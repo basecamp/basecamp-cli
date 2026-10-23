@@ -427,13 +427,13 @@ func TestURLParseOccurrenceURL(t *testing.T) {
 	assert.Equal(t, "20261022", *parsed.OccurrenceDate)
 	assert.Equal(t, "789", *parsed.RecordingID)
 	assert.Contains(t, resp.Notice, "whole series")
-	assert.Contains(t, resp.Notice, "basecamp schedule show "+url)
+	assert.Contains(t, resp.Notice, "basecamp show "+url+" prints")
 
 	cmds := make([]string, 0, len(resp.Breadcrumbs))
 	for _, b := range resp.Breadcrumbs {
 		cmds = append(cmds, b.Cmd)
 	}
-	assert.Contains(t, cmds, "basecamp schedule show "+url)
+	assert.Equal(t, []string{"basecamp show " + url}, cmds)
 	for _, c := range cmds {
 		assert.NotContains(t, c, "comments create 789", "a comment on the series ID would miss the occurrence")
 	}
@@ -448,8 +448,8 @@ func TestURLParseOmitsOccurrenceDateForOtherURLs(t *testing.T) {
 	assert.Empty(t, resp.Notice)
 }
 
-// show resolves a comment fragment first, so the occurrence breadcrumb must
-// lead somewhere that reads the occurrence even from a comment link.
+// show resolves a comment fragment first, so the occurrence breadcrumb drops
+// it to read the occurrence.
 func TestURLParseOccurrenceCommentURL(t *testing.T) {
 	url := "https://3.basecamp.com/2914079/buckets/41746046/schedule_entries/789/occurrences/20261022#__recording_555"
 	resp, err := parseURLWithOutput(t, url)
@@ -459,7 +459,7 @@ func TestURLParseOccurrenceCommentURL(t *testing.T) {
 	require.NotNil(t, parsed.CommentID)
 	assert.Equal(t, "555", *parsed.CommentID)
 	require.NotEmpty(t, resp.Breadcrumbs)
-	assert.Equal(t, "basecamp schedule show "+strings.TrimSuffix(url, "#__recording_555"), resp.Breadcrumbs[0].Cmd)
+	assert.Equal(t, "basecamp show "+strings.TrimSuffix(url, "#__recording_555"), resp.Breadcrumbs[0].Cmd)
 }
 
 func TestURLParseAccountScopedOccurrenceURL(t *testing.T) {
@@ -474,7 +474,7 @@ func TestURLParseAccountScopedOccurrenceURL(t *testing.T) {
 			for _, b := range resp.Breadcrumbs {
 				cmds = append(cmds, b.Cmd)
 			}
-			assert.Equal(t, []string{"basecamp show " + occurrence}, cmds, "schedule show needs a project this URL does not name")
+			assert.Equal(t, []string{"basecamp show " + occurrence}, cmds)
 			assert.Contains(t, resp.Notice, "basecamp show "+occurrence+" prints")
 		})
 	}

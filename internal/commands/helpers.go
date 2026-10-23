@@ -594,10 +594,20 @@ func occurrenceUsage(err error) error {
 	if errors.As(err, &occ) {
 		return output.ErrUsageHint("That URL names one occurrence of a recurring event",
 			fmt.Sprintf("To comment on, list the comments of, or subscribe to just this occurrence, pass its own ID, "+
-				"which basecamp schedule show <url> prints. To update, trash or boost the event, pass its ID, %s, "+
-				"which acts on the whole series. Basecamp's API cannot change a single occurrence", occ.EntryID))
+				"which %s prints. To update, trash or boost the event, pass its ID, %s, "+
+				"which acts on the whole series. Basecamp's API cannot change a single occurrence",
+				showOccurrence(occ.URL), occ.EntryID))
 	}
 	return err
+}
+
+// showOccurrence is the command that prints an occurrence's own recording ID.
+// show reads a comment fragment before the occurrence, so the fragment goes;
+// unlike schedule show, show needs no project, so it works for a URL without
+// one.
+func showOccurrence(url string) string {
+	url, _, _ = strings.Cut(url, "#")
+	return "basecamp show " + url
 }
 
 // requireOneParseableTarget rejects a recording argument whose every

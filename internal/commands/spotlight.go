@@ -151,7 +151,7 @@ func spotlightTarget(cmd *cobra.Command, app *appctx.App, arg string) (int64, er
 		// the whole series. The occurrence is a recording of its own.
 		if parsed.OccurrenceDate != "" {
 			return 0, spotlightUsage(cmd, "the URL names one occurrence of a recurring event",
-				"Pass the occurrence's own ID, which basecamp schedule show <url> prints, or the event's ID to act on the whole series")
+				"Pass the occurrence's own ID, which "+showOccurrence(arg)+" prints, or the event's ID to act on the whole series")
 		}
 		idStr, urlAccountID = parsed.RecordingID, parsed.AccountID
 	}

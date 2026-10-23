@@ -145,6 +145,7 @@ func TestOccurrenceURLIsRefused(t *testing.T) {
 				assert.Equal(t, output.CodeUsage, outErr.Code)
 				assert.Contains(t, outErr.Message, "occurrence")
 				assert.Contains(t, outErr.Hint, "789", "the hint names the event's ID")
+				assert.Contains(t, outErr.Hint, "basecamp show "+target+" prints", "the hint names the command that prints the occurrence's ID")
 				assert.Empty(t, requests)
 			})
 		}
@@ -305,8 +306,7 @@ func TestOccurrenceBreadcrumbsDropCommentFragment(t *testing.T) {
 	}
 }
 
-// A comment link reads the occurrence too, which is why url parse and the
-// refusal hint send callers here for the occurrence's own ID.
+// A comment link reads the occurrence too.
 func TestScheduleShowOccurrenceURLReadsItsComments(t *testing.T) {
 	for _, target := range []string{occurrenceURL, occurrenceEditURL, occurrenceURL + "#__recording_555"} {
 		t.Run(target, func(t *testing.T) {
@@ -347,5 +347,21 @@ func TestShowOccurrenceURLReadsItsComments(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// The hint's command has to work from any form of the URL: one with no
+// project, where schedule show fails, and one with a comment fragment, which
+// show would read instead of the occurrence.
+func TestOccurrenceHintNamesAWorkingShowCommand(t *testing.T) {
+	const occurrence = "https://3.basecampapi.com/99999/schedule_entries/789/occurrences/20261022.json"
+	for _, target := range []string{occurrence, occurrence + "#__recording_555"} {
+		t.Run(target, func(t *testing.T) {
+			_, err := extractID(target)
+
+			var outErr *output.Error
+			require.True(t, errors.As(err, &outErr), "want a usage error, got %v", err)
+			assert.Contains(t, outErr.Hint, "basecamp show "+occurrence+" prints")
+		})
 	}
 }

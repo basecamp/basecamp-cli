@@ -255,6 +255,7 @@ func Parse(input string) *Parsed {
 type OccurrenceError struct {
 	EntryID string
 	Date    string
+	URL     string // the occurrence's URL, without any comment fragment
 }
 
 func (e *OccurrenceError) Error() string {
@@ -263,9 +264,10 @@ func (e *OccurrenceError) Error() string {
 
 // recording returns the URL's recording ID, or an *OccurrenceError when the
 // URL names an occurrence of that recording.
-func (p *Parsed) recording() (string, error) {
+func (p *Parsed) recording(input string) (string, error) {
 	if p.OccurrenceDate != "" {
-		return "", &OccurrenceError{EntryID: p.RecordingID, Date: p.OccurrenceDate}
+		url, _, _ := strings.Cut(input, "#")
+		return "", &OccurrenceError{EntryID: p.RecordingID, Date: p.OccurrenceDate, URL: url}
 	}
 	return p.RecordingID, nil
 }
@@ -276,7 +278,7 @@ func (p *Parsed) recording() (string, error) {
 func ExtractID(arg string) (string, error) {
 	if parsed := Parse(arg); parsed != nil {
 		if parsed.RecordingID != "" {
-			return parsed.recording()
+			return parsed.recording(arg)
 		}
 		if parsed.ProjectID != "" {
 			return parsed.ProjectID, nil
@@ -302,7 +304,7 @@ func ExtractProjectID(arg string) string {
 // Returns (recordingID, projectID). If projectID is empty, it wasn't in the URL.
 func ExtractWithProject(arg string) (recordingID, projectID string, err error) {
 	if parsed := Parse(arg); parsed != nil {
-		recordingID, err = parsed.recording()
+		recordingID, err = parsed.recording(arg)
 		return recordingID, parsed.ProjectID, err
 	}
 	return arg, "", nil
@@ -318,7 +320,7 @@ func ExtractCommentWithProject(arg string) (id, projectID string, err error) {
 		if parsed.CommentID != "" {
 			return parsed.CommentID, parsed.ProjectID, nil
 		}
-		id, err = parsed.recording()
+		id, err = parsed.recording(arg)
 		return id, parsed.ProjectID, err
 	}
 	return arg, "", nil
