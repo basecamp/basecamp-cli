@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -150,6 +151,70 @@ func TestSpotlightAdoptsTheURLAccount(t *testing.T) {
 				followUps = append(followUps, b.Cmd)
 			}
 			assert.Contains(t, followUps, c.followUp)
+		})
+	}
+}
+
+// A follow-up copied into a fresh shell must act on the same item. A profile
+// chosen with --profile lasts only for this run, so the follow-up names it. A
+// profile a fresh process picks again, from default_profile or an exported
+// BASECAMP_PROFILE, needs no flag: the command never sees which of the two
+// chose it, only that --profile did not.
+func TestSpotlightFollowUpCarriesTheProfileAndAccount(t *testing.T) {
+	const itemURL = "https://app.basecamp.com/99999/buckets/123/messages/456"
+	cases := map[string]struct {
+		profileFlag   string
+		accountSource string
+		arg           string
+		followUp      string
+	}{
+		"profile and account from config": {
+			accountSource: "profile",
+			arg:           "456",
+			followUp:      "basecamp unspotlight 456",
+		},
+		"profile from --profile": {
+			profileFlag:   "staging",
+			accountSource: "profile",
+			arg:           "456",
+			followUp:      "basecamp unspotlight 456 --profile staging",
+		},
+		"account from the URL": {
+			arg:      itemURL,
+			followUp: "basecamp unspotlight 456 --account 99999",
+		},
+		"account from the URL under --profile": {
+			profileFlag: "staging",
+			arg:         itemURL,
+			followUp:    "basecamp unspotlight 456 --profile staging --account 99999",
+		},
+		"account from --account under --profile": {
+			profileFlag:   "staging",
+			accountSource: string(config.SourceFlag),
+			arg:           "456",
+			followUp:      "basecamp unspotlight 456 --profile staging --account 99999",
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			app, _ := setupRecordingTestApp(t, stubRoute{
+				method: http.MethodPost, path: spotlightPath, status: http.StatusCreated, body: `{"id":456}`,
+			})
+			app.Flags.Profile = c.profileFlag
+			app.Config.ActiveProfile = "staging"
+			app.Config.Sources = map[string]string{}
+			if c.accountSource == "" {
+				app.Config.AccountID = ""
+			} else {
+				app.Config.Sources["account_id"] = c.accountSource
+			}
+			buf := captureSpotlightOutput(app)
+
+			require.NoError(t, executeRecordingCommand(NewSpotlightCmd(), app, c.arg))
+
+			assert.Contains(t, decodeSpotlightEnvelope(t, buf).Breadcrumbs, output.Breadcrumb{
+				Action: "unspotlight", Cmd: c.followUp, Description: "Remove the spotlight",
+			})
 		})
 	}
 }
