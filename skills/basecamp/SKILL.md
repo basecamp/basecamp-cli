@@ -10,6 +10,7 @@ triggers:
   - basecamp todos
   - basecamp subtasks
   - basecamp project
+  - project wallpaper
   - basecamp cards
   - basecamp chat
   - basecamp campfire
@@ -230,6 +231,27 @@ to-do, card, card column, check-in question, schedule entry and more.
 basecamp spotlight <id|url> --agent
 basecamp unspotlight <id|url> --agent
 ```
+
+## Project wallpaper
+
+The wallpaper is the image behind a project's pages. The `projects wallpaper`
+group sets, lays out, and removes it, for the project in `--in`/`--project` or
+the configured default:
+
+```bash
+basecamp projects wallpaper set skyline.jpg --mode tile --in "<project>" --json
+basecamp projects wallpaper mode fill --in "<project>" --json
+basecamp projects wallpaper remove --in "<project>" --json
+```
+
+- Basecamp applies the web's rules: only someone who can edit the project may
+  change it, and an agent profile is always refused (403). Say so rather than
+  retrying or reaching for `basecamp api`.
+- The CLI refuses a file of the wrong type or size before uploading; leaf help
+  names the limits. `--mode` is `fill` or `tile`, and leaving it out keeps the
+  current mode.
+- Each command returns the project. `.data.wallpaper` is `{url, mode}`, and is
+  absent when the project has none; `projects show` carries the same field.
 
 ## Content and stdin
 
