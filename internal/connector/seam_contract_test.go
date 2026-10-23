@@ -263,7 +263,7 @@ func TestIntakeReportsTheBacklogsEdgesOnItsLogger(t *testing.T) {
 	assert.EqualValues(t, 1, lines[1]["resume_at"])
 
 	assert.Equal(t, "INFO", lines[2]["level"])
-	assert.Contains(t, lines[2]["msg"], "full speed again")
+	assert.Contains(t, lines[2]["msg"], "no producers are waiting")
 	assert.EqualValues(t, 1, lines[2]["depth"])
 	assert.EqualValues(t, 3, lines[2]["pause_at"])
 	assert.EqualValues(t, 1, lines[2]["resume_at"])

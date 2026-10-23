@@ -323,7 +323,10 @@ func TestAPanickingCallbackDoesNotSilenceTheReport(t *testing.T) {
 	require.NoError(t, err)
 	var logs bytes.Buffer
 	queue.SetLogger(slog.New(slog.NewTextHandler(&logs, nil)))
-	queue.OnWarn = func(int) { panic("a warning callback panics") }
+	queue.OnWarn = func(int) {
+		assert.Contains(t, logs.String(), "the backlog reached its warning depth")
+		panic("a warning callback panics")
+	}
 
 	require.NoError(t, queue.Offer(context.Background(), 1))
 
@@ -337,6 +340,38 @@ func TestAPanickingCallbackDoesNotSilenceTheReport(t *testing.T) {
 // waits again; that is still one pause, and the resume is reported only once
 // the backlog has drained to half the pause depth. The warning clears the
 // same way, at half the warning depth.
+func TestAPauseDepthExcludesAnOfferNotYetRegisteredAsWaiting(t *testing.T) {
+	queue, err := NewQueue(2, 3)
+	require.NoError(t, err)
+	for id := range int64(3) {
+		require.NoError(t, queue.Offer(t.Context(), id))
+	}
+	// An offer preempted between stage(1) and stageWait(1) has counted its
+	// id but is not held by the full channel. A second offer must report
+	// capacity, not include that first offer in the held depth.
+	queue.stage(1)
+	paused := make(chan int, 1)
+	queue.OnPause = func(depth int) { paused <- depth }
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- queue.Offer(ctx, 4) }()
+	select {
+	case depth := <-paused:
+		assert.Equal(t, 3, depth)
+	case <-time.After(time.Second):
+		t.Fatal("the second offer did not reach the full queue")
+	}
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+	queue.stage(-1) // The preempted first offer is canceled too.
+	for range 3 {
+		_, err := queue.Take(t.Context())
+		require.NoError(t, err)
+	}
+	assert.Zero(t, queue.Depth())
+}
+
 func TestABacklogHoveringAtItsThresholdsIsReportedOnceEachWay(t *testing.T) {
 	queue, err := NewQueue(4, 8)
 	require.NoError(t, err)

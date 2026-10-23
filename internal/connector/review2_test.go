@@ -254,6 +254,7 @@ func TestQueuePauseTracksEveryBlockedOffer(t *testing.T) {
 	_, err = queue.Take(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), pauses.Load())
+	require.Eventually(t, func() bool { return resumes.Load() == 1 }, time.Second, time.Millisecond)
 	assert.Equal(t, int32(1), resumes.Load())
 }
 

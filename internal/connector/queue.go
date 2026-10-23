@@ -281,9 +281,10 @@ func (q *Queue) decide() {
 	}
 	if !q.paused && q.waiting > 0 {
 		q.paused = true
-		// The held depth: a waiting offer has counted its id but cannot put
-		// it in, so it is not part of what the queue holds.
-		q.pending = append(q.pending, queueEdge{kind: edgePause, fire: q.OnPause, depth: q.depth - q.waiting})
+		// The nonblocking send observed capacity. Other offers may have
+		// counted their ids without registering as waiters yet, so the
+		// independently staged counters cannot tell us that held depth.
+		q.pending = append(q.pending, queueEdge{kind: edgePause, fire: q.OnPause, depth: cap(q.ids)})
 	}
 	if q.paused && q.waiting == 0 && q.depth <= q.resumeAt {
 		q.paused = false
@@ -371,10 +372,10 @@ func (q *Queue) report(log *slog.Logger, edge queueEdge) {
 		log.Info("the backlog fell back below its warning depth",
 			"depth", edge.depth, "warn_at", q.warnAt, "recover_at", q.recoverAt)
 	case edgePause:
-		log.Warn("the backlog reached its pause depth; the next event waits for room, and the feed is read only as fast as admission makes room, so the backlog cannot outgrow memory. "+backlogNextStep,
+		log.Warn("the backlog reached its pause depth; at least one producer is waiting for room in the queue. "+backlogNextStep,
 			"depth", edge.depth, "pause_at", pauseAt, "resume_at", q.resumeAt)
 	case edgeResume:
-		log.Info("the backlog drained to half its pause depth; the feed is read at full speed again",
+		log.Info("the backlog drained to half its pause depth; no producers are waiting for room",
 			"depth", edge.depth, "pause_at", pauseAt, "resume_at", q.resumeAt)
 	}
 }
