@@ -54,8 +54,11 @@ func pluginVersionNotice(cmd *cobra.Command) string {
 		return ""
 	}
 	dir := agentHookNoticeDir(cmd.Context())
+	// The marker names the agent too: without a plugin data directory both
+	// agents share the fallback, and one's notice mustn't silence the other's.
 	// Valid semver holds only [0-9A-Za-z.+-], so the marker stays one name.
-	if dir == "" || !claimOnce(filepath.Join(dir, pluginVersionNoticeMarker+plugin+"-"+cli)) {
+	marker := pluginVersionNoticeMarker + pluginRootAgent(root) + "-" + plugin + "-" + cli
+	if dir == "" || !claimOnce(filepath.Join(dir, marker)) {
 		return ""
 	}
 	if cliBehind {

@@ -176,3 +176,24 @@ func TestAgentHookVersionNoticeMarkerSurvivesSnapshotCleanup(t *testing.T) {
 
 	assert.Empty(t, runAgentHookPreservingHome(t, sessionStartPayload), "the notice stays shown once")
 }
+
+// Without plugin data directories Claude Code and Codex share the fallback,
+// and each still gets its own notice once.
+func TestAgentHookVersionNoticeOncePerAgentInSharedFallback(t *testing.T) {
+	setCLIVersion(t, "0.17.0")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("BASECAMP_CACHE_DIR", "")
+	claude := filepath.Join(home, ".claude", "plugins", "cache", "37signals", "basecamp-cli", "0.14.0")
+	codex := filepath.Join(home, ".codex", "plugins", "cache", "37signals", "basecamp-cli", "0.14.0")
+
+	installPluginAt(t, "CLAUDE_PLUGIN_ROOT", claude, ".claude-plugin", "0.14.0")
+	t.Setenv("CLAUDE_PLUGIN_DATA", "")
+	assert.Contains(t, sessionStartSystemMessage(t, runAgentHookPreservingHome(t, sessionStartPayload)), "claude plugin update")
+
+	installPluginAt(t, "PLUGIN_ROOT", codex, ".codex-plugin", "0.14.0")
+	t.Setenv("PLUGIN_DATA", "")
+	assert.Contains(t, sessionStartSystemMessage(t, runAgentHookPreservingHome(t, sessionStartPayload)), "basecamp setup codex")
+	assert.Empty(t, runAgentHookPreservingHome(t, sessionStartPayload), "and each only once")
+}
