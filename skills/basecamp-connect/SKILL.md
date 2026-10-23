@@ -63,12 +63,10 @@ note the output file the harness reports:
 basecamp connect -P '<profile>'
 ```
 
-It runs until stopped, from any folder. After a few seconds its log should say
-`connector: running`. If it exited instead, explain the error
-(see *When the connector stops*), and stop. If it says `could not get the
-agent's token yet`, Basecamp's token endpoint is limiting it or failing: it
-retries on its own. Tell the person, leave it running, and start the watcher;
-restarting doesn't help.
+It runs from any folder until stopped. Wait a few seconds for
+`connector: running`. If it exits, explain why (*When the connector stops*)
+and stop. If it logs `could not get the agent's token yet`, tell the person
+it will retry; leave it running and start the watcher. Restarting won't help.
 
 Then start the watcher, also with `run_in_background: true`:
 
@@ -76,13 +74,11 @@ Then start the watcher, also with `run_in_background: true`:
 bash '${CLAUDE_SKILL_DIR}/watch-requests.sh' '<connector-output-file>' ~/.config/basecamp-connect/'handled-<profile>'
 ```
 
-It exits once request lines arrive whose `event_id` the handled file lacks.
-Read them in full from its output file, record each
-(`echo <event_id> >> ~/.config/basecamp-connect/'handled-<profile>'`), start
-the watcher again, then handle each with *For each request*. Keep one running.
-Not the Monitor tool: its watches expire, and a `grep -v` in one holds a line
-back until the next. A request that arrives while you're waiting on the person
-is not their reply.
+It exits with unhandled requests. Read every line from its output file,
+record each id (`echo <event_id> >> ~/.config/basecamp-connect/'handled-<profile>'`),
+restart the watcher, then handle each with *For each request*. Keep one running.
+Use this instead of Monitor: watches expire and `grep -v` can buffer live
+lines. A request arriving while you wait on the person is not their reply.
 
 ### 2. The request line
 
