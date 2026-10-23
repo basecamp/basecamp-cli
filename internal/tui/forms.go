@@ -186,20 +186,23 @@ type SelectOption struct {
 	Label string
 }
 
-// Select shows a single-select prompt. Escape or Ctrl+C cancels.
+// Select shows a single-select prompt. It opens on the first option, so
+// Enter alone picks it. Escape or Ctrl+C cancels.
 func Select(title string, options []SelectOption) (string, error) {
+	var result string
+	return result, runFields(selectField(title, options, &result))
+}
+
+// selectField is Select's field, bound to result.
+func selectField(title string, options []SelectOption, result *string) *huh.Select[string] {
 	huhOptions := make([]huh.Option[string], len(options))
 	for i, opt := range options {
 		huhOptions[i] = huh.NewOption(opt.Label, opt.Value)
 	}
-
-	var result string
-	field := huh.NewSelect[string]().
+	return huh.NewSelect[string]().
 		Title(title).
 		Options(huhOptions...).
-		Value(&result)
-
-	return result, runFields(field)
+		Value(result)
 }
 
 // SelectWithDescription shows a select prompt with descriptions. Escape or Ctrl+C cancels.

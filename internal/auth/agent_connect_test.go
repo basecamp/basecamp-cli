@@ -550,6 +550,7 @@ func TestConnectAgentReportsADecline(t *testing.T) {
 	_, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, newTestClock()))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "declined")
+	assert.ErrorIs(t, err, ErrNoAgentConnection, "a decline connects no agent, so a caller can offer the person instead")
 	assert.Len(t, as.calls(&as.pollForms), 1, "a decline ends the ceremony")
 	assertNoAgentCredential(t, m)
 }
@@ -563,6 +564,7 @@ func TestConnectAgentReportsAnExpiredCode(t *testing.T) {
 	_, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, newTestClock()))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "expired")
+	assert.NotErrorIs(t, err, ErrNoAgentConnection, "an unanswered code is not Basecamp declining an agent")
 	// The lifetime is the server's to choose, so the remedy must not
 	// promise one this code may not have had.
 	var e *output.Error
@@ -710,6 +712,7 @@ func TestConnectAgentReportsARefusedIntake(t *testing.T) {
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
 	assert.Contains(t, e.Hint, "not issuing agent connections")
+	assert.ErrorIs(t, err, ErrNoAgentConnection)
 	assert.Empty(t, as.calls(&as.pollForms))
 }
 

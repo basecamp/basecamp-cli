@@ -362,3 +362,29 @@ func TestConfirmFieldAnswersFromTheKeyboard(t *testing.T) {
 		assert.Equal(t, huh.NextField(), last(), "keys %v", tc.keys)
 	}
 }
+
+// A select opens on its first option, so Enter alone picks it, and the
+// arrows move off it. Callers that recommend a choice (auth login offers
+// "Your agent (recommended)" first) rely on this.
+func TestSelectFieldAnsweredWithEnterIsItsFirstOption(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	options := []SelectOption{{Value: "agent", Label: "Your agent"}, {Value: "me", Label: "Yourself"}}
+	enter := tea.KeyMsg{Type: tea.KeyEnter}
+	for _, tc := range []struct {
+		keys []tea.KeyMsg
+		want string
+	}{
+		{keys: []tea.KeyMsg{enter}, want: "agent"},
+		{keys: []tea.KeyMsg{{Type: tea.KeyDown}, enter}, want: "me"},
+		{keys: []tea.KeyMsg{{Type: tea.KeyDown}, {Type: tea.KeyUp}, enter}, want: "agent"},
+	} {
+		var result string
+		field := selectField("Connect this computer as", options, &result)
+		field.WithKeyMap(escKeyMap())
+		field.Focus()
+		for _, k := range tc.keys {
+			field.Update(k)
+		}
+		assert.Equal(t, tc.want, result, "keys %v", tc.keys)
+	}
+}
