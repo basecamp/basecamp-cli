@@ -722,4 +722,18 @@ func TestAuthLoginRefusesAnAgentProfileOnAnotherBasecampAfterAsking(t *testing.T
 		require.NoError(t, err, out)
 		assert.Contains(t, out, `Connected profile "agent" to a Basecamp agent`)
 	})
+	// Having talked to the agent profile's Basecamp, this process can't
+	// sign the person in on the first one: no offer, just the refusal and
+	// its remedy, which runs in a process of its own.
+	t.Run("--as agent, no agent", func(t *testing.T) {
+		s, app, _ := setup(t)
+		s.pollStatus, s.pollBody = 400, `{"error":"access_denied"}`
+		prompter := answerLogin(t, &fakeLoginPrompter{confirm: true})
+
+		_, err := runConnectAsLogin(t, app, "--as", "agent")
+		assertNoAgentRefusal(t, err)
+		assert.Empty(t, prompter.confirmed)
+		_, deviceAuths, _ := s.counts()
+		assert.Zero(t, deviceAuths)
+	})
 }
