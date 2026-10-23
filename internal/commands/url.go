@@ -185,12 +185,12 @@ func runURLParse(app *appctx.App, url string) error {
 	if occurrenceDate != "" {
 		return app.OK(result,
 			output.WithSummary(summary),
-			output.WithNotice("recording_id is the whole series. To comment on or boost just this occurrence, "+
-				"use its own ID, which basecamp show <url> prints"),
+			output.WithNotice("recording_id is the whole series. To comment on just this occurrence, "+
+				"use its own ID, which basecamp schedule show <url> prints"),
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
 					Action:      "show",
-					Cmd:         fmt.Sprintf("basecamp show %s", url),
+					Cmd:         fmt.Sprintf("basecamp schedule show %s", url),
 					Description: "View the occurrence and its own ID",
 				},
 				output.Breadcrumb{

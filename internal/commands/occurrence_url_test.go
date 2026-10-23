@@ -305,8 +305,10 @@ func TestOccurrenceBreadcrumbsDropCommentFragment(t *testing.T) {
 	}
 }
 
+// A comment link reads the occurrence too, which is why url parse and the
+// refusal hint send callers here for the occurrence's own ID.
 func TestScheduleShowOccurrenceURLReadsItsComments(t *testing.T) {
-	for _, target := range []string{occurrenceURL, occurrenceEditURL} {
+	for _, target := range []string{occurrenceURL, occurrenceEditURL, occurrenceURL + "#__recording_555"} {
 		t.Run(target, func(t *testing.T) {
 			requests, out, err := runOccurrenceCommand(t, NewScheduleCmd(), "show", target, "--comments")
 

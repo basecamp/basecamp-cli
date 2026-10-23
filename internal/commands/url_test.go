@@ -431,7 +431,7 @@ func TestURLParseOccurrenceURL(t *testing.T) {
 	for _, b := range resp.Breadcrumbs {
 		cmds = append(cmds, b.Cmd)
 	}
-	assert.Contains(t, cmds, "basecamp show "+url)
+	assert.Contains(t, cmds, "basecamp schedule show "+url)
 	for _, c := range cmds {
 		assert.NotContains(t, c, "comments create 789", "a comment on the series ID would miss the occurrence")
 	}
@@ -440,6 +440,22 @@ func TestURLParseOccurrenceURL(t *testing.T) {
 func TestURLParseOmitsOccurrenceDateForOtherURLs(t *testing.T) {
 	resp, err := parseURLWithOutput(t, "https://3.basecamp.com/2914079/buckets/41746046/schedule_entries/789")
 	require.NoError(t, err)
-	assert.Nil(t, getParsedURL(t, resp).OccurrenceDate)
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok, "want an object, got %T", resp.Data)
+	assert.NotContains(t, data, "occurrence_date")
 	assert.Empty(t, resp.Notice)
+}
+
+// show resolves a comment fragment first, so the occurrence breadcrumb must
+// lead somewhere that reads the occurrence even from a comment link.
+func TestURLParseOccurrenceCommentURL(t *testing.T) {
+	url := "https://3.basecamp.com/2914079/buckets/41746046/schedule_entries/789/occurrences/20261022#__recording_555"
+	resp, err := parseURLWithOutput(t, url)
+	require.NoError(t, err)
+
+	parsed := getParsedURL(t, resp)
+	require.NotNil(t, parsed.CommentID)
+	assert.Equal(t, "555", *parsed.CommentID)
+	require.NotEmpty(t, resp.Breadcrumbs)
+	assert.Equal(t, "basecamp schedule show "+url, resp.Breadcrumbs[0].Cmd)
 }
