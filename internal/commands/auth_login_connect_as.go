@@ -285,13 +285,16 @@ func runLoginAsAgent(cmd *cobra.Command, app *appctx.App, l browserLogin) error 
 		fmt.Fprintln(human, r.Muted.Render(fmt.Sprintf("Profile %q already holds an agent connection. Approving replaces the credential stored here.", name)))
 	}
 
-	// What was discovered was discovered for the base URL the login
-	// started on. A profile bound to another Basecamp has its own
-	// authorization server, so the ceremony discovers it again rather than
-	// connect against one Basecamp and store under another.
-	provider := l.provider
-	if config.NormalizeBaseURL(app.Config.BaseURL) != config.NormalizeBaseURL(before.BaseURL) {
-		provider = nil
+	// Asking meant discovering first, for the base URL the login started
+	// on, and that also fixed the address policy of this process's OAuth
+	// client to it. A profile bound to another Basecamp needs both of its
+	// own, so it is refused before anything is requested, with the command
+	// that starts on it. Without the question nothing was discovered yet,
+	// and the ceremony discovers for the profile's own Basecamp.
+	if l.provider != nil && config.NormalizeBaseURL(app.Config.BaseURL) != config.NormalizeBaseURL(before.BaseURL) {
+		return output.ErrUsageHint(
+			fmt.Sprintf("Profile %q is on %s, not %s where this login started", name, app.Config.BaseURL, before.BaseURL),
+			"Connect your agent there: basecamp auth login --as agent -P "+name)
 	}
 
 	err = connectAgentProfile(cmd, app, agentConnectFlags{
@@ -301,7 +304,7 @@ func runLoginAsAgent(cmd *cobra.Command, app *appctx.App, l browserLogin) error 
 		noBrowser:  l.noBrowser || l.remote || l.deviceCode,
 		local:      l.local,
 		machine:    machine,
-		provider:   provider,
+		provider:   l.provider,
 		sayDefault: true,
 	})
 	if !errors.Is(err, auth.ErrNoAgentConnection) {

@@ -683,22 +683,43 @@ func TestAuthLoginAsksBeforeRefusingANewProfile(t *testing.T) {
 	})
 }
 
-// The discovery the question was asked after belongs to the base URL the
-// login started on. When choosing the agent moves the login onto a profile
-// bound to another Basecamp, the ceremony discovers again for it.
-func TestAuthLoginRediscoversForAnAgentProfileOnAnotherBasecamp(t *testing.T) {
-	s := startConnectAsServer(t)
-	app := connectAsApp(t, s, &config.Config{})
-	other := strings.Replace(s.srv.URL, "127.0.0.1", "localhost", 1)
-	require.NotEqual(t, s.srv.URL, other)
-	require.NoError(t, os.MkdirAll(config.GlobalConfigDir(), 0o700))
-	require.NoError(t, os.WriteFile(config.GlobalConfigDir()+"/config.json",
-		[]byte(`{"profiles":{"agent":{"base_url":"`+other+`","account_id":"999"}}}`), 0o600))
-	app.Config.Profiles = map[string]*config.ProfileConfig{"agent": {BaseURL: other, AccountID: "999"}}
-	answerLogin(t, &fakeLoginPrompter{choice: connectAsAgent})
+// Asking means discovering for the base URL the login started on, which
+// also fixes this process's OAuth client to it. When choosing the agent
+// would move the login onto a profile bound to another Basecamp, it is
+// refused before anything is requested, naming the command that starts
+// there. --as agent asks nothing and discovers nothing first, so it
+// connects that profile on its own Basecamp.
+func TestAuthLoginRefusesAnAgentProfileOnAnotherBasecampAfterAsking(t *testing.T) {
+	setup := func(t *testing.T) (*connectAsServer, *appctx.App, string) {
+		s := startConnectAsServer(t)
+		app := connectAsApp(t, s, &config.Config{})
+		other := strings.Replace(s.srv.URL, "127.0.0.1", "localhost", 1)
+		require.NotEqual(t, s.srv.URL, other)
+		require.NoError(t, os.MkdirAll(config.GlobalConfigDir(), 0o700))
+		require.NoError(t, os.WriteFile(config.GlobalConfigDir()+"/config.json",
+			[]byte(`{"profiles":{"agent":{"base_url":"`+other+`","account_id":"999"}}}`), 0o600))
+		app.Config.Profiles = map[string]*config.ProfileConfig{"agent": {BaseURL: other, AccountID: "999"}}
+		return s, app, other
+	}
 
-	out, err := runConnectAsLogin(t, app)
-	require.NoError(t, err, out)
-	assert.Equal(t, 2, strings.Count(out, "Authenticating via"), "once for the question, again for the agent's Basecamp")
-	assert.Contains(t, out, `Connected profile "agent" to a Basecamp agent`)
+	t.Run("asked", func(t *testing.T) {
+		s, app, other := setup(t)
+		answerLogin(t, &fakeLoginPrompter{choice: connectAsAgent})
+
+		_, err := runConnectAsLogin(t, app)
+		var e *output.Error
+		require.ErrorAs(t, err, &e)
+		assert.Equal(t, fmt.Sprintf("Profile %q is on %s, not %s where this login started", "agent", other, s.srv.URL), e.Message)
+		assert.Equal(t, "Connect your agent there: basecamp auth login --as agent -P agent", e.Hint)
+		intakes, deviceAuths, _ := s.counts()
+		assert.Zero(t, intakes+deviceAuths)
+	})
+	t.Run("--as agent", func(t *testing.T) {
+		_, app, _ := setup(t)
+		answerLogin(t, &fakeLoginPrompter{})
+
+		out, err := runConnectAsLogin(t, app, "--as", "agent")
+		require.NoError(t, err, out)
+		assert.Contains(t, out, `Connected profile "agent" to a Basecamp agent`)
+	})
 }
