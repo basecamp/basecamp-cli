@@ -413,3 +413,33 @@ func assertStringPtr(t *testing.T, got *string, want, name string) {
 	require.NotNil(t, got, "%s is nil, want %q", name, want)
 	assert.Equal(t, want, *got, "%s mismatch", name)
 }
+
+// An occurrence URL's recording_id is the whole series, so the response says
+// so and points at the occurrence instead of suggesting a comment on the series.
+func TestURLParseOccurrenceURL(t *testing.T) {
+	url := "https://3.basecamp.com/2914079/buckets/41746046/schedule_entries/789/occurrences/20261022"
+	resp, err := parseURLWithOutput(t, url)
+	require.NoError(t, err)
+
+	parsed := getParsedURL(t, resp)
+	require.NotNil(t, parsed.OccurrenceDate)
+	assert.Equal(t, "20261022", *parsed.OccurrenceDate)
+	assert.Equal(t, "789", *parsed.RecordingID)
+	assert.Contains(t, resp.Notice, "whole series")
+
+	cmds := make([]string, 0, len(resp.Breadcrumbs))
+	for _, b := range resp.Breadcrumbs {
+		cmds = append(cmds, b.Cmd)
+	}
+	assert.Contains(t, cmds, "basecamp show "+url)
+	for _, c := range cmds {
+		assert.NotContains(t, c, "comments create 789", "a comment on the series ID would miss the occurrence")
+	}
+}
+
+func TestURLParseOmitsOccurrenceDateForOtherURLs(t *testing.T) {
+	resp, err := parseURLWithOutput(t, "https://3.basecamp.com/2914079/buckets/41746046/schedule_entries/789")
+	require.NoError(t, err)
+	assert.Nil(t, getParsedURL(t, resp).OccurrenceDate)
+	assert.Empty(t, resp.Notice)
+}
