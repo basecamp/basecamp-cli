@@ -320,7 +320,11 @@ indistinguishable from a real error.
 // takes. With no way to browse bookmarkable recordings from this group, a
 // pasted URL is the natural way to name one.
 func bookmarkRecordingID(arg string) (int64, error) {
-	id, err := strconv.ParseInt(extractID(arg), 10, 64)
+	idStr, err := extractID(arg)
+	if err != nil {
+		return 0, err
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		return 0, output.ErrUsageHint(
 			fmt.Sprintf("%q is not a recording id or Basecamp URL", arg),

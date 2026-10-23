@@ -94,7 +94,10 @@ You can pass either an ID or a Basecamp URL:
 func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	id, resolvedType := resolveAttachmentTarget(arg, recordType)
+	id, resolvedType, err := resolveAttachmentTarget(arg, recordType)
+	if err != nil {
+		return err
+	}
 
 	// Validate type early (before account check) for better error messages
 	if !isGenericType(resolvedType) && typeToEndpoint(resolvedType, id) == "" {
@@ -229,7 +232,10 @@ Options:
 			}
 
 			// Resolve target — reuse the same URL/comment parsing as list
-			idStr, resolvedType := resolveAttachmentTarget(args[0], recordType)
+			idStr, resolvedType, err := resolveAttachmentTarget(args[0], recordType)
+			if err != nil {
+				return err
+			}
 
 			// Validate type early (same guard as list)
 			if !isGenericType(resolvedType) && typeToEndpoint(resolvedType, idStr) == "" {
@@ -536,8 +542,11 @@ func extractContentField(data map[string]any) string {
 // resolveAttachmentTarget extracts the recording ID and type from a raw
 // argument (plain ID or Basecamp URL) and an optional explicit type hint.
 // Prefers CommentID when present and type is compatible.
-func resolveAttachmentTarget(arg, recordType string) (id, resolvedType string) {
-	id = extractID(arg)
+func resolveAttachmentTarget(arg, recordType string) (id, resolvedType string, err error) {
+	id, err = extractID(arg)
+	if err != nil {
+		return "", "", err
+	}
 	resolvedType = recordType
 
 	if parsed := urlarg.Parse(arg); parsed != nil {
@@ -554,7 +563,7 @@ func resolveAttachmentTarget(arg, recordType string) (id, resolvedType string) {
 		}
 	}
 
-	return id, resolvedType
+	return id, resolvedType, nil
 }
 
 // normalizeShowType maps attachment type aliases to canonical types that

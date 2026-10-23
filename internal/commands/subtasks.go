@@ -567,7 +567,11 @@ func subtaskBreadcrumbs(subtask *basecamp.CardStep) []output.Breadcrumb {
 // subtaskParentID resolves the <todo-or-card-id|url> positional: the id of the
 // to-do or card itself, never a fragment inside its URL.
 func subtaskParentID(arg string) (int64, error) {
-	id, err := strconv.ParseInt(extractID(arg), 10, 64)
+	idStr, err := extractID(arg)
+	if err != nil {
+		return 0, err
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil || id <= 0 {
 		return 0, output.ErrUsageHint(
 			fmt.Sprintf("%q is not a to-do or card id or Basecamp URL", arg),

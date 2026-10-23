@@ -796,7 +796,10 @@ You can pass either a card ID or a Basecamp URL:
 		}
 
 		// Extract ID from URL if provided
-		cardIDStr := extractID(args[0])
+		cardIDStr, err := extractID(args[0])
+		if err != nil {
+			return err
+		}
 
 		cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 		if err != nil {
@@ -1171,7 +1174,10 @@ You can pass either a card ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			cardIDStr, urlProjectID := extractWithProject(args[0])
+			cardIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
@@ -1365,7 +1371,10 @@ the project doesn't need one.`,
 				return err
 			}
 
-			cardIDStr, urlProjectID := extractWithProject(args[0])
+			cardIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
@@ -1709,7 +1718,10 @@ func findWormholeByDestinationColumn(wormholes []basecamp.Wormhole, columnID int
 		if wormhole.DestinationURL == nil {
 			continue
 		}
-		id := extractID(*wormhole.DestinationURL)
+		id, err := extractID(*wormhole.DestinationURL)
+		if err != nil {
+			continue
+		}
 		if parsed, err := strconv.ParseInt(id, 10, 64); err == nil && parsed == columnID {
 			return wormhole
 		}
@@ -1774,7 +1786,10 @@ You can pass either a card ID or a Basecamp URL:
 				return err
 			}
 
-			cardIDStr, urlProjectID := extractWithProject(args[0])
+			cardIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid card ID")
@@ -2082,7 +2097,10 @@ You can pass either a column ID or a Basecamp URL:
 			}
 
 			// Extract ID and project from URL if provided
-			columnIDStr, urlProjectID := extractWithProject(args[0])
+			columnIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -2251,7 +2269,10 @@ You can pass either a column ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			columnIDStr := extractID(args[0])
+			columnIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -2313,7 +2334,10 @@ You can pass either a column ID or a Basecamp URL:
 			}
 
 			// Extract ID and project from URL if provided
-			columnIDStr, urlProjectID := extractWithProject(args[0])
+			columnIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Column ID must be numeric")
@@ -2400,7 +2424,10 @@ You can pass either a column ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			columnIDStr := extractID(args[0])
+			columnIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -2438,7 +2465,10 @@ You can pass either a column ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			columnIDStr := extractID(args[0])
+			columnIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -2476,7 +2506,10 @@ You can pass either a column ID or a Basecamp URL:
 			}
 
 			// Extract ID and project from URL if provided
-			columnIDStr, urlProjectID := extractWithProject(args[0])
+			columnIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -2522,7 +2555,10 @@ You can pass either a column ID or a Basecamp URL:
 			}
 
 			// Extract ID and project from URL if provided
-			columnIDStr, urlProjectID := extractWithProject(args[0])
+			columnIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -2575,7 +2611,10 @@ You can pass either a column ID or a Basecamp URL:
 			}
 
 			// Extract ID and project from URL if provided
-			columnIDStr, urlProjectID := extractWithProject(args[0])
+			columnIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
@@ -2791,7 +2830,10 @@ func newCardsWormholesUpdateCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			wormholeIDStr, urlProjectID := extractWithProject(args[0])
+			wormholeIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 			wormholeID, err := strconv.ParseInt(wormholeIDStr, 10, 64)
 			if err != nil || wormholeID <= 0 {
 				return output.ErrUsage("Invalid wormhole ID")
@@ -2838,7 +2880,10 @@ func newCardsWormholesDeleteCmd(project *string) *cobra.Command {
 				return err
 			}
 
-			wormholeIDStr, urlProjectID := extractWithProject(args[0])
+			wormholeIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 			wormholeID, err := strconv.ParseInt(wormholeIDStr, 10, 64)
 			if err != nil || wormholeID <= 0 {
 				return output.ErrUsage("Invalid wormhole ID")
@@ -3083,7 +3128,10 @@ You can pass either a step ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			stepIDStr := extractID(args[0])
+			stepIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")
@@ -3148,7 +3196,10 @@ You can pass either a step ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			stepIDStr := extractID(args[0])
+			stepIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")
@@ -3185,7 +3236,10 @@ You can pass either a step ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			stepIDStr := extractID(args[0])
+			stepIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")
@@ -3230,7 +3284,10 @@ You can pass either a step ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			stepIDStr := extractID(args[0])
+			stepIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Step ID must be numeric")
@@ -3287,7 +3344,10 @@ You can pass either a step ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			stepIDStr := extractID(args[0])
+			stepIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 			stepID, err := strconv.ParseInt(stepIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid step ID")

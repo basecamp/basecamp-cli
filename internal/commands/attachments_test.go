@@ -72,7 +72,8 @@ func TestResolveAttachmentTarget(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id, typ := resolveAttachmentTarget(tt.arg, tt.typeHint)
+			id, typ, err := resolveAttachmentTarget(tt.arg, tt.typeHint)
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantID, id)
 			assert.Equal(t, tt.wantType, typ)
 		})

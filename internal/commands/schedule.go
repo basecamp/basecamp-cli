@@ -639,7 +639,10 @@ You can pass either an entry ID or a Basecamp URL:
 
 			// Extract ID and project from URL if provided. Purely syntactic,
 			// so it precedes the stdin read like every other target-ID check.
-			entryID, urlProjectID := extractWithProject(args[0])
+			entryID, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			// This command used to send a malformed ID to the server as 0 —
 			// the ParseInt further down discarded its error. Reject it here

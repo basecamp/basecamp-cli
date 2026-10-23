@@ -558,27 +558,43 @@ func ensurePersonInProject(cmd *cobra.Command, app *appctx.App, projectID string
 // Instead of having to manually extract the ID:
 //
 //	basecamp todos show 789 --in 456
-func extractID(arg string) string {
-	return urlarg.ExtractID(arg)
+func extractID(arg string) (string, error) {
+	id, err := urlarg.ExtractID(arg)
+	return id, occurrenceUsage(err)
 }
 
 // extractWithProject extracts both recording ID and project ID from an argument.
 // If the argument is a Basecamp URL, extracts both; if the URL contains a project,
 // it can be used to auto-populate the --in flag.
 // Returns (recordingID, projectID). If projectID is empty, it wasn't in the URL.
-func extractWithProject(arg string) (recordingID, projectID string) {
-	return urlarg.ExtractWithProject(arg)
+func extractWithProject(arg string) (recordingID, projectID string, err error) {
+	recordingID, projectID, err = urlarg.ExtractWithProject(arg)
+	return recordingID, projectID, occurrenceUsage(err)
 }
 
 // extractCommentWithProject extracts a comment ID and project ID from an argument.
 // For URLs with a fragment (#__recording_N), returns the comment ID instead of the recording ID.
-func extractCommentWithProject(arg string) (id, projectID string) {
-	return urlarg.ExtractCommentWithProject(arg)
+func extractCommentWithProject(arg string) (id, projectID string, err error) {
+	id, projectID, err = urlarg.ExtractCommentWithProject(arg)
+	return id, projectID, occurrenceUsage(err)
 }
 
 // extractIDs extracts IDs from multiple arguments, handling URLs.
-func extractIDs(args []string) []string {
-	return urlarg.ExtractIDs(args)
+func extractIDs(args []string) ([]string, error) {
+	ids, err := urlarg.ExtractIDs(args)
+	return ids, occurrenceUsage(err)
+}
+
+// occurrenceUsage turns the extractors' refusal of an occurrence URL into a
+// usage error that names the entry, the one thing the CLI can act on.
+func occurrenceUsage(err error) error {
+	var occ *urlarg.OccurrenceError
+	if errors.As(err, &occ) {
+		return output.ErrUsageHint("That URL names one occurrence of a recurring event",
+			fmt.Sprintf("Basecamp's API cannot change a single occurrence. Pass the event's ID, %s, to act on the whole series, "+
+				"or see the occurrence with basecamp show <url>", occ.EntryID))
+	}
+	return err
 }
 
 // requireOneParseableTarget rejects a recording argument whose every
@@ -587,7 +603,11 @@ func extractIDs(args []string) []string {
 // nothing — and extractIDs is pure, so that is decidable from the argument
 // alone, before a "-" drains the producer.
 func requireOneParseableTarget(arg string) error {
-	for _, id := range extractIDs([]string{arg}) {
+	ids, err := extractIDs([]string{arg})
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
 		if _, err := strconv.ParseInt(id, 10, 64); err == nil {
 			return nil
 		}
@@ -811,7 +831,10 @@ func batchMentionScope(cmd *cobra.Command, app *appctx.App, targets string) name
 		if part == "" {
 			continue
 		}
-		recordingID, projectID := extractWithProject(part)
+		recordingID, projectID, err := extractWithProject(part)
+		if err != nil {
+			continue
+		}
 		if _, err := strconv.ParseInt(recordingID, 10, 64); err != nil {
 			continue
 		}

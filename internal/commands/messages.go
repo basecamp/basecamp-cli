@@ -365,7 +365,10 @@ You can pass either a message ID or a Basecamp URL:
 		}
 
 		// Extract ID from URL if provided
-		messageIDStr := extractID(args[0])
+		messageIDStr, err := extractID(args[0])
+		if err != nil {
+			return err
+		}
 
 		messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 		if err != nil {
@@ -678,7 +681,10 @@ anything else is a name matched against the message's project. List a project's 
 			}
 
 			// Extract ID from URL if provided
-			messageIDStr, urlProjectID := extractWithProject(args[0])
+			messageIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
@@ -782,7 +788,10 @@ You can pass either a message ID or a Basecamp URL:
 				return err
 			}
 
-			messageIDStr := extractID(args[0])
+			messageIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
@@ -836,7 +845,10 @@ You can pass either a message ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			messageIDStr := extractID(args[0])
+			messageIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {
@@ -890,7 +902,10 @@ You can pass either a message ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			messageIDStr := extractID(args[0])
+			messageIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 
 			messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 			if err != nil {

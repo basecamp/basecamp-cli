@@ -59,7 +59,10 @@ func runSubscriptionsShow(cmd *cobra.Command, recordingIDStr string) error {
 	}
 
 	// Extract ID from URL if provided
-	recordingIDStr = extractID(recordingIDStr)
+	recordingIDStr, err := extractID(recordingIDStr)
+	if err != nil {
+		return err
+	}
 
 	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 	if err != nil {
@@ -111,7 +114,10 @@ You can pass either an ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			recordingIDStr := extractID(args[0])
+			recordingIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {
@@ -160,7 +166,10 @@ You can pass either an ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			recordingIDStr := extractID(args[0])
+			recordingIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {
@@ -241,7 +250,10 @@ func runSubscriptionsUpdate(cmd *cobra.Command, args []string, peopleIDs, mode s
 	}
 
 	// Extract ID from URL if provided
-	recordingIDStr := extractID(args[0])
+	recordingIDStr, err := extractID(args[0])
+	if err != nil {
+		return err
+	}
 
 	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 	if err != nil {

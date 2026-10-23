@@ -168,7 +168,11 @@ run without checking first.
 // takes. With no way to browse bubble-uppable recordings from this group, a
 // pasted URL is the natural way to name one.
 func bubbleUpRecordingID(arg string) (int64, error) {
-	id, err := strconv.ParseInt(extractID(arg), 10, 64)
+	idStr, err := extractID(arg)
+	if err != nil {
+		return 0, err
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil || id <= 0 {
 		return 0, output.ErrUsageHint(
 			fmt.Sprintf("%q is not a recording id or Basecamp URL", arg),

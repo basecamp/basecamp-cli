@@ -337,7 +337,10 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, ne
 	if followComment {
 		extract = extractCommentWithProject
 	}
-	recordingIDStr, _ = extract(recordingIDStr)
+	recordingIDStr, _, err := extract(recordingIDStr)
+	if err != nil {
+		return err
+	}
 
 	// Parse recording ID
 	recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
@@ -411,7 +414,10 @@ You can pass either an ID or a Basecamp URL:
 			}
 
 			// Extract ID from URL if provided
-			recordingIDStr := extractID(args[0])
+			recordingIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {

@@ -509,7 +509,11 @@ func newCheckinsQuestionAnswerersCmd() *cobra.Command {
 
 // checkinsQuestionID resolves the <id|url> positional the question verbs take.
 func checkinsQuestionID(arg string) (int64, error) {
-	id, err := strconv.ParseInt(extractID(arg), 10, 64)
+	idStr, err := extractID(arg)
+	if err != nil {
+		return 0, err
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		return 0, output.ErrUsageHint(
 			fmt.Sprintf("%q is not a question id or Basecamp URL", arg),
@@ -548,7 +552,10 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string, 
 	}
 
 	// Extract ID and project from URL if provided
-	questionIDStr, urlProjectID := extractWithProject(questionIDStr)
+	questionIDStr, urlProjectID, err := extractWithProject(questionIDStr)
+	if err != nil {
+		return err
+	}
 
 	// Resolve project - use URL > flag > config, with interactive fallback
 	projectID := project
@@ -769,7 +776,10 @@ You can pass either a question ID or a Basecamp URL:
 			}
 
 			// Extract ID and project from URL if provided
-			questionIDStr, urlProjectID := extractWithProject(args[0])
+			questionIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			app := appctx.FromContext(cmd.Context())
 
@@ -977,7 +987,10 @@ func runCheckinsAnswers(cmd *cobra.Command, app *appctx.App, project, questionAr
 	}
 
 	// Extract ID and project from URL if provided
-	questionIDStr, urlProjectID := extractWithProject(questionArg)
+	questionIDStr, urlProjectID, err := extractWithProject(questionArg)
+	if err != nil {
+		return err
+	}
 
 	// Resolve project - use URL > flag > config, with interactive fallback
 	projectID := project
@@ -1213,7 +1226,10 @@ func runCheckinsAnswerShow(cmd *cobra.Command, project, answerIDStr string, cf *
 	}
 
 	// Extract ID and project from URL if provided
-	answerIDStr, urlProjectID := extractWithProject(answerIDStr)
+	answerIDStr, urlProjectID, err := extractWithProject(answerIDStr)
+	if err != nil {
+		return err
+	}
 
 	// Resolve project - use URL > flag > config, with interactive fallback
 	projectID := project
@@ -1432,7 +1448,10 @@ You can pass either an answer ID or a Basecamp URL:
 			}
 
 			// Extract ID and project from URL if provided
-			answerIDStr, urlProjectID := extractWithProject(args[0])
+			answerIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			// Decidable from the arguments alone, so it precedes the read; the
 			// project-resolution path parses it again once the project is known.
