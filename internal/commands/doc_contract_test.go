@@ -2,12 +2,15 @@ package commands_test
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/basecamp/basecamp-cli/internal/cli"
 )
@@ -77,6 +80,33 @@ func TestBasecampSkillStaysDiscoveryFirstAndFocused(t *testing.T) {
 	assert.Contains(t, content, "source of truth")
 	assert.NotContains(t, content, "## Resource Reference")
 	assert.NotContains(t, content, "## Quick Reference")
+}
+
+// TestSkillDescriptionsFitAgentSkillsSpec keeps skill metadata portable across
+// consumers. Count parsed YAML characters, not source bytes or wrapping:
+// https://agentskills.io/specification#description-field
+func TestSkillDescriptionsFitAgentSkillsSpec(t *testing.T) {
+	paths, err := filepath.Glob("../../skills/*/SKILL.md")
+	require.NoError(t, err)
+	require.NotEmpty(t, paths)
+
+	for _, path := range paths {
+		t.Run(filepath.Base(filepath.Dir(path)), func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+			parts := strings.SplitN(string(data), "---", 3)
+			require.Len(t, parts, 3)
+			require.Empty(t, parts[0], "skill must start with YAML frontmatter")
+
+			var frontmatter struct {
+				Description string `yaml:"description"`
+			}
+			require.NoError(t, yaml.Unmarshal([]byte(parts[1]), &frontmatter))
+			require.NotEmpty(t, strings.TrimSpace(frontmatter.Description))
+			assert.LessOrEqual(t, utf8.RuneCountInString(frontmatter.Description), 1024,
+				"keep routing cues in the description and workflow details in the body")
+		})
+	}
 }
 
 // findCommand traverses the command tree to find a command by its full path.

@@ -103,6 +103,21 @@ make test-e2e
 BASECAMP_BIN=./bin/basecamp bats e2e/
 ```
 
+## Skill descriptions
+
+Keep each skill's parsed YAML `description` between 1 and 1,024 characters,
+including whitespace, as required by the
+[Agent Skills specification](https://agentskills.io/specification#description-field).
+Use it for what the skill does and when to load it; keep workflow details in the
+body. `TestSkillDescriptionsFitAgentSkillsSpec` checks every `skills/*/SKILL.md`
+during the normal unit tests.
+
+This is a cross-agent portability requirement.
+[Anthropic's skill validator](https://github.com/anthropics/skills/blob/1ed29a03dc852d30fa6ef2ca53a67dc2c2c2c563/skills/skill-creator/scripts/quick_validate.py)
+rejects descriptions over it. That validator is not proof that Claude Code's
+runtime warns, truncates, or rejects identically; do not rely on a particular
+consumer accepting an overlong description.
+
 ## Questions?
 
 Open an issue for questions about contributing.
