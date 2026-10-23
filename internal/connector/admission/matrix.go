@@ -197,6 +197,6 @@ const (
 	// internal/connector Intake.sweepBlockedRetries). A day is the right bound
 	// for a failing server, which is not coming back on its own after one; a
 	// broken connect.json is a local file, and an operator away for a week is
-	// ordinary. `basecamp connect redispatch <id>` still runs one at once.
+	// ordinary.
 	ReasonConfigUnreadable Reason = "config_unreadable"
 )
