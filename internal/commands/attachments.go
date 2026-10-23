@@ -438,12 +438,12 @@ func isGenericType(recordType string) bool {
 	}
 }
 
-// shouldSuggestType reports whether the --type usage hint is appropriate
-// for the current recordType. It fires only when no explicit type was
-// provided. The "line"/"lines"/"replies" aliases route through the same
-// generic /recordings lookup for parent discovery, but the user *did*
-// pass --type — telling those callers to "specify --type" is misleading.
-func shouldSuggestType(recordType string) bool {
+// namesNoType reports whether recordType leaves the item's type open: no
+// --type, or one meaning any recording. The "line"/"lines"/"replies" aliases
+// route through the same generic /recordings lookup for parent discovery,
+// but they name a type, so telling those callers to "specify --type" is
+// misleading.
+func namesNoType(recordType string) bool {
 	switch recordType {
 	case "", "recording", "recordings":
 		return true
@@ -479,7 +479,7 @@ func fetchAttachmentItem(cmd *cobra.Command, app *appctx.App, target attachmentT
 		// "Resource not found". Only fires when no explicit type was
 		// provided — a 404 under --type line|replies means the ID is
 		// wrong, not that --type is missing.
-		if shouldSuggestType(recordType) {
+		if namesNoType(recordType) {
 			var sdkErr *basecamp.Error
 			if errors.As(err, &sdkErr) && sdkErr.Code == basecamp.CodeNotFound {
 				return nil, output.ErrUsageHint(
@@ -491,7 +491,7 @@ func fetchAttachmentItem(cmd *cobra.Command, app *appctx.App, target attachmentT
 		return nil, convertSDKError(err)
 	}
 	if resp.StatusCode == http.StatusNoContent {
-		if shouldSuggestType(recordType) {
+		if namesNoType(recordType) {
 			return nil, output.ErrUsageHint(
 				fmt.Sprintf("Item %s not found or type required", id),
 				genericLookupTypeHint,
@@ -577,7 +577,9 @@ func resolveAttachmentTarget(arg, recordType string) (attachmentTarget, error) {
 		}
 		return attachmentTarget{id: parsed.CommentID, recordType: recordType}, nil
 	}
-	if parsed != nil && recordType == "" {
+	// Left open, the type would be looked up by the event's ID and read the
+	// whole series, so an occurrence URL takes its type from the URL.
+	if parsed != nil && (recordType == "" || (parsed.OccurrenceDate != "" && namesNoType(recordType))) {
 		recordType = parsed.Type
 	}
 	if parsed != nil && parsed.OccurrenceDate != "" && isScheduleEntryType(recordType) {

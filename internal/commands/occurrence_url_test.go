@@ -131,6 +131,7 @@ var refusedOccurrenceCases = []occurrenceCase{
 	{"boost create", NewBoostsCmd, "create %s yes"},
 	{"subscriptions subscribe", NewSubscriptionsCmd, "subscribe %s"},
 	{"attachments list as a todo", NewAttachmentsCmd, "list %s --type todo"},
+	{"attachments list as a chat line", NewAttachmentsCmd, "list %s --type line"},
 }
 
 func TestOccurrenceURLIsRefused(t *testing.T) {
@@ -235,30 +236,41 @@ func (env occurrenceEnvelope) cmds() []string {
 	return cmds
 }
 
+// untypedHints leave the type open, so each reads the occurrence the URL names.
+var untypedHints = [][]string{nil, {"--type", "recording"}, {"--type", "recordings"}}
+
 // A read of an occurrence goes through the occurrence, and anything a
 // breadcrumb suggests writing goes to the occurrence's own recording.
 func TestAttachmentsListOccurrenceURL(t *testing.T) {
-	requests, out, err := runOccurrenceCommand(t, NewAttachmentsCmd(), "list", occurrenceURL)
+	for _, hint := range untypedHints {
+		t.Run(strings.Join(hint, " "), func(t *testing.T) {
+			requests, out, err := runOccurrenceCommand(t, NewAttachmentsCmd(), append([]string{"list", occurrenceURL}, hint...)...)
 
-	require.NoError(t, err, "requests: %v", requests)
-	assert.Equal(t, []string{"GET /99999/schedule_entries/789/occurrences/20261022.json"}, requests)
-	env := decodeOccurrenceEnvelope(t, out)
-	assert.Contains(t, string(env.Data), "agenda.pdf")
-	assert.Equal(t, []string{
-		"basecamp show " + occurrenceURL,
-		"basecamp comments create 1001 <text>",
-		"basecamp attachments download " + occurrenceURL,
-	}, env.cmds())
+			require.NoError(t, err, "requests: %v", requests)
+			assert.Equal(t, []string{"GET /99999/schedule_entries/789/occurrences/20261022.json"}, requests)
+			env := decodeOccurrenceEnvelope(t, out)
+			assert.Contains(t, string(env.Data), "agenda.pdf")
+			assert.Equal(t, []string{
+				"basecamp show " + occurrenceURL,
+				"basecamp comments create 1001 <text>",
+				"basecamp attachments download " + occurrenceURL,
+			}, env.cmds())
+		})
+	}
 }
 
 func TestAttachmentsDownloadOccurrenceURL(t *testing.T) {
-	requests, _, err := runOccurrenceCommand(t, NewAttachmentsCmd(), "download", occurrenceEditURL, "--out", t.TempDir())
+	for _, hint := range untypedHints {
+		t.Run(strings.Join(hint, " "), func(t *testing.T) {
+			requests, _, err := runOccurrenceCommand(t, NewAttachmentsCmd(), append([]string{"download", occurrenceEditURL, "--out", t.TempDir()}, hint...)...)
 
-	require.NoError(t, err, "requests: %v", requests)
-	assert.Equal(t, []string{
-		"GET /99999/schedule_entries/789/occurrences/20261022.json",
-		"GET /99999/blobs/agenda/download/agenda.pdf",
-	}, requests)
+			require.NoError(t, err, "requests: %v", requests)
+			assert.Equal(t, []string{
+				"GET /99999/schedule_entries/789/occurrences/20261022.json",
+				"GET /99999/blobs/agenda/download/agenda.pdf",
+			}, requests)
+		})
+	}
 }
 
 // With --type schedule-entry, a comment fragment does not pick the comment,
