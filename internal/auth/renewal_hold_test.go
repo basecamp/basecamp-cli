@@ -360,7 +360,7 @@ func TestAStaleRefusalNeverLandsOnANewSecret(t *testing.T) {
 	relogged.ClientSecret = "a-new-secret"
 	require.NoError(t, m.store.Save(key, relogged))
 
-	m.rememberRenewalHold(key, stale)
+	m.rememberRenewalHold(key, stale.Client, stale)
 
 	stored, err := m.store.Load(key)
 	require.NoError(t, err)
@@ -489,12 +489,12 @@ func TestAFailedReadIsReportedWhenARefusalCannotBeRemembered(t *testing.T) {
 	var warned []string
 	m.Warnf = func(format string, args ...any) { warned = append(warned, fmt.Sprintf(format, args...)) }
 
-	m.rememberRenewalHold("nowhere", &RenewalHold{Kind: renewalHoldRefused})
+	m.rememberRenewalHold("nowhere", "", &RenewalHold{Kind: renewalHoldRefused})
 	assert.Empty(t, warned, "a credential that is gone has nothing to remember a refusal on")
 
 	m.store = &Store{inner: unreadableStore{}}
 	m.store.initOnce.Do(func() {})
-	m.rememberRenewalHold(key, &RenewalHold{Kind: renewalHoldRefused})
+	m.rememberRenewalHold(key, "", &RenewalHold{Kind: renewalHoldRefused})
 	require.Len(t, warned, 1)
 	assert.Contains(t, warned[0], "could not read the credential")
 }

@@ -110,8 +110,9 @@ const MaxServerWait = maxAgentConnectLifetime
 
 // RenewalHold is the token endpoint's last refusal of a credential's renewal
 // — an agent's mint, or anyone else's refresh — remembered so the next
-// renewal can answer it without asking again. A refresh is only ever held
-// for a rate limit (holdRateLimitedRefresh).
+// renewal can answer it without asking again. A refresh is held for a rate
+// limit (holdRateLimitedRefresh) or for an invalid_client refusal of the
+// client it was sent as (holdRefusedRefreshClient).
 //
 // Nothing in it came from the server as free text: Detail is the same fixed
 // vocabulary agentMintRefusal renders (see oauthErrorCodes).
@@ -184,7 +185,7 @@ func (m *Manager) holdRateLimitedRefresh(origin string, creds *Credentials, err 
 		Client: refreshTokenFingerprint(creds.RefreshToken),
 		Until:  ceilUnix(now.Add(min(wait, MaxServerWait))),
 	}
-	m.rememberRenewalHold(origin, hold)
+	m.rememberRenewalHold(origin, hold.Client, hold)
 
 	held := time.Unix(hold.Until, 0).UTC().Format(time.RFC3339)
 	var msg string
@@ -207,6 +208,68 @@ func (m *Manager) holdRateLimitedRefresh(origin string, creds *Credentials, err 
 	// error still reach the error envelope.
 	e.Cause = errors.Join(e.Cause, err)
 	return e
+}
+
+// refreshClientFingerprint names a refresh token together with the client it
+// is presented as, for the one hold that is about the pair: an invalid_client
+// refusal. A Launchpad refresh is sent as whatever client
+// BASECAMP_OAUTH_CLIENT_ID/SECRET name, so the same refresh token can be
+// refused as one client and accepted as another; a hold on the token alone
+// would outlive the fix.
+func refreshClientFingerprint(refreshToken, clientID, clientSecret string) string {
+	sum := sha256.Sum256([]byte("basecamp-cli refresh client hold\x00" + refreshToken + "\x00" + clientID + "\x00" + clientSecret))
+	return hex.EncodeToString(sum[:16])
+}
+
+// holdRefusedRefreshClient remembers an invalid_client answer to a refresh
+// and returns the auth error it is answered with.
+//
+// invalid_client is not a refusal that waits out: the token endpoint does not
+// know the client the refresh was sent as, and asking again as the same
+// client cannot change that. Every command that finds the access token near
+// expiry would otherwise send the same refresh, and a scheduled job sends it
+// on every run — each one charged to the abuse tracker that blocks the
+// address after a handful. So it is held with no recheck, for exactly this
+// refresh token and client (refreshClientFingerprint); a login writes a
+// credential with no hold, and a changed client is not held.
+func (m *Manager) holdRefusedRefreshClient(origin string, creds *Credentials, clientID, clientSecret string, err error) error {
+	m.rememberRenewalHold(origin, refreshTokenFingerprint(creds.RefreshToken), &RenewalHold{
+		Kind:   renewalHoldRefused,
+		Detail: invalidClientDetail,
+		Client: refreshClientFingerprint(creds.RefreshToken, clientID, clientSecret),
+	})
+	e := m.errAuth(refusedRefreshClientMessage(creds) + "; it will not be sent again")
+	// The SDK's refusal stays in the chain, so its request id and OAuth
+	// error still reach the error envelope.
+	e.Cause = err
+	return e
+}
+
+// refusedRefreshClient is the error a remembered invalid_client answers a
+// refresh with, or nil when the refresh may be sent. A hold for another
+// refresh token or another client holds nothing.
+func (m *Manager) refusedRefreshClient(creds *Credentials, clientID, clientSecret string) error {
+	hold := creds.RenewalHold
+	if hold == nil || creds.OAuthType == oauthTypeAgent || hold.Kind != renewalHoldRefused ||
+		hold.Until != 0 || hold.Detail != invalidClientDetail ||
+		hold.Client != refreshClientFingerprint(creds.RefreshToken, clientID, clientSecret) {
+		return nil
+	}
+	e := m.errAuth(refusedRefreshClientMessage(creds) + "; the refusal is remembered, and this refresh will not be sent again")
+	e.Cause = errRenewalHeld
+	return e
+}
+
+// refusedRefreshClientMessage says what an invalid_client refusal of creds'
+// refresh means. A BC5 refresh is sent as the fixed public client, so the
+// login itself is the remedy; a Launchpad one may have been sent as a client
+// the environment names.
+func refusedRefreshClientMessage(creds *Credentials) string {
+	msg := "The token endpoint refused the OAuth client this login refreshes as (" + invalidClientDetail + ")"
+	if creds.OAuthType == oauthTypeLaunchpad {
+		msg += ", either because the login is not one this client can refresh or because BASECAMP_OAUTH_CLIENT_ID/SECRET name a different client"
+	}
+	return msg
 }
 
 // refreshTokenFingerprint names a refresh token the way
@@ -375,8 +438,10 @@ func (hold *RenewalHold) holds(creds *Credentials, now time.Time) bool {
 	if hold == nil || hold.Client != renewalSubject(creds) {
 		return false
 	}
-	// A refresh is only ever held for a rate limit: a refused refresh token
-	// is forgotten outright rather than held (refreshCredential).
+	// A refresh is held here only for a rate limit. A refused grant is
+	// forgotten outright rather than held (refreshCredential), and a refused
+	// client is held for the client it was sent as, which only
+	// refusedRefreshClient can read.
 	if creds.OAuthType != oauthTypeAgent && hold.Kind != renewalHoldRateLimited {
 		return false
 	}
@@ -411,7 +476,7 @@ func (hold *RenewalHold) holds(creds *Credentials, now time.Time) bool {
 //
 // A failure to write is reported and otherwise changes nothing — the
 // refusal is what the caller sees either way.
-func (m *Manager) rememberRenewalHold(origin string, hold *RenewalHold) {
+func (m *Manager) rememberRenewalHold(origin, about string, hold *RenewalHold) {
 	current, err := m.store.Load(origin)
 	if err != nil {
 		// A credential removed since the mint (a logout) has nothing to
@@ -421,7 +486,7 @@ func (m *Manager) rememberRenewalHold(origin string, hold *RenewalHold) {
 		}
 		return
 	}
-	if renewalSubject(current) != hold.Client {
+	if renewalSubject(current) != about {
 		return
 	}
 	current.RenewalHold = hold
