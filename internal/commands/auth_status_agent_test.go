@@ -224,6 +224,52 @@ func TestAuthStatusNamesAPermanentHoldWhileTheTokenIsLive(t *testing.T) {
 	assert.Contains(t, report.hint, "--with-client-credentials")
 }
 
+// TestAuthStatusNamesARefusedRefreshClientsRemedy: a login's refresh held
+// for invalid_client is a refusal of the client the refresh is sent as, not
+// of an agent's secret, so the line names a login, not a new secret.
+func TestAuthStatusNamesARefusedRefreshClientsRemedy(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_TOKEN", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &config.Config{BaseURL: srv.URL, ActiveProfile: "work", Sources: map[string]string{}}
+	authMgr := auth.NewManager(cfg, srv.Client())
+	store := auth.NewStore(config.GlobalConfigDir())
+	authMgr.SetStore(store)
+	require.NoError(t, store.Save("profile:work", &auth.Credentials{
+		AccessToken:   "spent",
+		RefreshToken:  "refused-ref",
+		OAuthType:     "bc5",
+		Scope:         "full",
+		TokenEndpoint: srv.URL + "/oauth/tokens",
+		ExpiresAt:     time.Now().Add(-time.Minute).Unix(),
+	}))
+	_, err := authMgr.AccessToken(context.Background())
+	require.Error(t, err)
+
+	creds, err := store.Load("profile:work")
+	require.NoError(t, err)
+	require.NotNil(t, creds.RenewalHold)
+	creds.AccessToken = "still-good"
+	creds.ExpiresAt = time.Now().Add(time.Hour).Unix()
+	require.NoError(t, store.Save("profile:work", creds))
+
+	app := &appctx.App{Config: cfg, Auth: authMgr}
+	report, err := authStatusReport(context.Background(), app)
+	require.NoError(t, err)
+	joined := strings.Join(report.details, "\n")
+	assert.Contains(t, joined, "renewal would be refused: token error: invalid_client; log in again")
+	assert.NotContains(t, joined, "new secret")
+	assert.Contains(t, report.hint, "basecamp auth login -P work")
+}
+
 // TestAuthStatusReportsATimeLimitedHoldAsRefreshable: a hold that ends on
 // its own — a 429 until its Retry-After, a refusal rechecked hourly — is
 // what a renewal sent now would meet, and nothing more. The credential is

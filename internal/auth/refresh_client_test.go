@@ -200,3 +200,18 @@ func TestInvalidClient_ReadsTheTypedCodeAndStatus(t *testing.T) {
 	assert.False(t, invalidClient(&basecamp.Error{HTTPStatus: 401, OAuthError: "invalid_grant", Message: "invalid_client"}))
 	assert.False(t, invalidClient(fmt.Errorf("token error: invalid_client")))
 }
+
+// The refusal promises that the refresh will not be sent again only when the
+// hold that keeps that promise was stored.
+func TestRefresh_InvalidClientPromisesOnlyAStoredHold(t *testing.T) {
+	m := &Manager{cfg: config.Default(), store: newTestStore(t, t.TempDir())}
+	creds := &Credentials{RefreshToken: "old-ref", OAuthType: oauthTypeBC5}
+	refusal := &basecamp.Error{HTTPStatus: 401, OAuthError: "invalid_client"}
+
+	err := m.holdRefusedRefreshClient("nowhere", creds, bc5ClientID, "", refusal)
+	var cliErr *output.Error
+	require.ErrorAs(t, err, &cliErr)
+	assert.Equal(t, output.CodeAuth, cliErr.Code)
+	assert.Contains(t, cliErr.Message, "invalid_client")
+	assert.NotContains(t, cliErr.Message, "will not be sent again", "nothing was stored to keep that promise")
+}

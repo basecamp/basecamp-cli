@@ -233,12 +233,16 @@ func refreshClientFingerprint(refreshToken, clientID, clientSecret string) strin
 // refresh token and client (refreshClientFingerprint); a login writes a
 // credential with no hold, and a changed client is not held.
 func (m *Manager) holdRefusedRefreshClient(origin string, creds *Credentials, clientID, clientSecret string, err error) error {
-	m.rememberRenewalHold(origin, refreshTokenFingerprint(creds.RefreshToken), &RenewalHold{
+	stored := m.rememberRenewalHold(origin, refreshTokenFingerprint(creds.RefreshToken), &RenewalHold{
 		Kind:   renewalHoldRefused,
 		Detail: invalidClientDetail,
 		Client: refreshClientFingerprint(creds.RefreshToken, clientID, clientSecret),
 	})
-	e := m.errAuth(refusedRefreshClientMessage(creds) + "; it will not be sent again")
+	msg := refusedRefreshClientMessage(creds)
+	if stored {
+		msg += "; it will not be sent again"
+	}
+	e := m.errAuth(msg)
 	// The SDK's refusal stays in the chain, so its request id and OAuth
 	// error still reach the error envelope.
 	e.Cause = err
@@ -475,8 +479,9 @@ func (hold *RenewalHold) holds(creds *Credentials, now time.Time) bool {
 // instead would leave exactly those hosts minting on every poll.
 //
 // A failure to write is reported and otherwise changes nothing — the
-// refusal is what the caller sees either way.
-func (m *Manager) rememberRenewalHold(origin, about string, hold *RenewalHold) {
+// refusal is what the caller sees either way. It reports whether the hold
+// was stored, for a caller whose message promises what later commands do.
+func (m *Manager) rememberRenewalHold(origin, about string, hold *RenewalHold) (stored bool) {
 	current, err := m.store.Load(origin)
 	if err != nil {
 		// A credential removed since the mint (a logout) has nothing to
@@ -484,15 +489,17 @@ func (m *Manager) rememberRenewalHold(origin, about string, hold *RenewalHold) {
 		if !errors.Is(err, ErrNoCredential) {
 			m.warnf("warning: could not read the credential for %s to remember the token endpoint's refusal, so the next command will ask again: %v", origin, err)
 		}
-		return
+		return false
 	}
 	if renewalSubject(current) != about {
-		return
+		return false
 	}
 	current.RenewalHold = hold
 	if err := m.store.Save(origin, current); err != nil {
 		m.warnf("warning: could not remember the token endpoint's refusal for %s, so the next command will ask again: %v", origin, err)
+		return false
 	}
+	return true
 }
 
 // now is the Manager's clock: the clock field when a test set one.
