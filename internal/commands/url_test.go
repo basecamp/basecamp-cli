@@ -426,6 +426,7 @@ func TestURLParseOccurrenceURL(t *testing.T) {
 	assert.Equal(t, "20261022", *parsed.OccurrenceDate)
 	assert.Equal(t, "789", *parsed.RecordingID)
 	assert.Contains(t, resp.Notice, "whole series")
+	assert.Contains(t, resp.Notice, "basecamp schedule show "+url)
 
 	cmds := make([]string, 0, len(resp.Breadcrumbs))
 	for _, b := range resp.Breadcrumbs {
@@ -458,4 +459,18 @@ func TestURLParseOccurrenceCommentURL(t *testing.T) {
 	assert.Equal(t, "555", *parsed.CommentID)
 	require.NotEmpty(t, resp.Breadcrumbs)
 	assert.Equal(t, "basecamp schedule show "+url, resp.Breadcrumbs[0].Cmd)
+}
+
+func TestURLParseAccountScopedOccurrenceURL(t *testing.T) {
+	url := "https://3.basecampapi.com/99999/schedule_entries/789/occurrences/20261022.json"
+	resp, err := parseURLWithOutput(t, url)
+	require.NoError(t, err)
+
+	require.NotNil(t, getParsedURL(t, resp).OccurrenceDate)
+	cmds := make([]string, 0, len(resp.Breadcrumbs))
+	for _, b := range resp.Breadcrumbs {
+		cmds = append(cmds, b.Cmd)
+	}
+	assert.Equal(t, []string{"basecamp show " + url}, cmds, "schedule show needs a project this URL does not name")
+	assert.Contains(t, resp.Notice, "basecamp show "+url)
 }

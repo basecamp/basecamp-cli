@@ -587,15 +587,15 @@ func extractIDs(args []string) ([]string, error) {
 
 // occurrenceUsage turns the extractors' refusal of an occurrence URL into a
 // usage error that names both IDs a caller can act on: the occurrence's own,
-// which takes comments, and the entry's, which acts on the series. bc3 refuses
-// a boost on an occurrence with a 403.
+// which has its own comments and subscribers, and the entry's, which acts on
+// the series. bc3 refuses a boost on an occurrence with a 403.
 func occurrenceUsage(err error) error {
 	var occ *urlarg.OccurrenceError
 	if errors.As(err, &occ) {
 		return output.ErrUsageHint("That URL names one occurrence of a recurring event",
-			fmt.Sprintf("To comment on just this occurrence, pass its own ID, which basecamp schedule show <url> prints. "+
-				"For anything else, pass the event's ID, %s, which acts on the whole series. "+
-				"Basecamp's API cannot change a single occurrence", occ.EntryID))
+			fmt.Sprintf("To comment on, list the comments of, or subscribe to just this occurrence, pass its own ID, "+
+				"which basecamp schedule show <url> prints. To update, trash or boost the event, pass its ID, %s, "+
+				"which acts on the whole series. Basecamp's API cannot change a single occurrence", occ.EntryID))
 	}
 	return err
 }
