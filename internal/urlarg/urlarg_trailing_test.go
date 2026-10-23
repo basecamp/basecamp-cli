@@ -6,8 +6,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// A URL with segments past an item names the item only through a path bc3
-// serves for it. Anything else is refused, never resolved to the parent.
+// Segments past an item's ID name that item unless one of them is another ID.
+// Then the URL names that other item only through a path Parse knows, and is
+// otherwise refused, never resolved to the parent.
 func TestParseTrailingSegments(t *testing.T) {
 	const base = "https://app.basecamp.com/99999/buckets/123"
 	tests := []struct {
@@ -110,16 +111,78 @@ func TestParseTrailingSegments(t *testing.T) {
 			input: "https://app.basecamp.com/99999/people/5/edit",
 			want:  &Parsed{AccountID: "99999", Type: "people", RecordingID: "5"},
 		},
-		{name: "unknown page under a to-do", input: base + "/todos/789/unknown"},
-		{name: "occurrence status path", input: base + "/schedule_entries/456/occurrences/20261022/status/trashed"},
-		{name: "new-document page in a folder", input: base + "/vaults/111/documents/new"},
+		{
+			name:  "to-do dates edit page names the to-do",
+			input: base + "/todos/789/dates/edit",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "todos", RecordingID: "789"},
+		},
+		{
+			name:  "comment editor page names the comment",
+			input: base + "/comments/789/compositions/edit",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "comments", RecordingID: "789"},
+		},
+		{
+			name:  "unknown page under a to-do names the to-do",
+			input: base + "/todos/789/unknown",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "todos", RecordingID: "789"},
+		},
+		{
+			name:  "occurrence status path keeps the occurrence date",
+			input: base + "/schedule_entries/456/occurrences/20261022/status/trashed",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "schedule_entries", RecordingID: "456", OccurrenceDate: "20261022"},
+		},
+		{
+			name:  "new-document page in a folder names the folder",
+			input: base + "/vaults/111/documents/new",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "vaults", RecordingID: "111"},
+		},
+		{
+			name:  "unknown page under a project names the project",
+			input: "https://app.basecamp.com/99999/projects/123/unknown",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "project"},
+		},
+		{
+			name:  "JSON document in a folder names the document",
+			input: base + "/vaults/111/documents/222.json",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "documents", RecordingID: "222"},
+		},
+		{
+			name:  "JSON document in a folder with a comment fragment names the comment",
+			input: base + "/vaults/111/documents/222.json#__recording_789",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "documents", RecordingID: "222", CommentID: "789"},
+		},
+		{
+			name:  "download link with digits in the filename names the upload",
+			input: base + "/uploads/456/download/report2024.pdf",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "uploads", RecordingID: "456"},
+		},
+		{
+			name:  "download link with an all-digit filename names the upload",
+			input: base + "/uploads/456/download/12345",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "uploads", RecordingID: "456"},
+		},
+		{
+			name:  "download link with an all-digit filename and extension names the upload",
+			input: base + "/uploads/456/download/12345.pdf",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "uploads", RecordingID: "456"},
+		},
+		{
+			name:  "version download link with an all-digit filename names the upload",
+			input: base + "/uploads/456/versions/7/download/12345",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "uploads", RecordingID: "456"},
+		},
+		{name: "upload version as JSON", input: base + "/uploads/456/versions/7.json"},
+		{name: "answers by a person end in the person's ID", input: base + "/questions/111/answers/by/789"},
+		{name: "a person's out-of-office ends in the person's ID", input: "https://app.basecamp.com/99999/people/5/out_of_office"},
+		{name: "to-dos assigned to a person end in the person's ID", input: "https://app.basecamp.com/99999/reports/todos/assigned/5"},
+		{name: "a person's progress ends in the person's ID", input: "https://app.basecamp.com/99999/reports/users/progress/5"},
+		{name: "an embed ends in its sgid", input: "https://app.basecamp.com/99999/embeds/BAh7abc"},
 		{name: "folder child the parser does not model", input: base + "/vaults/111/children/222"},
 		{name: "answer under a question", input: base + "/questions/111/answers/2"},
 		{name: "boost under a message", input: base + "/messages/789/boosts/5"},
 		{name: "step under a card", input: base + "/card_tables/cards/789/steps/5"},
 		{name: "upload version page bc3 does not serve", input: base + "/uploads/456/versions/7"},
 		{name: "bucket without a resource", input: base},
-		{name: "unknown page under a project", input: "https://app.basecamp.com/99999/projects/123/unknown"},
 		{name: "unknown account-level page", input: "https://app.basecamp.com/99999/whatever/5/deep"},
 	}
 

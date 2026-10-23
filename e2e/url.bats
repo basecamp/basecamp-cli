@@ -140,8 +140,8 @@ load test_helper
   assert_json_value ".data.recording_id" "789"
 }
 
-@test "basecamp url parse refuses a path past the item it names" {
-  run basecamp url parse "https://3.basecamp.com/123/buckets/456/todos/789/unknown"
+@test "basecamp url parse refuses a path to another item under the one it names" {
+  run basecamp url parse "https://3.basecamp.com/123/buckets/456/messages/789/boosts/5"
   assert_failure
   assert_output_contains "Could not parse URL"
 }

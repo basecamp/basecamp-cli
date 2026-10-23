@@ -22,25 +22,30 @@ var pingAtRe = regexp.MustCompile(`/circles/(\d+)@(\d+)`)
 // Basecamp links to for the same Ping, and drops the my/sidebar prefix.
 var pingSidebarRe = regexp.MustCompile(`/my/sidebar(/circles/\d+)`)
 
-// itemPaths are the longer paths bc3 serves for an item, each rewritten to the
-// item's own path as ${1}${2}: a child nested under its parent, which bc3 also
-// serves at top level, an upload's download, preview and new-version links, and
-// an edit page. Nested children come first so that their edit pages reduce to
-// the child. bc3 links a download or preview to a version even when it is the
-// latest, so a version's links name the upload.
+// jsonSuffixRe matches the .json an API URL's path ends in.
+var jsonSuffixRe = regexp.MustCompile(`^([^?#]*)\.json([?#]|$)`)
+
+// itemPaths are paths whose segments past an item name another item, each
+// rewritten to that item's own path as ${1}${2}: a child nested under its
+// parent, which bc3 also serves at top level, and an upload's download and
+// preview links. bc3 links those to a version even when it is the latest, so
+// they name the upload; a download's filename, which may be all digits, goes
+// with them.
 var itemPaths = []*regexp.Regexp{
 	regexp.MustCompile(`/vaults/\d+(/(?:vaults|documents|google_documents|cloud_files|uploads)/\d+)([/?#]|$)`),
 	regexp.MustCompile(`/todolists/\d+(/todos/\d+)([/?#]|$)`),
 	regexp.MustCompile(`/questionnaires/\d+(/questions/\d+)([/?#]|$)`),
 	regexp.MustCompile(`(/uploads/\d+)(?:/versions/\d+)?/download/[^?#]+([?#]|$)`),
-	regexp.MustCompile(`(/uploads/\d+)/versions/(?:\d+/representations/[^/?#]+|new)/?([?#]|$)`),
-	regexp.MustCompile(`(/\d+)/edit/?([?#]|$)`),
+	regexp.MustCompile(`(/uploads/\d+)/versions/\d+/representations/[^/?#]+/?([?#]|$)`),
 }
 
 // structuralPath is the whole path of each shape the router's structural
-// fallback recognizes. The fallback matches only a prefix of the path, so a URL
-// with more segments would otherwise name the item those segments sit under.
+// fallback recognizes. The fallback matches only a prefix of the path.
 var structuralPath = regexp.MustCompile(`^/\d+(?:/projects/\d+|/buckets/\d+/(?:card_tables/[^/]+/\d+|[^/]+(?:/\d+)?))?$`)
+
+// trailingWords matches the segments after a path's last ID when none of them
+// is an ID: a page of that item, such as edit or dates/edit.
+var trailingWords = regexp.MustCompile(`(/\d+)(?:/[^/?#]*[^/?#0-9][^/?#]*)+/?([?#]|$)`)
 
 // Parsed represents components extracted from a Basecamp URL.
 type Parsed struct {
@@ -65,9 +70,9 @@ func IsURL(input string) bool {
 	return router.Match(normalized) != nil
 }
 
-// normalize rewrites the web @-forms and itemPaths into routable URLs. Chat
-// lines become the slash form; a Ping line loses its @line, which the second
-// result returns.
+// normalize rewrites the web @-forms and itemPaths into routable URLs, and
+// drops a .json suffix. Chat lines become the slash form; a Ping line loses its
+// @line, which the second result returns.
 func normalize(input string) (normalized, pingLineID string) {
 	normalized = chatAtRe.ReplaceAllString(input, "${1}/lines/${2}")
 	normalized = pingSidebarRe.ReplaceAllString(normalized, "${1}")
@@ -75,6 +80,7 @@ func normalize(input string) (normalized, pingLineID string) {
 		pingLineID = m[2]
 		normalized = pingAtRe.ReplaceAllString(normalized, "/circles/${1}")
 	}
+	normalized = jsonSuffixRe.ReplaceAllString(normalized, "${1}${2}")
 	for _, re := range itemPaths {
 		normalized = re.ReplaceAllString(normalized, "${1}${2}")
 	}
@@ -82,7 +88,7 @@ func normalize(input string) (normalized, pingLineID string) {
 }
 
 // urlPath returns the path the router matches: the URL without its scheme,
-// host, query, fragment, trailing slash, or .json suffix.
+// host, query, fragment, or trailing slash.
 func urlPath(rawURL string) string {
 	path, _, _ := strings.Cut(rawURL, "#")
 	path, _, _ = strings.Cut(path, "?")
@@ -98,13 +104,28 @@ func urlPath(rawURL string) string {
 		}
 		path = path[slash:]
 	}
-	return strings.TrimSuffix(strings.TrimRight(path, "/"), ".json")
+	return strings.TrimRight(path, "/")
+}
+
+// match routes a normalized URL, refusing a structural match that leaves an ID
+// unconsumed. Words after the item's ID name the item: the URL is routed again
+// without them, so a page of an API item, such as a chat line's edit page,
+// still names that item.
+func match(normalized string) *basecamp.Match {
+	for _, u := range []string{normalized, trailingWords.ReplaceAllString(normalized, "${1}${2}")} {
+		m := router.Match(u)
+		if m == nil || m.Source == basecamp.MatchedAPI || structuralPath.MatchString(urlPath(u)) {
+			return m
+		}
+	}
+	return nil
 }
 
 // Parse extracts IDs from a Basecamp URL.
-// Returns nil if the input is not a valid Basecamp URL, or if its path goes
-// past the item it names in a way Parse does not model, so that callers refuse
-// it rather than act on the parent item.
+// Returns nil if the input is not a valid Basecamp URL, if its path goes past
+// the item it names to another one Parse does not model, or if the ID it ends
+// in is a person's or an embed's, so that callers refuse it rather than act on
+// the wrong recording.
 //
 // Supported URL patterns:
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/{type}/{id}
@@ -117,19 +138,22 @@ func urlPath(rawURL string) string {
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/schedule_entries/{id}/occurrences/{date}
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/vaults/{folder}/documents/{id}, and the
 //     other children bc3 nests under folders, to-do lists, and questionnaires
-//   - any of these followed by /edit, and an upload followed by /download/{filename},
-//     /versions/new, or a version's /download/{filename} or /representations/{key}
+//   - any of these followed by segments with no ID, such as /edit, and an upload
+//     followed by /download/{filename} or a version's /download/{filename} or
+//     /representations/{key}
 //   - https://3.basecamp.com/{account}/projects/{project}
 func Parse(input string) *Parsed {
 	// Normalize the Basecamp web @-forms (chats/789@111, circles/456@111)
 	// into routable URLs before routing.
 	normalized, pingLineID := normalize(input)
 
-	m := router.Match(normalized)
+	m := match(normalized)
 	if m == nil {
 		return nil
 	}
-	if m.Source == basecamp.MatchedStructural && !structuralPath.MatchString(urlPath(normalized)) {
+	// questions/{id}/answers/by/{person}, people/{person}/out_of_office and the
+	// reports by person end in a person's ID, and embeds/{sgid} in an sgid.
+	if m.Params["sgid"] != "" || (m.Params["personId"] != "" && m.PathType != "people") {
 		return nil
 	}
 
