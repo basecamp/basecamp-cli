@@ -300,12 +300,16 @@ func connectDeviceName(named string) string {
 	if named != "" {
 		return named
 	}
-	host, err := os.Hostname()
+	host, err := connectHostname()
 	if err != nil {
 		return ""
 	}
 	return host
 }
+
+// connectHostname is this computer's name. A variable so tests can make it
+// unreadable.
+var connectHostname = os.Hostname
 
 // refuseNonInteractiveAgentConnect is the environment gate: the ceremony
 // waits on a person opening a link, signing in, and picking the agent, so

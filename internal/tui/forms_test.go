@@ -363,6 +363,24 @@ func TestConfirmFieldAnswersFromTheKeyboard(t *testing.T) {
 	}
 }
 
+// Select returns what was picked, read after the form ran, not the empty
+// value it held before. Answered through Select itself, by the field's own
+// accessible input handling: Enter takes the default, the first option.
+func TestSelectReturnsWhatWasPicked(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	options := []SelectOption{{Value: "agent", Label: "Your agent"}, {Value: "me", Label: "Yourself"}}
+	for typed, want := range map[string]string{"\n": "agent", "1\n": "agent", "2\n": "me"} {
+		prev := runSelectForm
+		runSelectForm = func(field *huh.Select[string]) error {
+			return field.RunAccessible(io.Discard, strings.NewReader(typed))
+		}
+		got, err := Select("Connect this computer as", options)
+		runSelectForm = prev
+		require.NoError(t, err)
+		assert.Equal(t, want, got, "typed %q", typed)
+	}
+}
+
 // A select opens on its first option, so Enter alone picks it, and the
 // arrows move off it. Callers that recommend a choice (auth login offers
 // "Your agent (recommended)" first) rely on this.

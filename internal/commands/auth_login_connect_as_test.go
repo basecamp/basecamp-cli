@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -736,4 +737,49 @@ func TestAuthLoginRefusesAnAgentProfileOnAnotherBasecampAfterAsking(t *testing.T
 		_, deviceAuths, _ := s.counts()
 		assert.Zero(t, deviceAuths)
 	})
+}
+
+// Reconnecting the agent under the very profile the login started on, and
+// getting no agent, ends there: the person's login would land on that
+// profile and replace the agent's credential with the person's.
+func TestAuthLoginWithNoAgentNeverSignsYouInOverTheAgentBeingReconnected(t *testing.T) {
+	s := startConnectAsServer(t)
+	s.pollStatus, s.pollBody = 400, `{"error":"access_denied"}`
+	app := connectAsApp(t, s, &config.Config{})
+	require.NoError(t, os.MkdirAll(config.GlobalConfigDir(), 0o700))
+	require.NoError(t, os.WriteFile(config.GlobalConfigDir()+"/config.json",
+		[]byte(`{"profiles":{"agent":{"base_url":"`+s.srv.URL+`","account_id":"999"}},"default_profile":"agent"}`), 0o600))
+	app.Config.Profiles = map[string]*config.ProfileConfig{"agent": {BaseURL: s.srv.URL, AccountID: "999"}}
+	app.Config.DefaultProfile = "agent"
+	app.Config.ActiveProfile = "agent"
+	require.NoError(t, app.Auth.GetStore().Save("profile:agent", &auth.Credentials{OAuthType: "agent", ClientID: "old-client", ClientSecret: "old"}))
+	prompter := answerLogin(t, &fakeLoginPrompter{choice: connectAsAgent, confirm: true})
+
+	_, err := runConnectAsLogin(t, app)
+	assertNoAgentRefusal(t, err)
+	assert.Equal(t, 1, prompter.asked)
+	assert.Empty(t, prompter.confirmed, "no offer to sign in over the agent")
+	_, deviceAuths, _ := s.counts()
+	assert.Zero(t, deviceAuths)
+	creds, err := app.Auth.GetStore().Load("profile:agent")
+	require.NoError(t, err)
+	assert.Equal(t, "old-client", creds.ClientID, "the agent's credential is untouched")
+}
+
+// auth login has no --device-name, so where this computer's name can't be
+// read the agent path names the command that has one, before anything is
+// requested.
+func TestAuthLoginAsAgentWithoutAHostnameNamesTheCommandThatTakesOne(t *testing.T) {
+	s := startConnectAsServer(t)
+	app := connectAsApp(t, s, &config.Config{})
+	prev := connectHostname
+	t.Cleanup(func() { connectHostname = prev })
+	connectHostname = func() (string, error) { return "", errors.New("no hostname") }
+
+	_, err := runConnectAsLogin(t, app, "--as", "agent")
+	var e *output.Error
+	require.ErrorAs(t, err, &e)
+	assert.Equal(t, "Name it: basecamp auth agent connect --device-name <name> -P <profile>", e.Hint)
+	intakes, _, _ := s.counts()
+	assert.Zero(t, intakes)
 }

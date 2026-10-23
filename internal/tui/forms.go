@@ -149,7 +149,8 @@ func Input(title, placeholder string) (string, error) {
 		Placeholder(placeholder).
 		Value(&result)
 
-	return result, runFields(field)
+	err := runFields(field)
+	return result, err
 }
 
 // InputRequired shows a required text input prompt. Escape or Ctrl+C cancels.
@@ -166,7 +167,8 @@ func InputRequired(title, placeholder string) (string, error) {
 			return nil
 		})
 
-	return result, runFields(field)
+	err := runFields(field)
+	return result, err
 }
 
 // TextArea shows a multiline text input prompt. Escape or Ctrl+C cancels.
@@ -177,7 +179,8 @@ func TextArea(title, placeholder string) (string, error) {
 		Placeholder(placeholder).
 		Value(&result)
 
-	return result, runFields(field)
+	err := runFields(field)
+	return result, err
 }
 
 // SelectOption represents an option in a select prompt.
@@ -190,8 +193,13 @@ type SelectOption struct {
 // Enter alone picks it. Escape or Ctrl+C cancels.
 func Select(title string, options []SelectOption) (string, error) {
 	var result string
-	return result, runFields(selectField(title, options, &result))
+	err := runSelectForm(selectField(title, options, &result))
+	return result, err
 }
+
+// runSelectForm runs Select's form. A variable so a test can answer it
+// through Select itself.
+var runSelectForm = func(field *huh.Select[string]) error { return runFields(field) }
 
 // selectField is Select's field, bound to result.
 func selectField(title string, options []SelectOption, result *string) *huh.Select[string] {
@@ -219,7 +227,8 @@ func SelectWithDescription(title, description string, options []SelectOption) (s
 		Options(huhOptions...).
 		Value(&result)
 
-	return result, runFields(field)
+	err := runFields(field)
+	return result, err
 }
 
 // MultiSelect shows a multi-select prompt. Escape or Ctrl+C cancels.
@@ -235,7 +244,8 @@ func MultiSelect(title string, options []SelectOption) ([]string, error) {
 		Options(huhOptions...).
 		Value(&result)
 
-	return result, runFields(field)
+	err := runFields(field)
+	return result, err
 }
 
 // FormField represents a field in a form.

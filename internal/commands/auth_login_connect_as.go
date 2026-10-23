@@ -264,6 +264,14 @@ func runLoginAsAgent(cmd *cobra.Command, app *appctx.App, l browserLogin) error 
 		return output.ErrUsage("Invalid scope. Use 'read' or 'full'")
 	}
 
+	// The approval page names this computer by its hostname. auth login
+	// has no --device-name to name it otherwise, so where the hostname
+	// can't be read, the command that has one is the remedy.
+	if connectDeviceName("") == "" {
+		return output.ErrUsageHint("This computer's name can't be read, and an agent connection needs one",
+			"Name it: basecamp auth agent connect --device-name <name> -P <profile>")
+	}
+
 	machine := app.Flags.JSON || app.Flags.Agent
 	human := cmd.OutOrStdout()
 	if machine {
@@ -314,8 +322,11 @@ func runLoginAsAgent(cmd *cobra.Command, app *appctx.App, l browserLogin) error 
 		return err
 	}
 
+	// The person's login lands on the profile the login started on. When
+	// that is the agent profile being reconnected, it would replace the
+	// agent's credential with the person's, which nobody asked for.
 	refusal := noAgentLoginError(err)
-	if !loginAsks(app) || moved {
+	if !loginAsks(app) || moved || (reconnects && before.ActiveProfile == name) {
 		return refusal
 	}
 	fmt.Fprintln(human)
