@@ -248,8 +248,12 @@ func migrateKeyring(result *MigrateResult, configDir string) {
 			return
 		}
 		if err == nil {
-			// Already migrated — just clean up the legacy key
-			_ = ops.delete(legacyServiceName, legacyKey)
+			// Already copied — cleanup must finish before marking migration complete.
+			if err := ops.delete(legacyServiceName, legacyKey); errors.Is(err, context.DeadlineExceeded) {
+				result.KeyringErrors = append(result.KeyringErrors,
+					fmt.Sprintf("failed to delete legacy credential for %s: %v", origin, err))
+				return
+			}
 			result.KeyringMigrated++
 			continue
 		}
@@ -261,8 +265,13 @@ func migrateKeyring(result *MigrateResult, configDir string) {
 			continue
 		}
 
-		// Delete old entry (best-effort)
-		_ = ops.delete(legacyServiceName, legacyKey)
+		// Ordinary deletion errors remain best-effort, but a timed-out
+		// cleanup must remain visible and withhold the completion marker.
+		if err := ops.delete(legacyServiceName, legacyKey); errors.Is(err, context.DeadlineExceeded) {
+			result.KeyringErrors = append(result.KeyringErrors,
+				fmt.Sprintf("failed to delete legacy credential for %s: %v", origin, err))
+			return
+		}
 
 		result.KeyringMigrated++
 	}

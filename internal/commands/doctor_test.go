@@ -455,6 +455,27 @@ func TestDoctorAuthenticationPreservesLaterStoreTimeouts(t *testing.T) {
 	}
 }
 
+func TestDoctorAuthenticationKeepsGenuineLoginRemedies(t *testing.T) {
+	app, _ := setupDoctorTestApp(t, "12345")
+	t.Setenv("BASECAMP_TOKEN", "")
+	t.Run("missing credential", func(t *testing.T) {
+		check := checkAuthentication(context.Background(), app, false)
+		assert.Equal(t, "fail", check.Status)
+		assert.Equal(t, app.Auth.LoginHint(), check.Hint)
+		require.Len(t, buildDoctorBreadcrumbs([]Check{check}, app.Auth.LoginCommand()), 1)
+	})
+	t.Run("expired without refresh token", func(t *testing.T) {
+		require.NoError(t, app.Auth.GetStore().Save(app.Auth.CredentialKey(), &auth.Credentials{
+			AccessToken: "test-token", OAuthType: "bc5", ExpiresAt: time.Now().Add(-time.Hour).Unix(),
+		}))
+		check := checkAuthentication(context.Background(), app, false)
+		assert.Equal(t, "fail", check.Status)
+		assert.Contains(t, check.Message, "No refresh token")
+		assert.Equal(t, app.Auth.LoginHint(), check.Hint)
+		require.Len(t, buildDoctorBreadcrumbs([]Check{check}, app.Auth.LoginCommand()), 1)
+	})
+}
+
 func TestDoctorAuthenticationBreadcrumbRequiresLoginRemedy(t *testing.T) {
 	for _, status := range []string{"fail", "warn"} {
 		check := Check{Name: "Authentication", Status: status, Hint: "Try again later"}
