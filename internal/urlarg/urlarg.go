@@ -24,13 +24,16 @@ var pingSidebarRe = regexp.MustCompile(`/my/sidebar(/circles/\d+)`)
 
 // itemPaths are the longer paths bc3 serves for an item, each rewritten to the
 // item's own path as ${1}${2}: a child nested under its parent, which bc3 also
-// serves at top level, an upload's download link, and an edit page. Nested
-// children come first so that their edit pages reduce to the child.
+// serves at top level, an upload's download, preview and new-version links, and
+// an edit page. Nested children come first so that their edit pages reduce to
+// the child. bc3 links a download or preview to a version even when it is the
+// latest, so a version's links name the upload.
 var itemPaths = []*regexp.Regexp{
 	regexp.MustCompile(`/vaults/\d+(/(?:vaults|documents|google_documents|cloud_files|uploads)/\d+)([/?#]|$)`),
 	regexp.MustCompile(`/todolists/\d+(/todos/\d+)([/?#]|$)`),
 	regexp.MustCompile(`/questionnaires/\d+(/questions/\d+)([/?#]|$)`),
-	regexp.MustCompile(`(/uploads/\d+)/download/[^?#]+([?#]|$)`),
+	regexp.MustCompile(`(/uploads/\d+)(?:/versions/\d+)?/download/[^?#]+([?#]|$)`),
+	regexp.MustCompile(`(/uploads/\d+)/versions/(?:\d+/representations/[^/?#]+|new)/?([?#]|$)`),
 	regexp.MustCompile(`(/\d+)/edit/?([?#]|$)`),
 }
 
@@ -114,7 +117,8 @@ func urlPath(rawURL string) string {
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/schedule_entries/{id}/occurrences/{date}
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/vaults/{folder}/documents/{id}, and the
 //     other children bc3 nests under folders, to-do lists, and questionnaires
-//   - any of these followed by /edit, and an upload followed by /download/{filename}
+//   - any of these followed by /edit, and an upload followed by /download/{filename},
+//     /versions/new, or a version's /download/{filename} or /representations/{key}
 //   - https://3.basecamp.com/{account}/projects/{project}
 func Parse(input string) *Parsed {
 	// Normalize the Basecamp web @-forms (chats/789@111, circles/456@111)

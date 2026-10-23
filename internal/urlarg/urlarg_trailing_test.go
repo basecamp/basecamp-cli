@@ -86,6 +86,26 @@ func TestParseTrailingSegments(t *testing.T) {
 			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "uploads", RecordingID: "456"},
 		},
 		{
+			name:  "upload version download link names the upload",
+			input: base + "/uploads/456/versions/7/download/a.pdf",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "uploads", RecordingID: "456"},
+		},
+		{
+			name:  "upload version download link with a query names the upload",
+			input: base + "/uploads/456/versions/7/download/Q3%20report.pdf?disposition=attachment",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "uploads", RecordingID: "456"},
+		},
+		{
+			name:  "upload version preview names the upload",
+			input: base + "/uploads/456/versions/7/representations/eyJfcmFpbHMiOnt9fQ==--a1b2",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "uploads", RecordingID: "456"},
+		},
+		{
+			name:  "new-version page names the upload",
+			input: base + "/uploads/456/versions/new",
+			want:  &Parsed{AccountID: "99999", ProjectID: "123", Type: "uploads", RecordingID: "456"},
+		},
+		{
 			name:  "person edit page names the person",
 			input: "https://app.basecamp.com/99999/people/5/edit",
 			want:  &Parsed{AccountID: "99999", Type: "people", RecordingID: "5"},
@@ -97,7 +117,7 @@ func TestParseTrailingSegments(t *testing.T) {
 		{name: "answer under a question", input: base + "/questions/111/answers/2"},
 		{name: "boost under a message", input: base + "/messages/789/boosts/5"},
 		{name: "step under a card", input: base + "/card_tables/cards/789/steps/5"},
-		{name: "upload version download", input: base + "/uploads/456/versions/7/download/a.pdf"},
+		{name: "upload version page bc3 does not serve", input: base + "/uploads/456/versions/7"},
 		{name: "bucket without a resource", input: base},
 		{name: "unknown page under a project", input: "https://app.basecamp.com/99999/projects/123/unknown"},
 		{name: "unknown account-level page", input: "https://app.basecamp.com/99999/whatever/5/deep"},
