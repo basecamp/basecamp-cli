@@ -183,11 +183,12 @@ func runURLParse(app *appctx.App, url string) error {
 	// Build breadcrumbs
 	var breadcrumbs []output.Breadcrumb
 	if occurrenceDate != "" {
-		// schedule show reads the occurrence even from a comment link, where show
-		// would read the comment, but it needs the project the URL names.
-		showOccurrence := "basecamp schedule show " + url
+		// Without the comment fragment, show reads the occurrence, not the
+		// comment. schedule show needs the project the URL names; show does not.
+		occurrenceURL, _, _ := strings.Cut(url, "#")
+		showOccurrence := "basecamp schedule show " + occurrenceURL
 		if bucketID == "" {
-			showOccurrence = "basecamp show " + url
+			showOccurrence = "basecamp show " + occurrenceURL
 		}
 		return app.OK(result,
 			output.WithSummary(summary),

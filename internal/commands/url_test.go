@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -458,19 +459,23 @@ func TestURLParseOccurrenceCommentURL(t *testing.T) {
 	require.NotNil(t, parsed.CommentID)
 	assert.Equal(t, "555", *parsed.CommentID)
 	require.NotEmpty(t, resp.Breadcrumbs)
-	assert.Equal(t, "basecamp schedule show "+url, resp.Breadcrumbs[0].Cmd)
+	assert.Equal(t, "basecamp schedule show "+strings.TrimSuffix(url, "#__recording_555"), resp.Breadcrumbs[0].Cmd)
 }
 
 func TestURLParseAccountScopedOccurrenceURL(t *testing.T) {
-	url := "https://3.basecampapi.com/99999/schedule_entries/789/occurrences/20261022.json"
-	resp, err := parseURLWithOutput(t, url)
-	require.NoError(t, err)
+	const occurrence = "https://3.basecampapi.com/99999/schedule_entries/789/occurrences/20261022.json"
+	for _, url := range []string{occurrence, occurrence + "#__recording_555"} {
+		t.Run(url, func(t *testing.T) {
+			resp, err := parseURLWithOutput(t, url)
+			require.NoError(t, err)
 
-	require.NotNil(t, getParsedURL(t, resp).OccurrenceDate)
-	cmds := make([]string, 0, len(resp.Breadcrumbs))
-	for _, b := range resp.Breadcrumbs {
-		cmds = append(cmds, b.Cmd)
+			require.NotNil(t, getParsedURL(t, resp).OccurrenceDate)
+			cmds := make([]string, 0, len(resp.Breadcrumbs))
+			for _, b := range resp.Breadcrumbs {
+				cmds = append(cmds, b.Cmd)
+			}
+			assert.Equal(t, []string{"basecamp show " + occurrence}, cmds, "schedule show needs a project this URL does not name")
+			assert.Contains(t, resp.Notice, "basecamp show "+occurrence+" prints")
+		})
 	}
-	assert.Equal(t, []string{"basecamp show " + url}, cmds, "schedule show needs a project this URL does not name")
-	assert.Contains(t, resp.Notice, "basecamp show "+url)
 }
