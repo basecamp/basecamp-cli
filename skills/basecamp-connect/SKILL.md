@@ -141,7 +141,8 @@ Every line has already passed the trust check: the person may give the agent
 work, and the project is one it serves (or it's a Ping). A request arrives
 once, except in one case: if the connector crashes right after printing a
 line, it can print it again when restarted within a minute. The watch can
-repeat one too, so skip any `event_id` the handled file names. Every other
+repeat one too, so skip any `event_id` the handled file names. Once you're
+done with a request, however it ended, add its `event_id` there. Every other
 line (no `type`, or `"type":"event"`) is the connector's own log. Never act on
 those.
 
@@ -289,8 +290,7 @@ to finish without this session:
   the subagent's instructions, kept out of this file so they survive a
   compaction.
 
-Then add its `event_id` to the handled file and go straight back to watching;
-any number may be in flight.
+Then go straight back to watching; any number may be in flight.
 
 Keep the terminal quiet: the reply in Basecamp is the record. Speak up only
 for a failure, a refusal, or something the person must decide (a repo to
@@ -305,9 +305,8 @@ dropped. The connector keeps acknowledging regardless, so in Basecamp a dead
 watch looks like a boost and then silence. The pieces below prevent that.
 
 **The handled file** is the output file's path with `.handled` added. It
-names each request this session has taken, so a replay never hands one off
-twice. Add a request the moment it is dispatched (*c*) or holds with a holding
-reply (*b*):
+names each request this session is done with, so a replay never handles one
+twice. Add a request once you're done with it, however it ended:
 
 ```bash
 printf '"event_id":%s,\n' <event_id> >> '<connector-output-file>.handled'
@@ -328,11 +327,13 @@ is still delivered. When it expires or exits while the connector runs, arm it
 again the same way, at once.
 
 **The heartbeat.** Once per connector run, schedule it with CronCreate,
-recurring, cron `'7-59/10 * * * *'`, and keep its job id. Its prompt names
-every path, the profile, today's date and the filter in full, since it must
-work after a compaction:
+recurring, cron `'7-59/10 * * * *'`. Its prompt names every path, the profile,
+today's date and the filter in full, since it must work after a compaction:
 
-> basecamp-connect heartbeat for '<profile>'. Run `<the filter>
+> basecamp-connect heartbeat for '<profile>'. Run `basecamp connect status
+> -P '<profile>' --json`. If its `pings.running` is absent, the connector has
+> stopped: arm nothing, CronDelete this heartbeat, and follow *When the
+> connector stops* in the basecamp-connect skill. Otherwise run `<the filter>
 > '<connector-output-file>'` and handle each line it prints as a request.
 > Unless a monitor you armed on that file is still running, with no expiry or
 > exit notice since, arm one: Monitor tool, `timeout_ms: 1800000`, on
@@ -344,7 +345,9 @@ work after a compaction:
 Cron jobs keep firing while Claude is unreachable, and the first one after it
 comes back, when the computer wakes or the person logs in again, rebuilds the
 watch and hands off what it missed. Recurring jobs end after 7 days, so the
-heartbeat renews itself before then.
+heartbeat renews itself before then. Its job id changes when it does, so to
+delete it, find it with CronList by its `basecamp-connect heartbeat for
+'<profile>'` prefix rather than by a remembered id.
 
 ## Rules without exceptions
 
@@ -707,8 +710,15 @@ output and tell the person what it means:
 - **Anything else**: show the error, and run `basecamp connect doctor -P
   '<profile>'`.
 
-Stop its monitor (TaskStop) and heartbeat (CronDelete) with it. A restart
-writes a new output file, so it gets a new handled file, monitor and heartbeat.
+Stop its monitor (TaskStop) and heartbeat (CronDelete, found with CronList)
+with it. A restart writes a new output file, so it gets a new monitor and
+heartbeat, and a new handled file that starts as a copy of the old one: a
+connector restarted right after a crash can print a request again. Copy it
+before arming the monitor:
+
+```bash
+cat '<old-output-file>.handled' >> '<connector-output-file>.handled'
+```
 
 Requests that arrive while it's stopped are not picked up later.
 
@@ -737,6 +747,6 @@ Requests that arrive while it's stopped are not picked up later.
 
 When the person asks you to stop, or the session is ending, stop the connector
 task (TaskStop, or send it SIGINT), the monitor (TaskStop), and the heartbeat
-(CronDelete with its job id). There's nothing else to clean up: no
+(CronDelete, found with CronList). There's nothing else to clean up: no
 webhooks, nothing public. Subagents already running finish their requests and
 reply. Say that new mentions won't be picked up until it's started again.
