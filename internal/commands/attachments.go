@@ -32,7 +32,7 @@ import (
 // scope). Callers need to specify --type (or pass a URL, from which the
 // type is parsed) so the typed endpoint can be used instead.
 //
-// Kept command-agnostic: fetchItemContent is shared by `attachments list`
+// Kept command-agnostic: fetchAttachmentItem is shared by `attachments list`
 // and `attachments download`, so the hint must not tell a download caller
 // to re-run the list command (or vice versa).
 const genericLookupTypeHint = "Re-run with --type todo|todolist|message|comment|card|card-table|document|schedule-entry|checkin|answer|forward|upload, or pass a URL (which encodes the type)"
@@ -94,10 +94,11 @@ You can pass either an ID or a Basecamp URL:
 func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 	app := appctx.FromContext(cmd.Context())
 
-	id, resolvedType, err := resolveAttachmentTarget(arg, recordType)
+	target, err := resolveAttachmentTarget(arg, recordType)
 	if err != nil {
 		return err
 	}
+	id, resolvedType := target.id, target.recordType
 
 	// Validate type early (before account check) for better error messages
 	if !isGenericType(resolvedType) && typeToEndpoint(resolvedType, id) == "" {
@@ -114,12 +115,25 @@ func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 	// Fetch the item — same two-step pattern as show.go:
 	// 1. Generic recording lookup to discover type
 	// 2. Re-fetch via type-specific endpoint for full content
-	content, err := fetchItemContent(cmd, app, id, resolvedType)
+	data, err := fetchAttachmentItem(cmd, app, target)
 	if err != nil {
 		return err
 	}
 
-	attachments := richtext.ParseAttachments(content)
+	attachments := richtext.ParseAttachments(extractContentField(data))
+
+	// An occurrence shows its event's description but has comments of its
+	// own, so reads name it by its URL and a comment goes to its recording.
+	readRef := id
+	showCmd := fmt.Sprintf("basecamp show %s", id)
+	if showType := normalizeShowType(resolvedType); showType != "" {
+		showCmd = fmt.Sprintf("basecamp show %s --type %s", id, showType)
+	}
+	if target.occurrence != "" {
+		id = fmt.Sprint(data["id"])
+		readRef = arg
+		showCmd = fmt.Sprintf("basecamp show %s", arg)
+	}
 
 	// Styled TTY output
 	if app.Output.EffectiveFormat() == output.FormatStyled {
@@ -159,17 +173,12 @@ func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 		}
 		if downloadable > 0 {
 			fmt.Fprintln(w)
-			fmt.Fprintln(w, muted.Render(fmt.Sprintf("Download: basecamp attachments download %s", id)))
+			fmt.Fprintln(w, muted.Render(fmt.Sprintf("Download: basecamp attachments download %s", readRef)))
 		}
 		return nil
 	}
 
 	// JSON/agent output
-	showCmd := fmt.Sprintf("basecamp show %s", id)
-	if showType := normalizeShowType(resolvedType); showType != "" {
-		showCmd = fmt.Sprintf("basecamp show %s --type %s", id, showType)
-	}
-
 	breadcrumbs := []output.Breadcrumb{
 		{Action: "show", Cmd: showCmd, Description: "Show item"},
 	}
@@ -183,7 +192,7 @@ func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 	}
 	downloadable := downloadableAttachments(attachments)
 	if len(downloadable) > 0 {
-		breadcrumbs = append(breadcrumbs, attachmentBreadcrumb(id, len(downloadable)))
+		breadcrumbs = append(breadcrumbs, attachmentBreadcrumb(readRef, len(downloadable)))
 	}
 
 	respOpts := []output.ResponseOption{
@@ -232,10 +241,11 @@ Options:
 			}
 
 			// Resolve target — reuse the same URL/comment parsing as list
-			idStr, resolvedType, err := resolveAttachmentTarget(args[0], recordType)
+			target, err := resolveAttachmentTarget(args[0], recordType)
 			if err != nil {
 				return err
 			}
+			idStr, resolvedType := target.id, target.recordType
 
 			// Validate type early (same guard as list)
 			if !isGenericType(resolvedType) && typeToEndpoint(resolvedType, idStr) == "" {
@@ -246,13 +256,16 @@ Options:
 			}
 
 			// Fetch recording content
-			content, err := fetchItemContent(cmd, app, idStr, resolvedType)
+			data, err := fetchAttachmentItem(cmd, app, target)
 			if err != nil {
 				return err
 			}
+			if target.occurrence != "" {
+				idStr = args[0]
+			}
 
 			// Parse all attachments (same parser as list — consistent indexes)
-			allAttachments := richtext.ParseAttachments(content)
+			allAttachments := richtext.ParseAttachments(extractContentField(data))
 			if len(allAttachments) == 0 {
 				return output.ErrUsageHint(
 					"No downloadable attachments found",
@@ -439,15 +452,20 @@ func shouldSuggestType(recordType string) bool {
 	}
 }
 
-// fetchItemContent retrieves the HTML content field from a Basecamp item.
-// Uses the same recording-type discovery pattern as show.go.
-func fetchItemContent(cmd *cobra.Command, app *appctx.App, id, recordType string) (string, error) {
+// fetchAttachmentItem retrieves the item whose rich text holds the
+// attachments. Uses the same recording-type discovery pattern as show.go.
+func fetchAttachmentItem(cmd *cobra.Command, app *appctx.App, target attachmentTarget) (map[string]any, error) {
+	id, recordType := target.id, target.recordType
+
 	// If type is provided, go directly to the type-specific endpoint.
 	// Caller validates the type before calling, so typeToEndpoint won't return "".
 	var endpoint string
-	if !isGenericType(recordType) {
+	switch {
+	case target.occurrence != "":
+		endpoint = fmt.Sprintf("/schedule_entries/%s/occurrences/%s.json", id, target.occurrence)
+	case !isGenericType(recordType):
 		endpoint = typeToEndpoint(recordType, id)
-	} else {
+	default:
 		// Generic recording lookup first
 		endpoint = fmt.Sprintf("/recordings/%s.json", id)
 	}
@@ -464,22 +482,22 @@ func fetchItemContent(cmd *cobra.Command, app *appctx.App, id, recordType string
 		if shouldSuggestType(recordType) {
 			var sdkErr *basecamp.Error
 			if errors.As(err, &sdkErr) && sdkErr.Code == basecamp.CodeNotFound {
-				return "", output.ErrUsageHint(
+				return nil, output.ErrUsageHint(
 					fmt.Sprintf("Item %s not found or type required", id),
 					genericLookupTypeHint,
 				)
 			}
 		}
-		return "", convertSDKError(err)
+		return nil, convertSDKError(err)
 	}
 	if resp.StatusCode == http.StatusNoContent {
 		if shouldSuggestType(recordType) {
-			return "", output.ErrUsageHint(
+			return nil, output.ErrUsageHint(
 				fmt.Sprintf("Item %s not found or type required", id),
 				genericLookupTypeHint,
 			)
 		}
-		return "", output.ErrNotFound("item", id)
+		return nil, output.ErrNotFound("item", id)
 	}
 
 	// UseNumber so parentRecordingID sees json.Number for large IDs
@@ -488,7 +506,7 @@ func fetchItemContent(cmd *cobra.Command, app *appctx.App, id, recordType string
 	dec := json.NewDecoder(bytes.NewReader(resp.Data))
 	dec.UseNumber()
 	if err := dec.Decode(&data); err != nil {
-		return "", fmt.Errorf("failed to parse response: %w", err)
+		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	// If we used generic recording, re-fetch via type-specific endpoint for full content
@@ -506,8 +524,7 @@ func fetchItemContent(cmd *cobra.Command, app *appctx.App, id, recordType string
 		}
 	}
 
-	// Extract content — different item types use different field names
-	return extractContentField(data), nil
+	return data, nil
 }
 
 // extractContentField extracts the rich-text HTML content from a recording's
@@ -539,31 +556,47 @@ func extractContentField(data map[string]any) string {
 	return content
 }
 
-// resolveAttachmentTarget extracts the recording ID and type from a raw
-// argument (plain ID or Basecamp URL) and an optional explicit type hint.
-// Prefers CommentID when present and type is compatible.
-func resolveAttachmentTarget(arg, recordType string) (id, resolvedType string, err error) {
-	id, err = extractID(arg)
+// attachmentTarget is the item whose attachments list and download read.
+// For one occurrence of a recurring event, id is the event's and occurrence
+// is the date.
+type attachmentTarget struct {
+	id         string
+	recordType string
+	occurrence string
+}
+
+// resolveAttachmentTarget reads the target from a raw argument (plain ID or
+// Basecamp URL) and an optional explicit type hint. A comment fragment wins
+// when the type allows a comment, even on an occurrence URL.
+func resolveAttachmentTarget(arg, recordType string) (attachmentTarget, error) {
+	parsed := urlarg.Parse(arg)
+	if parsed != nil && parsed.CommentID != "" && (recordType == "" || recordType == "comment" || recordType == "comments") {
+		if recordType == "" {
+			recordType = "comment"
+		}
+		return attachmentTarget{id: parsed.CommentID, recordType: recordType}, nil
+	}
+	if parsed != nil && recordType == "" {
+		recordType = parsed.Type
+	}
+	if parsed != nil && parsed.OccurrenceDate != "" && isScheduleEntryType(recordType) {
+		return attachmentTarget{id: parsed.RecordingID, recordType: recordType, occurrence: parsed.OccurrenceDate}, nil
+	}
+
+	id, err := extractID(arg)
 	if err != nil {
-		return "", "", err
+		return attachmentTarget{}, err
 	}
-	resolvedType = recordType
+	return attachmentTarget{id: id, recordType: recordType}, nil
+}
 
-	if parsed := urlarg.Parse(arg); parsed != nil {
-		if parsed.CommentID != "" && (resolvedType == "" || resolvedType == "comment" || resolvedType == "comments") {
-			id = parsed.CommentID
-			if resolvedType == "" {
-				resolvedType = "comment"
-			}
-		} else if parsed.RecordingID != "" {
-			id = parsed.RecordingID
-		}
-		if resolvedType == "" && parsed.Type != "" {
-			resolvedType = parsed.Type
-		}
+func isScheduleEntryType(recordType string) bool {
+	switch recordType {
+	case "schedule-entry", "schedule_entry", "schedule_entries":
+		return true
+	default:
+		return false
 	}
-
-	return id, resolvedType, nil
 }
 
 // normalizeShowType maps attachment type aliases to canonical types that
