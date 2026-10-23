@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/harness"
 )
 
@@ -30,10 +32,7 @@ func pluginRenameNotice(cmd *cobra.Command) string {
 	if !isLegacyPluginRoot(root) {
 		return ""
 	}
-	dir := agentPluginDataDir()
-	if dir == "" {
-		dir = agentHookStateDir(cmd.Context())
-	}
+	dir := agentHookNoticeDir(cmd.Context())
 	if dir == "" || !claimOnce(filepath.Join(dir, pluginRenameNoticeMarker)) {
 		return ""
 	}
@@ -43,15 +42,18 @@ func pluginRenameNotice(cmd *cobra.Command) string {
 }
 
 // emitSessionStartNotices writes the SessionStart hook's one JSON reply: the
-// rename notice, shown to the user and to the model, and after a compaction
-// the connector's reload instruction, to the model only. Nothing to say
-// writes nothing.
+// rename or version notice, shown to the user and to the model, and after a
+// compaction the connector's reload instruction, to the model only. Nothing
+// to say writes nothing.
 func emitSessionStartNotices(cmd *cobra.Command, input agentHookInput) {
-	rename := pluginRenameNotice(cmd)
+	notice := pluginRenameNotice(cmd)
+	if notice == "" {
+		notice = pluginVersionNotice(cmd)
+	}
 	reload := connectorReloadNotice(input)
 	var contexts []string
-	if rename != "" {
-		contexts = append(contexts, "Mention this to the user once: "+rename)
+	if notice != "" {
+		contexts = append(contexts, "Mention this to the user once: "+notice)
 	}
 	if reload != "" {
 		contexts = append(contexts, reload)
@@ -65,8 +67,8 @@ func emitSessionStartNotices(cmd *cobra.Command, input agentHookInput) {
 			"additionalContext": strings.Join(contexts, "\n\n"),
 		},
 	}
-	if rename != "" {
-		reply["systemMessage"] = rename
+	if notice != "" {
+		reply["systemMessage"] = notice
 	}
 	_ = json.NewEncoder(cmd.OutOrStdout()).Encode(reply)
 }
@@ -79,6 +81,21 @@ func agentPluginRoot() string {
 		return root
 	}
 	return os.Getenv("PLUGIN_ROOT")
+}
+
+// agentHookNoticeDir holds the markers that keep a notice to once: the
+// plugin's data directory, else a directory of the CLI's cache of its own.
+// Not the commit-snapshot directory, whose cleanup removes every file older
+// than an hour and would bring a notice back.
+func agentHookNoticeDir(ctx context.Context) string {
+	if dir := agentPluginDataDir(); dir != "" {
+		return dir
+	}
+	app := appctx.FromContext(ctx)
+	if app == nil || app.Config == nil || app.Config.CacheDir == "" {
+		return ""
+	}
+	return filepath.Join(app.Config.CacheDir, "agent-hook-notices")
 }
 
 func agentPluginDataDir() string {
@@ -101,19 +118,28 @@ func isLegacyPluginRoot(root string) bool {
 // legacyPluginSetupCommand names the setup command for the agent that owns
 // root, falling back to setting up every detected agent.
 func legacyPluginSetupCommand(root string) string {
+	if agent := pluginRootAgent(root); agent != "" {
+		return "basecamp setup " + agent
+	}
+	return "basecamp setup agents"
+}
+
+// pluginRootAgent names the agent whose home holds root, "claude" or
+// "codex", or "" when neither does.
+func pluginRootAgent(root string) string {
 	if home, err := os.UserHomeDir(); err == nil {
 		for agent, dir := range map[string]string{"claude": ".claude", "codex": ".codex"} {
 			if rel, err := filepath.Rel(filepath.Join(home, dir), root); err == nil && filepath.IsLocal(rel) {
-				return "basecamp setup " + agent
+				return agent
 			}
 		}
 	}
 	if codexHome := os.Getenv("CODEX_HOME"); codexHome != "" {
 		if rel, err := filepath.Rel(codexHome, root); err == nil && filepath.IsLocal(rel) {
-			return "basecamp setup codex"
+			return "codex"
 		}
 	}
-	return "basecamp setup agents"
+	return ""
 }
 
 // claimOnce creates marker, reporting whether this call created it. Any

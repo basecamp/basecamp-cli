@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
@@ -275,8 +277,19 @@ func codexPluginVersionCheck(state codexPluginState, found bool, err error) *Sta
 		Name:    "Codex Plugin Version",
 		Status:  "warn",
 		Message: fmt.Sprintf("Mismatched (plugin %s, CLI %s)", state.Version, version.Version),
-		Hint:    "Run: basecamp setup codex",
+		Hint:    codexPluginVersionMismatchHint(state.Version, version.Version),
 	}
+}
+
+// codexPluginVersionMismatchHint says which side of a mismatch to bring
+// forward: setup upgrades a plugin behind the CLI, and only an upgrade
+// brings a CLI behind the plugin the commands its skills run.
+func codexPluginVersionMismatchHint(installed, cli string) string {
+	plugin, current := normalizeSemver(installed), normalizeSemver(cli)
+	if semver.IsValid(plugin) && semver.IsValid(current) && semver.Compare(current, plugin) < 0 {
+		return "Run: basecamp upgrade"
+	}
+	return "Run: basecamp setup codex"
 }
 
 func queryCodexPlugin(parent context.Context) (codexPluginState, bool, error) {

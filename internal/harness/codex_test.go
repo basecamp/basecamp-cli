@@ -118,6 +118,19 @@ func TestCheckCodexPluginVersionMismatch(t *testing.T) {
 	assert.Equal(t, "Run: basecamp setup codex", check.Hint)
 }
 
+func TestCheckCodexPluginVersionCLIBehindPlugin(t *testing.T) {
+	original := version.Version
+	version.Version = "0.7.2"
+	t.Cleanup(func() { version.Version = original })
+	stubCodexList(t, codexListFixture("0.8.0", true, true), nil)
+
+	check := CheckCodexPluginVersion()
+
+	assert.Equal(t, "warn", check.Status)
+	assert.Contains(t, check.Message, "plugin 0.8.0, CLI 0.7.2")
+	assert.Equal(t, "Run: basecamp upgrade", check.Hint)
+}
+
 func TestCheckCodexPluginVersionSkipsMissingPlugin(t *testing.T) {
 	stubCodexList(t, `{"installed":[],"available":[]}`, nil)
 
