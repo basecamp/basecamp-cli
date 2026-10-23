@@ -664,6 +664,27 @@ func TestConnectAgentBacksOffWhenThrottled(t *testing.T) {
 	assert.Equal(t, []time.Duration{time.Second, 30 * time.Second}, clock.waits())
 }
 
+// TestConnectAgentWaitsOutAPollAnswered503: only the intake's 503 means
+// Basecamp isn't issuing connections, and only it says no agent was
+// connected. A poll answered 503 is the server's trouble while an approval
+// may already stand: the poll backs off and carries on, never reaching the
+// refusal that marks ErrNoAgentConnection.
+func TestConnectAgentWaitsOutAPollAnswered503(t *testing.T) {
+	as := startConnectAS(t)
+	as.poll = func(call int) (int, string) {
+		if call == 0 {
+			return http.StatusServiceUnavailable, ``
+		}
+		return http.StatusOK, connectionJSON(scopeFull)
+	}
+	m := connectManager(t, as)
+
+	result, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, newTestClock()))
+	require.NoError(t, err)
+	assert.Equal(t, "999", result.AccountID)
+	assert.Len(t, as.calls(&as.pollForms), 2)
+}
+
 // TestConnectAgentRefusesATokenEndpointOnAnotherOrigin: the poll carries
 // the device code and is answered with a client secret. A response body
 // naming another host for it is not followed, and the handover never

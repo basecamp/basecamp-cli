@@ -671,6 +671,21 @@ func TestAuthLoginAsksBeforeRefusingANewProfile(t *testing.T) {
 		intakes, deviceAuths, _ := s.counts()
 		assert.Zero(t, intakes+deviceAuths)
 	})
+	// Yourself can't follow onto a profile that doesn't exist, so no agent
+	// ends at the refusal, with nothing offered that would only fail.
+	t.Run("agent, no agent", func(t *testing.T) {
+		s := startConnectAsServer(t)
+		s.pollStatus, s.pollBody = 400, `{"error":"access_denied"}`
+		app := connectAsApp(t, s, &config.Config{ActiveProfile: "new-agent"})
+		app.Flags.Profile = "new-agent"
+		prompter := answerLogin(t, &fakeLoginPrompter{choice: connectAsAgent, confirm: true})
+
+		_, err := runConnectAsLogin(t, app)
+		assertNoAgentRefusal(t, err)
+		assert.Empty(t, prompter.confirmed)
+		_, deviceAuths, _ := s.counts()
+		assert.Zero(t, deviceAuths)
+	})
 	t.Run("nobody to ask", func(t *testing.T) {
 		s := startConnectAsServer(t)
 		app := connectAsApp(t, s, &config.Config{ActiveProfile: "new-agent"})

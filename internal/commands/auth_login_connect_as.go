@@ -322,11 +322,8 @@ func runLoginAsAgent(cmd *cobra.Command, app *appctx.App, l browserLogin) error 
 		return err
 	}
 
-	// The person's login lands on the profile the login started on. When
-	// that is the agent profile being reconnected, it would replace the
-	// agent's credential with the person's, which nobody asked for.
 	refusal := noAgentLoginError(err)
-	if !loginAsks(app) || moved || (reconnects && before.ActiveProfile == name) {
+	if !loginAsks(app) || !personLoginCanFollow(&before, name, reconnects, moved) {
 		return refusal
 	}
 	fmt.Fprintln(human)
@@ -342,6 +339,27 @@ func runLoginAsAgent(cmd *cobra.Command, app *appctx.App, l browserLogin) error 
 	*app.Config = before
 	l.as = connectAsMe
 	return runLoginAsYourself(cmd, app, l)
+}
+
+// personLoginCanFollow reports whether, after Basecamp connected no agent,
+// the person's login can run in this process where the login started
+// (before), and land there cleanly. It can't when the agent ran on another
+// Basecamp (moved: this process's OAuth client is now that one's), when the
+// start was the agent profile being reconnected (the person's token would
+// replace the agent's credential), or when the start was a profile that
+// doesn't exist (a person's login refuses it). Where it can't, the refusal
+// names --as me, which runs in a process of its own.
+func personLoginCanFollow(before *config.Config, agentProfile string, reconnects, moved bool) bool {
+	start := before.ActiveProfile
+	switch {
+	case moved:
+		return false
+	case reconnects && start == agentProfile:
+		return false
+	case start != "" && before.Profiles[start] == nil:
+		return false
+	}
+	return true
 }
 
 // loginAgentProfile is the profile the login connects the agent under, as
