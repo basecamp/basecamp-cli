@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/version"
 )
 
@@ -102,7 +104,7 @@ func TestAgentHookVersionNoticeSilentWhenNothingToSay(t *testing.T) {
 		{"same release", "0.17.0", "0.17.0"},
 		{"same release spelled with a v", "v0.17.0", "0.17.0"},
 		{"dev build", "dev", "0.17.0"},
-		{"prerelease CLI", "0.18.0-rc.1", "0.17.0"},
+		{"prerelease CLI ahead of the plugin", "0.18.0-rc.1", "0.17.0"},
 		{"go install pseudo-version", "0.17.1-0.20261022120000-abcdef123456", "0.17.0"},
 		{"plugin version not semver", "0.17.0", "main"},
 		{"plugin without a version", "0.17.0", ""},
@@ -137,4 +139,40 @@ func TestAgentHookVersionNoticeOnlyAtSessionStart(t *testing.T) {
 	installPluginAt(t, "CLAUDE_PLUGIN_ROOT", claudePluginRoot(t, "0.14.0"), ".claude-plugin", "0.14.0")
 
 	assert.Empty(t, runAgentHookPreservingHome(t, `{"hook_event_name":"PreToolUse","session_id":"s","tool_use_id":"t","tool_input":{"command":"ls"}}`))
+}
+
+// An rc left installed past its release is behind the plugin, and upgrading
+// it is the remedy, prerelease or not.
+func TestAgentHookVersionNoticeSaysUpgradeForPrereleaseBehindPlugin(t *testing.T) {
+	setCLIVersion(t, "0.17.0-rc.1")
+	installPluginAt(t, "CLAUDE_PLUGIN_ROOT", claudePluginRoot(t, "0.17.0"), ".claude-plugin", "0.17.0")
+
+	message := sessionStartSystemMessage(t, runAgentHookPreservingHome(t, sessionStartPayload))
+	assert.Contains(t, message, "plugin (0.17.0) is newer than the `basecamp` command (0.17.0-rc.1)")
+	assert.Contains(t, message, "Run `basecamp upgrade`.")
+}
+
+// Without a plugin data directory the marker lives in the CLI's cache, and
+// must survive the commit-snapshot cleanup, which removes every file in its
+// own directory older than an hour.
+func TestAgentHookVersionNoticeMarkerSurvivesSnapshotCleanup(t *testing.T) {
+	setCLIVersion(t, "0.17.0")
+	installPluginAt(t, "CLAUDE_PLUGIN_ROOT", claudePluginRoot(t, "0.14.0"), ".claude-plugin", "0.14.0")
+	t.Setenv("CLAUDE_PLUGIN_DATA", "")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("BASECAMP_CACHE_DIR", "")
+
+	require.NotEmpty(t, runAgentHookPreservingHome(t, sessionStartPayload))
+
+	cache := config.Default().CacheDir
+	aged := time.Now().Add(-2 * agentHookSnapshotTTL)
+	require.NoError(t, filepath.Walk(cache, func(path string, _ os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chtimes(path, aged, aged)
+	}))
+	removeExpiredAgentHookSnapshots(filepath.Join(cache, "agent-hook"))
+
+	assert.Empty(t, runAgentHookPreservingHome(t, sessionStartPayload), "the notice stays shown once")
 }

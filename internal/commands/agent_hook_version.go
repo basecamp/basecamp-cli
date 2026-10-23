@@ -46,20 +46,19 @@ func pluginVersionNotice(cmd *cobra.Command) string {
 	if !semver.IsValid(plugin) || !semver.IsValid(cli) || semver.Compare(plugin, cli) == 0 {
 		return ""
 	}
-	// A prerelease or go-install build is ahead of every plugin the
-	// marketplace offers, so there is nothing to update to.
-	if semver.Prerelease(cli) != "" {
+	cliBehind := semver.Compare(cli, plugin) < 0
+	// A prerelease or go-install build ahead of the plugin is ahead of every
+	// plugin the marketplace offers, so there is no plugin to update to. One
+	// behind it, an rc left installed past its release, still needs upgrading.
+	if semver.Prerelease(cli) != "" && !cliBehind {
 		return ""
 	}
-	dir := agentPluginDataDir()
-	if dir == "" {
-		dir = agentHookStateDir(cmd.Context())
-	}
+	dir := agentHookNoticeDir(cmd.Context())
 	// Valid semver holds only [0-9A-Za-z.+-], so the marker stays one name.
 	if dir == "" || !claimOnce(filepath.Join(dir, pluginVersionNoticeMarker+plugin+"-"+cli)) {
 		return ""
 	}
-	if semver.Compare(cli, plugin) < 0 {
+	if cliBehind {
 		return "The Basecamp plugin (" + pluginVersion + ") is newer than the `basecamp` command (" + version.Version + "), " +
 			"so its skills may run commands this CLI doesn't have. Run `basecamp upgrade`."
 	}

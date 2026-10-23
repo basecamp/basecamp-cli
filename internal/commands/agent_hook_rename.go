@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/harness"
 )
 
@@ -30,10 +32,7 @@ func pluginRenameNotice(cmd *cobra.Command) string {
 	if !isLegacyPluginRoot(root) {
 		return ""
 	}
-	dir := agentPluginDataDir()
-	if dir == "" {
-		dir = agentHookStateDir(cmd.Context())
-	}
+	dir := agentHookNoticeDir(cmd.Context())
 	if dir == "" || !claimOnce(filepath.Join(dir, pluginRenameNoticeMarker)) {
 		return ""
 	}
@@ -82,6 +81,21 @@ func agentPluginRoot() string {
 		return root
 	}
 	return os.Getenv("PLUGIN_ROOT")
+}
+
+// agentHookNoticeDir holds the markers that keep a notice to once: the
+// plugin's data directory, else a directory of the CLI's cache of its own.
+// Not the commit-snapshot directory, whose cleanup removes every file older
+// than an hour and would bring a notice back.
+func agentHookNoticeDir(ctx context.Context) string {
+	if dir := agentPluginDataDir(); dir != "" {
+		return dir
+	}
+	app := appctx.FromContext(ctx)
+	if app == nil || app.Config == nil || app.Config.CacheDir == "" {
+		return ""
+	}
+	return filepath.Join(app.Config.CacheDir, "agent-hook-notices")
 }
 
 func agentPluginDataDir() string {
