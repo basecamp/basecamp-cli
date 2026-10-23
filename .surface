@@ -334,11 +334,15 @@ ARG basecamp project delete 00 <id>
 ARG basecamp project show 00 <id>
 ARG basecamp project trash 00 <id>
 ARG basecamp project update 00 <id>
+ARG basecamp project wallpaper mode 00 <fill|tile>
+ARG basecamp project wallpaper set 00 <file>
 ARG basecamp projects create 00 <name>
 ARG basecamp projects delete 00 <id>
 ARG basecamp projects show 00 <id>
 ARG basecamp projects trash 00 <id>
 ARG basecamp projects update 00 <id>
+ARG basecamp projects wallpaper mode 00 <fill|tile>
+ARG basecamp projects wallpaper set 00 <file>
 ARG basecamp recordings 00 [type]
 ARG basecamp recordings active 00 <id|url>
 ARG basecamp recordings archive 00 <id|url>
@@ -1028,6 +1032,10 @@ CMD basecamp project list
 CMD basecamp project show
 CMD basecamp project trash
 CMD basecamp project update
+CMD basecamp project wallpaper
+CMD basecamp project wallpaper mode
+CMD basecamp project wallpaper remove
+CMD basecamp project wallpaper set
 CMD basecamp projects
 CMD basecamp projects create
 CMD basecamp projects delete
@@ -1035,6 +1043,10 @@ CMD basecamp projects list
 CMD basecamp projects show
 CMD basecamp projects trash
 CMD basecamp projects update
+CMD basecamp projects wallpaper
+CMD basecamp projects wallpaper mode
+CMD basecamp projects wallpaper remove
+CMD basecamp projects wallpaper set
 CMD basecamp recordings
 CMD basecamp recordings active
 CMD basecamp recordings archive
@@ -13236,6 +13248,91 @@ FLAG basecamp project update --stats type=bool
 FLAG basecamp project update --styled type=bool
 FLAG basecamp project update --todolist type=string
 FLAG basecamp project update --verbose type=count
+FLAG basecamp project wallpaper --account type=string
+FLAG basecamp project wallpaper --agent type=bool
+FLAG basecamp project wallpaper --cache-dir type=string
+FLAG basecamp project wallpaper --count type=bool
+FLAG basecamp project wallpaper --help type=bool
+FLAG basecamp project wallpaper --hints type=bool
+FLAG basecamp project wallpaper --ids-only type=bool
+FLAG basecamp project wallpaper --in type=string
+FLAG basecamp project wallpaper --jq type=string
+FLAG basecamp project wallpaper --json type=bool
+FLAG basecamp project wallpaper --markdown type=bool
+FLAG basecamp project wallpaper --md type=bool
+FLAG basecamp project wallpaper --no-hints type=bool
+FLAG basecamp project wallpaper --no-stats type=bool
+FLAG basecamp project wallpaper --profile type=string
+FLAG basecamp project wallpaper --project type=string
+FLAG basecamp project wallpaper --quiet type=bool
+FLAG basecamp project wallpaper --stats type=bool
+FLAG basecamp project wallpaper --styled type=bool
+FLAG basecamp project wallpaper --todolist type=string
+FLAG basecamp project wallpaper --verbose type=count
+FLAG basecamp project wallpaper mode --account type=string
+FLAG basecamp project wallpaper mode --agent type=bool
+FLAG basecamp project wallpaper mode --cache-dir type=string
+FLAG basecamp project wallpaper mode --count type=bool
+FLAG basecamp project wallpaper mode --help type=bool
+FLAG basecamp project wallpaper mode --hints type=bool
+FLAG basecamp project wallpaper mode --ids-only type=bool
+FLAG basecamp project wallpaper mode --in type=string
+FLAG basecamp project wallpaper mode --jq type=string
+FLAG basecamp project wallpaper mode --json type=bool
+FLAG basecamp project wallpaper mode --markdown type=bool
+FLAG basecamp project wallpaper mode --md type=bool
+FLAG basecamp project wallpaper mode --no-hints type=bool
+FLAG basecamp project wallpaper mode --no-stats type=bool
+FLAG basecamp project wallpaper mode --profile type=string
+FLAG basecamp project wallpaper mode --project type=string
+FLAG basecamp project wallpaper mode --quiet type=bool
+FLAG basecamp project wallpaper mode --stats type=bool
+FLAG basecamp project wallpaper mode --styled type=bool
+FLAG basecamp project wallpaper mode --todolist type=string
+FLAG basecamp project wallpaper mode --verbose type=count
+FLAG basecamp project wallpaper remove --account type=string
+FLAG basecamp project wallpaper remove --agent type=bool
+FLAG basecamp project wallpaper remove --cache-dir type=string
+FLAG basecamp project wallpaper remove --count type=bool
+FLAG basecamp project wallpaper remove --help type=bool
+FLAG basecamp project wallpaper remove --hints type=bool
+FLAG basecamp project wallpaper remove --ids-only type=bool
+FLAG basecamp project wallpaper remove --in type=string
+FLAG basecamp project wallpaper remove --jq type=string
+FLAG basecamp project wallpaper remove --json type=bool
+FLAG basecamp project wallpaper remove --markdown type=bool
+FLAG basecamp project wallpaper remove --md type=bool
+FLAG basecamp project wallpaper remove --no-hints type=bool
+FLAG basecamp project wallpaper remove --no-stats type=bool
+FLAG basecamp project wallpaper remove --profile type=string
+FLAG basecamp project wallpaper remove --project type=string
+FLAG basecamp project wallpaper remove --quiet type=bool
+FLAG basecamp project wallpaper remove --stats type=bool
+FLAG basecamp project wallpaper remove --styled type=bool
+FLAG basecamp project wallpaper remove --todolist type=string
+FLAG basecamp project wallpaper remove --verbose type=count
+FLAG basecamp project wallpaper set --account type=string
+FLAG basecamp project wallpaper set --agent type=bool
+FLAG basecamp project wallpaper set --cache-dir type=string
+FLAG basecamp project wallpaper set --count type=bool
+FLAG basecamp project wallpaper set --help type=bool
+FLAG basecamp project wallpaper set --hints type=bool
+FLAG basecamp project wallpaper set --ids-only type=bool
+FLAG basecamp project wallpaper set --in type=string
+FLAG basecamp project wallpaper set --jq type=string
+FLAG basecamp project wallpaper set --json type=bool
+FLAG basecamp project wallpaper set --markdown type=bool
+FLAG basecamp project wallpaper set --md type=bool
+FLAG basecamp project wallpaper set --mode type=string
+FLAG basecamp project wallpaper set --no-hints type=bool
+FLAG basecamp project wallpaper set --no-stats type=bool
+FLAG basecamp project wallpaper set --profile type=string
+FLAG basecamp project wallpaper set --project type=string
+FLAG basecamp project wallpaper set --quiet type=bool
+FLAG basecamp project wallpaper set --stats type=bool
+FLAG basecamp project wallpaper set --styled type=bool
+FLAG basecamp project wallpaper set --todolist type=string
+FLAG basecamp project wallpaper set --verbose type=count
 FLAG basecamp projects --account type=string
 FLAG basecamp projects --agent type=bool
 FLAG basecamp projects --cache-dir type=string
@@ -13393,6 +13490,91 @@ FLAG basecamp projects update --stats type=bool
 FLAG basecamp projects update --styled type=bool
 FLAG basecamp projects update --todolist type=string
 FLAG basecamp projects update --verbose type=count
+FLAG basecamp projects wallpaper --account type=string
+FLAG basecamp projects wallpaper --agent type=bool
+FLAG basecamp projects wallpaper --cache-dir type=string
+FLAG basecamp projects wallpaper --count type=bool
+FLAG basecamp projects wallpaper --help type=bool
+FLAG basecamp projects wallpaper --hints type=bool
+FLAG basecamp projects wallpaper --ids-only type=bool
+FLAG basecamp projects wallpaper --in type=string
+FLAG basecamp projects wallpaper --jq type=string
+FLAG basecamp projects wallpaper --json type=bool
+FLAG basecamp projects wallpaper --markdown type=bool
+FLAG basecamp projects wallpaper --md type=bool
+FLAG basecamp projects wallpaper --no-hints type=bool
+FLAG basecamp projects wallpaper --no-stats type=bool
+FLAG basecamp projects wallpaper --profile type=string
+FLAG basecamp projects wallpaper --project type=string
+FLAG basecamp projects wallpaper --quiet type=bool
+FLAG basecamp projects wallpaper --stats type=bool
+FLAG basecamp projects wallpaper --styled type=bool
+FLAG basecamp projects wallpaper --todolist type=string
+FLAG basecamp projects wallpaper --verbose type=count
+FLAG basecamp projects wallpaper mode --account type=string
+FLAG basecamp projects wallpaper mode --agent type=bool
+FLAG basecamp projects wallpaper mode --cache-dir type=string
+FLAG basecamp projects wallpaper mode --count type=bool
+FLAG basecamp projects wallpaper mode --help type=bool
+FLAG basecamp projects wallpaper mode --hints type=bool
+FLAG basecamp projects wallpaper mode --ids-only type=bool
+FLAG basecamp projects wallpaper mode --in type=string
+FLAG basecamp projects wallpaper mode --jq type=string
+FLAG basecamp projects wallpaper mode --json type=bool
+FLAG basecamp projects wallpaper mode --markdown type=bool
+FLAG basecamp projects wallpaper mode --md type=bool
+FLAG basecamp projects wallpaper mode --no-hints type=bool
+FLAG basecamp projects wallpaper mode --no-stats type=bool
+FLAG basecamp projects wallpaper mode --profile type=string
+FLAG basecamp projects wallpaper mode --project type=string
+FLAG basecamp projects wallpaper mode --quiet type=bool
+FLAG basecamp projects wallpaper mode --stats type=bool
+FLAG basecamp projects wallpaper mode --styled type=bool
+FLAG basecamp projects wallpaper mode --todolist type=string
+FLAG basecamp projects wallpaper mode --verbose type=count
+FLAG basecamp projects wallpaper remove --account type=string
+FLAG basecamp projects wallpaper remove --agent type=bool
+FLAG basecamp projects wallpaper remove --cache-dir type=string
+FLAG basecamp projects wallpaper remove --count type=bool
+FLAG basecamp projects wallpaper remove --help type=bool
+FLAG basecamp projects wallpaper remove --hints type=bool
+FLAG basecamp projects wallpaper remove --ids-only type=bool
+FLAG basecamp projects wallpaper remove --in type=string
+FLAG basecamp projects wallpaper remove --jq type=string
+FLAG basecamp projects wallpaper remove --json type=bool
+FLAG basecamp projects wallpaper remove --markdown type=bool
+FLAG basecamp projects wallpaper remove --md type=bool
+FLAG basecamp projects wallpaper remove --no-hints type=bool
+FLAG basecamp projects wallpaper remove --no-stats type=bool
+FLAG basecamp projects wallpaper remove --profile type=string
+FLAG basecamp projects wallpaper remove --project type=string
+FLAG basecamp projects wallpaper remove --quiet type=bool
+FLAG basecamp projects wallpaper remove --stats type=bool
+FLAG basecamp projects wallpaper remove --styled type=bool
+FLAG basecamp projects wallpaper remove --todolist type=string
+FLAG basecamp projects wallpaper remove --verbose type=count
+FLAG basecamp projects wallpaper set --account type=string
+FLAG basecamp projects wallpaper set --agent type=bool
+FLAG basecamp projects wallpaper set --cache-dir type=string
+FLAG basecamp projects wallpaper set --count type=bool
+FLAG basecamp projects wallpaper set --help type=bool
+FLAG basecamp projects wallpaper set --hints type=bool
+FLAG basecamp projects wallpaper set --ids-only type=bool
+FLAG basecamp projects wallpaper set --in type=string
+FLAG basecamp projects wallpaper set --jq type=string
+FLAG basecamp projects wallpaper set --json type=bool
+FLAG basecamp projects wallpaper set --markdown type=bool
+FLAG basecamp projects wallpaper set --md type=bool
+FLAG basecamp projects wallpaper set --mode type=string
+FLAG basecamp projects wallpaper set --no-hints type=bool
+FLAG basecamp projects wallpaper set --no-stats type=bool
+FLAG basecamp projects wallpaper set --profile type=string
+FLAG basecamp projects wallpaper set --project type=string
+FLAG basecamp projects wallpaper set --quiet type=bool
+FLAG basecamp projects wallpaper set --stats type=bool
+FLAG basecamp projects wallpaper set --styled type=bool
+FLAG basecamp projects wallpaper set --todolist type=string
+FLAG basecamp projects wallpaper set --verbose type=count
 FLAG basecamp recordings --account type=string
 FLAG basecamp recordings --agent type=bool
 FLAG basecamp recordings --all type=bool
@@ -19873,6 +20055,10 @@ SUB basecamp project list
 SUB basecamp project show
 SUB basecamp project trash
 SUB basecamp project update
+SUB basecamp project wallpaper
+SUB basecamp project wallpaper mode
+SUB basecamp project wallpaper remove
+SUB basecamp project wallpaper set
 SUB basecamp projects
 SUB basecamp projects create
 SUB basecamp projects delete
@@ -19880,6 +20066,10 @@ SUB basecamp projects list
 SUB basecamp projects show
 SUB basecamp projects trash
 SUB basecamp projects update
+SUB basecamp projects wallpaper
+SUB basecamp projects wallpaper mode
+SUB basecamp projects wallpaper remove
+SUB basecamp projects wallpaper set
 SUB basecamp recordings
 SUB basecamp recordings active
 SUB basecamp recordings archive
