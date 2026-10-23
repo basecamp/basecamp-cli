@@ -550,6 +550,7 @@ func TestConnectAgentReportsADecline(t *testing.T) {
 	_, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, newTestClock()))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "declined")
+	assert.ErrorIs(t, err, ErrNoAgentConnection, "a decline connects no agent, so a caller can offer the person instead")
 	assert.Len(t, as.calls(&as.pollForms), 1, "a decline ends the ceremony")
 	assertNoAgentCredential(t, m)
 }
@@ -563,6 +564,7 @@ func TestConnectAgentReportsAnExpiredCode(t *testing.T) {
 	_, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, newTestClock()))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "expired")
+	assert.NotErrorIs(t, err, ErrNoAgentConnection, "an unanswered code is not Basecamp declining an agent")
 	// The lifetime is the server's to choose, so the remedy must not
 	// promise one this code may not have had.
 	var e *output.Error
@@ -662,6 +664,27 @@ func TestConnectAgentBacksOffWhenThrottled(t *testing.T) {
 	assert.Equal(t, []time.Duration{time.Second, 30 * time.Second}, clock.waits())
 }
 
+// TestConnectAgentWaitsOutAPollAnswered503: only the intake's 503 means
+// Basecamp isn't issuing connections, and only it says no agent was
+// connected. A poll answered 503 is the server's trouble while an approval
+// may already stand: the poll backs off and carries on, never reaching the
+// refusal that marks ErrNoAgentConnection.
+func TestConnectAgentWaitsOutAPollAnswered503(t *testing.T) {
+	as := startConnectAS(t)
+	as.poll = func(call int) (int, string) {
+		if call == 0 {
+			return http.StatusServiceUnavailable, ``
+		}
+		return http.StatusOK, connectionJSON(scopeFull)
+	}
+	m := connectManager(t, as)
+
+	result, err := m.ConnectAgent(context.Background(), connectOptions(&collectLogger{}, newTestClock()))
+	require.NoError(t, err)
+	assert.Equal(t, "999", result.AccountID)
+	assert.Len(t, as.calls(&as.pollForms), 2)
+}
+
 // TestConnectAgentRefusesATokenEndpointOnAnotherOrigin: the poll carries
 // the device code and is answered with a client secret. A response body
 // naming another host for it is not followed, and the handover never
@@ -710,6 +733,7 @@ func TestConnectAgentReportsARefusedIntake(t *testing.T) {
 	var e *output.Error
 	require.ErrorAs(t, err, &e)
 	assert.Contains(t, e.Hint, "not issuing agent connections")
+	assert.ErrorIs(t, err, ErrNoAgentConnection)
 	assert.Empty(t, as.calls(&as.pollForms))
 }
 

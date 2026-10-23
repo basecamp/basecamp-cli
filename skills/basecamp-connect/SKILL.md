@@ -347,9 +347,13 @@ hint. If it fails at once with "Interactive login cannot run under a machine
 output mode", the CLI predates this skill: run `basecamp upgrade`, tell the
 person, and run it again. Don't follow that error's hint.
 
-`basecamp auth login` and `basecamp profile create` refuse `--json`. Run them
-plainly, in the background, and read their output as it arrives, so you can
-show the link and code while they wait.
+`basecamp auth login --as agent` runs this same ceremony, with the same
+`--json` lines; prefer `basecamp auth agent connect`, which says what it does.
+
+`basecamp auth login` and `basecamp profile create` otherwise refuse `--json`.
+Run them plainly, in the background, and read their output as it arrives, so
+you can show the link and code while they wait. Run that way, with no terminal,
+`basecamp auth login` signs the person in and asks nothing.
 
 ## Pings: only one computer answers them
 
