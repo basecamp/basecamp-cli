@@ -170,8 +170,8 @@ func newAgentHookPreCommitSnapshotCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			input, ok := readAgentHookInput(cmd.InOrStdin())
 			// The plugin's SessionStart hook runs this subcommand too, for the
-			// rename notice and, after a compaction, the connector's reload
-			// notice: CLIs that predate them already have this subcommand and
+			// rename and version notices and, after a compaction, the
+			// connector's reload notice: CLIs that predate them already have this subcommand and
 			// ignore a payload with no tool call, so a plugin newer than the
 			// CLI stays silent instead of failing every session start with
 			// "unknown command".

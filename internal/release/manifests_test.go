@@ -147,17 +147,18 @@ func TestHooksFileCommandsInvokeBasecamp(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &config))
 	require.NotEmpty(t, config.Hooks)
 	// Plugins must not inject Basecamp context into every agent session. The
-	// one SessionStart hook allowed speaks only in two cases: the rename
-	// notice, once, when the plugin runs under its pre-rename id, and the
-	// connector's reload notice, after a compaction of a session that ran
-	// basecamp-connect. It goes through pre-commit-snapshot, which every
+	// one SessionStart hook allowed speaks only in three cases: the rename
+	// notice, once, when the plugin runs under its pre-rename id; the version
+	// notice, once per pairing, when the plugin and the CLI come from
+	// different releases; and the connector's reload notice, after a
+	// compaction of a session that ran basecamp-connect. It goes through pre-commit-snapshot, which every
 	// hook-capable CLI has and which older ones answer silently: a new
 	// subcommand would fail every session start for anyone whose CLI is
 	// older than the plugin.
 	sessionStart := config.Hooks["SessionStart"]
-	require.Len(t, sessionStart, 1, "exactly one SessionStart matcher: the rename and connector reload notices")
-	require.Len(t, sessionStart[0].Hooks, 1, "exactly one SessionStart hook: the rename and connector reload notices")
-	assert.Equal(t, "basecamp agent-hook pre-commit-snapshot", sessionStart[0].Hooks[0].Command, "only the rename and connector reload notices may run at session start")
+	require.Len(t, sessionStart, 1, "exactly one SessionStart matcher: the rename, version and connector reload notices")
+	require.Len(t, sessionStart[0].Hooks, 1, "exactly one SessionStart hook: the rename, version and connector reload notices")
+	assert.Equal(t, "basecamp agent-hook pre-commit-snapshot", sessionStart[0].Hooks[0].Command, "only the rename, version and connector reload notices may run at session start")
 
 	for event, matchers := range config.Hooks {
 		require.NotEmpty(t, matchers, event)

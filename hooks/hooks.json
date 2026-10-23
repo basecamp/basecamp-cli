@@ -1,5 +1,5 @@
 {
-  "description": "Basecamp agent hooks: commit-reference nudges, a one-time notice for installs under the plugin's pre-rename id, and after a compaction a notice to reload the basecamp-connect skill in a session that ran it.",
+  "description": "Basecamp agent hooks: commit-reference nudges, a one-time notice for installs under the plugin's pre-rename id, a once-per-pairing notice when the plugin and the basecamp command come from different releases, and after a compaction a notice to reload the basecamp-connect skill in a session that ran it.",
   "hooks": {
     "SessionStart": [
       {

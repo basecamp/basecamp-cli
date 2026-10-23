@@ -298,6 +298,9 @@ Structured failures include `error`, `code`, `retryable`, and often `hint`.
   known verdicts and unclassified failures. Inspect `code`, `error`, and `hint`
   before choosing recovery, and do not blindly repeat the same call.
 - For usage errors, inspect leaf help and supply the named positional argument.
+- If the CLI rejects a command or flag this skill names as unknown, the installed
+  `basecamp` is older than the skill. Do not work around it: compare
+  `basecamp --version` and tell the user to run `basecamp upgrade`.
 - For ambiguous names, use an ID or add the missing project/container scope.
 - For auth or connectivity diagnosis, use `basecamp doctor --json` and
   `basecamp auth status --json` before changing credentials.
