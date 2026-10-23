@@ -38,14 +38,11 @@ Three pieces:
 
 - **The agent**: a Basecamp person of its own, owned by you, connected to this
   computer under a CLI profile (often named after the agent).
-- **The connector**: `basecamp connect -P '<profile>'`. It listens to the
-  account's event feed as the agent, checks each event against who may give the
-  agent work and which projects it serves, and prints one line per trusted
-  request. It boosts each one that asks for something first, and does
-  nothing else.
-- **This session**: the orchestrator. It watches those lines, words each
-  acknowledgement, chooses the repo, and dispatches one background subagent
-  per request. It never does the work itself.
+- **The connector**: `basecamp connect -P '<profile>'`. It checks the agent's
+  event feed against its trust and served projects, boosts each request that
+  asks for something, and prints one line per trusted request. Nothing else.
+- **This session**: watches those lines, words acknowledgements, chooses the
+  repo, and dispatches one background subagent per request. Never does the work.
 
 Claude Code only. The connector runs on Linux and macOS.
 
