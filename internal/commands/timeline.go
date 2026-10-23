@@ -3,11 +3,13 @@ package commands
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -18,20 +20,22 @@ func NewTimelineCmd() *cobra.Command {
 	var limit int
 	var page int
 	var all bool
+	var date string
 
 	cmd := &cobra.Command{
 		Use:   "timeline [me]",
 		Short: "View activity timeline",
 		Long: `View activity timelines for the account, a project, or a person.
 
-By default, shows the account-wide activity feed (recent activity across all projects).
+By default, shows today's account-wide activity feed (activity across all projects).
+Basecamp serves that feed one day at a time: use --date to read another day.
 
 Use --in to view a specific project's timeline.
 Use "me" or --person to view a person's activity timeline.`,
-		Annotations: map[string]string{"agent_notes": "Timeline shows activity feed — account-wide by default, or scoped with --in <project> or --person <id>"},
+		Annotations: map[string]string{"agent_notes": "Timeline shows activity feed — account-wide by default, one day per call (--date YYYY-MM-DD for an earlier day), or scoped with --in <project> or --person <id>"},
 		Args:        cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTimeline(cmd, args, project, person, limit, page, all)
+			return runTimeline(cmd, args, project, person, date, limit, page, all)
 		},
 	}
 
@@ -41,6 +45,7 @@ Use "me" or --person to view a person's activity timeline.`,
 	cmd.Flags().IntVarP(&limit, "limit", "n", 0, "Maximum number of events to fetch (0 = default 100)")
 	cmd.Flags().BoolVar(&all, "all", false, "Fetch all events (no limit)")
 	cmd.Flags().IntVar(&page, "page", 0, "Fetch a single page (use --all for everything)")
+	cmd.Flags().StringVar(&date, "date", "", "Day of the account-wide feed to read (YYYY-MM-DD, today, yesterday)")
 
 	return cmd
 }
@@ -71,8 +76,32 @@ func timelineListOpts(limit, page int, all bool) *basecamp.TimelineListOptions {
 	return opts
 }
 
-func runTimeline(cmd *cobra.Command, args []string, project, person string, limit, page int, all bool) error {
+// timelineDay parses --date. Basecamp reads a day it can't parse as today,
+// so anything that isn't a date is refused here, as is a future day, which
+// has no activity; dateparse reads a weekday name as the next one.
+func timelineDay(date string, now time.Time) (basecamp.Date, error) {
+	if date == "" {
+		return basecamp.Date{}, nil
+	}
+	day, err := basecamp.ParseDate(dateparse.ParseFrom(date, now))
+	if err != nil {
+		return basecamp.Date{}, output.ErrUsageHint(fmt.Sprintf("invalid --date %q", date), "Use YYYY-MM-DD, today or yesterday.")
+	}
+	if day.In(time.Local).After(now) {
+		return basecamp.Date{}, output.ErrUsageHint(fmt.Sprintf("--date %s is in the future", day), "The activity feed has nothing after today.")
+	}
+	return day, nil
+}
+
+func runTimeline(cmd *cobra.Command, args []string, project, person, date string, limit, page int, all bool) error {
 	if err := validateTimelinePagination(limit, page, all); err != nil {
+		return err
+	}
+	if date != "" && (project != "" || person != "" || len(args) > 0) {
+		return output.ErrUsage("--date reads the account-wide feed; Basecamp doesn't filter project or person timelines by day")
+	}
+	day, err := timelineDay(date, time.Now())
+	if err != nil {
 		return err
 	}
 
@@ -116,14 +145,26 @@ func runTimeline(cmd *cobra.Command, args []string, project, person string, limi
 	}
 
 	// Default: account-wide activity feed
-	result, err := app.Account().Timeline().Progress(cmd.Context(), opts)
+	result, err := app.Account().Timeline().Progress(cmd.Context(), &basecamp.ProgressOptions{Limit: opts.Limit, Page: opts.Page, Date: day})
 	if err != nil {
 		return convertSDKError(err)
 	}
 
+	summary := fmt.Sprintf("%d events today", len(result.Events))
+	previous := basecamp.DateOf(time.Now().AddDate(0, 0, -1))
+	if !day.IsZero() {
+		summary = fmt.Sprintf("%d events on %s", len(result.Events), day)
+		previous = basecamp.DateOf(day.In(time.Local).AddDate(0, 0, -1))
+	}
+
 	respOpts := []output.ResponseOption{
-		output.WithSummary(fmt.Sprintf("%d recent events", len(result.Events))),
+		output.WithSummary(summary),
 		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "previous",
+				Cmd:         fmt.Sprintf("basecamp timeline --date %s", previous),
+				Description: "View the day before",
+			},
 			output.Breadcrumb{
 				Action:      "project",
 				Cmd:         "basecamp timeline --in <project>",

@@ -21516,6 +21516,45 @@
             "required": true
           },
           {
+            "name": "date",
+            "in": "query",
+            "description": "The day to read (YYYY-MM-DD). The feed serves one day per request and defaults to today, so step this back a day at a time to read history; `page` pages within the day. The server reads an unparseable date as today.",
+            "schema": {
+              "type": "string",
+              "description": "The day to read (YYYY-MM-DD). The feed serves one day per request and defaults to today, so step this back a day at a time to read history; `page` pages within the day. The server reads an unparseable date as today."
+            }
+          },
+          {
+            "name": "project_ids[]",
+            "in": "query",
+            "description": "Only events in these projects. When omitted, the server applies the project filter the caller last saved in the web's activity view, not \"all projects\". If none of the IDs is a project the caller can access, the response is empty and the server clears that saved filter, so send only IDs the API just returned.",
+            "style": "form",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "description": "Only events in these projects. When omitted, the server applies the project filter the caller last saved in the web's activity view, not \"all projects\". If none of the IDs is a project the caller can access, the response is empty and the server clears that saved filter, so send only IDs the API just returned."
+            },
+            "explode": true
+          },
+          {
+            "name": "people_ids[]",
+            "in": "query",
+            "description": "Only events created by these people. When omitted, the server applies the people filter the caller last saved in the web's activity view, not \"everyone\". If none of the IDs is a person the caller can see, the response is empty and the server clears that saved filter, so send only IDs the API just returned.",
+            "style": "form",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "description": "Only events created by these people. When omitted, the server applies the people filter the caller last saved in the web's activity view, not \"everyone\". If none of the IDs is a person the caller can see, the response is empty and the server clears that saved filter, so send only IDs the API just returned."
+            },
+            "explode": true
+          },
+          {
             "name": "page",
             "in": "query",
             "description": "Page number for paginating through results. Defaults to 1. A positive value selects exactly that page, not a starting offset; see SPEC section 8.",
