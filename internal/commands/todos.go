@@ -1148,7 +1148,10 @@ You can pass either a todo ID or a Basecamp URL:
 		}
 
 		// Extract ID from URL if provided
-		todoIDStr := extractID(args[0])
+		todoIDStr, err := extractID(args[0])
+		if err != nil {
+			return err
+		}
 
 		todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 		if err != nil {
@@ -1578,7 +1581,10 @@ Set or clear the people notified when the todo is completed:
 			}
 
 			// Extract ID from URL if provided
-			todoIDStr := extractID(args[0])
+			todoIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 			todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid todo ID")
@@ -1778,7 +1784,10 @@ func completeTodos(cmd *cobra.Command, todoIDs []string) error {
 	}
 
 	// Extract IDs from URLs (handles both plain IDs and URLs)
-	extractedIDs := extractIDs(todoIDs)
+	extractedIDs, err := extractIDs(todoIDs)
+	if err != nil {
+		return err
+	}
 
 	var completedTodos []basecamp.Todo
 	var failed []string
@@ -2190,7 +2199,10 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string) error {
 	}
 
 	// Extract IDs from URLs (handles both plain IDs and URLs)
-	extractedIDs := extractIDs(todoIDs)
+	extractedIDs, err := extractIDs(todoIDs)
+	if err != nil {
+		return err
+	}
 
 	var reopenedTodos []basecamp.Todo
 	var failed []string
@@ -2307,7 +2319,10 @@ Move to a different todolist in the same project:
 			}
 
 			// Extract todo ID and project from URL if provided
-			todoIDStr, todoProjectID := extractWithProject(args[0])
+			todoIDStr, todoProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 			if err != nil {
@@ -2317,7 +2332,10 @@ Move to a different todolist in the same project:
 			// Resolve destination todolist when --list is provided
 			var parentID *int64
 			if list != "" {
-				listIDStr, listProjectID := extractWithProject(list)
+				listIDStr, listProjectID, err := extractWithProject(list)
+				if err != nil {
+					return err
+				}
 
 				// When --list is a URL, validate it's a todolist URL — not a
 				// todo, project, or collection URL that would silently extract

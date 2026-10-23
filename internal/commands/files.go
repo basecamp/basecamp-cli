@@ -1439,7 +1439,10 @@ You can pass either an item ID or a Basecamp URL:
 			}
 
 			// Extract ID and project from URL if provided
-			itemIDStr, urlProjectID := extractWithProject(args[0])
+			itemIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
 			if err != nil {
@@ -1654,7 +1657,10 @@ You can pass either an upload ID or a Basecamp URL:
 				return err
 			}
 
-			uploadIDStr := extractID(args[0])
+			uploadIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 			uploadID, err := strconv.ParseInt(uploadIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid upload ID")
@@ -1768,7 +1774,10 @@ You can pass either an upload ID or a Basecamp URL:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
-			uploadIDStr := extractID(args[0])
+			uploadIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 			uploadID, err := strconv.ParseInt(uploadIDStr, 10, 64)
 			if err != nil || uploadID <= 0 {
 				return output.ErrUsage("Invalid upload ID")
@@ -1949,7 +1958,10 @@ You can pass either an item ID or a Basecamp URL:
 		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Extract ID and project from URL if provided
-			itemIDStr, urlProjectID := extractWithProject(args[0])
+			itemIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			itemID, err := strconv.ParseInt(itemIDStr, 10, 64)
 			if err != nil {
@@ -2529,7 +2541,10 @@ Use --out - to stream the file to stdout (for piping to other commands).`,
 					return err
 				}
 				// Upload ID path — resolve project, then stream
-				uploadIDStr, urlProjectID := extractWithProject(args[0])
+				uploadIDStr, urlProjectID, err := extractWithProject(args[0])
+				if err != nil {
+					return err
+				}
 				uploadID, err := strconv.ParseInt(uploadIDStr, 10, 64)
 				if err != nil {
 					return output.ErrUsage("Invalid upload ID")
@@ -2577,7 +2592,10 @@ Use --out - to stream the file to stdout (for piping to other commands).`,
 			}
 
 			// Upload ID path: two-step download via SDK
-			uploadIDStr, urlProjectID := extractWithProject(args[0])
+			uploadIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			uploadID, err := strconv.ParseInt(uploadIDStr, 10, 64)
 			if err != nil {

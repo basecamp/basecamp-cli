@@ -294,7 +294,10 @@ You can pass either a forward ID or a Basecamp URL:
 			}
 
 			// Extract ID and project from URL if provided
-			forwardIDStr, urlProjectID := extractWithProject(args[0])
+			forwardIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			forwardID, err := strconv.ParseInt(forwardIDStr, 10, 64)
 			if err != nil {
@@ -464,7 +467,10 @@ You can pass either a forward ID or a Basecamp URL:
 			}
 
 			// Extract ID and project from URL if provided
-			forwardIDStr, urlProjectID := extractWithProject(args[0])
+			forwardIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			forwardID, err := strconv.ParseInt(forwardIDStr, 10, 64)
 			if err != nil {
@@ -564,8 +570,14 @@ You can pass either IDs or Basecamp URLs:
 			}
 
 			// Extract IDs and project from URLs if provided
-			forwardIDStr, urlProjectID := extractWithProject(args[0])
-			replyIDStr := extractID(args[1])
+			forwardIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
+			replyIDStr, err := extractID(args[1])
+			if err != nil {
+				return err
+			}
 
 			forwardID, err := strconv.ParseInt(forwardIDStr, 10, 64)
 			if err != nil {

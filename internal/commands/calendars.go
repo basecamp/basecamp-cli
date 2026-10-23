@@ -169,7 +169,11 @@ func validateCalendarColor(color string) error {
 // calendarIDFromArg resolves the <id|url> positional. With no index endpoint, a
 // pasted URL is the realistic way to name a calendar.
 func calendarIDFromArg(arg string) (int64, error) {
-	id, err := strconv.ParseInt(extractID(arg), 10, 64)
+	idStr, err := extractID(arg)
+	if err != nil {
+		return 0, err
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		return 0, output.ErrUsageHint(
 			fmt.Sprintf("%q is not a calendar id or Basecamp URL", arg),

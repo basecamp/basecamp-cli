@@ -160,7 +160,10 @@ You can pass either a marker ID or a Basecamp URL:
 				return err
 			}
 
-			markerIDStr := extractID(args[0])
+			markerIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 			markerID, err := strconv.ParseInt(markerIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid marker ID")
@@ -243,7 +246,10 @@ You can pass either a marker ID or a Basecamp URL:
 				return err
 			}
 
-			markerIDStr := extractID(args[0])
+			markerIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 			markerID, err := strconv.ParseInt(markerIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid marker ID")

@@ -88,8 +88,10 @@ You can also pass a Basecamp URL directly:
 					)
 				} else if parsed.RecordingID != "" {
 					id = parsed.RecordingID
-					// Auto-detect type from URL if not specified
-					if recordType == "" && parsed.Type != "" {
+					// Auto-detect type from URL if not specified. Left open, an
+					// occurrence's type would be looked up by the event's ID and
+					// read the whole series, so it takes its type from the URL.
+					if parsed.Type != "" && (recordType == "" || (parsed.OccurrenceDate != "" && namesNoType(recordType))) {
 						recordType = parsed.Type
 						untypedLookup = false // URL carries the type
 					}
@@ -257,10 +259,17 @@ You can also pass a Basecamp URL directly:
 				return err
 			}
 
+			// An occurrence URL carries its event's ID, but the occurrence is
+			// a recording of its own, with its own comments.
+			recordingID := id
+			if occurrenceDate != "" {
+				recordingID = fmt.Sprint(data["id"])
+			}
+
 			// Skip comment fetch for non-commentable types.
 			enrichment := &commentEnrichment{}
 			if isCommentableShowType(recordType, data) {
-				enrichment = fetchRecordingComments(cmd.Context(), app, id, data, cf)
+				enrichment = fetchRecordingComments(cmd.Context(), app, recordingID, data, cf)
 				if enrichment.Comments != nil {
 					data["comments"] = enrichment.Comments
 				}
@@ -283,14 +292,14 @@ You can also pass a Basecamp URL directly:
 				itemType = t
 			}
 
-			summary := fmt.Sprintf("%s #%s: %s", itemType, id, title)
+			summary := fmt.Sprintf("%s #%s: %s", itemType, recordingID, title)
 			if enrichment.CountLabel != "" {
 				summary += fmt.Sprintf(" (%s)", enrichment.CountLabel)
 			}
 			breadcrumbs := make([]output.Breadcrumb, 0, 1+len(enrichment.Breadcrumbs))
 			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 				Action:      "comment",
-				Cmd:         fmt.Sprintf("basecamp comments create %s <text>", id),
+				Cmd:         fmt.Sprintf("basecamp comments create %s <text>", recordingID),
 				Description: "Add comment",
 			})
 			breadcrumbs = append(breadcrumbs, enrichment.Breadcrumbs...)

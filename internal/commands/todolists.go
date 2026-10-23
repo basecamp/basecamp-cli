@@ -205,7 +205,10 @@ You can pass either a todolist ID or a Basecamp URL:
 			}
 
 			// Extract ID and project from URL if provided
-			todolistIDStr, urlProjectID := extractWithProject(args[0])
+			todolistIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
@@ -407,7 +410,10 @@ You can pass either a todolist ID or a Basecamp URL:
 			}
 
 			// Extract ID and project from URL if provided
-			todolistIDStr, urlProjectID := extractWithProject(args[0])
+			todolistIDStr, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			// Parse todolist ID as int64
 			todolistID, err := strconv.ParseInt(todolistIDStr, 10, 64)
@@ -537,7 +543,10 @@ Confirm with ` + "`basecamp todolists list`" + `.`,
 			}
 
 			// ExtractIDs drops empty segments, so a bare "," yields zero IDs.
-			ids := extractIDs(args)
+			ids, err := extractIDs(args)
+			if err != nil {
+				return err
+			}
 			if len(ids) == 0 {
 				return missingArg(cmd, "<id|url>...")
 			}
@@ -661,7 +670,10 @@ Confirm with ` + "`basecamp todolists list`" + `.`,
 				summary = fmt.Sprintf("Moved todolist #%d to position %d", parsed[0], position)
 				// No preflight Get in single mode: resolve project from ambient
 				// context (URL > group flag > flags > config) for the breadcrumbs.
-				_, urlProjectID := extractWithProject(args[0])
+				_, urlProjectID, err := extractWithProject(args[0])
+				if err != nil {
+					return err
+				}
 				proj := urlProjectID
 				if proj == "" {
 					proj = *project

@@ -239,5 +239,7 @@ func TestRefusedURLIsStillURL(t *testing.T) {
 	url := "https://app.basecamp.com/99999/buckets/123/vaults/111/children/222"
 	assert.True(t, IsURL(url))
 	assert.Nil(t, Parse(url))
-	assert.Equal(t, url, ExtractID(url))
+	id, err := ExtractID(url)
+	assert.NoError(t, err)
+	assert.Equal(t, url, id)
 }

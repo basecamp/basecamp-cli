@@ -115,7 +115,10 @@ func runBoostList(cmd *cobra.Command, app *appctx.App, recording, project, event
 	// and the SDK dropped Everything().Boosts() with it in v0.11.0
 	// (basecamp/basecamp-sdk#504). When it returns, this is where the
 	// account-wide branch goes back, along with --all-projects.
-	recordingID, urlProjectID := extractCommentWithProject(recording)
+	recordingID, urlProjectID, err := extractCommentWithProject(recording)
+	if err != nil {
+		return err
+	}
 
 	projectID := project
 	if projectID == "" && urlProjectID != "" {
@@ -204,7 +207,10 @@ You can pass either a boost ID or a Basecamp URL:
 				return err
 			}
 
-			boostID, urlProjectID := extractWithProject(args[0])
+			boostID, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			projectID := *project
 			if projectID == "" && urlProjectID != "" {
@@ -284,7 +290,10 @@ Use --event to boost a specific event within the item.`,
 			// Both identifiers are decidable from the arguments alone, so they
 			// are checked before the pipe is drained; runBoostCreate parses
 			// them again once the project is known.
-			recordingID, _ := extractCommentWithProject(args[0])
+			recordingID, _, err := extractCommentWithProject(args[0])
+			if err != nil {
+				return err
+			}
 			if _, err := strconv.ParseInt(recordingID, 10, 64); err != nil {
 				return output.ErrUsage("Invalid ID")
 			}
@@ -329,7 +338,10 @@ func runBoostCreate(cmd *cobra.Command, app *appctx.App, recording, project, con
 		return err
 	}
 
-	recordingID, urlProjectID := extractCommentWithProject(recording)
+	recordingID, urlProjectID, err := extractCommentWithProject(recording)
+	if err != nil {
+		return err
+	}
 
 	projectID := project
 	if projectID == "" && urlProjectID != "" {
@@ -517,7 +529,10 @@ You can pass either a boost ID or a Basecamp URL:
 				return err
 			}
 
-			boostID := extractID(args[0])
+			boostID, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 
 			boostIDInt, err := strconv.ParseInt(boostID, 10, 64)
 			if err != nil {

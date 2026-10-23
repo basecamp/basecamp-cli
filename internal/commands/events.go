@@ -70,7 +70,10 @@ addressed-items lane of the same feed.`,
 			}
 
 			// Extract ID from URL if provided
-			recordingIDStr := extractID(args[0])
+			recordingIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
 
 			recordingID, err := strconv.ParseInt(recordingIDStr, 10, 64)
 			if err != nil {

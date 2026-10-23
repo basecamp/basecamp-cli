@@ -72,9 +72,10 @@ func TestResolveAttachmentTarget(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id, typ := resolveAttachmentTarget(tt.arg, tt.typeHint)
-			assert.Equal(t, tt.wantID, id)
-			assert.Equal(t, tt.wantType, typ)
+			target, err := resolveAttachmentTarget(tt.arg, tt.typeHint)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantID, target.id)
+			assert.Equal(t, tt.wantType, target.recordType)
 		})
 	}
 }
@@ -474,11 +475,11 @@ func TestWriteBodyToFile(t *testing.T) {
 	})
 }
 
-// TestFetchItemContentRefetchesLineWithLargeParentID verifies that
-// fetchItemContent uses UseNumber when decoding the recording response,
+// TestFetchAttachmentItemRefetchesLineWithLargeParentID verifies that
+// fetchAttachmentItem uses UseNumber when decoding the recording response,
 // so parentRecordingID can build the correct refetch endpoint even when
 // the parent ID exceeds 2^53.
-func TestFetchItemContentRefetchesLineWithLargeParentID(t *testing.T) {
+func TestFetchAttachmentItemRefetchesLineWithLargeParentID(t *testing.T) {
 	largeID := "9007199254740993" // 2^53 + 1
 
 	transport := &showTrackingTransport{

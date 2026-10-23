@@ -143,7 +143,10 @@ func assignItems(cmd *cobra.Command, args []string, assignee *string, project st
 		return output.ErrUsageHint("Person to assign is required", "Use --to <person>")
 	}
 
-	extractedIDs := extractIDs(args)
+	extractedIDs, err := extractIDs(args)
+	if err != nil {
+		return err
+	}
 	if len(extractedIDs) == 0 {
 		return missingArg(cmd, "<id|url>...")
 	}
@@ -236,7 +239,10 @@ func unassignItems(cmd *cobra.Command, args []string, assignee *string, project 
 		return output.ErrUsageHint("Person to unassign is required", "Use --from <person>")
 	}
 
-	extractedIDs := extractIDs(args)
+	extractedIDs, err := extractIDs(args)
+	if err != nil {
+		return err
+	}
 	if len(extractedIDs) == 0 {
 		return missingArg(cmd, "<id|url>...")
 	}

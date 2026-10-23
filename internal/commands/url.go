@@ -20,6 +20,9 @@ type ParsedURL struct {
 	TypeSingular *string `json:"type_singular"`
 	RecordingID  *string `json:"recording_id"`
 	CommentID    *string `json:"comment_id"`
+	// OccurrenceDate is set only for an occurrence URL, whose recording_id
+	// names the whole series.
+	OccurrenceDate *string `json:"occurrence_date,omitempty"`
 }
 
 // NewURLCmd creates the url command for parsing Basecamp URLs.
@@ -142,6 +145,10 @@ func runURLParse(app *appctx.App, url string) error {
 	if commentID != "" {
 		result.CommentID = &commentID
 	}
+	occurrenceDate := parsed.OccurrenceDate
+	if occurrenceDate != "" {
+		result.OccurrenceDate = &occurrenceDate
+	}
 
 	// Build summary
 	var summary string
@@ -158,6 +165,9 @@ func runURLParse(app *appctx.App, url string) error {
 		if commentID != "" {
 			summary += fmt.Sprintf(", comment #%s", commentID)
 		}
+		if occurrenceDate != "" {
+			summary += fmt.Sprintf(", occurrence %s", occurrenceDate)
+		}
 	} else if bucketID != "" {
 		if recordingType == "project" {
 			summary = fmt.Sprintf("Project #%s", bucketID)
@@ -172,6 +182,18 @@ func runURLParse(app *appctx.App, url string) error {
 
 	// Build breadcrumbs
 	var breadcrumbs []output.Breadcrumb
+	if occurrenceDate != "" {
+		return app.OK(result,
+			output.WithSummary(summary),
+			output.WithNotice("recording_id is the whole series. To comment on or subscribe to just this occurrence, "+
+				"use its own ID, which "+showOccurrence(url)+" prints"),
+			output.WithBreadcrumbs(output.Breadcrumb{
+				Action:      "show",
+				Cmd:         showOccurrence(url),
+				Description: "View the occurrence and its own ID",
+			}),
+		)
+	}
 	if recordingID != "" && bucketID != "" {
 		// Special handling for card table types (column, step)
 		switch typeSingular {

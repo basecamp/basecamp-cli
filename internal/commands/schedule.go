@@ -336,7 +336,10 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 			title = "Entry"
 		}
 
-		enrichment := fetchCommentsForRecording(cmd.Context(), app, entryID, cf)
+		// The occurrence is a recording of its own, with its own comments.
+		// The API cannot update it, so there is no update breadcrumb.
+		occurrenceID := strconv.FormatInt(entry.ID, 10)
+		enrichment := fetchCommentsForRecording(cmd.Context(), app, occurrenceID, cf)
 		data, commentOpts := enrichment.apply(entry, "")
 		summary := fmt.Sprintf("%s: %s -> %s", title, entry.StartsAt.Format("2006-01-02 15:04"), entry.EndsAt.Format("2006-01-02 15:04"))
 
@@ -345,9 +348,9 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 			output.WithSummary(summary),
 			output.WithBreadcrumbs(
 				output.Breadcrumb{
-					Action:      "update",
-					Cmd:         fmt.Sprintf("basecamp schedule update %s --summary \"...\" --project %s", entryID, resolvedProjectID),
-					Description: "Update entry",
+					Action:      "comment",
+					Cmd:         fmt.Sprintf("basecamp comments create %s <text>", occurrenceID),
+					Description: "Comment on this occurrence",
 				},
 				output.Breadcrumb{
 					Action:      "entries",
@@ -639,7 +642,10 @@ You can pass either an entry ID or a Basecamp URL:
 
 			// Extract ID and project from URL if provided. Purely syntactic,
 			// so it precedes the stdin read like every other target-ID check.
-			entryID, urlProjectID := extractWithProject(args[0])
+			entryID, urlProjectID, err := extractWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			// This command used to send a malformed ID to the server as 0 —
 			// the ParseInt further down discarded its error. Reject it here

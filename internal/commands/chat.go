@@ -1332,8 +1332,7 @@ You can pass either a line ID or a Basecamp line URL:
 // bucket whatever --in says.
 func chatLineRef(ctx context.Context, app *appctx.App, arg string) (lineID, projectID, chatID string, isPing bool, err error) {
 	if !urlarg.IsURL(arg) {
-		lineID, projectID = extractWithProject(arg)
-		return lineID, projectID, "", false, nil
+		return arg, "", "", false, nil
 	}
 	if !hostutil.IsTrustedBasecampHost(arg, app.Config.BaseURL) {
 		return "", "", "", false, output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")

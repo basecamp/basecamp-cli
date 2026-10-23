@@ -310,7 +310,7 @@ func TestExtractID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			if got := ExtractID(tt.input); got != tt.want {
+			if got, err := ExtractID(tt.input); err != nil || got != tt.want {
 				t.Errorf("ExtractID(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
@@ -350,7 +350,10 @@ func TestExtractWithProject(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			gotRecordingID, gotProjectID := ExtractWithProject(tt.input)
+			gotRecordingID, gotProjectID, err := ExtractWithProject(tt.input)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if gotRecordingID != tt.wantRecordingID {
 				t.Errorf("recordingID = %q, want %q", gotRecordingID, tt.wantRecordingID)
 			}
@@ -379,7 +382,10 @@ func TestExtractCommentWithProject(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			gotID, gotProj := ExtractCommentWithProject(tt.input)
+			gotID, gotProj, err := ExtractCommentWithProject(tt.input)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if gotID != tt.wantID {
 				t.Errorf("id = %q, want %q", gotID, tt.wantID)
 			}
@@ -397,7 +403,10 @@ func TestExtractIDs(t *testing.T) {
 		"https://3.basecamp.com/123/buckets/456/messages/222",
 	}
 	want := []string{"789", "111", "222"}
-	got := ExtractIDs(args)
+	got, err := ExtractIDs(args)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(got) != len(want) {
 		t.Errorf("ExtractIDs() = %v, want %v", got, want)
@@ -413,7 +422,10 @@ func TestExtractIDs(t *testing.T) {
 func TestExtractIDs_CommaSeparated(t *testing.T) {
 	args := []string{"111,222,333"}
 	want := []string{"111", "222", "333"}
-	got := ExtractIDs(args)
+	got, err := ExtractIDs(args)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(got) != len(want) {
 		t.Errorf("ExtractIDs() = %v, want %v", got, want)
@@ -429,7 +441,10 @@ func TestExtractIDs_CommaSeparated(t *testing.T) {
 func TestExtractIDs_CommaSeparatedWithSpaces(t *testing.T) {
 	args := []string{"111, 222, 333"}
 	want := []string{"111", "222", "333"}
-	got := ExtractIDs(args)
+	got, err := ExtractIDs(args)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(got) != len(want) {
 		t.Errorf("ExtractIDs() = %v, want %v", got, want)

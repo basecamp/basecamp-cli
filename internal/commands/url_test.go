@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -412,4 +413,69 @@ func assertStringPtr(t *testing.T, got *string, want, name string) {
 	t.Helper()
 	require.NotNil(t, got, "%s is nil, want %q", name, want)
 	assert.Equal(t, want, *got, "%s mismatch", name)
+}
+
+// An occurrence URL's recording_id is the whole series, so the response says
+// so and points at the occurrence instead of suggesting a comment on the series.
+func TestURLParseOccurrenceURL(t *testing.T) {
+	url := "https://3.basecamp.com/2914079/buckets/41746046/schedule_entries/789/occurrences/20261022"
+	resp, err := parseURLWithOutput(t, url)
+	require.NoError(t, err)
+
+	parsed := getParsedURL(t, resp)
+	require.NotNil(t, parsed.OccurrenceDate)
+	assert.Equal(t, "20261022", *parsed.OccurrenceDate)
+	assert.Equal(t, "789", *parsed.RecordingID)
+	assert.Contains(t, resp.Notice, "whole series")
+	assert.Contains(t, resp.Notice, "basecamp show "+url+" prints")
+
+	cmds := make([]string, 0, len(resp.Breadcrumbs))
+	for _, b := range resp.Breadcrumbs {
+		cmds = append(cmds, b.Cmd)
+	}
+	assert.Equal(t, []string{"basecamp show " + url}, cmds)
+	for _, c := range cmds {
+		assert.NotContains(t, c, "comments create 789", "a comment on the series ID would miss the occurrence")
+	}
+}
+
+func TestURLParseOmitsOccurrenceDateForOtherURLs(t *testing.T) {
+	resp, err := parseURLWithOutput(t, "https://3.basecamp.com/2914079/buckets/41746046/schedule_entries/789")
+	require.NoError(t, err)
+	data, ok := resp.Data.(map[string]any)
+	require.True(t, ok, "want an object, got %T", resp.Data)
+	assert.NotContains(t, data, "occurrence_date")
+	assert.Empty(t, resp.Notice)
+}
+
+// show resolves a comment fragment first, so the occurrence breadcrumb drops
+// it to read the occurrence.
+func TestURLParseOccurrenceCommentURL(t *testing.T) {
+	url := "https://3.basecamp.com/2914079/buckets/41746046/schedule_entries/789/occurrences/20261022#__recording_555"
+	resp, err := parseURLWithOutput(t, url)
+	require.NoError(t, err)
+
+	parsed := getParsedURL(t, resp)
+	require.NotNil(t, parsed.CommentID)
+	assert.Equal(t, "555", *parsed.CommentID)
+	require.NotEmpty(t, resp.Breadcrumbs)
+	assert.Equal(t, "basecamp show "+strings.TrimSuffix(url, "#__recording_555"), resp.Breadcrumbs[0].Cmd)
+}
+
+func TestURLParseAccountScopedOccurrenceURL(t *testing.T) {
+	const occurrence = "https://3.basecampapi.com/99999/schedule_entries/789/occurrences/20261022.json"
+	for _, url := range []string{occurrence, occurrence + "#__recording_555"} {
+		t.Run(url, func(t *testing.T) {
+			resp, err := parseURLWithOutput(t, url)
+			require.NoError(t, err)
+
+			require.NotNil(t, getParsedURL(t, resp).OccurrenceDate)
+			cmds := make([]string, 0, len(resp.Breadcrumbs))
+			for _, b := range resp.Breadcrumbs {
+				cmds = append(cmds, b.Cmd)
+			}
+			assert.Equal(t, []string{"basecamp show " + occurrence}, cmds)
+			assert.Contains(t, resp.Notice, "basecamp show "+occurrence+" prints")
+		})
+	}
 }

@@ -248,22 +248,46 @@ func Parse(input string) *Parsed {
 	}
 }
 
+// OccurrenceError reports a URL that names one occurrence of a recurring
+// schedule entry. The occurrence is a recording of its own and the API cannot
+// change it, so the extractors refuse the URL rather than return the entry's
+// ID, which would act on the whole series.
+type OccurrenceError struct {
+	EntryID string
+	Date    string
+	URL     string // the occurrence's URL, without any comment fragment
+}
+
+func (e *OccurrenceError) Error() string {
+	return "the URL names one occurrence of a recurring event"
+}
+
+// recording returns the URL's recording ID, or an *OccurrenceError when the
+// URL names an occurrence of that recording.
+func (p *Parsed) recording(input string) (string, error) {
+	if p.OccurrenceDate != "" {
+		url, _, _ := strings.Cut(input, "#")
+		return "", &OccurrenceError{EntryID: p.RecordingID, Date: p.OccurrenceDate, URL: url}
+	}
+	return p.RecordingID, nil
+}
+
 // ExtractID extracts the primary ID from an argument.
 // If the argument is a Basecamp URL, extracts the recording ID.
 // Otherwise, returns the argument as-is (assumed to be an ID).
-func ExtractID(arg string) string {
+func ExtractID(arg string) (string, error) {
 	if parsed := Parse(arg); parsed != nil {
 		if parsed.RecordingID != "" {
-			return parsed.RecordingID
+			return parsed.recording(arg)
 		}
 		if parsed.ProjectID != "" {
-			return parsed.ProjectID
+			return parsed.ProjectID, nil
 		}
 		if parsed.AccountID != "" {
-			return parsed.AccountID
+			return parsed.AccountID, nil
 		}
 	}
-	return arg
+	return arg, nil
 }
 
 // ExtractProjectID extracts the project (bucket) ID from an argument.
@@ -278,39 +302,47 @@ func ExtractProjectID(arg string) string {
 
 // ExtractWithProject extracts both the recording ID and project ID from an argument.
 // Returns (recordingID, projectID). If projectID is empty, it wasn't in the URL.
-func ExtractWithProject(arg string) (recordingID, projectID string) {
+func ExtractWithProject(arg string) (recordingID, projectID string, err error) {
 	if parsed := Parse(arg); parsed != nil {
-		return parsed.RecordingID, parsed.ProjectID
+		recordingID, err = parsed.recording(arg)
+		return recordingID, parsed.ProjectID, err
 	}
-	return arg, ""
+	return arg, "", nil
 }
 
 // ExtractCommentWithProject extracts a comment ID and project ID from an argument.
 // For URLs with a fragment (e.g., #__recording_789), returns the comment ID.
 // For URLs without a fragment, returns the recording ID (same as ExtractWithProject).
 // Returns (commentOrRecordingID, projectID).
-func ExtractCommentWithProject(arg string) (id, projectID string) {
+func ExtractCommentWithProject(arg string) (id, projectID string, err error) {
 	if parsed := Parse(arg); parsed != nil {
 		// Prefer comment ID from fragment when present
 		if parsed.CommentID != "" {
-			return parsed.CommentID, parsed.ProjectID
+			return parsed.CommentID, parsed.ProjectID, nil
 		}
-		return parsed.RecordingID, parsed.ProjectID
+		id, err = parsed.recording(arg)
+		return id, parsed.ProjectID, err
 	}
-	return arg, ""
+	return arg, "", nil
 }
 
 // ExtractIDs extracts IDs from multiple arguments, handling URLs and
-// comma-separated values (e.g. "123,456,789").
-func ExtractIDs(args []string) []string {
+// comma-separated values (e.g. "123,456,789"). One occurrence URL refuses
+// them all, before the caller acts on any.
+func ExtractIDs(args []string) ([]string, error) {
 	var result []string
 	for _, arg := range args {
 		for part := range strings.SplitSeq(arg, ",") {
 			part = strings.TrimSpace(part)
-			if part != "" {
-				result = append(result, ExtractID(part))
+			if part == "" {
+				continue
 			}
+			id, err := ExtractID(part)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, id)
 		}
 	}
-	return result
+	return result, nil
 }

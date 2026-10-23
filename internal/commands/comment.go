@@ -137,7 +137,10 @@ func runCommentsListForItem(cmd *cobra.Command, app *appctx.App, recordingArg st
 	}
 
 	// Extract recording ID from URL if provided
-	recordingID := extractID(recordingArg)
+	recordingID, err := extractID(recordingArg)
+	if err != nil {
+		return err
+	}
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
@@ -1009,7 +1012,10 @@ as backslash-n.`,
 
 			// Extract comment ID from URL if provided
 			// Uses extractCommentWithProject to prefer CommentID from URL fragments
-			commentIDStr, urlProjectID := extractCommentWithProject(args[0])
+			commentIDStr, urlProjectID, err := extractCommentWithProject(args[0])
+			if err != nil {
+				return err
+			}
 
 			commentID, err := strconv.ParseInt(commentIDStr, 10, 64)
 			if err != nil {
@@ -1182,14 +1188,17 @@ busybox-ash) it posts a literal leading $ and keeps \n as backslash-n:
 			}
 
 			// Expand comma-separated IDs and extract from URLs
-			expandedIDs := extractIDs([]string{recordingArg})
+			expandedIDs, err := extractIDs([]string{recordingArg})
+			if err != nil {
+				return err
+			}
 
 			// Create comments on all recordings
 			// Convert Markdown content to HTML for Basecamp's rich text fields
 			html := richTextToHTML(cmd, content)
 
 			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
-			html, err := resolveLocalImages(cmd, app, html)
+			html, err = resolveLocalImages(cmd, app, html)
 			if err != nil {
 				return err
 			}
