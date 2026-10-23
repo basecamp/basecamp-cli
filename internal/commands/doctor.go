@@ -6,6 +6,7 @@ import (
 	"context"
 	"debug/pe"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -809,9 +810,13 @@ func checkAuthenticationWith(ctx context.Context, app *appctx.App, verbose bool,
 	credKey := app.Auth.CredentialKey()
 	creds, err := load(ctx, credKey)
 	if err != nil {
+		problem := output.AsError(err)
 		check.Status = "fail"
-		check.Message = "Cannot load credentials"
-		check.Hint = app.Auth.LoginHint()
+		check.Message = "Could not read stored credentials: " + problem.Message
+		check.Hint = problem.Hint
+		if errors.Is(err, auth.ErrNoCredential) || errors.Is(err, auth.ErrInvalidCredentials) {
+			check.Hint = app.Auth.LoginHint()
+		}
 		return check
 	}
 
@@ -822,13 +827,15 @@ func checkAuthenticationWith(ctx context.Context, app *appctx.App, verbose bool,
 		if expiresIn < 0 {
 			// Token expired - try to refresh
 			if err := refresh(ctx); err != nil {
+				problem := output.AsError(err)
 				check.Status = "fail"
-				check.Message = "Token expired and refresh failed"
-				// The failure's own remedy, not a blanket login: for an
-				// agent credential `basecamp auth login` signs a PERSON
-				// in, and doctor is read by people (and agents) looking
-				// for exactly the command to run.
-				check.Hint = remedyFor(app, err)
+				check.Message = "Token expired and refresh failed: " + problem.Message
+				check.Hint = problem.Hint
+				// Only a refused credential calls for login. A storage or
+				// network failure must retain its own cause and remedy.
+				if problem.Code == output.CodeAuth {
+					check.Hint = remedyFor(app, err)
+				}
 				return check
 			}
 			check.Status = "pass"
@@ -1159,10 +1166,9 @@ func buildDoctorBreadcrumbs(checks []Check, login string) []output.Breadcrumb {
 
 		switch c.Name {
 		case "Credentials", "Authentication":
-			// Credential checks carry a login hint only when the store was
-			// readable and a login would repair what it reported. Do not
-			// invent that remedy for a timeout or another read failure.
-			if c.Name == "Credentials" && !strings.Contains(c.Hint, login) {
+			// Both checks must name login as the remedy before offering it
+			// as a next step. Do not invent it for storage or network errors.
+			if !strings.Contains(c.Hint, login) {
 				continue
 			}
 			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
