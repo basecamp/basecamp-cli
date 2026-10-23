@@ -17,7 +17,6 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
-	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/editor"
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -316,13 +315,7 @@ You can pass either a comment ID or a Basecamp URL:
 			}
 
 			app := appctx.FromContext(cmd.Context())
-
-			// Whether the account is persistently available (on-disk config or env)
-			// before resolution. When it isn't — adopted from the URL, resolved
-			// interactively, or passed via the process-local --account flag — the
-			// advertised follow-ups must spell out --account so they remain runnable
-			// in a fresh process.
-			persistentAccount := hasPersistentAccount(app.Config)
+			scope := newFollowUpScope(app)
 
 			// Same safe front door as `thread`: classify, guard the account, and
 			// validate the ID — so a plain recording URL or wrong-account URL is
@@ -331,7 +324,7 @@ You can pass either a comment ID or a Basecamp URL:
 			if err != nil {
 				return err
 			}
-			accountArg := replyAccountArg(persistentAccount, app.Config.AccountID)
+			scopeArgs := scope.args(app.Config.AccountID)
 
 			comment, err := app.Account().Comments().Get(cmd.Context(), commentID)
 			if err != nil {
@@ -376,14 +369,14 @@ You can pass either a comment ID or a Basecamp URL:
 			breadcrumbs := make([]output.Breadcrumb, 0, 2)
 			breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 				Action:      "update",
-				Cmd:         fmt.Sprintf("basecamp comments update %d <text>%s", commentID, accountArg),
+				Cmd:         fmt.Sprintf("basecamp comments update %d <text>%s", commentID, scopeArgs),
 				Description: "Update comment",
 			})
 			if comment.Parent != nil && comment.Parent.ID != 0 {
 				m["reply_target"] = replyTarget(comment.Parent.ID, app.Config.AccountID)
 				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 					Action:      "reply",
-					Cmd:         fmt.Sprintf("basecamp comments create %d <text>%s", comment.Parent.ID, accountArg),
+					Cmd:         fmt.Sprintf("basecamp comments create %d <text>%s", comment.Parent.ID, scopeArgs),
 					Description: "Reply on the parent recording",
 				})
 			}
@@ -451,16 +444,12 @@ func runCommentsThread(cmd *cobra.Command, arg string, all bool, window int) err
 	// and `comments show` are equally safe: a plain recording URL / collection is
 	// rejected toward `basecamp show`, a wrong-account URL and a non-positive ID
 	// are rejected before any API call.
-	persistentAccount := hasPersistentAccount(app.Config)
+	scope := newFollowUpScope(app)
 	triggerID, err := resolveCommentTrigger(cmd, app, arg)
 	if err != nil {
 		return err
 	}
-	// When the account isn't persistently available (adopted from the URL,
-	// resolved interactively, or passed via the process-local --account flag), the
-	// advertised follow-ups must carry --account so they stay runnable in a fresh
-	// process.
-	accountArg := replyAccountArg(persistentAccount, app.Config.AccountID)
+	scopeArgs := scope.args(app.Config.AccountID)
 
 	// Step 1 — resolve the focus comment.
 	trigger, err := app.Account().Comments().Get(cmd.Context(), triggerID)
@@ -555,13 +544,13 @@ func runCommentsThread(cmd *cobra.Command, arg string, all bool, window int) err
 	if len(trigger.ContentAttachments) > 0 {
 		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 			Action:      "download",
-			Cmd:         fmt.Sprintf("basecamp attachments download %d --type comment%s", trigger.ID, accountArg),
+			Cmd:         fmt.Sprintf("basecamp attachments download %d --type comment%s", trigger.ID, scopeArgs),
 			Description: "Download comment attachments",
 		})
 	}
 	breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 		Action:      "reply",
-		Cmd:         fmt.Sprintf("basecamp comments create %s <text>%s", parentIDStr, accountArg),
+		Cmd:         fmt.Sprintf("basecamp comments create %s <text>%s", parentIDStr, scopeArgs),
 		Description: "Reply on the parent recording",
 	})
 
@@ -666,37 +655,6 @@ func resolveCommentTrigger(cmd *cobra.Command, app *appctx.App, arg string) (int
 		return 0, err
 	}
 	return id, nil
-}
-
-// hasPersistentAccount reports whether the account is available to a fresh
-// process without re-specifying it — i.e. backed by an on-disk config layer or
-// an exported env var. A flag- or prompt-sourced account is process-local: it
-// lives only for this invocation, so an advertised follow-up copied into a new
-// process would fail to resolve it. Call this BEFORE resolveCommentTrigger, so a
-// URL-adopted / interactively-resolved account (AccountID empty at entry) also
-// reads as non-persistent.
-func hasPersistentAccount(cfg *config.Config) bool {
-	if cfg.AccountID == "" {
-		return false
-	}
-	switch cfg.Sources["account_id"] {
-	case string(config.SourceFlag), string(config.SourcePrompt):
-		return false
-	default:
-		return true
-	}
-}
-
-// replyAccountArg returns " --account <id>" to append to an advertised
-// follow-up command when the account is not persistently available (adopted from
-// the URL, resolved interactively, or passed via the process-local --account
-// flag this run), so the command stays runnable in a fresh process; otherwise
-// "". A persistent account needs no echo — the follow-up inherits it.
-func replyAccountArg(persistentAccount bool, accountID string) string {
-	if persistentAccount || accountID == "" {
-		return ""
-	}
-	return " --account " + accountID
 }
 
 // replyTarget builds the machine reply-target contract: the parent recording to

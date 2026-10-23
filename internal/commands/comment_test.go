@@ -432,29 +432,29 @@ func TestCommentsShowRejectsZeroComment(t *testing.T) {
 
 // --- Iteration 2: account provenance in reply breadcrumbs -------------------
 
-func TestHasPersistentAccount(t *testing.T) {
-	mk := func(id, src string) *config.Config {
-		c := &config.Config{AccountID: id, Sources: map[string]string{}}
-		if src != "" {
-			c.Sources["account_id"] = src
+func TestFollowUpScopeNamesWhatAFreshProcessLacks(t *testing.T) {
+	args := func(activeProfile, accountID, accountSource string) string {
+		app := &appctx.App{Config: &config.Config{
+			ActiveProfile: activeProfile, AccountID: accountID, Sources: map[string]string{},
+		}}
+		if accountSource != "" {
+			app.Config.Sources["account_id"] = accountSource
 		}
-		return c
+		return newFollowUpScope(app).args("99999")
 	}
-	// No account → not persistent.
-	assert.False(t, hasPersistentAccount(mk("", "")))
-	// Process-local sources → not persistent (follow-ups must echo --account).
-	assert.False(t, hasPersistentAccount(mk("99999", string(config.SourceFlag))))
-	assert.False(t, hasPersistentAccount(mk("99999", string(config.SourcePrompt))))
-	// On-disk / exported-env sources → persistent (follow-ups inherit it).
-	assert.True(t, hasPersistentAccount(mk("99999", string(config.SourceGlobal))))
-	assert.True(t, hasPersistentAccount(mk("99999", string(config.SourceLocal))))
-	assert.True(t, hasPersistentAccount(mk("99999", string(config.SourceEnv))))
-}
-
-func TestReplyAccountArg(t *testing.T) {
-	assert.Equal(t, "", replyAccountArg(true, "99999"))                  // persistent → no echo
-	assert.Equal(t, "", replyAccountArg(false, ""))                      // nothing to echo
-	assert.Equal(t, " --account 99999", replyAccountArg(false, "99999")) // process-local → echo
+	// Account resolved after the scope was read (URL, picker) → named.
+	assert.Equal(t, " --account 99999", args("", "", ""))
+	// Process-local account → named.
+	assert.Equal(t, " --account 99999", args("", "99999", string(config.SourceFlag)))
+	assert.Equal(t, " --account 99999", args("", "99999", string(config.SourcePrompt)))
+	// Account a fresh process resolves again → inherited.
+	assert.Equal(t, "", args("", "99999", string(config.SourceGlobal)))
+	assert.Equal(t, "", args("", "99999", string(config.SourceLocal)))
+	assert.Equal(t, "", args("", "99999", string(config.SourceEnv)))
+	// The active profile is always named; its account is inherited through it.
+	assert.Equal(t, " --profile staging", args("staging", "99999", "profile"))
+	assert.Equal(t, " --profile staging --account 99999", args("staging", "99999", string(config.SourceFlag)))
+	assert.Equal(t, " --profile 'my profile' --account 99999", args("my profile", "", ""))
 }
 
 func TestCommentsShowFlagAccountEchoedInBreadcrumb(t *testing.T) {
