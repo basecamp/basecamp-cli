@@ -505,6 +505,27 @@ func invalidGrant(err error) (string, bool) {
 	return "", false
 }
 
+// invalidClient reports whether a refresh was refused with invalid_client:
+// the token endpoint does not accept the client the refresh was sent as.
+// Read off the SDK's typed refusal, as invalidGrant is, and only from the
+// statuses RFC 6749 §5.2 gives that refusal: a 429 or a server fault naming
+// the client is not a verdict on it.
+func invalidClient(err error) bool {
+	var refusal *basecamp.Error
+	return errors.As(err, &refusal) && refusal.OAuthError == "invalid_client" &&
+		(refusal.HTTPStatus == http.StatusBadRequest || refusal.HTTPStatus == http.StatusUnauthorized)
+}
+
+// errNewerCredential is the refusal for a stored credential whose OAuth type
+// this version does not know. The type is quoted, so a damaged store cannot
+// put terminal controls into the message.
+func (m *Manager) errNewerCredential(oauthType string) *output.Error {
+	e := m.errAuth(fmt.Sprintf("These credentials were written by a newer basecamp CLI (OAuth type %q) and this version cannot refresh them", oauthType))
+	command, _ := m.loginRemedy()
+	e.Hint = "Run: basecamp upgrade (or, to keep this version, log in again with it: " + command + ")"
+	return e
+}
+
 // forgetRefusedGrant deletes the stored credential only while it still
 // carries the refresh token the server just refused. Two processes used to
 // be able to enter the refresh window together — the first rotating and
@@ -566,13 +587,26 @@ func (m *Manager) refreshLocked(ctx context.Context, origin string, creds *Crede
 // the credential's missing fields in place, checks what it holds, and
 // resolves the client and lane the request would go out through.
 func (m *Manager) prepareRefresh(creds *Credentials) (oauth.RefreshRequest, *oauth.Exchanger, error) {
-	if creds.RefreshToken == "" {
-		return oauth.RefreshRequest{}, nil, m.errAuth("No refresh token available")
-	}
-
 	// Migrate old credentials missing OAuthType
 	if creds.OAuthType == "" {
 		creds.OAuthType = oauthTypeLaunchpad
+	}
+
+	// Only the types this version knows how to refresh go any further. A
+	// type it has never heard of was written by a newer CLI, whose client
+	// and token endpoint this one cannot know: refreshing it as Launchpad
+	// sends Launchpad's client to someone else's token endpoint, which
+	// answers invalid_client on every command, forever. Checked before
+	// anything the credential holds, since a newer type need not hold what
+	// this version's refresh asks for.
+	switch creds.OAuthType {
+	case "bc3", oauthTypeBC5, oauthTypeLaunchpad:
+	default:
+		return oauth.RefreshRequest{}, nil, m.errNewerCredential(creds.OAuthType)
+	}
+
+	if creds.RefreshToken == "" {
+		return oauth.RefreshRequest{}, nil, m.errAuth("No refresh token available")
 	}
 
 	// Migrate old credentials missing TokenEndpoint
@@ -608,7 +642,7 @@ func (m *Manager) prepareRefresh(creds *Credentials) (oauth.RefreshRequest, *oau
 	case oauthTypeBC5:
 		// Pre-registered public client: no secret.
 		clientID = bc5ClientID
-	default:
+	case oauthTypeLaunchpad:
 		// Launchpad (or old credentials defaulted to launchpad)
 		if envCreds, err := resolveClientCredentials(func(string) {}); err != nil {
 			return oauth.RefreshRequest{}, nil, err
@@ -631,6 +665,12 @@ func (m *Manager) prepareRefresh(creds *Credentials) (oauth.RefreshRequest, *oau
 	}
 	if laneErr != nil {
 		return oauth.RefreshRequest{}, nil, laneErr
+	}
+
+	// A client the token endpoint already refused for this refresh token
+	// is refused again here, before anything is sent.
+	if err := m.refusedRefreshClient(creds, clientID, clientSecret); err != nil {
+		return oauth.RefreshRequest{}, nil, err
 	}
 
 	// A rate limit the token endpoint already put on this refresh token is
@@ -668,6 +708,9 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 	if err != nil {
 		if held := m.holdRateLimitedRefresh(origin, creds, err); held != nil {
 			return held
+		}
+		if invalidClient(err) {
+			return m.holdRefusedRefreshClient(origin, creds, req.ClientID, req.ClientSecret, err)
 		}
 		desc, dead := invalidGrant(err)
 		if !dead {

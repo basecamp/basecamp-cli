@@ -458,7 +458,13 @@ func authStatusReport(ctx context.Context, app *appctx.App) (*authStatus, error)
 		case !expired && hold != nil:
 			// A stored hold that never ends: the next renewal will be
 			// refused, and the line says so before the token runs out.
-			expiry = "expires in " + coarseDuration(expiresIn) + "; renewal would be refused: " + hold.Detail + "; log in with a new secret"
+			// An agent's refusal is of its secret; anyone else's is of the
+			// client a refresh is sent as, which a login replaces.
+			remedy := "log in again"
+			if creds.OAuthType == "agent" {
+				remedy = "log in with a new secret"
+			}
+			expiry = "expires in " + coarseDuration(expiresIn) + "; renewal would be refused: " + hold.Detail + "; " + remedy
 			report.hint = remedyFor(app, refusal)
 		case !expired:
 			expiry = "expires in " + coarseDuration(expiresIn)

@@ -192,7 +192,7 @@ func (m *Manager) mintAgentCredential(ctx context.Context, origin string, creds 
 	token, hold, err := m.mintAgentToken(ctx, mint)
 	if err != nil {
 		if hold != nil {
-			m.rememberRenewalHold(origin, hold)
+			m.rememberRenewalHold(origin, hold.Client, hold)
 		}
 		return err
 	}
