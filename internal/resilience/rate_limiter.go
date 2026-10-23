@@ -118,6 +118,44 @@ func (rl *RateLimiter) take() (allowed bool, wait time.Duration, blocked bool) {
 	return allowed, wait, blocked
 }
 
+func (rl *RateLimiter) takeToken() (allowed bool, wait time.Duration) {
+	err := rl.store.Update(func(state *State) error {
+		now := rl.now()
+		rl.refill(&state.RateLimiter, now)
+		if state.RateLimiter.Tokens >= rl.config.TokensPerRequest {
+			state.RateLimiter.Tokens -= rl.config.TokensPerRequest
+			allowed = true
+		} else {
+			deficit := rl.config.TokensPerRequest - state.RateLimiter.Tokens
+			wait = time.Duration(deficit / rl.config.RefillRate * float64(time.Second))
+		}
+		state.UpdatedAt = now
+		return nil
+	})
+	if err != nil {
+		return true, 0
+	}
+	return allowed, wait
+}
+
+func (rl *RateLimiter) Pace(ctx context.Context) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		allowed, wait := rl.takeToken() //nolint:contextcheck // lock acquisition is context-independent by design
+		if allowed {
+			return nil
+		}
+		if rl.onWait != nil {
+			rl.onWait()
+		}
+		if err := pause(ctx, jittered(max(wait, minRefillWait))); err != nil {
+			return err
+		}
+	}
+}
+
 // minRefillWait floors the sleep between token attempts: a deficit of a few
 // microseconds is not worth a wakeup, and under contention the refill is
 // consumed by whichever process reaches the lock first anyway.
