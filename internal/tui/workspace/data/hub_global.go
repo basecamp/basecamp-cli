@@ -592,8 +592,8 @@ func (h *Hub) Timeline() *Pool[[]TimelineEventInfo] {
 			sort.Slice(all, func(i, j int) bool {
 				return all[i].CreatedAtTS > all[j].CreatedAtTS
 			})
-			if len(all) > 80 {
-				all = all[:80]
+			if len(all) > timelineFeedSize {
+				all = all[:timelineFeedSize]
 			}
 			return all, nil
 		})
@@ -605,14 +605,43 @@ func (h *Hub) Timeline() *Pool[[]TimelineEventInfo] {
 
 // -- Shared fetch helpers
 
+// timelineFeedSize is how many events the activity feed shows.
+const timelineFeedSize = 80
+
+// timelineLookbackDays is how many days, today included, a quiet account's
+// feed reads.
+const timelineLookbackDays = 7
+
 // fetchTimelineEvents fetches timeline events from a single account.
+// Basecamp serves the activity feed one day per request, so this asks for
+// today undated, which is today in the person's Basecamp time zone, then
+// steps back a day at a time from today on this machine until the feed is
+// full. Starting the dated walk at this machine's today, not yesterday, keeps
+// a day from being skipped when Basecamp's date is ahead; when the dates
+// agree that day comes back twice, so an event already seen is skipped.
 func fetchTimelineEvents(ctx context.Context, client *basecamp.AccountClient, acct AccountInfo) ([]TimelineEventInfo, error) {
-	result, err := client.Timeline().Progress(ctx, nil)
-	if err != nil {
-		return nil, err
+	var events []basecamp.TimelineEvent
+	seen := make(map[int64]bool)
+	today := basecamp.DateOf(hubNow())
+	for back := -1; back < timelineLookbackDays && len(events) < timelineFeedSize; back++ {
+		opts := &basecamp.ProgressOptions{Limit: timelineFeedSize - len(events)}
+		if back >= 0 {
+			opts.Date = today.AddDays(-back)
+		}
+		result, err := client.Timeline().Progress(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range result.Events {
+			if !seen[e.ID] {
+				seen[e.ID] = true
+				events = append(events, e)
+			}
+		}
 	}
-	infos := make([]TimelineEventInfo, 0, len(result.Events))
-	for _, e := range result.Events {
+
+	infos := make([]TimelineEventInfo, 0, len(events))
+	for _, e := range events {
 		project := ""
 		var projectID int64
 		if e.Bucket != nil {

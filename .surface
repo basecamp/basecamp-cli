@@ -14775,6 +14775,7 @@ FLAG basecamp timeline --agent type=bool
 FLAG basecamp timeline --all type=bool
 FLAG basecamp timeline --cache-dir type=string
 FLAG basecamp timeline --count type=bool
+FLAG basecamp timeline --date type=string
 FLAG basecamp timeline --help type=bool
 FLAG basecamp timeline --hints type=bool
 FLAG basecamp timeline --ids-only type=bool

@@ -21516,6 +21516,15 @@
             "required": true
           },
           {
+            "name": "date",
+            "in": "query",
+            "description": "The day to read (YYYY-MM-DD). The feed serves one day per request and defaults to today, so step this back a day at a time to read history; `page` pages within the day. The server reads an unparseable date as today.",
+            "schema": {
+              "type": "string",
+              "description": "The day to read (YYYY-MM-DD). The feed serves one day per request and defaults to today, so step this back a day at a time to read history; `page` pages within the day. The server reads an unparseable date as today."
+            }
+          },
+          {
             "name": "page",
             "in": "query",
             "description": "Page number for paginating through results. Defaults to 1. A positive value selects exactly that page, not a starting offset; see SPEC section 8.",

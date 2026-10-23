@@ -337,3 +337,26 @@ func TestCatalogRefusesAnUndecidedPaginationStyle(t *testing.T) {
 	assert.Contains(t, err.Error(), `"offset"`)
 	assert.Empty(t, cat.Domains[0].Operations[0].Params, "nothing may be synthesized for an undecided style")
 }
+
+// TestCatalogKeepsTheActivityFilterOffTheProgressReport pins a policy the
+// model sync applies. bc3 reads project_ids[] and people_ids[] on the
+// progress report, but a list naming no ID the caller can see clears the
+// caller's saved web activity filter. That makes a GET change state, which a
+// read-only server must not do, so neither list is served; the day is.
+func TestCatalogKeepsTheActivityFilterOffTheProgressReport(t *testing.T) {
+	cat := loadForTest(t)
+	var query []string
+	for _, d := range cat.Domains {
+		for _, op := range d.Operations {
+			if op.ID != "GetProgressReport" {
+				continue
+			}
+			for _, p := range op.Params {
+				if p.In == "query" {
+					query = append(query, p.Name)
+				}
+			}
+		}
+	}
+	assert.ElementsMatch(t, []string{"date", "page"}, query)
+}

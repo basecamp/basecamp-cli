@@ -70,6 +70,15 @@ POLICY_EXCLUDED_OPERATIONS = {
     "CreateStreamTicket",
 }
 
+# Query parameters dropped by policy. bc3's progress report reads
+# project_ids[] and people_ids[], but a list naming no ID the caller can see
+# clears the caller's saved web activity filter, so a GET that carries one can
+# change state. The catalog marks the operation read-only, so neither list is
+# served; `date` and `page` are.
+POLICY_EXCLUDED_PARAMETERS: dict[str, set[str]] = {
+    "GetProgressReport": {"project_ids[]", "people_ids[]"},
+}
+
 PATCHED_TAGS: dict[str, str] = {
     # Empty: basecamp-sdk now tags every exported operation itself
     # (basecamp-sdk#878). Kept as a seam, because the export has left
@@ -82,6 +91,7 @@ with open(f"{sdk}/openapi.json") as f:
 
 patched = []
 excluded = []
+dropped = []
 for path in list(doc["paths"]):
     methods = doc["paths"][path]
     for method in list(methods):
@@ -100,6 +110,13 @@ for path in list(doc["paths"]):
             del methods[method]
             excluded.append(oid)
             continue
+        if oid in POLICY_EXCLUDED_PARAMETERS:
+            drop = POLICY_EXCLUDED_PARAMETERS[oid]
+            names = {p.get("name") for p in op.get("parameters", [])}
+            if not drop <= names:
+                sys.exit(f"{oid} no longer takes {sorted(drop - names)} — drop them from POLICY_EXCLUDED_PARAMETERS")
+            op["parameters"] = [p for p in op["parameters"] if p.get("name") not in drop]
+            dropped.append(oid)
         tags = op.get("tags") or []
         if oid in PATCHED_TAGS:
             if tags:
@@ -114,6 +131,9 @@ for path in list(doc["paths"]):
 missing = sorted(set(PATCHED_TAGS) - set(patched))
 if missing:
     sys.exit(f"PATCHED_TAGS entries not found in the export: {missing}")
+missing = sorted(set(POLICY_EXCLUDED_PARAMETERS) - set(dropped))
+if missing:
+    sys.exit(f"POLICY_EXCLUDED_PARAMETERS operations not found in the export: {missing}")
 missing = sorted((EXCLUDED_OPERATIONS | POLICY_EXCLUDED_OPERATIONS) - set(excluded))
 if missing:
     sys.exit(f"excluded operations not found in the export: {missing}")
