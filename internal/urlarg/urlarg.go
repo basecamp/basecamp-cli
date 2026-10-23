@@ -22,6 +22,23 @@ var pingAtRe = regexp.MustCompile(`/circles/(\d+)@(\d+)`)
 // Basecamp links to for the same Ping, and drops the my/sidebar prefix.
 var pingSidebarRe = regexp.MustCompile(`/my/sidebar(/circles/\d+)`)
 
+// itemPaths are the longer paths bc3 serves for an item, each rewritten to the
+// item's own path as ${1}${2}: a child nested under its parent, which bc3 also
+// serves at top level, an upload's download link, and an edit page. Nested
+// children come first so that their edit pages reduce to the child.
+var itemPaths = []*regexp.Regexp{
+	regexp.MustCompile(`/vaults/\d+(/(?:vaults|documents|google_documents|cloud_files|uploads)/\d+)([/?#]|$)`),
+	regexp.MustCompile(`/todolists/\d+(/todos/\d+)([/?#]|$)`),
+	regexp.MustCompile(`/questionnaires/\d+(/questions/\d+)([/?#]|$)`),
+	regexp.MustCompile(`(/uploads/\d+)/download/[^?#]+([?#]|$)`),
+	regexp.MustCompile(`(/\d+)/edit/?([?#]|$)`),
+}
+
+// structuralPath is the whole path of each shape the router's structural
+// fallback recognizes. The fallback matches only a prefix of the path, so a URL
+// with more segments would otherwise name the item those segments sit under.
+var structuralPath = regexp.MustCompile(`^/\d+(?:/projects/\d+|/buckets/\d+/(?:card_tables/[^/]+/\d+|[^/]+(?:/\d+)?))?$`)
+
 // Parsed represents components extracted from a Basecamp URL.
 type Parsed struct {
 	AccountID      string
@@ -45,8 +62,9 @@ func IsURL(input string) bool {
 	return router.Match(normalized) != nil
 }
 
-// normalize rewrites the web @-forms into routable URLs. Chat lines become the
-// slash form; a Ping line loses its @line, which the second result returns.
+// normalize rewrites the web @-forms and itemPaths into routable URLs. Chat
+// lines become the slash form; a Ping line loses its @line, which the second
+// result returns.
 func normalize(input string) (normalized, pingLineID string) {
 	normalized = chatAtRe.ReplaceAllString(input, "${1}/lines/${2}")
 	normalized = pingSidebarRe.ReplaceAllString(normalized, "${1}")
@@ -54,11 +72,36 @@ func normalize(input string) (normalized, pingLineID string) {
 		pingLineID = m[2]
 		normalized = pingAtRe.ReplaceAllString(normalized, "/circles/${1}")
 	}
+	for _, re := range itemPaths {
+		normalized = re.ReplaceAllString(normalized, "${1}${2}")
+	}
 	return normalized, pingLineID
 }
 
+// urlPath returns the path the router matches: the URL without its scheme,
+// host, query, fragment, trailing slash, or .json suffix.
+func urlPath(rawURL string) string {
+	path, _, _ := strings.Cut(rawURL, "#")
+	path, _, _ = strings.Cut(path, "?")
+	if _, afterScheme, ok := strings.Cut(path, "://"); ok {
+		path = afterScheme
+	} else {
+		path = strings.TrimPrefix(path, "//")
+	}
+	if !strings.HasPrefix(path, "/") {
+		slash := strings.Index(path, "/")
+		if slash == -1 {
+			return ""
+		}
+		path = path[slash:]
+	}
+	return strings.TrimSuffix(strings.TrimRight(path, "/"), ".json")
+}
+
 // Parse extracts IDs from a Basecamp URL.
-// Returns nil if the input is not a valid Basecamp URL.
+// Returns nil if the input is not a valid Basecamp URL, or if its path goes
+// past the item it names in a way Parse does not model, so that callers refuse
+// it rather than act on the parent item.
 //
 // Supported URL patterns:
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/{type}/{id}
@@ -69,6 +112,9 @@ func normalize(input string) (normalized, pingLineID string) {
 //   - https://3.basecamp.com/{account}/circles/{ping}@{lineId}
 //   - https://3.basecamp.com/{account}/my/sidebar/circles/{ping}, with or without @{lineId}
 //   - https://3.basecamp.com/{account}/buckets/{bucket}/schedule_entries/{id}/occurrences/{date}
+//   - https://3.basecamp.com/{account}/buckets/{bucket}/vaults/{folder}/documents/{id}, and the
+//     other children bc3 nests under folders, to-do lists, and questionnaires
+//   - any of these followed by /edit, and an upload followed by /download/{filename}
 //   - https://3.basecamp.com/{account}/projects/{project}
 func Parse(input string) *Parsed {
 	// Normalize the Basecamp web @-forms (chats/789@111, circles/456@111)
@@ -77,6 +123,9 @@ func Parse(input string) *Parsed {
 
 	m := router.Match(normalized)
 	if m == nil {
+		return nil
+	}
+	if m.Source == basecamp.MatchedStructural && !structuralPath.MatchString(urlPath(normalized)) {
 		return nil
 	}
 
