@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/auth"
@@ -272,6 +273,26 @@ func TestABotLoginWithNoRefreshIsAskedAboutWithItsOwnToken(t *testing.T) {
 
 	assert.True(t, confirmCredentialRefused(t.Context(), app, setup.KindBotUser, "bot"))
 	assert.Equal(t, []string{"me old-tok"}, bc.asked())
+}
+
+func TestARepairPollRetainsARefusedRenewalForTheCredentialWatch(t *testing.T) {
+	bc := newBotBasecamp(t)
+	bc.answerRefresh(http.StatusBadRequest, `{"error":"invalid_grant"}`)
+	app := bc.app(t)
+	creds, err := app.Auth.GetStore().Load("profile:bot")
+	require.NoError(t, err)
+	creds.ExpiresAt = time.Now().Add(-time.Hour).Unix()
+	require.NoError(t, app.Auth.GetStore().Save("profile:bot", creds))
+
+	watch := newCredentialWatch()
+	tokens := watch.Tokens(&feedTokens{managerTokens: managerTokens{mgr: app.Auth}})
+	opts := append(connectSDKOptions(), basecamp.WithTransportWrapper(watch))
+	live, err := eventfeed.NewLive(&basecamp.Config{BaseURL: bc.srv.URL}, tokens, "555", eventfeed.AccountLane, opts...)
+	require.NoError(t, err)
+	_, err = connector.LiveOptions(live).PollsFor().Poll(t.Context(), eventfeed.Cursor{Since: "0"}, eventfeed.Filters{})
+	require.Error(t, err)
+	assert.Equal(t, []string{"refresh"}, bc.asked())
+	assert.ErrorIs(t, runWatch(t, watch, mustNotConfirm(t)), auth.ErrLoginRefused)
 }
 
 func TestABoostRetainsARefusedRenewalForTheCredentialWatch(t *testing.T) {
