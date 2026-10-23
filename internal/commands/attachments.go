@@ -131,8 +131,8 @@ func runAttachmentsList(cmd *cobra.Command, arg, recordType string) error {
 	}
 	if target.occurrence != "" {
 		id = fmt.Sprint(data["id"])
-		readRef = arg
-		showCmd = fmt.Sprintf("basecamp show %s", arg)
+		readRef = target.url
+		showCmd = fmt.Sprintf("basecamp show %s", target.url)
 	}
 
 	// Styled TTY output
@@ -261,7 +261,7 @@ Options:
 				return err
 			}
 			if target.occurrence != "" {
-				idStr = args[0]
+				idStr = target.url
 			}
 
 			// Parse all attachments (same parser as list — consistent indexes)
@@ -557,12 +557,13 @@ func extractContentField(data map[string]any) string {
 }
 
 // attachmentTarget is the item whose attachments list and download read.
-// For one occurrence of a recurring event, id is the event's and occurrence
-// is the date.
+// For one occurrence of a recurring event, id is the event's, occurrence is
+// the date, and url names the occurrence without any comment fragment.
 type attachmentTarget struct {
 	id         string
 	recordType string
 	occurrence string
+	url        string
 }
 
 // resolveAttachmentTarget reads the target from a raw argument (plain ID or
@@ -580,7 +581,8 @@ func resolveAttachmentTarget(arg, recordType string) (attachmentTarget, error) {
 		recordType = parsed.Type
 	}
 	if parsed != nil && parsed.OccurrenceDate != "" && isScheduleEntryType(recordType) {
-		return attachmentTarget{id: parsed.RecordingID, recordType: recordType, occurrence: parsed.OccurrenceDate}, nil
+		url, _, _ := strings.Cut(arg, "#")
+		return attachmentTarget{id: parsed.RecordingID, recordType: recordType, occurrence: parsed.OccurrenceDate, url: url}, nil
 	}
 
 	id, err := extractID(arg)

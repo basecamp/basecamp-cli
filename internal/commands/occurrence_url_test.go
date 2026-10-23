@@ -261,6 +261,38 @@ func TestAttachmentsDownloadOccurrenceURL(t *testing.T) {
 	}, requests)
 }
 
+// With --type schedule-entry, a comment fragment does not pick the comment,
+// so no breadcrumb may carry the fragment that would.
+func TestOccurrenceBreadcrumbsDropCommentFragment(t *testing.T) {
+	commentURL := occurrenceURL + "#__recording_555"
+	cases := []struct {
+		name      string
+		args      []string
+		wantReqs  []string
+		wantCrumb []string
+	}{
+		{"attachments list", []string{"list", commentURL, "--type", "schedule-entry"},
+			[]string{"GET /99999/schedule_entries/789/occurrences/20261022.json"},
+			[]string{
+				"basecamp show " + occurrenceURL,
+				"basecamp comments create 1001 <text>",
+				"basecamp attachments download " + occurrenceURL,
+			}},
+		{"attachments download", []string{"download", commentURL, "--type", "schedule-entry", "--out", t.TempDir()},
+			[]string{"GET /99999/schedule_entries/789/occurrences/20261022.json", "GET /99999/blobs/agenda/download/agenda.pdf"},
+			[]string{"basecamp show " + occurrenceURL}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			requests, out, err := runOccurrenceCommand(t, NewAttachmentsCmd(), c.args...)
+
+			require.NoError(t, err, "requests: %v", requests)
+			assert.Equal(t, c.wantReqs, requests)
+			assert.Equal(t, c.wantCrumb, decodeOccurrenceEnvelope(t, out).cmds())
+		})
+	}
+}
+
 func TestScheduleShowOccurrenceURLReadsItsComments(t *testing.T) {
 	for _, target := range []string{occurrenceURL, occurrenceEditURL} {
 		t.Run(target, func(t *testing.T) {
