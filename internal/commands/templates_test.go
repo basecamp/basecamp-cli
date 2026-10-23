@@ -73,7 +73,8 @@ func TestTemplatesLibraryUsesSDKLibraryEndpoint(t *testing.T) {
 		body:   templateLibraryJSON,
 	})
 	buf := captureTemplateOutput(app)
-	app.Config.ActiveProfile = "work profile"
+	app.Flags.Profile = "work profile"
+	app.Config.ActiveProfile = app.Flags.Profile
 	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
 	err := executeRecordingCommand(NewTemplatesCmd(), app, "library")
@@ -117,7 +118,8 @@ func TestTemplatesCopyResolvesProjectAndTodosTool(t *testing.T) {
 		},
 	)
 	buf := captureTemplateOutput(app)
-	app.Config.ActiveProfile = "work profile"
+	app.Flags.Profile = "work profile"
+	app.Config.ActiveProfile = app.Flags.Profile
 	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
 	err := executeRecordingCommand(NewTemplatesCmd(), app, "copy", "3", "--in", "Test Project")
@@ -212,7 +214,8 @@ func TestTemplatesCopyExplainsPeopleConfirmation(t *testing.T) {
 		},
 	)
 
-	app.Config.ActiveProfile = "work profile; echo unsafe"
+	app.Flags.Profile = "work profile; echo unsafe"
+	app.Config.ActiveProfile = app.Flags.Profile
 	app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
 	err := executeRecordingCommand(NewTemplatesCmd(), app, "copy", "3", "--in", "123")
@@ -353,7 +356,8 @@ func TestTemplatesCopyStatusStates(t *testing.T) {
 				body:   test.body,
 			})
 			buf := captureTemplateOutput(app)
-			app.Config.ActiveProfile = "work profile"
+			app.Flags.Profile = "work profile"
+			app.Config.ActiveProfile = app.Flags.Profile
 			app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
 
 			err := executeRecordingCommand(NewTemplatesCmd(), app, "copy-status", "5")

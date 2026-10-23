@@ -39,7 +39,7 @@ nothing. Requires edit access to the project.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			persistentAccount := hasPersistentAccount(app.Config)
+			scope := newFollowUpScope(app)
 			recordingID, err := spotlightTarget(cmd, app, args[0])
 			if err != nil {
 				return err
@@ -50,18 +50,18 @@ nothing. Requires edit access to the project.`,
 				return spotlightError(err)
 			}
 
-			accountArg := replyAccountArg(persistentAccount, app.Config.AccountID)
+			scopeArgs := scope.args(app.Config.AccountID)
 			return app.OK(recording,
 				output.WithSummary(fmt.Sprintf("Spotlighted #%d on its project page", recordingID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "unspotlight",
-						Cmd:         fmt.Sprintf("basecamp unspotlight %d%s", recordingID, accountArg),
+						Cmd:         fmt.Sprintf("basecamp unspotlight %d%s", recordingID, scopeArgs),
 						Description: "Remove the spotlight",
 					},
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp show %d%s", recordingID, accountArg),
+						Cmd:         fmt.Sprintf("basecamp show %d%s", recordingID, scopeArgs),
 						Description: "View item",
 					},
 				),
@@ -90,7 +90,7 @@ nothing. Requires edit access to the project.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			persistentAccount := hasPersistentAccount(app.Config)
+			scope := newFollowUpScope(app)
 			recordingID, err := spotlightTarget(cmd, app, args[0])
 			if err != nil {
 				return err
@@ -100,18 +100,18 @@ nothing. Requires edit access to the project.`,
 				return convertSDKError(err)
 			}
 
-			accountArg := replyAccountArg(persistentAccount, app.Config.AccountID)
+			scopeArgs := scope.args(app.Config.AccountID)
 			return app.OK(map[string]any{"id": recordingID, "spotlighted": false},
 				output.WithSummary(fmt.Sprintf("Spotlight removed from #%d", recordingID)),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "spotlight",
-						Cmd:         fmt.Sprintf("basecamp spotlight %d%s", recordingID, accountArg),
+						Cmd:         fmt.Sprintf("basecamp spotlight %d%s", recordingID, scopeArgs),
 						Description: "Spotlight it again",
 					},
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp show %d%s", recordingID, accountArg),
+						Cmd:         fmt.Sprintf("basecamp show %d%s", recordingID, scopeArgs),
 						Description: "View item",
 					},
 				),

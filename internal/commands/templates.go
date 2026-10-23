@@ -14,7 +14,6 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/dateparse"
 	"github.com/basecamp/basecamp-cli/internal/output"
-	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // NewTemplatesCmd creates the templates command for managing project and to-do list templates.
@@ -146,15 +145,11 @@ func newTemplatesLibraryCmd() *cobra.Command {
 		Long:  "List the account's active to-do list templates.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			persistentAccount := hasPersistentAccount(app.Config)
+			scope := newFollowUpScope(app)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-			contextArgs := templateCommandContextArgs(
-				app.Config.ActiveProfile,
-				persistentAccount,
-				app.Config.AccountID,
-			)
+			contextArgs := scope.args(app.Config.AccountID)
 
 			library, err := app.Account().Templates().GetLibraryTodolists(cmd.Context())
 			if err != nil {
@@ -209,15 +204,11 @@ when --confirm-adding-people is explicitly provided.`,
 			}
 
 			app := appctx.FromContext(cmd.Context())
-			persistentAccount := hasPersistentAccount(app.Config)
+			scope := newFollowUpScope(app)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-			contextArgs := templateCommandContextArgs(
-				app.Config.ActiveProfile,
-				persistentAccount,
-				app.Config.AccountID,
-			)
+			contextArgs := scope.args(app.Config.AccountID)
 
 			resolvedProjectID, err := resolveProjectID(cmd, app, project)
 			if err != nil {
@@ -293,14 +284,6 @@ func validateTemplateCopyTodoset(cmd *cobra.Command, app *appctx.App, todosetID,
 	return output.ErrUsage(fmt.Sprintf("--todoset %s is not a To-dos tool in project %s", todosetID, projectID))
 }
 
-func templateCommandContextArgs(profile string, persistentAccount bool, accountID string) string {
-	args := ""
-	if profile != "" {
-		args += " --profile " + richtext.ShellQuote(profile)
-	}
-	return args + replyAccountArg(persistentAccount, accountID)
-}
-
 func templateCopyError(err error, templateID int64, projectID, todosetID, contextArgs string) error {
 	var confirmationErr *basecamp.PeopleConfirmationRequiredError
 	if !errors.As(err, &confirmationErr) {
@@ -338,15 +321,11 @@ func newTemplatesCopyStatusCmd() *cobra.Command {
 			}
 
 			app := appctx.FromContext(cmd.Context())
-			persistentAccount := hasPersistentAccount(app.Config)
+			scope := newFollowUpScope(app)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-			contextArgs := templateCommandContextArgs(
-				app.Config.ActiveProfile,
-				persistentAccount,
-				app.Config.AccountID,
-			)
+			contextArgs := scope.args(app.Config.AccountID)
 
 			templateCopy, err := app.Account().Templates().GetLibraryCopy(cmd.Context(), copyID)
 			if err != nil {
