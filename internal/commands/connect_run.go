@@ -354,6 +354,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	watch := newCredentialWatch()
 	watchedOpts := append(connectSDKOptions(), basecamp.WithTransportWrapper(watch))
 	watchedTokens := watch.Tokens(tokens)
+	watchedClient := basecamp.NewClient(&basecamp.Config{BaseURL: app.Config.BaseURL}, watchedTokens, watchedOpts...).ForAccount(account)
 
 	queue, err := connector.NewQueue(connector.DefaultBacklogWarn, connector.DefaultBacklogPause)
 	if err != nil {
@@ -373,7 +374,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	intakeOpts.Lines = lines
 	intakeOpts.Logger = logger
 	intakeOpts.Membership = connector.SDKMembership{
-		Client: basecamp.NewClient(&basecamp.Config{BaseURL: app.Config.BaseURL}, watchedTokens, watchedOpts...).ForAccount(account),
+		Client: watchedClient,
 	}
 	intake, err := connector.New(intakeOpts)
 	if err != nil {
@@ -476,7 +477,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			return connector.RunHandoff(ctx, connector.HandoffOptions{
 				Ledger: ledger, Served: served.Current, Buckets: buckets, Pings: policy.HearsPings, AgentID: agentID,
 				Lines: lines, Logger: logger, Started: started,
-				AckContent: file.Ack().Content, Booster: connector.SDKBooster{Client: accountClient},
+				AckContent: file.Ack().Content, Booster: connector.SDKBooster{Client: watchedClient},
 			})
 		})
 	}
@@ -531,7 +532,7 @@ func connectorStoppedBy(err error, who connectRunAs, refused func() bool) (state
 	return state, e.Message, e
 }
 
-// errCredentialRefused says Basecamp refused who's credential in the words
+// errCredentialRefused says Basecamp refused whose credential in the words
 // for its kind, with the connection state status keeps for it: an Agent was
 // disconnected and is reconnected; a bot user's login was refused and the
 // bot signs in again.
@@ -647,7 +648,10 @@ func botLoginRefused(ctx context.Context, app *appctx.App, name string) bool {
 	if err != nil {
 		return false
 	}
-	if app.Auth.RefreshRefusal(creds) == nil {
+	if creds.RefreshToken != "" {
+		if app.Auth.RefreshRefusal(creds) != nil {
+			return false
+		}
 		if err := app.Auth.Refresh(ctx); err != nil {
 			return errors.Is(err, auth.ErrLoginRefused)
 		}

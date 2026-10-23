@@ -63,6 +63,13 @@ func (w *credentialWatch) WrapTransport(inner http.RoundTripper) http.RoundTripp
 // ends, and returns nil. confirm asks Basecamp whether it still takes the
 // credential, and reports true when it does not.
 func (w *credentialWatch) Run(ctx context.Context, confirm func(context.Context) bool) error {
+	var confirming <-chan bool
+	var cancelConfirm context.CancelFunc
+	defer func() {
+		if cancelConfirm != nil {
+			cancelConfirm()
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -70,7 +77,23 @@ func (w *credentialWatch) Run(ctx context.Context, confirm func(context.Context)
 		case err := <-w.refused:
 			return err
 		case <-w.suspect:
-			if confirm(ctx) {
+			if confirming != nil {
+				continue
+			}
+			checkCtx, cancel := context.WithCancel(ctx)
+			cancelConfirm = cancel
+			done := make(chan bool, 1)
+			confirming = done
+			go func() { done <- confirm(checkCtx) }()
+		case refused := <-confirming:
+			cancelConfirm()
+			confirming = nil
+			// All suspicions that arrived during this check share its answer.
+			select {
+			case <-w.suspect:
+			default:
+			}
+			if refused {
 				return errCredentialNotTaken
 			}
 		}

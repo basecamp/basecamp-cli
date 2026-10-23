@@ -177,6 +177,7 @@ func TestConnectStatusLeadsWithSignedOut(t *testing.T) {
 	assert.Equal(t, "  Signed out: "+detail+". Sign it in again: basecamp auth login -P bot --expect-identity 4242", lines[2])
 	assert.NotContains(t, out.String(), "Disconnected")
 	assert.True(t, strings.HasPrefix(connectStatusSummary(report), "signed out"))
+	assert.Contains(t, connectStatusSummary(report), "basecamp auth login -P bot --expect-identity 4242", "JSON output also carries the recovery command")
 }
 
 // Status says the agent was disconnected first, with the command that

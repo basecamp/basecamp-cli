@@ -526,11 +526,9 @@ func (m *Manager) errNewerCredential(oauthType string) *output.Error {
 	return e
 }
 
-// ErrLoginRefused is the cause of a refresh the token endpoint refused with
-// invalid_grant: Basecamp no longer takes the login's refresh token, because
-// the session expired or was revoked, or, on Launchpad, because the
-// environment names a different OAuth client than the one it was issued to.
-// No retry changes that answer; only signing in again does.
+// ErrLoginRefused marks a BC5 refresh refused with invalid_grant: the
+// session expired or was revoked. Launchpad's same error can mean a
+// recoverable OAuth-client mismatch, so it does not carry this cause.
 var ErrLoginRefused = errors.New("the login's refresh token was refused")
 
 // forgetRefusedGrant deletes the stored credential only while it still
@@ -756,7 +754,9 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 			msg += ". " + containerLoginAdvice
 		}
 		refused := m.errAuth(msg)
-		refused.Cause = ErrLoginRefused
+		if creds.OAuthType == oauthTypeBC5 {
+			refused.Cause = ErrLoginRefused
+		}
 		return refused
 	}
 

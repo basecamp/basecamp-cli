@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -66,26 +68,92 @@ func TestTheCredentialWatchAsksAboutAnUnauthorizedRead(t *testing.T) {
 // A 401 Basecamp does not confirm, from a proxy say, leaves the run going,
 // and the next one asks again.
 func TestTheCredentialWatchRunsOnWhenBasecampStillTakesTheCredential(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := newCredentialWatch()
+		transport := w.WrapTransport(statusTransport(http.StatusUnauthorized))
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		var asks atomic.Int32
+		done := make(chan error, 1)
+		go func() {
+			done <- w.Run(ctx, func(context.Context) bool { asks.Add(1); return false })
+		}()
+		for attempt := range int32(2) {
+			roundTrip(t, transport)
+			synctest.Wait() // The previous confirmation has finished, not just started.
+			assert.Equal(t, attempt+1, asks.Load())
+		}
+		cancel()
+		require.NoError(t, <-done, "ended by its context, the watch stops nothing")
+	})
+}
+
+func TestARefusedRenewalInterruptsAPendingConfirmation(t *testing.T) {
 	w := newCredentialWatch()
-	transport := w.WrapTransport(statusTransport(http.StatusUnauthorized))
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	asks := make(chan struct{})
+	started, stopped := make(chan struct{}), make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- w.Run(ctx, func(context.Context) bool { asks <- struct{}{}; return false })
+		done <- w.Run(ctx, func(ctx context.Context) bool {
+			close(started)
+			<-ctx.Done()
+			close(stopped)
+			return false
+		})
 	}()
-
-	for range 2 {
-		roundTrip(t, transport)
-		select {
-		case <-asks:
-		case <-time.After(10 * time.Second):
-			t.Fatal("the watch did not ask about a 401")
-		}
+	w.unauthorized()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("confirmation never started")
 	}
-	cancel()
-	require.NoError(t, <-done, "ended by its context, the watch stops nothing")
+	w.refuse(auth.ErrLoginRefused)
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, auth.ErrLoginRefused)
+	case <-time.After(5 * time.Second):
+		t.Fatal("a definitive refusal waited behind confirmation")
+	}
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the in-flight confirmation was not canceled")
+	}
+}
+
+func TestUnauthorizedReadsShareOnePendingConfirmation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := newCredentialWatch()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		release := make(chan struct{})
+		var calls atomic.Int32
+		done := make(chan error, 1)
+		go func() {
+			done <- w.Run(ctx, func(context.Context) bool {
+				calls.Add(1)
+				<-release
+				return false
+			})
+		}()
+		w.unauthorized()
+		synctest.Wait()
+		require.EqualValues(t, 1, calls.Load())
+		for range 20 {
+			w.unauthorized()
+		}
+		synctest.Wait()
+		assert.EqualValues(t, 1, calls.Load())
+		close(release)
+		synctest.Wait()
+		assert.EqualValues(t, 1, calls.Load(), "pending suspicions share the completed answer")
+		w.unauthorized()
+		synctest.Wait()
+		assert.EqualValues(t, 2, calls.Load(), "a later refusal is checked again")
+		cancel()
+		require.NoError(t, <-done)
+	})
 }
 
 // A bot user's refresh the token endpoint refuses is Basecamp's answer
@@ -167,6 +235,30 @@ func TestABotUsersRefreshThatCanPassDoesNotStopTheRun(t *testing.T) {
 	}
 }
 
+func TestRepeatedUnauthorizedReadsDuringARefreshHoldDoNotSignOut(t *testing.T) {
+	bc := newBotBasecamp(t)
+	bc.answerRefresh(http.StatusTooManyRequests, `{"error":"temporarily_unavailable"}`)
+	bc.answerMe(func(string) int { return http.StatusUnauthorized })
+	app := bc.app(t)
+	for range 2 {
+		assert.False(t, confirmCredentialRefused(t.Context(), app, setup.KindBotUser, "bot"))
+	}
+	assert.Equal(t, []string{"refresh"}, bc.asked(), "a held refresh must not probe the old token or refresh twice")
+}
+
+func TestALocalRefreshPreflightFailureDoesNotProveRevocation(t *testing.T) {
+	bc := newBotBasecamp(t)
+	bc.answerMe(func(string) int { return http.StatusUnauthorized })
+	app := bc.app(t)
+	creds, err := app.Auth.GetStore().Load("profile:bot")
+	require.NoError(t, err)
+	creds.TokenEndpoint = "ftp://invalid.example/tokens"
+	require.Error(t, app.Auth.RefreshRefusal(creds))
+	require.NoError(t, app.Auth.GetStore().Save("profile:bot", creds))
+	assert.False(t, confirmCredentialRefused(t.Context(), app, setup.KindBotUser, "bot"))
+	assert.Empty(t, bc.asked(), "a configuration fault is not proof from the old token")
+}
+
 // A bot login stored from a bare token has no refresh to try; the token it
 // has is the only one it will ever have, so a 401 for it is the answer.
 func TestABotLoginWithNoRefreshIsAskedAboutWithItsOwnToken(t *testing.T) {
@@ -180,6 +272,18 @@ func TestABotLoginWithNoRefreshIsAskedAboutWithItsOwnToken(t *testing.T) {
 
 	assert.True(t, confirmCredentialRefused(t.Context(), app, setup.KindBotUser, "bot"))
 	assert.Equal(t, []string{"me old-tok"}, bc.asked())
+}
+
+func TestABoostRetainsARefusedRenewalForTheCredentialWatch(t *testing.T) {
+	w := newCredentialWatch()
+	tokens := w.Tokens(tokenFunc(func() (string, error) { return "", refusedLogin() }))
+	client := basecamp.NewClient(&basecamp.Config{BaseURL: "http://127.0.0.1:1"}, tokens).ForAccount("555")
+	booster := connector.SDKBooster{Client: client}
+	_, err := booster.Boost(t.Context(), 123, "ok")
+	require.Error(t, err)
+	// Even if acknowledgement only logs the failure, the definitive
+	// refusal remains visible to the connector's credential watch.
+	assert.ErrorIs(t, runWatch(t, w, mustNotConfirm(t)), auth.ErrLoginRefused)
 }
 
 // Every other failure is the reads' own: neither a renewal that failed for

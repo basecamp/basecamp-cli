@@ -2135,6 +2135,7 @@ func TestRefresh_InvalidGrantOnLaunchpadKeepsTheCredential(t *testing.T) {
 	require.ErrorAs(t, err, &cliErr)
 	assert.Equal(t, output.CodeAuth, cliErr.Code)
 	assert.Contains(t, cliErr.Message, "BASECAMP_OAUTH_CLIENT_ID/SECRET name a different OAuth client", "the message names the client mismatch the refusal may mean")
+	assert.NotErrorIs(t, err, ErrLoginRefused, "a client mismatch must not stop the connector as a revoked login")
 	assert.Equal(t, "Run: basecamp auth login", cliErr.Hint)
 
 	creds, loadErr := m.store.Load(key)

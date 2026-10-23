@@ -310,7 +310,7 @@ func connectStatusSummary(r connectStatusReport) string {
 		case connector.ConnectionDisconnected:
 			parts = append(parts, "disconnected")
 		case connector.ConnectionSignedOut:
-			parts = append(parts, "signed out")
+			parts = append(parts, "signed out; "+botSignInHint(r.name(), r.identity))
 		}
 	}
 	if r.Status.Hold != nil {
