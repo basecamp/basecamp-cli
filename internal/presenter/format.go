@@ -30,9 +30,22 @@ func FormatField(spec FieldSpec, key string, val any, locale Locale) string {
 		return formatDock(val)
 	case "steps":
 		return formatSteps(val)
+	case "wallpaper":
+		return formatWallpaper(val)
 	default:
 		return formatText(val)
 	}
+}
+
+// formatWallpaper names how a project's wallpaper is laid out. Its URL is a
+// signed-in redirect, no use to read in a terminal.
+func formatWallpaper(val any) string {
+	if m, ok := val.(map[string]any); ok {
+		if mode, ok := m["mode"].(string); ok {
+			return richtext.SanitizeSingleLine(mode)
+		}
+	}
+	return ""
 }
 
 // formatSteps renders a CardStep array as a multi-line checklist.
