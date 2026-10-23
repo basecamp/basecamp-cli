@@ -690,6 +690,21 @@ func TestPresentEmptySliceMarkdownTable(t *testing.T) {
 	}
 }
 
+func TestProjectDetailNamesTheWallpaperMode(t *testing.T) {
+	project := map[string]any{"id": float64(123), "name": "Launch", "status": "active"}
+
+	var without strings.Builder
+	require.True(t, PresentWithTheme(&without, project, "project", ModeMarkdown, tui.NoColorTheme(), enUS))
+	assert.NotContains(t, without.String(), "Wallpaper")
+
+	project["wallpaper"] = map[string]any{"url": "https://3.basecamp.com/1/projects/123/wallpaper", "mode": "tile"}
+	var with strings.Builder
+	require.True(t, PresentWithTheme(&with, project, "project", ModeMarkdown, tui.NoColorTheme(), enUS))
+	assert.Contains(t, with.String(), "Wallpaper")
+	assert.Contains(t, with.String(), "tile")
+	assert.NotContains(t, with.String(), "/wallpaper")
+}
+
 // =============================================================================
 // Collapse Tests
 // =============================================================================
