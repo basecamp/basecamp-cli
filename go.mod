@@ -8,7 +8,7 @@ require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.1.0
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/basecamp/basecamp-sdk/go v0.27.1-0.20261022230746-63115e7978c9
+	github.com/basecamp/basecamp-sdk/go v0.28.0
 	github.com/basecamp/cli v0.2.2-0.20261023171439-c9bce8206df9
 	github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d
 	github.com/basecamp/surfguard/go v0.1.0

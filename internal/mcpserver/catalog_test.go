@@ -55,10 +55,11 @@ func TestCatalogClaimsEveryTag(t *testing.T) {
 func TestCatalogExcludesUnservedOperations(t *testing.T) {
 	cat := loadForTest(t)
 	excluded := map[string]bool{
-		"CreateAttachment":     true,
-		"CreateCampfireUpload": true,
-		"UpdateAccountLogo":    true,
-		"CreateStreamTicket":   true,
+		"CreateAttachment":       true,
+		"CreateCampfireUpload":   true,
+		"UpdateAccountLogo":      true,
+		"UpdateProjectWallpaper": true,
+		"CreateStreamTicket":     true,
 	}
 	model, composite := 0, 0
 	for _, d := range cat.Domains {
@@ -71,7 +72,7 @@ func TestCatalogExcludesUnservedOperations(t *testing.T) {
 			assert.False(t, excluded[op.ID], "operation %q should be excluded from the vendored model", op.ID)
 		}
 	}
-	assert.Equal(t, 281, model, "served model operation count")
+	assert.Equal(t, 282, model, "served model operation count")
 	assert.Equal(t, 1, composite, "served composite operation count")
 }
 

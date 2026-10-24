@@ -40,9 +40,6 @@ setup_file() {
     base64 -d > "$png"
 
   run_smoke basecamp projects wallpaper set "$png" --mode tile --project "$proj_id" --json
-  if [[ "$status" -ne 0 ]] && [[ "$output" == *"not found"* || "$output" == *"404"* ]]; then
-    mark_unverifiable "This Basecamp does not serve project wallpaper to API clients yet"
-  fi
   assert_success
   assert_json_value '.data.wallpaper.mode' 'tile'
   assert_json_not_null '.data.wallpaper.url'

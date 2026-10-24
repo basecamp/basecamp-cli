@@ -18,7 +18,7 @@ load test_helper
 @test "projects wallpaper set help names the formats and the size cap" {
   run basecamp projects wallpaper set --help
   assert_success
-  assert_output_contains "PNG, JPEG, WebP, or AVIF files up to 10 MB"
+  assert_output_contains "PNG, JPEG, GIF, WebP, AVIF, HEIF, or HEIC files up to 10 MB"
 }
 
 
@@ -34,14 +34,14 @@ load test_helper
   assert_json_value '.code' 'usage'
 }
 
-@test "projects wallpaper set refuses a GIF" {
+@test "projects wallpaper set refuses an SVG" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
-  printf 'GIF89a' > anim.gif
+  printf '<svg></svg>' > image.svg
 
-  run basecamp projects wallpaper set anim.gif
+  run basecamp projects wallpaper set image.svg
   assert_failure
-  assert_json_value '.error' 'anim.gif: unsupported image type image/gif (use PNG, JPEG, WebP, or AVIF)'
+  assert_json_value '.error' 'image.svg: unsupported image type image/svg+xml (use PNG, JPEG, GIF, WebP, AVIF, HEIF, or HEIC)'
   assert_json_value '.code' 'usage'
 }
 

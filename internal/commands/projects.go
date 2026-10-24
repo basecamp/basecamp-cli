@@ -431,13 +431,15 @@ func newProjectsDeleteCmd() *cobra.Command {
 	}
 }
 
-// wallpaperFormats are the image types a project wallpaper may be: the set the
-// web's picker offers, which the server holds the API to as well.
+// wallpaperFormats match the server's shared image validation, not the narrower web picker.
 var wallpaperFormats = []struct{ mime, name string }{
 	{"image/png", "PNG"},
 	{"image/jpeg", "JPEG"},
+	{"image/gif", "GIF"},
 	{"image/webp", "WebP"},
 	{"image/avif", "AVIF"},
+	{"image/heif", "HEIF"},
+	{"image/heic", "HEIC"},
 }
 
 const maxWallpaperMB = 10
@@ -445,7 +447,7 @@ const maxWallpaperMB = 10
 var wallpaperModes = []string{"fill", "tile"}
 
 func wallpaperAgentNotes() map[string]string {
-	return map[string]string{"agent_notes": "Agent profiles are refused (403): changing a wallpaper needs a person who can edit the project\n.data.wallpaper on the returned project is {url, mode}, absent when there is none"}
+	return map[string]string{"agent_notes": "People and personal assistants follow project-edit permissions; shared agents are refused (403)\n.data.wallpaper is {url, mode}, absent when there is none; url requires authentication and redirects to the image"}
 }
 
 func newProjectsWallpaperCmd() *cobra.Command {
@@ -456,7 +458,8 @@ func newProjectsWallpaperCmd() *cobra.Command {
 		Long: `Set, lay out, or remove a project's wallpaper.
 
 The project comes from --project (or --in), then the configured default.
-Only people who can edit the project can change its wallpaper.`,
+People and personal assistants with project-edit permissions can change its wallpaper.
+Shared agents are refused.`,
 		Example: `  $ basecamp projects wallpaper set skyline.jpg --mode fill --project 12345
   $ basecamp projects wallpaper mode tile --project 12345
   $ basecamp projects wallpaper remove --project 12345`,
@@ -621,9 +624,8 @@ func newProjectsWallpaperRemoveCmd() *cobra.Command {
 	}
 }
 
-// wallpaperFile refuses, before anything is sent, a file the server would
-// refuse for its size or type. The server sniffs the bytes, so a mislabeled
-// file still comes back as its 422.
+// wallpaperFile checks the size and MIME hint before uploading. The server's
+// shared image validations remain authoritative.
 func wallpaperFile(arg string) (path, contentType string, err error) {
 	path = richtext.NormalizeDragPath(arg)
 	if err := richtext.ValidateFile(path); err != nil {
@@ -646,7 +648,7 @@ func wallpaperFile(arg string) (path, contentType string, err error) {
 	return "", "", output.ErrUsage(fmt.Sprintf("%s: unsupported image type %s (use %s)", name, contentType, wallpaperFormatNames()))
 }
 
-// wallpaperFormatNames reads "PNG, JPEG, WebP, or AVIF".
+// wallpaperFormatNames lists the accepted formats for help and validation errors.
 func wallpaperFormatNames() string {
 	names := make([]string, len(wallpaperFormats))
 	for i, f := range wallpaperFormats {

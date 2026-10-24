@@ -11,6 +11,7 @@ ACTIONS (RO = read-only):
 - list_projects (RO, paginated): List projects (active by default; optionally archived/trashed)
 - list_recent_projects (RO): List the projects the current user has most recently visited, most recent visit first
 - record_project_visit: Record that the current user visited a project, moving it to the front of ListRecentProjects (returns 204 No Content)
+- remove_project_wallpaper: Remove the project's wallpaper (returns 204 No Content)
 - trash_project: Trash a project (returns 204 No Content)
 - unarchive_project: Restore a project to active status from trash as well as from the archive (returns 204 No Content)
 - update_project: Update an existing project

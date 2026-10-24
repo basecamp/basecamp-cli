@@ -16481,6 +16481,104 @@
         }
       }
     },
+    "/{accountId}/projects/{projectId}/wallpaper.json": {
+      "delete": {
+        "description": "Remove the project's wallpaper (returns 204 No Content).\nPeople and personal assistants follow project-edit permissions; shared agents are refused.",
+        "operationId": "RemoveProjectWallpaper",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "RemoveProjectWallpaper 204 response"
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Projects"
+        ],
+        "x-basecamp-idempotent": {
+          "natural": true
+        },
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
     "/{accountId}/question_answers/{answerId}": {
       "get": {
         "description": "Get a single answer by id",
@@ -36532,6 +36630,9 @@
           "client_company": {
             "$ref": "#/components/schemas/ClientCompany"
           },
+          "wallpaper": {
+            "$ref": "#/components/schemas/ProjectWallpaper"
+          },
           "clientside": {
             "$ref": "#/components/schemas/ClientSide",
             "deprecated": true,
@@ -36632,6 +36733,24 @@
         },
         "required": [
           "error"
+        ]
+      },
+      "ProjectWallpaper": {
+        "type": "object",
+        "description": "The project's wallpaper, included only in single-project responses when attached.\nProject lists and home responses omit it.",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "An authenticated API-host URL that redirects to the wallpaper image in storage, not a public image link.\nUse the SDK's authenticated download helper instead of placing this URL directly in an image element."
+          },
+          "mode": {
+            "type": "string",
+            "description": "fill|tile"
+          }
+        },
+        "required": [
+          "mode",
+          "url"
         ]
       },
       "Question": {
@@ -40304,6 +40423,10 @@
           },
           "schedule_attributes": {
             "$ref": "#/components/schemas/ScheduleAttributes"
+          },
+          "wallpaper_mode": {
+            "type": "string",
+            "description": "How the project's wallpaper is laid out. Changes only the layout of a\nwallpaper already attached; UpdateProjectWallpaper uploads one."
           }
         },
         "required": [
@@ -40312,6 +40435,10 @@
       },
       "UpdateProjectResponseContent": {
         "$ref": "#/components/schemas/Project"
+      },
+      "UpdateProjectWallpaperInputPayload": {
+        "type": "string",
+        "contentEncoding": "byte"
       },
       "UpdateQuestionNotificationSettingsRequestContent": {
         "type": "object",
