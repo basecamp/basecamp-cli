@@ -48,7 +48,7 @@ load test_helper
 @test "projects wallpaper set refuses a file over 10 MB" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
-  truncate -s 10485761 big.png
+  dd if=/dev/zero of=big.png bs=1 count=1 seek=10485760 2>/dev/null
 
   run basecamp projects wallpaper set big.png
   assert_failure
