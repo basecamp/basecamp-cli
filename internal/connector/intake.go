@@ -897,8 +897,8 @@ const blockedRetryBatch = 100
 // This is the whole of the blocked-record recovery schedule that
 // admission.NextBlockedRetry describes: without it that function computes a
 // time nothing acts on, and a read that failed during an outage, a throttle,
-// or an unreadable connect.json waits for somebody to notice and run
-// `basecamp connect redispatch <id>` on each one.
+// or an unreadable connect.json is never run again: no command re-runs a
+// blocked record.
 //
 // The scope is the run's --project buckets, passed down rather than assumed.
 // A connector restricted to project A that offered a blocked record from

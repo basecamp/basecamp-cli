@@ -687,9 +687,11 @@ func newConnectServed(path string, file setup.File, log *slog.Logger) *connectSe
 // read, or the reason it could not be read. "As of the last read" is the
 // honest span: a reading is reused for connectServedTTL, and no lock is
 // taken, so a `connect setup --unserve` can complete between any read and
-// whatever the caller goes on to do with it. Dispatch treats an error as authorizing
-// nothing; admission holds the record as a configuration error rather than
-// answering that the project is not served.
+// whatever the caller goes on to do with it — for the handoff, a boost and a
+// line later (#952; #771 closed the same window for the dispatcher, under the
+// lock). The handoff treats an error as authorizing nothing; admission holds
+// the record as a configuration error rather than answering that the project
+// is not served.
 func (r *connectServed) Current() (map[int64]admission.Project, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
