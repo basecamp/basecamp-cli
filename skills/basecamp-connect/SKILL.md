@@ -38,14 +38,11 @@ Three pieces:
 
 - **The agent**: a Basecamp person of its own, owned by you, connected to this
   computer under a CLI profile (often named after the agent).
-- **The connector**: `basecamp connect -P '<profile>'`. It listens to the
-  account's event feed as the agent, checks each event against who may give the
-  agent work and which projects it serves, and prints one line per trusted
-  request. It boosts each one that asks for something first, and does
-  nothing else.
-- **This session**: the orchestrator. It watches those lines, words each
-  acknowledgement, chooses the repo, and dispatches one background subagent
-  per request. It never does the work itself.
+- **The connector**: `basecamp connect -P '<profile>'`. It checks the agent's
+  event feed against its trust and served projects, boosts each request that
+  asks for something, and prints one line per trusted request. Nothing else.
+- **This session**: watches those lines, words acknowledgements, chooses the
+  repo, and dispatches one background subagent per request. Never does the work.
 
 Claude Code only. The connector runs on Linux and macOS.
 
@@ -63,25 +60,22 @@ note the output file the harness reports:
 basecamp connect -P '<profile>'
 ```
 
-It runs until stopped, from any folder. After a few seconds its log should say
-`connector: running`. If it exited instead, explain the error
-(see *When the connector stops*), and stop. If it says `could not get the
-agent's token yet`, Basecamp's token endpoint is limiting it or failing: it
-retries on its own. Tell the person, leave it running, and arm the monitor;
-restarting doesn't help.
+It runs from any folder until stopped. Wait a few seconds for
+`connector: running`. If it exits, explain why (*When the connector stops*)
+and stop. If it logs `could not get the agent's token yet`, tell the person
+it will retry; leave it running and start the watcher. Restarting won't help.
 
-Then arm a persistent monitor on that file with the Monitor tool
-(`persistent: true`), replaying from the start so nothing that arrived between
-the start and the monitor is missed:
+Then start the watcher, also with `run_in_background: true`:
 
 ```bash
-tail -f -n +1 '<connector-output-file>' | grep --line-buffered -F '"type":"request"'
+bash '${CLAUDE_SKILL_DIR}/watch-requests.sh' '<connector-output-file>' ~/.config/basecamp-connect/'handled-<profile>'
 ```
 
-Single-quote the path, as with every other value.
-
-Each notification is one request: handle it with *For each request*. A request
-that arrives while you're waiting on the person is not their reply.
+It exits with unhandled requests. Read every line from its output file,
+record each id (`echo <event_id> >> ~/.config/basecamp-connect/'handled-<profile>'`),
+restart the watcher, then handle each with *For each request*. Keep one running.
+Use this instead of Monitor: watches expire and `grep -v` can buffer live
+lines. A request arriving while you wait on the person is not their reply.
 
 ### 2. The request line
 
@@ -652,6 +646,16 @@ output and tell the person what it means:
 
 Requests that arrive while it's stopped are not picked up later.
 
+Each start writes a new output file. Stop the watcher (TaskStop), then check
+the old file once, so a request printed just before the exit isn't left there:
+
+```bash
+bash '${CLAUDE_SKILL_DIR}/watch-requests.sh' --once '<old-output-file>' ~/.config/basecamp-connect/'handled-<profile>'
+```
+
+Handle any line it prints as usual. Start the watcher on the new file once the
+connector is running.
+
 ## Checking on it
 
 - `basecamp connect doctor -P '<profile>'`: the credential, the identity, the
@@ -675,7 +679,8 @@ Requests that arrive while it's stopped are not picked up later.
 
 ## Stopping
 
-When the person asks you to stop, or the session is ending, stop the connector
-task (TaskStop, or send it SIGINT). There's nothing else to clean up: no
-webhooks, nothing public. Subagents already running finish their requests and
-reply. Say that new mentions won't be picked up until it's started again.
+When the person asks you to stop, or the session is ending, stop the watcher
+and the connector task (TaskStop, or send it SIGINT). There's nothing else to
+clean up: no webhooks, nothing public. Subagents already running finish their
+requests and reply. Say that new mentions won't be picked up until it's
+started again.
