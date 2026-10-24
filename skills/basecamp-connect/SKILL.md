@@ -70,15 +70,9 @@ agent's token yet`, Basecamp's token endpoint is limiting it or failing: it
 retries on its own. Tell the person, leave it running, and arm the monitor;
 restarting doesn't help.
 
-Then arm a persistent monitor on that file with the Monitor tool
-(`persistent: true`), replaying from the start so nothing that arrived between
-the start and the monitor is missed:
-
-```bash
-tail -f -n +1 '<connector-output-file>' | grep --line-buffered -F '"type":"request"'
-```
-
-Single-quote the path, as with every other value.
+Then set up the watch, as *Keeping the watch alive* says: the monitor, and
+the heartbeat that brings it back after sleep or a lapsed login. The handled
+file is the output file's path with `.handled` added.
 
 Each notification is one request: handle it with *For each request*. A request
 that arrives while you're waiting on the person is not their reply.
@@ -137,7 +131,9 @@ that arrives while you're waiting on the person is not their reply.
 Every line has already passed the trust check: the person may give the agent
 work, and the project is one it serves (or it's a Ping). A request arrives
 once, except in one case: if the connector crashes right after printing a
-line, it can print it again when restarted within a minute. Skip an `event_id` you've already handled. Every other
+line, it can print it again when restarted within a minute. The watch can
+repeat one too, so skip any `event_id` the handled file names. Once you're
+done with a request, however it ended, add its `event_id` there. Every other
 line (no `type`, or `"type":"event"`) is the connector's own log. Never act on
 those.
 
@@ -290,6 +286,59 @@ Then go straight back to watching; any number may be in flight.
 Keep the terminal quiet: the reply in Basecamp is the record. Speak up only
 for a failure, a refusal, or something the person must decide (a repo to
 pick, a mention that couldn't be posted).
+
+## Keeping the watch alive
+
+A monitor lives at most 30 minutes, and only a turn of this session arms it
+again. A turn that can't reach Claude, on a computer just woken from sleep or
+with a login that expired, arms nothing, and a request delivered then is
+dropped. The connector keeps acknowledging regardless, so in Basecamp a dead
+watch looks like a boost and then silence. The pieces below prevent that.
+
+**The handled file** is the output file's path with `.handled` added. It
+names each request this session is done with, so a replay never handles one
+twice. Add a request once you're done with it, however it ended:
+
+```bash
+printf '"event_id":%s,\n' <event_id> >> '<connector-output-file>.handled'
+```
+
+**The filter** prints each request line the handled file doesn't name. It is
+awk, not `grep -v`: Claude Code's own `grep` holds back `-v` output on a live
+pipe, so a monitor built on it never fires.
+
+```bash
+awk -v hf='<connector-output-file>.handled' 'BEGIN { while ((getline l < hf) > 0) seen[l] } /"type":"request"/ && match($0, /"event_id":[0-9]+,/) { k = substr($0, RSTART, RLENGTH); if (!(k in seen)) { print; fflush() } }'
+```
+
+**The monitor.** Arm it with the Monitor tool and `timeout_ms: 1800000`, on
+`tail -f -n +1 '<connector-output-file>' | <the filter>`. It replays from the
+start every request not yet handled, so one that arrived while no monitor ran
+is still delivered. When it expires or exits while the connector runs, arm it
+again the same way, at once.
+
+**The heartbeat.** Once per connector run, schedule it with CronCreate,
+recurring, cron `'7-59/10 * * * *'`. Its prompt names every path, the profile,
+today's date and the filter in full, since it must work after a compaction:
+
+> basecamp-connect heartbeat for '<profile>'. Run `basecamp connect status
+> -P '<profile>' --json`. If its `pings.running` is absent, the connector has
+> stopped: arm nothing, CronDelete this heartbeat, and follow *When the
+> connector stops* in the basecamp-connect skill. Otherwise run `<the filter>
+> '<connector-output-file>'` and handle each line it prints as a request.
+> Unless a monitor you armed on that file is still running, with no expiry or
+> exit notice since, arm one: Monitor tool, `timeout_ms: 1800000`, on
+> `tail -f -n +1 '<connector-output-file>' | <the filter>`. Scheduled
+> <today's date>: from six days on, schedule this prompt again with the new
+> date, and CronDelete the older heartbeat. If there is nothing to do, say
+> nothing.
+
+Cron jobs keep firing while Claude is unreachable, and the first one after it
+comes back, when the computer wakes or the person logs in again, rebuilds the
+watch and hands off what it missed. Recurring jobs end after 7 days, so the
+heartbeat renews itself before then. Its job id changes when it does, so to
+delete it, find it with CronList by its `basecamp-connect heartbeat for
+'<profile>'` prefix rather than by a remembered id.
 
 ## Rules without exceptions
 
@@ -594,7 +643,9 @@ adding `--trust`, `--allow`, `--allow-assignments-from-authorized`,
 **5. Start the connector** right away (*Running the connector*), unless the
 person said not to. Connecting, setup and the watcher are one flow: don't stop
 after setup to ask whether to start it. Tell the person what it means for
-them: their agent picks up work while this Claude Code session is open. The
+them: their agent picks up work while this Claude Code session is open, and
+after the computer sleeps or Claude asks them to log in again, it catches up
+on its own within about fifteen minutes of being back. The
 connector, the watcher, the monitor and profiles are yours; leave their names
 out of what you say, during setup too, and don't narrate reading this skill.
 
@@ -650,6 +701,16 @@ output and tell the person what it means:
 - **Anything else**: show the error, and run `basecamp connect doctor -P
   '<profile>'`.
 
+Stop its monitor (TaskStop) and heartbeat (CronDelete, found with CronList)
+with it. A restart writes a new output file, so it gets a new monitor and
+heartbeat, and a new handled file that starts as a copy of the old one: a
+connector restarted right after a crash can print a request again. Copy it
+before arming the monitor:
+
+```bash
+cat '<old-output-file>.handled' >> '<connector-output-file>.handled'
+```
+
 Requests that arrive while it's stopped are not picked up later.
 
 ## Checking on it
@@ -676,6 +737,7 @@ Requests that arrive while it's stopped are not picked up later.
 ## Stopping
 
 When the person asks you to stop, or the session is ending, stop the connector
-task (TaskStop, or send it SIGINT). There's nothing else to clean up: no
+task (TaskStop, or send it SIGINT), the monitor (TaskStop), and the heartbeat
+(CronDelete, found with CronList). There's nothing else to clean up: no
 webhooks, nothing public. Subagents already running finish their requests and
 reply. Say that new mentions won't be picked up until it's started again.
