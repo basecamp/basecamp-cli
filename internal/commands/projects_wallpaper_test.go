@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -190,6 +191,48 @@ func TestProjectsWallpaperSetUploadsTheFileAndReturnsTheProject(t *testing.T) {
 	assert.Equal(t, "Wallpaper set: skyline.png (tile)", env.Summary)
 	assert.Equal(t, map[string]any{"url": wallpaperURL, "mode": "tile"}, env.Data["wallpaper"])
 	assert.Equal(t, "basecamp projects show 123", env.Breadcrumbs[0].Cmd)
+}
+
+func TestProjectsWallpaperFollowUpsPreserveScope(t *testing.T) {
+	for _, scope := range []struct {
+		name, profile, accountSource, suffix string
+	}{
+		{"configured account", "", string(config.SourceGlobal), ""},
+		{"active profile", "staging", "profile", " --profile staging"},
+		{"explicit account override", "staging", string(config.SourceFlag), " --profile staging --account 99999"},
+		{"selected account", "", string(config.SourcePrompt), " --account 99999"},
+	} {
+		for _, action := range []string{"set", "mode", "remove"} {
+			t.Run(scope.name+"/"+action, func(t *testing.T) {
+				_, app, buf := newWallpaperServer(t)
+				app.Flags.Project = "123"
+				app.Config.ActiveProfile = scope.profile
+				app.Config.Sources = map[string]string{"account_id": scope.accountSource}
+				args := []string{"wallpaper", action}
+				want := map[string]string{"show": "basecamp projects show 123" + scope.suffix}
+				switch action {
+				case "set":
+					args = append(args, writeWallpaperFile(t, "image.png", 0))
+					want["mode"] = "basecamp projects wallpaper mode <fill|tile> --project 123" + scope.suffix
+					want["remove"] = "basecamp projects wallpaper remove --project 123" + scope.suffix
+				case "mode":
+					args = append(args, "tile")
+					fallthrough
+				case "remove":
+					want["set"] = "basecamp projects wallpaper set <file> --project 123" + scope.suffix
+				}
+
+				require.NoError(t, executeCommand(NewProjectsCmd(), app, args...))
+				env := decodeWallpaperEnvelope(t, buf)
+				require.Len(t, env.Breadcrumbs, len(want))
+				got := make(map[string]string, len(env.Breadcrumbs))
+				for _, breadcrumb := range env.Breadcrumbs {
+					got[breadcrumb.Action] = breadcrumb.Cmd
+				}
+				assert.Equal(t, want, got)
+			})
+		}
+	}
 }
 
 func TestProjectsWallpaperSetWithoutModeKeepsTheCurrentMode(t *testing.T) {

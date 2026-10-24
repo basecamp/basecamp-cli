@@ -503,6 +503,7 @@ its current mode.`, wallpaperFormatNames(), maxWallpaperMB, strings.Join(wallpap
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
 			projectID, err := wallpaperProjectID(cmd, app)
 			if err != nil {
 				return err
@@ -524,7 +525,7 @@ its current mode.`, wallpaperFormatNames(), maxWallpaperMB, strings.Join(wallpap
 			if mode != "" {
 				summary += " (" + mode + ")"
 			}
-			return respondWithWallpaperProject(cmd, app, projectID, map[string]any{"id": projectID}, summary,
+			return respondWithWallpaperProject(cmd, app, projectID, scope, map[string]any{"id": projectID}, summary,
 				output.Breadcrumb{
 					Action:      "mode",
 					Cmd:         fmt.Sprintf("basecamp projects wallpaper mode <fill|tile> --project %d", projectID),
@@ -567,6 +568,7 @@ A project with no wallpaper keeps the mode for the next one uploaded.`,
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
 			projectID, err := wallpaperProjectID(cmd, app)
 			if err != nil {
 				return err
@@ -583,7 +585,7 @@ A project with no wallpaper keeps the mode for the next one uploaded.`,
 				return convertSDKError(err)
 			}
 
-			return respondWithWallpaperProject(cmd, app, projectID, project, "Wallpaper mode set to "+mode,
+			return respondWithWallpaperProject(cmd, app, projectID, scope, project, "Wallpaper mode set to "+mode,
 				output.Breadcrumb{
 					Action:      "set",
 					Cmd:         fmt.Sprintf("basecamp projects wallpaper set <file> --project %d", projectID),
@@ -604,6 +606,7 @@ func newProjectsWallpaperRemoveCmd() *cobra.Command {
 		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
 			projectID, err := wallpaperProjectID(cmd, app)
 			if err != nil {
 				return err
@@ -613,7 +616,7 @@ func newProjectsWallpaperRemoveCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return respondWithWallpaperProject(cmd, app, projectID, map[string]any{"id": projectID}, "Wallpaper removed",
+			return respondWithWallpaperProject(cmd, app, projectID, scope, map[string]any{"id": projectID}, "Wallpaper removed",
 				output.Breadcrumb{
 					Action:      "set",
 					Cmd:         fmt.Sprintf("basecamp projects wallpaper set <file> --project %d", projectID),
@@ -683,15 +686,20 @@ func wallpaperProjectID(cmd *cobra.Command, app *appctx.App) (int64, error) {
 // the output carries its wallpaper. The change has already happened, so a
 // failed read falls back to what the caller has, with a diagnostic, rather
 // than failing the command.
-func respondWithWallpaperProject(cmd *cobra.Command, app *appctx.App, projectID int64, fallback any, summary string, crumbs ...output.Breadcrumb) error {
+func respondWithWallpaperProject(cmd *cobra.Command, app *appctx.App, projectID int64, scope followUpScope, fallback any, summary string, crumbs ...output.Breadcrumb) error {
+	crumbs = append([]output.Breadcrumb{{
+		Action:      "show",
+		Cmd:         fmt.Sprintf("basecamp projects show %d", projectID),
+		Description: "View the project",
+	}}, crumbs...)
+	scopeArgs := scope.args(app.Config.AccountID)
+	for i := range crumbs {
+		crumbs[i].Cmd += scopeArgs
+	}
 	opts := []output.ResponseOption{
 		output.WithEntity("project"),
 		output.WithSummary(summary),
-		output.WithBreadcrumbs(append([]output.Breadcrumb{{
-			Action:      "show",
-			Cmd:         fmt.Sprintf("basecamp projects show %d", projectID),
-			Description: "View the project",
-		}}, crumbs...)...),
+		output.WithBreadcrumbs(crumbs...),
 	}
 	data := fallback
 	project, err := app.Account().Projects().Get(cmd.Context(), projectID)
