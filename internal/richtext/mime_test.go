@@ -16,6 +16,8 @@ func TestDetectMIME(t *testing.T) {
 		{"data.json", "application/json"},
 		{"README.md", "text/markdown"},
 		{"photo.jpeg", "image/jpeg"},
+		{"photo.HEIC", "image/heic"},
+		{"photo.heif", "image/heif"},
 		{"archive.zip", "application/zip"},
 		{"style.css", "application/octet-stream"}, // not in our map, file doesn't exist
 		{"doc.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},

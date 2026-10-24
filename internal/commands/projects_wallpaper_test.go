@@ -21,7 +21,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
-const wallpaperURL = "https://3.basecamp.com/99999/projects/123/wallpaper?v=1"
+const wallpaperURL = "https://3.basecampapi.com/99999/projects/123/wallpaper?v=1"
 
 // wallpaperServer plays bc3's side of the wallpaper endpoints for project 123:
 // it records each request and keeps the wallpaper the requests leave behind,
@@ -216,6 +216,27 @@ func TestProjectsWallpaperSetAcceptsExactlyTheSizeCap(t *testing.T) {
 	assert.Equal(t, "image/jpeg", s.request(http.MethodPut, "/99999/projects/123/wallpaper.json").upload.contentType)
 }
 
+func TestProjectsWallpaperSetAcceptsServerImageFormats(t *testing.T) {
+	for _, tc := range []struct{ filename, contentType string }{
+		{"image.png", "image/png"},
+		{"image.jpg", "image/jpeg"},
+		{"image.gif", "image/gif"},
+		{"image.webp", "image/webp"},
+		{"image.avif", "image/avif"},
+		{"image.heif", "image/heif"},
+		{"image.HEIC", "image/heic"},
+	} {
+		t.Run(tc.filename, func(t *testing.T) {
+			s, app, _ := newWallpaperServer(t)
+			app.Flags.Project = "123"
+			path := writeWallpaperFile(t, tc.filename, 0)
+
+			require.NoError(t, executeCommand(NewProjectsCmd(), app, "wallpaper", "set", path))
+			assert.Equal(t, tc.contentType, s.request(http.MethodPut, "/99999/projects/123/wallpaper.json").upload.contentType)
+		})
+	}
+}
+
 func TestProjectsWallpaperSetRefusesBeforeAnyRequest(t *testing.T) {
 	cases := []struct {
 		name, file string
@@ -224,8 +245,8 @@ func TestProjectsWallpaperSetRefusesBeforeAnyRequest(t *testing.T) {
 		message    string
 	}{
 		{"over the size cap", "big.png", maxWallpaperMB<<20 + 1, nil, "big.png exceeds maximum wallpaper size of 10 MB"},
-		{"a GIF", "anim.gif", 0, nil, "anim.gif: unsupported image type image/gif (use PNG, JPEG, WebP, or AVIF)"},
-		{"a HEIC", "photo.heic", 0, nil, "photo.heic: unsupported image type image/heic (use PNG, JPEG, WebP, or AVIF)"},
+		{"an SVG", "image.svg", 0, nil, "image.svg: unsupported image type image/svg+xml (use PNG, JPEG, GIF, WebP, AVIF, HEIF, or HEIC)"},
+		{"plain text", "notes.txt", 0, nil, "notes.txt: unsupported image type text/plain (use PNG, JPEG, GIF, WebP, AVIF, HEIF, or HEIC)"},
 		{"an unknown mode", "skyline.png", 0, []string{"--mode", "stretch"}, `unknown wallpaper mode "stretch"`},
 	}
 	for _, tc := range cases {
@@ -258,7 +279,7 @@ func TestProjectsWallpaperSetRefusesAMissingFileBeforeAnyRequest(t *testing.T) {
 
 func TestProjectsWallpaperSetCarriesTheServersRefusal(t *testing.T) {
 	s, app, _ := newWallpaperServer(t)
-	s.refuse = "Wallpaper must be a PNG, JPEG, WebP, or AVIF image"
+	s.refuse = "Wallpaper is not an allowed image type"
 	app.Flags.Project = "123"
 	path := writeWallpaperFile(t, "disguised.png", 0)
 

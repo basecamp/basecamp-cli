@@ -61,6 +61,7 @@ EXCLUDED_OPERATIONS = {
     "CreateAttachment",
     "CreateCampfireUpload",
     "UpdateAccountLogo",
+    "UpdateProjectWallpaper",
 }
 
 # Excluded by policy rather than by body shape, so these are not held to the

@@ -244,14 +244,15 @@ basecamp projects wallpaper mode fill --in "<project>" --json
 basecamp projects wallpaper remove --in "<project>" --json
 ```
 
-- Basecamp applies the web's rules: only someone who can edit the project may
-  change it, and an agent profile is always refused (403). Say so rather than
-  retrying or reaching for `basecamp api`.
-- The CLI refuses a file of the wrong type or size before uploading; leaf help
-  names the limits. `--mode` is `fill` or `tile`, and leaving it out keeps the
-  current mode.
+- People and personal assistants follow project-edit permissions. Shared
+  agents are refused (403); do not retry or route around that refusal.
+- The CLI checks the file's size and MIME hint before uploading; leaf help
+  names the limits. Server image validations still apply. `--mode` is `fill`
+  or `tile`, and leaving it out keeps the current mode.
 - Each command returns the project. `.data.wallpaper` is `{url, mode}`, and is
   absent when the project has none; `projects show` carries the same field.
+  The URL requires authentication and redirects to the image; it is not a
+  public image link.
 
 ## Content and stdin
 
