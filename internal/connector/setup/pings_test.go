@@ -120,3 +120,97 @@ func TestVerifyPings(t *testing.T) {
 	assert.Equal(t, StatusFail, verify(gone, guest, false).Status, "a Ping the agent is not in")
 	assert.Equal(t, StatusWarn, verify(gone, guest, true).Status, "one already recorded is a warning")
 }
+
+func TestApplyAgentsInPings(t *testing.T) {
+	base := validFile(t)
+
+	out, err := Apply(base, Changes{AllowAgentInPing: []PingPerson{{groupPing, peerAgent}, {groupPing, peerAgent}}})
+	require.NoError(t, err)
+	assert.Equal(t, map[int64]admission.PingTrust{groupPing: {Agents: []int64{peerAgent}}}, out.Pings)
+	assert.Empty(t, out.Trust.AgentIDs, "letting an agent into a Ping allows it nowhere else")
+	assert.Nil(t, base.Pings, "the file passed in is not changed")
+
+	both, err := Apply(out, Changes{AllowInPing: []PingPerson{{groupPing, guest}}})
+	require.NoError(t, err)
+	assert.Equal(t, admission.PingTrust{Participants: []int64{guest}, Agents: []int64{peerAgent}}, both.Pings[groupPing], "people and agents share the entry")
+
+	people, err := Apply(both, Changes{DisallowAgentInPing: []PingPerson{{groupPing, peerAgent}}})
+	require.NoError(t, err)
+	assert.Equal(t, admission.PingTrust{Participants: []int64{guest}}, people.Pings[groupPing])
+	assert.Equal(t, []int64{peerAgent}, both.Pings[groupPing].Agents, "the file passed in is not changed")
+
+	none, err := Apply(out, Changes{DisallowAgentInPing: []PingPerson{{groupPing, peerAgent}}})
+	require.NoError(t, err)
+	assert.Nil(t, none.Pings, "a Ping no agent and nobody is let into is no entry")
+
+	_, err = Apply(base, Changes{AllowAgentInPing: []PingPerson{{groupPing, peerAgent}}, DisallowAgentInPing: []PingPerson{{groupPing, peerAgent}}})
+	require.ErrorContains(t, err, "both")
+	_, err = Apply(base, Changes{AllowAgentInPing: []PingPerson{{0, peerAgent}}})
+	require.ErrorContains(t, err, "<ping-id>:<agent-id>")
+	_, err = Apply(base, Changes{AllowAgentInPing: []PingPerson{{groupPing, 0}}})
+	require.Error(t, err)
+}
+
+func TestAgentsInPingsRoundTripThroughConnectJSON(t *testing.T) {
+	path, err := Path(configDir(t), "agent")
+	require.NoError(t, err)
+	f := validFile(t)
+	f.Pings = map[int64]admission.PingTrust{groupPing: {Agents: []int64{peerAgent}}}
+	require.NoError(t, save(path, f))
+
+	loaded, err := Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, f, loaded)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"agents": [`)
+	p, err := admission.ParsePolicy(data)
+	require.NoError(t, err)
+	assert.Equal(t, f.Pings, p.Pings, "admission reads what setup wrote")
+}
+
+func TestAPingsAgentEntryRefusesTheAgentItselfAndTheOperator(t *testing.T) {
+	for _, id := range []int64{agentID, operatorID} {
+		f := validFile(t)
+		f.Pings = map[int64]admission.PingTrust{groupPing: {Agents: []int64{id}}}
+		require.Error(t, f.Validate(), "person %d", id)
+	}
+}
+
+func TestVerifyPingsAgents(t *testing.T) {
+	ctx := context.Background()
+	r := &fakeReader{pings: map[int64]Ping{groupPing: {ID: groupPing, People: []Person{
+		{ID: operatorID, Name: "Operator"},
+		{ID: guest, Name: "Jorge"},
+		{ID: peerAgent, Name: "Goose", PersonableType: PersonableAgent},
+	}}}}
+	verify := func(r Reader, id int64, recorded bool) Check {
+		t.Helper()
+		pings := map[int64]admission.PingTrust{groupPing: {Agents: []int64{id}}}
+		var rec map[int64]admission.PingTrust
+		if recorded {
+			rec = pings
+		}
+		checks := VerifyPings(ctx, r, pings, rec, agentID)
+		require.Len(t, checks, 1)
+		return checks[0]
+	}
+
+	pass := verify(r, peerAgent, false)
+	assert.Equal(t, StatusPass, pass.Status, pass.Message)
+	assert.Contains(t, pass.Message, "Goose")
+	assert.Equal(t, "Ping 2085958513, agent 53309518", pass.Name)
+
+	person := verify(r, guest, false)
+	assert.Equal(t, StatusFail, person.Status, "a person is let in with --allow-in-ping")
+	assert.Contains(t, person.Message, "--allow-in-ping")
+	assert.Equal(t, StatusFail, verify(r, guest, true).Status, "recorded or not")
+	assert.Equal(t, StatusFail, verify(r, agentID, false).Status, "the agent itself")
+	assert.Equal(t, StatusFail, verify(r, 53309999, false).Status, "an agent not in the Ping")
+	assert.Equal(t, StatusWarn, verify(r, 53309999, true).Status, "one recorded that has since left is a warning")
+
+	gone := &fakeReader{pingErr: status(http.StatusForbidden)}
+	assert.Equal(t, StatusFail, verify(gone, peerAgent, false).Status, "a Ping this agent is not in")
+	assert.Equal(t, StatusWarn, verify(gone, peerAgent, true).Status, "one already recorded is a warning")
+}

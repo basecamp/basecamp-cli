@@ -792,12 +792,12 @@ func connectRunningAttrs(profile, account string, agentID int64, shadow bool, se
 }
 
 // connectActorTypes is the feed's actor filter. People only, as always,
-// unless connect.json allows other agents to mention this one: then agents'
-// events are asked for too, and admission's gate discards every one but an
-// allowed agent's mention. A change of filter re-enters the feed under a new
+// unless connect.json allows other agents to mention this one, anywhere or in
+// one Ping: then agents' events are asked for too, and admission's gate
+// discards every one but an allowed agent's mention. A change of filter re-enters the feed under a new
 // lineage, resuming after the last event served, so nothing is replayed.
 func connectActorTypes(policy admission.Policy) []string {
-	if len(policy.Trust.AgentIDs) > 0 {
+	if len(policy.AllowedAgents()) > 0 {
 		return []string{"agent", "person"}
 	}
 	return []string{"person"}
