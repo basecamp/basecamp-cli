@@ -755,6 +755,25 @@ func (in *Intake) observer(ctx context.Context) eventfeed.Observer {
 		BufferOverflow: func(dropped int) {
 			in.log.Warn("live buffer overflowed", "dropped", dropped)
 		},
+		// In-band renewal. A server that bounds the stream by its token's
+		// expiry advertises the deadline in the welcome, and the package
+		// renews the socket before it. Nothing here decides anything: a
+		// renewal that gives up leaves the socket to the server's lease, and
+		// the reconnect after that `remote` close is the ordinary one. The
+		// lines are what tell that close apart from an unexplained one.
+		StreamDeadline: func(expiresAt time.Time) {
+			in.log.Info("feed stream deadline advertised; renewing in band before it", "expires_at", expiresAt.UTC())
+		},
+		Renewed: func(expiresAt time.Time) {
+			in.log.Info("feed stream renewed in band", "expires_at", expiresAt.UTC())
+		},
+		RenewFailed: func(kind eventfeed.RenewFailure, retrying bool) {
+			msg := "feed stream renewal failed; retrying"
+			if !retrying {
+				msg = "feed stream renewal gave up; the server closes the socket at its deadline, and the connector reconnects and catches up"
+			}
+			in.log.Warn(msg, "kind", kind.String())
+		},
 	}
 }
 
