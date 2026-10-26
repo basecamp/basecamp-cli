@@ -1960,6 +1960,7 @@ func TestRefresh_InvalidGrantForgetsTheCredential(t *testing.T) {
 	assert.True(t, strings.HasPrefix(cliErr.Message, "Your session has expired or was revoked (The refresh token was revoked"), cliErr.Message)
 	assert.NotContains(t, cliErr.Message, "\x1b", "the server's description is sanitized for the terminal")
 	assert.Equal(t, "Run: basecamp auth login -P work", cliErr.Hint)
+	assert.ErrorIs(t, err, ErrLoginRefused, "a connector tells this refusal from every other failure by its cause")
 
 	_, loadErr := m.store.Load(key)
 	assert.Error(t, loadErr, "the dead credential must be forgotten")
@@ -1994,6 +1995,7 @@ func TestRefresh_InvalidRequestKeepsTheCredential(t *testing.T) {
 	require.ErrorAs(t, err, &cliErr)
 	assert.Equal(t, output.CodeAPI, cliErr.Code)
 	assert.True(t, strings.HasPrefix(cliErr.Message, "token refresh failed: "), cliErr.Message)
+	assert.NotErrorIs(t, err, ErrLoginRefused)
 
 	creds, loadErr := m.store.Load(key)
 	require.NoError(t, loadErr)
@@ -2011,8 +2013,38 @@ func TestAccessToken_InvalidGrantHintsTheProfile(t *testing.T) {
 	require.ErrorAs(t, err, &cliErr)
 	assert.Equal(t, output.CodeAuth, cliErr.Code)
 	assert.Equal(t, "Run: basecamp auth login -P work", cliErr.Hint)
+	assert.ErrorIs(t, err, ErrLoginRefused)
 	_, loadErr := m.store.Load(key)
 	assert.Error(t, loadErr)
+}
+
+// TestRefresh_ARefusalThatCanPassIsNotTheLoginRefused: a rate limit or a
+// server fault at the token endpoint says nothing about the login, so it
+// never carries the cause that says Basecamp refused it.
+func TestRefresh_ARefusalThatCanPassIsNotTheLoginRefused(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		m, key := refreshRefusedBy(t, status, `{"error":"temporarily_unavailable"}`)
+
+		err := m.Refresh(context.Background())
+		require.Error(t, err, status)
+		assert.NotErrorIs(t, err, ErrLoginRefused, status)
+		_, loadErr := m.store.Load(key)
+		assert.NoError(t, loadErr, status)
+	}
+}
+
+func TestInvalidGrantOnAServerFaultDoesNotForgetTheLogin(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusServiceUnavailable} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			m, key := refreshRefusedBy(t, status, `{"error":"invalid_grant"}`)
+			err := m.Refresh(t.Context())
+			require.Error(t, err)
+			assert.NotErrorIs(t, err, ErrLoginRefused)
+			creds, loadErr := m.store.Load(key)
+			require.NoError(t, loadErr, "a server fault is not proof that the refresh token is dead")
+			assert.Equal(t, "old-ref", creds.RefreshToken)
+		})
+	}
 }
 
 // TestRefresh_PreservesIdentityAndBinding: a rotation replaces the tokens
@@ -2117,6 +2149,7 @@ func TestRefresh_InvalidGrantOnLaunchpadKeepsTheCredential(t *testing.T) {
 	require.ErrorAs(t, err, &cliErr)
 	assert.Equal(t, output.CodeAuth, cliErr.Code)
 	assert.Contains(t, cliErr.Message, "BASECAMP_OAUTH_CLIENT_ID/SECRET name a different OAuth client", "the message names the client mismatch the refusal may mean")
+	assert.NotErrorIs(t, err, ErrLoginRefused, "a client mismatch must not stop the connector as a revoked login")
 	assert.Equal(t, "Run: basecamp auth login", cliErr.Hint)
 
 	creds, loadErr := m.store.Load(key)

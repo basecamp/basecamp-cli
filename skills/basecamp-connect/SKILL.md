@@ -643,6 +643,10 @@ output and tell the person what it means:
 - **"was disconnected in Basecamp, or replaced by a newer connection"**: run
   `basecamp connect setup -P '<profile>'` (it reconnects with one approval),
   then start it again.
+- **"is no longer signed in: Basecamp refused its login"** (a bot user): the
+  person signs the bot in again with the command in the hint,
+  `basecamp auth login -P '<profile>' --expect-identity <bot-identity-id>`,
+  then you start it again.
 - **Already running**: another connector holds the profile's lock in this
   state directory. Don't start a second. An older build holding legacy state
   must be stopped and its existing profile restarted on this build first.
