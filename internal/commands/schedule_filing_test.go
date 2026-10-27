@@ -95,3 +95,71 @@ func TestScheduleMoveOfARecurringEventOntoItsOwnScheduleIsRefused(t *testing.T) 
 	assert.Contains(t, e.Message, "is already in schedule 555")
 	assert.Empty(t, transport.posts)
 }
+
+// A recurring event in an employee calendar (bucket 777, a Calendar, not a
+// project) is read as an occurrence; its schedule, 770, is the one the
+// calendar links to.
+func calendarTransport() *familyTransport {
+	transport := scheduleFilingTransport()
+	transport.gets["/calendars/777"] = `{"id":777,"type":"Calendar","name":"Jason's calendar","schedule_url":"https://3.basecampapi.com/99999/buckets/777/schedules/770.json"}`
+	transport.gets["/schedules/770"] = `{"id":770,"title":"Jason's calendar","bucket":{"id":777,"name":"Jason's calendar","type":"Calendar"}}`
+	transport.gets["/schedule_entries/458"] = `{"id":7003,"type":"Schedule::Entry::Occurrence","summary":"1:1","bucket":{"id":777,"name":"Jason's calendar","type":"Calendar"},"parent":{"id":458,"title":"1:1","type":"Schedule::Entry"}}`
+	transport.gets["/schedule_entries/4580"] = `{"id":7004,"type":"Schedule::Entry::Occurrence","summary":"1:1","bucket":{"id":999,"name":"Dest","type":"Project"},"parent":{"id":4580,"title":"1:1","type":"Schedule::Entry"}}`
+	transport.gets["/schedule_entries/4570"] = `{"id":7002,"type":"Schedule::Entry::Occurrence","summary":"Standup","bucket":{"id":777,"name":"Jason's calendar","type":"Calendar"},"parent":{"id":4570,"title":"Standup","type":"Schedule::Entry"}}`
+	transport.gets["/schedule_entries/457"] = `{"id":7001,"type":"Schedule::Entry::Occurrence","summary":"Standup","bucket":{"id":123,"name":"Source","type":"Project"},"parent":{"id":457,"title":"Standup","type":"Schedule::Entry"}}`
+	return transport
+}
+
+func TestScheduleFilesARecurringCalendarEventFromItsCalendarsSchedule(t *testing.T) {
+	transport := calendarTransport()
+	run := runFamilyCommand(t, transport, NewScheduleCmd(), "copy", "458")
+	require.NoError(t, run.err)
+	assert.Equal(t, float64(770), transport.bodies[0]["filing_destination_id"], "a copy with no destination goes onto the calendar it is on")
+
+	transport = calendarTransport()
+	run = runFamilyCommand(t, transport, NewScheduleCmd(), "move", "458", "--to-project", "Dest")
+	require.NoError(t, run.err)
+	assert.Equal(t, "Moved schedule entry #458 to Dest › Calendar as schedule entry #4580", run.envelope.Summary)
+
+	transport = calendarTransport()
+	e := runFamilyCommand(t, transport, NewScheduleCmd(), "move", "458", "--to-schedule", "770").failure(t)
+	assert.Contains(t, e.Message, "is already in schedule 770")
+	assert.Empty(t, transport.posts)
+}
+
+func TestScheduleFilesARecurringEventIntoACalendarAndReadsItBack(t *testing.T) {
+	transport := calendarTransport()
+	run := runFamilyCommand(t, transport, NewScheduleCmd(), "move", "457", "--to-schedule", "770")
+	require.NoError(t, run.err, "the event lands in the calendar and is read back there")
+	assert.Equal(t, float64(770), transport.bodies[0]["filing_destination_id"])
+	assert.Equal(t, "Moved schedule entry #457 to Jason's calendar › Jason's calendar as schedule entry #4570", run.envelope.Summary)
+}
+
+func TestScheduleFindsARecurringEventsScheduleAmongSeveral(t *testing.T) {
+	twoSchedules := func() *familyTransport {
+		transport := calendarTransport()
+		transport.gets["/projects/123"] = `{"id":123,"name":"Source","dock":[{"name":"schedule","id":555,"title":"Schedule","enabled":true},{"name":"schedule","id":556,"title":"Launches","enabled":true}]}`
+		transport.gets["/schedules/555/entries"] = `[{"id":456,"type":"Schedule::Entry","summary":"Launch"}]`
+		transport.gets["/schedules/556/entries"] = `[{"id":457,"type":"Schedule::Entry","summary":"Standup"}]`
+		transport.gets["/schedules/556"] = `{"id":556,"title":"Launches","bucket":{"id":123,"name":"Source"}}`
+		return transport
+	}
+	transport := twoSchedules()
+	run := runFamilyCommand(t, transport, NewScheduleCmd(), "copy", "457")
+	require.NoError(t, run.err)
+	assert.Equal(t, float64(556), transport.bodies[0]["filing_destination_id"], "the copy goes onto the schedule listing the event")
+
+	transport = twoSchedules()
+	e := runFamilyCommand(t, transport, NewScheduleCmd(), "move", "457", "--to-schedule", "556").failure(t)
+	assert.Contains(t, e.Message, "is already in schedule 556")
+	assert.Empty(t, transport.posts)
+}
+
+func TestScheduleCopyIntoACalendarIsLookedForInItsEntries(t *testing.T) {
+	transport := calendarTransport()
+	transport.stuck = map[int64]bool{456: true}
+	e := runFamilyCommand(t, transport, NewScheduleCmd(), "copy", "456", "--to-schedule", "770").failure(t)
+	assert.Equal(t, output.CodeInProgress, e.Code)
+	assert.Contains(t, e.Hint, "basecamp schedule entries --in 777 --schedule 770 --status active --all",
+		"the recordings listing does not serve a calendar")
+}

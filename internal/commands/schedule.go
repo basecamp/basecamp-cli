@@ -1,8 +1,11 @@
 package commands
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -948,7 +951,7 @@ web's Move… does. A recurring event moves as a whole, every occurrence with it
 --to-project alone needs a project with one schedule; add --to-schedule when it
 has several, or pass a schedule's ID or URL alone. The command waits for
 Basecamp to finish the move and shows the event where it landed, under a new ID.`,
-	notes: "--to-project <project> (ID or name) moves the event to that project's schedule; --to-schedule <id|url> names a schedule directly. " +
+	notes: "--to-project <project> (ID or name) moves the event to that project's schedule; --to-schedule <id|url> names a schedule directly, which is how to name an employee calendar's schedule (a calendar is not a project). " +
 		"A recurring event moves as a whole; an occurrence URL moves the whole series. " +
 		"Output is the moved event: data.id is its NEW id and data.source_id the old one. Write to the new id; the old id stops taking changes, and reading it follows the move. " +
 		"--schedule names the event's own schedule and is refused; moving onto the schedule it is already on is refused. " +
@@ -968,7 +971,7 @@ With no destination, the copy goes onto the event's own schedule:
 
 Basecamp makes the copy in the background; the command waits for it and shows
 the new event.`,
-	notes: "Without --to-project/--to-schedule the copy goes onto the event's own schedule. " +
+	notes: "Without --to-project/--to-schedule the copy goes onto the event's own schedule; --to-schedule <id|url> also names an employee calendar's schedule. " +
 		"Output is the new event; its id is data.id and the original's is data.source_id. --include-comments copies the comments too. " +
 		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy.",
 }
@@ -1000,6 +1003,10 @@ func scheduleEntryFamily() filingFamily {
 		get:      getScheduleEntryForFiling,
 		landing:  "The copy lands on that schedule",
 		lookFor: func(src filingSource, t filingTarget) string {
+			if t.calendar {
+				// The recordings listing serves projects, not calendars.
+				return fmt.Sprintf("basecamp schedule entries --in %d --schedule %d --status %s --all", t.projectID, t.id, cmp.Or(src.status, "active"))
+			}
 			return recordingCopyLookFor("Schedule::Entry", t.projectID, src.status)
 		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
@@ -1019,7 +1026,7 @@ const occurrenceType = "Schedule::Entry::Occurrence"
 // getScheduleEntryForFiling reads an event to move or copy. A recurring
 // event's read answers with one occurrence, so the event is its parent and
 // files as a whole series; the output names the event, with the occurrence
-// read as occurrence_id, and the schedule it is on is its project's.
+// read as occurrence_id, and seriesSchedule finds the schedule it is on.
 func getScheduleEntryForFiling(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
 	e, err := app.Account().Schedules().GetEntry(ctx, id)
 	if err != nil {
@@ -1032,12 +1039,8 @@ func getScheduleEntryForFiling(ctx context.Context, app *appctx.App, id int64) (
 
 	src.id, src.typ, src.parent = e.Parent.ID, "Schedule::Entry", nil
 	if e.Bucket != nil {
-		schedules, _, err := getDockTools(ctx, app, strconv.FormatInt(e.Bucket.ID, 10), "schedule")
-		if err != nil {
+		if src.parent, err = seriesSchedule(ctx, app, e.Bucket, src.id); err != nil {
 			return nil, filingSource{}, err
-		}
-		if len(schedules) == 1 {
-			src.parent = &basecamp.Parent{ID: schedules[0].ID, Title: schedules[0].Title, Type: "Schedule"}
 		}
 	}
 	record, ok := withSourceID(e, 0).(map[string]any)
@@ -1050,4 +1053,49 @@ func getScheduleEntryForFiling(ctx context.Context, app *appctx.App, id int64) (
 	record["type"] = src.typ
 	record["parent"] = src.parent
 	return record, src, nil
+}
+
+// seriesSchedule finds the schedule a recurring event is on, which its
+// occurrence's read does not name. A calendar, such as an employee's, has one
+// schedule, which the calendar's read links to; a project's schedules are on
+// its dock, and of several, the one whose entries list the event is it. It
+// returns nil when none does.
+func seriesSchedule(ctx context.Context, app *appctx.App, bucket *basecamp.Bucket, eventID int64) (*basecamp.Parent, error) {
+	scheduleOf := func(id int64) (*basecamp.Parent, error) {
+		schedule, err := app.Account().Schedules().Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		return &basecamp.Parent{ID: schedule.ID, Title: schedule.Title, Type: "Schedule"}, nil
+	}
+
+	if bucket.Type == "Calendar" {
+		calendar, err := app.Account().Calendars().Get(ctx, bucket.ID)
+		if err != nil {
+			return nil, err
+		}
+		id, err := strconv.ParseInt(strings.TrimSuffix(path.Base(calendar.ScheduleURL), ".json"), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("calendar %d links to no schedule (%q)", bucket.ID, calendar.ScheduleURL)
+		}
+		return scheduleOf(id)
+	}
+
+	_, schedules, err := getDockTools(ctx, app, strconv.FormatInt(bucket.ID, 10), "schedule")
+	if err != nil {
+		return nil, err
+	}
+	if len(schedules) == 1 {
+		return &basecamp.Parent{ID: schedules[0].ID, Title: schedules[0].Title, Type: "Schedule"}, nil
+	}
+	for _, schedule := range schedules {
+		entries, err := app.Account().Schedules().ListEntries(ctx, schedule.ID, nil)
+		if err != nil {
+			return nil, err
+		}
+		if slices.ContainsFunc(entries.Entries, func(e basecamp.ScheduleEntry) bool { return e.ID == eventID }) {
+			return &basecamp.Parent{ID: schedule.ID, Title: schedule.Title, Type: "Schedule"}, nil
+		}
+	}
+	return nil, nil
 }

@@ -48,6 +48,9 @@ type filingTarget struct {
 	title       string
 	projectID   int64
 	projectName string
+	// calendar is set when the container is in a calendar, such as an
+	// employee's, rather than a project.
+	calendar bool
 	// parentID is a folder inside a Docs & Files destination, or 0 for its
 	// top level.
 	parentID    int64
@@ -160,6 +163,7 @@ func bucketTarget(id int64, title string, bucket *basecamp.Bucket) filingTarget 
 	target := filingTarget{id: id, title: title}
 	if bucket != nil {
 		target.projectID, target.projectName = bucket.ID, bucket.Name
+		target.calendar = bucket.Type == "Calendar"
 	}
 	return target
 }
