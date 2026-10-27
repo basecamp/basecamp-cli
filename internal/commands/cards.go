@@ -43,6 +43,7 @@ func NewCardsCmd() *cobra.Command {
 		newCardsCreateCmd(&project, &cardTable),
 		newCardsUpdateCmd(),
 		newCardsMoveCmd(&project, &cardTable),
+		newCardsCopyCmd(&cardTable),
 		newCardsDoneCmd(&project, &cardTable),
 		newCardsColumnsCmd(&project, &cardTable),
 		newCardsColumnCmd(&project, &cardTable),
@@ -1782,6 +1783,88 @@ func parseColumnID(ref string) (int64, error) {
 		return invalid()
 	}
 	return id, nil
+}
+
+func newCardsCopyCmd(cardTable *string) *cobra.Command {
+	var toProject, toCardTable string
+	var includeComments bool
+
+	cmd := &cobra.Command{
+		Use:   "copy <id|url>",
+		Short: "Copy a card to a card table in this or another project",
+		Long: `Copy a card into a card table, as the web's Copy… does. The original stays
+where it is. The copy lands in the card table's Triage, or in Done if the card
+is completed.
+
+With no destination, the copy goes onto the card's own card table:
+  basecamp cards copy 789
+  basecamp cards copy 789 --to-project "Marketing"
+  basecamp cards copy 789 --to-project "Marketing" --to-card-table "Roadmap"
+  basecamp cards copy 789 --to-card-table 1069479999 --include-comments
+
+Basecamp makes the copy in the background; the command waits for it and shows
+the new card.`,
+		Args: cobra.ExactArgs(1),
+		Annotations: map[string]string{
+			"agent_notes": "Without --to-project/--to-card-table the copy goes onto the card's own card table. " +
+				"--to-project alone uses that project's only card table and fails as ambiguous when it has several; add --to-card-table. " +
+				"The copy lands in Triage, or Done if the card is completed; move it on with cards move --to. " +
+				"Output is the new card; its id is data.id and the original's is data.source_id. " +
+				"Never re-run a copy that reported in_progress: each run makes another copy.",
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			filingSet := cmd.Flags().Changed("to-project") || cmd.Flags().Changed("to-card-table")
+			if filingSet || *cardTable != "" {
+				if err := validateFilingFlags(*cardTable, toProject, toCardTable); err != nil {
+					return err
+				}
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+
+			cardIDStr, err := extractID(args[0])
+			if err != nil {
+				return err
+			}
+			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
+			if err != nil {
+				return output.ErrUsage("Invalid card ID")
+			}
+
+			card, err := app.Account().Cards().Get(cmd.Context(), cardID)
+			if err != nil {
+				return convertSDKError(err)
+			}
+
+			var table *basecamp.CardTable
+			if filingSet {
+				table, err = resolveFilingTable(cmd, app, toProject, toCardTable)
+			} else {
+				if card.Bucket == nil {
+					return output.ErrNotFound("card", cardIDStr)
+				}
+				_, table, err = resolveCardTableForCard(cmd, app, strconv.FormatInt(card.Bucket.ID, 10), "", card)
+			}
+			if err != nil {
+				return err
+			}
+
+			return runCardFiling(cmd, app, cardFiling{
+				kind:            basecamp.FilingCopy,
+				card:            card,
+				table:           table,
+				includeComments: includeComments,
+			})
+		},
+	}
+
+	addFilingDestinationFlags(cmd, &toProject, &toCardTable, "Copy")
+	cmd.Flags().BoolVar(&includeComments, "include-comments", false, "Copy the card's comments too")
+
+	return cmd
 }
 
 // addFilingDestinationFlags adds --to-project and --to-card-table, which name

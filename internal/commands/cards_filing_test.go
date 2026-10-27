@@ -268,3 +268,47 @@ func TestCardsMoveStillRunningWhenTheWaitRunsOut(t *testing.T) {
 	assert.Len(t, transport.posts, 1, "the move is never sent twice")
 	assert.Greater(t, transport.filingGet, 1)
 }
+
+func TestCardsCopyDefaultsToItsOwnCardTable(t *testing.T) {
+	transport := &mockFilingTransport{statuses: []string{"completed"}}
+	run := runFilingCommand(t, transport, "copy", "456")
+	require.NoError(t, run.err)
+
+	assert.Equal(t, []string{"/99999/recordings/456/copies"}, transport.posts)
+	assert.Equal(t, float64(555), transport.body["filing_destination_id"])
+	assert.NotContains(t, transport.body, "include_comments")
+	assert.Equal(t, float64(4560), run.envelope.Data["id"])
+	assert.Equal(t, float64(456), run.envelope.Data["source_id"])
+	assert.True(t, strings.HasPrefix(run.envelope.Summary, "Copied card #456 to "), run.envelope.Summary)
+}
+
+func TestCardsCopyToProjectIncludingComments(t *testing.T) {
+	transport := &mockFilingTransport{statuses: []string{"completed"}}
+	run := runFilingCommand(t, transport, "copy", "456", "--to-project", "Dest", "--include-comments")
+	require.NoError(t, run.err)
+
+	assert.Equal(t, float64(900), transport.body["filing_destination_id"])
+	assert.Equal(t, true, transport.body["include_comments"])
+	assert.Equal(t, float64(4560), run.envelope.Data["id"])
+}
+
+func TestCardsCopyStillRunningSaysNotToCopyAgain(t *testing.T) {
+	transport := &mockFilingTransport{statuses: []string{"pending"}}
+	run := runFilingCommand(t, transport, "copy", "456", "--to-project", "Dest")
+	e := requireFilingError(t, run)
+
+	assert.Equal(t, output.CodeInProgress, e.Code)
+	assert.Contains(t, e.Hint, "Do not copy it again")
+	assert.Contains(t, e.Hint, "basecamp cards list --in 999 --card-table 900")
+	assert.Len(t, transport.posts, 1)
+}
+
+func TestCardsCopyRefusesTheSourceCardTableFlag(t *testing.T) {
+	transport := &mockFilingTransport{}
+	run := runFilingCommand(t, transport, "copy", "456", "--card-table", "555")
+	e := requireFilingError(t, run)
+
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Contains(t, e.Hint, "--to-card-table")
+	assert.Empty(t, transport.posts)
+}
