@@ -2130,17 +2130,7 @@ func runCardFiling(cmd *cobra.Command, app *appctx.App, f cardFiling) error {
 			Hint:    fmt.Sprintf("Check the card with: basecamp cards show %d", f.card.ID),
 		}
 	case filing.Status != basecamp.FilingCompleted || filing.DestinationRecording == nil:
-		hint := fmt.Sprintf("Once it lands, basecamp cards show %d returns the card at its new id", f.card.ID)
-		if f.kind == basecamp.FilingCopy {
-			hint = fmt.Sprintf("Do not copy it again, which makes another copy. The copy lands in that table's Triage, or Done if completed: basecamp cards list --in %d --card-table %d",
-				cardTableProjectID(f.table), f.table.ID)
-		}
-		return &output.Error{
-			Code:    output.CodeInProgress,
-			Message: fmt.Sprintf("Basecamp is still %s card #%d to card table %d (%s)", progressive, f.card.ID, f.table.ID, f.table.Title),
-			Hint:    hint,
-			Cause:   waitErr,
-		}
+		return stillFilingError(f, progressive, waitErr)
 	}
 
 	filed, err := app.Account().Cards().Get(cmd.Context(), filing.DestinationRecording.ID)
@@ -2149,10 +2139,37 @@ func runCardFiling(cmd *cobra.Command, app *appctx.App, f cardFiling) error {
 			Code:    output.CodeAPI,
 			Message: fmt.Sprintf("%s card #%d as card #%d, but could not read the new card", past, f.card.ID, filing.DestinationRecording.ID),
 			Hint:    fmt.Sprintf("Show it with: basecamp cards show %d", filing.DestinationRecording.ID),
-			Cause:   err,
+			Cause:   textCause(err),
 		}
 	}
 	return filedCardOK(app, filed, f.card.ID, past)
+}
+
+// stillFilingError reports a move or copy that Basecamp accepted but had not
+// finished when the wait ended.
+func stillFilingError(f cardFiling, progressive string, waitErr error) error {
+	hint := fmt.Sprintf("Once it lands, basecamp cards show %d returns the card at its new id", f.card.ID)
+	if f.kind == basecamp.FilingCopy {
+		hint = fmt.Sprintf("Do not copy it again, which makes another copy. The copy lands in that table's Triage, or Done if completed: basecamp cards list --in %d --card-table %d",
+			cardTableProjectID(f.table), f.table.ID)
+	}
+	return &output.Error{
+		Code:    output.CodeInProgress,
+		Message: fmt.Sprintf("Basecamp is still %s card #%d to card table %d (%s)", progressive, f.card.ID, f.table.ID, f.table.Title),
+		Hint:    hint,
+		Cause:   textCause(waitErr),
+	}
+}
+
+// textCause keeps a cause's message but not its type. output.AsError renders
+// a rate-limit gate error found anywhere in the chain in place of the error
+// wrapping it, which would turn an accepted filing's "do not retry" into a
+// retryable rate limit.
+func textCause(err error) error {
+	if err == nil {
+		return nil
+	}
+	return errors.New(err.Error())
 }
 
 // filedCardResult is a card that a move, copy or teleport made, with the id of

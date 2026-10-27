@@ -12,10 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/resilience"
 )
 
 func shortFilingWait(t *testing.T) {
@@ -260,6 +262,21 @@ func TestCardsCopyThatIsRateLimitedStaysRetryable(t *testing.T) {
 
 	assert.True(t, e.Retryable, "Basecamp refuses a rate-limited request before copying")
 	assert.NotContains(t, e.Hint, "may have started the copy")
+}
+
+func TestAcceptedCopyStaysNotRetryableWhenTheWaitHitsTheRateLimitGate(t *testing.T) {
+	f := cardFiling{
+		kind:  basecamp.FilingCopy,
+		card:  &basecamp.Card{ID: 456},
+		table: &basecamp.CardTable{ID: 900, Title: "Ideas", Bucket: &basecamp.Bucket{ID: 999}},
+	}
+	gate := &resilience.GateError{Message: "rate limited by a recent 429", Hint: "Re-run in 30s"}
+
+	e := output.AsError(stillFilingError(f, "copying", gate))
+
+	assert.Equal(t, output.CodeInProgress, e.Code)
+	assert.False(t, e.Retryable, "the copy was accepted, so re-running makes a second one")
+	assert.Contains(t, e.Hint, "Do not copy it again")
 }
 
 func TestCardsMoveToExplicitCardTable(t *testing.T) {
