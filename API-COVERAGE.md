@@ -6,12 +6,16 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 56 | 216 |
+| ✅ Implemented | 57 | 218 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **60** | **228** |
+| **Total tracked** | **61** | **230** |
 
-**216 of 216 tracked in-scope endpoints.** Moving and copying a recording
+**218 of 218 tracked in-scope endpoints.** Uploading and removing a project's
+logo (`PUT`/`DELETE /projects/:id/logo.json`, added by
+[bc3#14174](https://github.com/basecamp/bc3/pull/14174) and shipped in
+[SDK v0.30.0](https://github.com/basecamp/basecamp-sdk/releases/tag/v0.30.0))
+land as `projects logo`. Moving and copying a recording
 into another project (`POST /recordings/:id/moves.json`,
 `POST /recordings/:id/copies.json`) and reading the background filing they
 start (`GET /filings/:id.json`), modelled by
@@ -210,6 +214,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 |---------|-----------|-------------|--------|-------|----------|-------|
 | **Core** |
 | projects | 9 | `projects` | ✅ | BC4 | - | list, show, create, update, delete |
+| projects (logo) | 2 | `projects logo` | ✅ | BC5 | - | set (`PUT /projects/:id/logo.json`, multipart `logo`), remove (`DELETE` on the same route; 204 with or without a logo). PNG, JPEG, GIF, WebP, AVIF, HEIF or HEIC up to 5 MB, checked before the upload using a local MIME hint; the server applies its shared image validations. People and agents who can edit the project may change it; others get 403. Project JSON carries `logo {url}` when one is attached, so `projects show` shows it. `GET /projects/:id/logo.json` only redirects to the image `logo.url` already names, so the CLI does not wrap it. Project-scoped via `--in`/`--project` |
 | projects (wallpaper) | 2 | `projects wallpaper` | ✅ | BC5 | - | set (`PUT /projects/:id/wallpaper.json`, multipart `wallpaper` with an optional `mode`), remove (`DELETE` on the same route; 204 with or without a wallpaper). `mode` sends `wallpaper_mode` through the existing `PUT /projects/:id.json`, with the current name the SDK requires. PNG, JPEG, GIF, WebP, AVIF, HEIF or HEIC up to 10 MB, checked before the upload using a local MIME hint; the server applies its shared image validations. People and personal assistants follow project-edit permissions; shared agents are refused with 403. Project JSON carries `wallpaper {url, mode}` when one is attached, so `projects show` shows it. Project-scoped via `--in`/`--project` |
 | todos | 12 | `todos`, `todo`, `done`, `reopen` | ✅ | BC4 | - | list, show, create, update, complete, uncomplete, position (BC5: `steps` shown on `todos show`, plus `subtasks_count`/`subtasks_completed_count`/`subtasks_url`; edit via `subtasks`). `todos create --loose` creates on the to-do set, outside any list |
 | subtasks | 8 | `subtasks` | ✅ | BC5 | - | list (`GET /recordings/:id/subtasks.json`, paginated), show, create (`POST` on the same list route), update (partial; `--no-due`/`--no-assignees` clear), complete/uncomplete (`POST`/`DELETE /subtasks/:id/completion.json`), move (`PUT /subtasks/:id/position.json`, 1-based), delete. Account-scoped flat routes (bc3#12659), so no `--in`. Parents are to-dos and cards only. Same `Kanban::Step` records as `card_table_steps` |

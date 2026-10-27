@@ -1,0 +1,9 @@
+task: Use ./brand.png as the logo for project 55555
+tags: [domain, update]
+accept:
+  - 'projects? logo set .*brand\.png'
+  - '(--in|--project|-p) 55555'
+reject:
+  - 'projects? wallpaper'
+  - 'projects? update'
+  - 'basecamp api'
