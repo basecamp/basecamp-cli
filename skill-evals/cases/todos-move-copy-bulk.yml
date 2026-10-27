@@ -1,0 +1,7 @@
+task: Move to-dos 111, 222 and 333 into the Backlog list in the Ops project
+tags: [domain, move]
+accept:
+  - '^(?=.*\btodos (move|position) )(?=.*\b111\b)(?=.*\b222\b)(?=.*\b333\b)(?=.*--to-project[ =]["'']?Ops)(?=.*--to-list[ =]["'']?Backlog)'
+reject:
+  - '(^|\s)--list[ =]'
+  - 'basecamp api'

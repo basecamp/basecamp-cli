@@ -391,6 +391,7 @@ ARG basecamp templates update 00 <id>
 ARG basecamp timeline 00 [me]
 ARG basecamp timesheet item 00 <id>
 ARG basecamp timesheet recording 00 <id>
+ARG basecamp tlgroup copy 00 <id|url>
 ARG basecamp tlgroup create 00 <name>
 ARG basecamp tlgroup move 00 <id>
 ARG basecamp tlgroup position 00 <id>
@@ -399,6 +400,7 @@ ARG basecamp tlgroup rename 01 <name>
 ARG basecamp tlgroup show 00 <id>
 ARG basecamp tlgroup update 00 <id>
 ARG basecamp tlgroup update 01 <name>
+ARG basecamp tlgroups copy 00 <id|url>
 ARG basecamp tlgroups create 00 <name>
 ARG basecamp tlgroups move 00 <id>
 ARG basecamp tlgroups position 00 <id>
@@ -408,6 +410,7 @@ ARG basecamp tlgroups show 00 <id>
 ARG basecamp tlgroups update 00 <id>
 ARG basecamp tlgroups update 01 <name>
 ARG basecamp todolist archive 00 <id|url>
+ARG basecamp todolist copy 00 <id|url>
 ARG basecamp todolist create 00 <name>
 ARG basecamp todolist move 00 <id|url>...
 ARG basecamp todolist position 00 <id|url>...
@@ -416,6 +419,7 @@ ARG basecamp todolist restore 00 <id|url>
 ARG basecamp todolist show 00 <id|url>
 ARG basecamp todolist trash 00 <id|url>
 ARG basecamp todolist update 00 <id|url>
+ARG basecamp todolistgroup copy 00 <id|url>
 ARG basecamp todolistgroup create 00 <name>
 ARG basecamp todolistgroup move 00 <id>
 ARG basecamp todolistgroup position 00 <id>
@@ -424,6 +428,7 @@ ARG basecamp todolistgroup rename 01 <name>
 ARG basecamp todolistgroup show 00 <id>
 ARG basecamp todolistgroup update 00 <id>
 ARG basecamp todolistgroup update 01 <name>
+ARG basecamp todolistgroups copy 00 <id|url>
 ARG basecamp todolistgroups create 00 <name>
 ARG basecamp todolistgroups move 00 <id>
 ARG basecamp todolistgroups position 00 <id>
@@ -433,6 +438,7 @@ ARG basecamp todolistgroups show 00 <id>
 ARG basecamp todolistgroups update 00 <id>
 ARG basecamp todolistgroups update 01 <name>
 ARG basecamp todolists archive 00 <id|url>
+ARG basecamp todolists copy 00 <id|url>
 ARG basecamp todolists create 00 <name>
 ARG basecamp todolists move 00 <id|url>...
 ARG basecamp todolists position 00 <id|url>...
@@ -443,11 +449,12 @@ ARG basecamp todolists trash 00 <id|url>
 ARG basecamp todolists update 00 <id|url>
 ARG basecamp todos archive 00 <id|url>
 ARG basecamp todos complete 00 <id|url>...
+ARG basecamp todos copy 00 <id|url>...
 ARG basecamp todos create 00 <content>
-ARG basecamp todos move 00 <id|url>
-ARG basecamp todos position 00 <id|url>
+ARG basecamp todos move 00 <id|url>...
+ARG basecamp todos position 00 <id|url>...
 ARG basecamp todos reopen 00 <id|url>...
-ARG basecamp todos reorder 00 <id|url>
+ARG basecamp todos reorder 00 <id|url>...
 ARG basecamp todos restore 00 <id|url>
 ARG basecamp todos show 00 <id|url>
 ARG basecamp todos trash 00 <id|url>
@@ -1116,6 +1123,7 @@ CMD basecamp timesheet project
 CMD basecamp timesheet recording
 CMD basecamp timesheet report
 CMD basecamp tlgroup
+CMD basecamp tlgroup copy
 CMD basecamp tlgroup create
 CMD basecamp tlgroup list
 CMD basecamp tlgroup move
@@ -1124,6 +1132,7 @@ CMD basecamp tlgroup rename
 CMD basecamp tlgroup show
 CMD basecamp tlgroup update
 CMD basecamp tlgroups
+CMD basecamp tlgroups copy
 CMD basecamp tlgroups create
 CMD basecamp tlgroups list
 CMD basecamp tlgroups move
@@ -1133,6 +1142,7 @@ CMD basecamp tlgroups show
 CMD basecamp tlgroups update
 CMD basecamp todolist
 CMD basecamp todolist archive
+CMD basecamp todolist copy
 CMD basecamp todolist create
 CMD basecamp todolist list
 CMD basecamp todolist move
@@ -1143,6 +1153,7 @@ CMD basecamp todolist show
 CMD basecamp todolist trash
 CMD basecamp todolist update
 CMD basecamp todolistgroup
+CMD basecamp todolistgroup copy
 CMD basecamp todolistgroup create
 CMD basecamp todolistgroup list
 CMD basecamp todolistgroup move
@@ -1151,6 +1162,7 @@ CMD basecamp todolistgroup rename
 CMD basecamp todolistgroup show
 CMD basecamp todolistgroup update
 CMD basecamp todolistgroups
+CMD basecamp todolistgroups copy
 CMD basecamp todolistgroups create
 CMD basecamp todolistgroups list
 CMD basecamp todolistgroups move
@@ -1160,6 +1172,7 @@ CMD basecamp todolistgroups show
 CMD basecamp todolistgroups update
 CMD basecamp todolists
 CMD basecamp todolists archive
+CMD basecamp todolists copy
 CMD basecamp todolists create
 CMD basecamp todolists list
 CMD basecamp todolists move
@@ -1172,6 +1185,7 @@ CMD basecamp todolists update
 CMD basecamp todos
 CMD basecamp todos archive
 CMD basecamp todos complete
+CMD basecamp todos copy
 CMD basecamp todos create
 CMD basecamp todos list
 CMD basecamp todos move
@@ -15162,6 +15176,32 @@ FLAG basecamp tlgroup --stats type=bool
 FLAG basecamp tlgroup --styled type=bool
 FLAG basecamp tlgroup --todolist type=string
 FLAG basecamp tlgroup --verbose type=count
+FLAG basecamp tlgroup copy --account type=string
+FLAG basecamp tlgroup copy --agent type=bool
+FLAG basecamp tlgroup copy --cache-dir type=string
+FLAG basecamp tlgroup copy --count type=bool
+FLAG basecamp tlgroup copy --help type=bool
+FLAG basecamp tlgroup copy --hints type=bool
+FLAG basecamp tlgroup copy --ids-only type=bool
+FLAG basecamp tlgroup copy --in type=string
+FLAG basecamp tlgroup copy --include-comments type=bool
+FLAG basecamp tlgroup copy --jq type=string
+FLAG basecamp tlgroup copy --json type=bool
+FLAG basecamp tlgroup copy --list type=string
+FLAG basecamp tlgroup copy --markdown type=bool
+FLAG basecamp tlgroup copy --md type=bool
+FLAG basecamp tlgroup copy --no-hints type=bool
+FLAG basecamp tlgroup copy --no-stats type=bool
+FLAG basecamp tlgroup copy --profile type=string
+FLAG basecamp tlgroup copy --project type=string
+FLAG basecamp tlgroup copy --quiet type=bool
+FLAG basecamp tlgroup copy --stats type=bool
+FLAG basecamp tlgroup copy --styled type=bool
+FLAG basecamp tlgroup copy --to-list type=string
+FLAG basecamp tlgroup copy --to-project type=string
+FLAG basecamp tlgroup copy --to-todoset type=string
+FLAG basecamp tlgroup copy --todolist type=string
+FLAG basecamp tlgroup copy --verbose type=count
 FLAG basecamp tlgroup create --account type=string
 FLAG basecamp tlgroup create --agent type=bool
 FLAG basecamp tlgroup create --cache-dir type=string
@@ -15228,6 +15268,9 @@ FLAG basecamp tlgroup move --project type=string
 FLAG basecamp tlgroup move --quiet type=bool
 FLAG basecamp tlgroup move --stats type=bool
 FLAG basecamp tlgroup move --styled type=bool
+FLAG basecamp tlgroup move --to-list type=string
+FLAG basecamp tlgroup move --to-project type=string
+FLAG basecamp tlgroup move --to-todoset type=string
 FLAG basecamp tlgroup move --todolist type=string
 FLAG basecamp tlgroup move --verbose type=count
 FLAG basecamp tlgroup position --account type=string
@@ -15252,6 +15295,9 @@ FLAG basecamp tlgroup position --project type=string
 FLAG basecamp tlgroup position --quiet type=bool
 FLAG basecamp tlgroup position --stats type=bool
 FLAG basecamp tlgroup position --styled type=bool
+FLAG basecamp tlgroup position --to-list type=string
+FLAG basecamp tlgroup position --to-project type=string
+FLAG basecamp tlgroup position --to-todoset type=string
 FLAG basecamp tlgroup position --todolist type=string
 FLAG basecamp tlgroup position --verbose type=count
 FLAG basecamp tlgroup rename --account type=string
@@ -15342,6 +15388,32 @@ FLAG basecamp tlgroups --stats type=bool
 FLAG basecamp tlgroups --styled type=bool
 FLAG basecamp tlgroups --todolist type=string
 FLAG basecamp tlgroups --verbose type=count
+FLAG basecamp tlgroups copy --account type=string
+FLAG basecamp tlgroups copy --agent type=bool
+FLAG basecamp tlgroups copy --cache-dir type=string
+FLAG basecamp tlgroups copy --count type=bool
+FLAG basecamp tlgroups copy --help type=bool
+FLAG basecamp tlgroups copy --hints type=bool
+FLAG basecamp tlgroups copy --ids-only type=bool
+FLAG basecamp tlgroups copy --in type=string
+FLAG basecamp tlgroups copy --include-comments type=bool
+FLAG basecamp tlgroups copy --jq type=string
+FLAG basecamp tlgroups copy --json type=bool
+FLAG basecamp tlgroups copy --list type=string
+FLAG basecamp tlgroups copy --markdown type=bool
+FLAG basecamp tlgroups copy --md type=bool
+FLAG basecamp tlgroups copy --no-hints type=bool
+FLAG basecamp tlgroups copy --no-stats type=bool
+FLAG basecamp tlgroups copy --profile type=string
+FLAG basecamp tlgroups copy --project type=string
+FLAG basecamp tlgroups copy --quiet type=bool
+FLAG basecamp tlgroups copy --stats type=bool
+FLAG basecamp tlgroups copy --styled type=bool
+FLAG basecamp tlgroups copy --to-list type=string
+FLAG basecamp tlgroups copy --to-project type=string
+FLAG basecamp tlgroups copy --to-todoset type=string
+FLAG basecamp tlgroups copy --todolist type=string
+FLAG basecamp tlgroups copy --verbose type=count
 FLAG basecamp tlgroups create --account type=string
 FLAG basecamp tlgroups create --agent type=bool
 FLAG basecamp tlgroups create --cache-dir type=string
@@ -15408,6 +15480,9 @@ FLAG basecamp tlgroups move --project type=string
 FLAG basecamp tlgroups move --quiet type=bool
 FLAG basecamp tlgroups move --stats type=bool
 FLAG basecamp tlgroups move --styled type=bool
+FLAG basecamp tlgroups move --to-list type=string
+FLAG basecamp tlgroups move --to-project type=string
+FLAG basecamp tlgroups move --to-todoset type=string
 FLAG basecamp tlgroups move --todolist type=string
 FLAG basecamp tlgroups move --verbose type=count
 FLAG basecamp tlgroups position --account type=string
@@ -15432,6 +15507,9 @@ FLAG basecamp tlgroups position --project type=string
 FLAG basecamp tlgroups position --quiet type=bool
 FLAG basecamp tlgroups position --stats type=bool
 FLAG basecamp tlgroups position --styled type=bool
+FLAG basecamp tlgroups position --to-list type=string
+FLAG basecamp tlgroups position --to-project type=string
+FLAG basecamp tlgroups position --to-todoset type=string
 FLAG basecamp tlgroups position --todolist type=string
 FLAG basecamp tlgroups position --verbose type=count
 FLAG basecamp tlgroups rename --account type=string
@@ -15542,6 +15620,31 @@ FLAG basecamp todolist archive --stats type=bool
 FLAG basecamp todolist archive --styled type=bool
 FLAG basecamp todolist archive --todolist type=string
 FLAG basecamp todolist archive --verbose type=count
+FLAG basecamp todolist copy --account type=string
+FLAG basecamp todolist copy --agent type=bool
+FLAG basecamp todolist copy --cache-dir type=string
+FLAG basecamp todolist copy --count type=bool
+FLAG basecamp todolist copy --help type=bool
+FLAG basecamp todolist copy --hints type=bool
+FLAG basecamp todolist copy --ids-only type=bool
+FLAG basecamp todolist copy --in type=string
+FLAG basecamp todolist copy --include-comments type=bool
+FLAG basecamp todolist copy --jq type=string
+FLAG basecamp todolist copy --json type=bool
+FLAG basecamp todolist copy --markdown type=bool
+FLAG basecamp todolist copy --md type=bool
+FLAG basecamp todolist copy --no-hints type=bool
+FLAG basecamp todolist copy --no-stats type=bool
+FLAG basecamp todolist copy --profile type=string
+FLAG basecamp todolist copy --project type=string
+FLAG basecamp todolist copy --quiet type=bool
+FLAG basecamp todolist copy --stats type=bool
+FLAG basecamp todolist copy --styled type=bool
+FLAG basecamp todolist copy --to-list type=string
+FLAG basecamp todolist copy --to-project type=string
+FLAG basecamp todolist copy --to-todoset type=string
+FLAG basecamp todolist copy --todolist type=string
+FLAG basecamp todolist copy --verbose type=count
 FLAG basecamp todolist create --account type=string
 FLAG basecamp todolist create --agent type=bool
 FLAG basecamp todolist create --cache-dir type=string
@@ -15615,6 +15718,9 @@ FLAG basecamp todolist move --quiet type=bool
 FLAG basecamp todolist move --stats type=bool
 FLAG basecamp todolist move --styled type=bool
 FLAG basecamp todolist move --to type=int
+FLAG basecamp todolist move --to-list type=string
+FLAG basecamp todolist move --to-project type=string
+FLAG basecamp todolist move --to-todoset type=string
 FLAG basecamp todolist move --todolist type=string
 FLAG basecamp todolist move --verbose type=count
 FLAG basecamp todolist position --account type=string
@@ -15638,6 +15744,9 @@ FLAG basecamp todolist position --quiet type=bool
 FLAG basecamp todolist position --stats type=bool
 FLAG basecamp todolist position --styled type=bool
 FLAG basecamp todolist position --to type=int
+FLAG basecamp todolist position --to-list type=string
+FLAG basecamp todolist position --to-project type=string
+FLAG basecamp todolist position --to-todoset type=string
 FLAG basecamp todolist position --todolist type=string
 FLAG basecamp todolist position --verbose type=count
 FLAG basecamp todolist reorder --account type=string
@@ -15661,6 +15770,9 @@ FLAG basecamp todolist reorder --quiet type=bool
 FLAG basecamp todolist reorder --stats type=bool
 FLAG basecamp todolist reorder --styled type=bool
 FLAG basecamp todolist reorder --to type=int
+FLAG basecamp todolist reorder --to-list type=string
+FLAG basecamp todolist reorder --to-project type=string
+FLAG basecamp todolist reorder --to-todoset type=string
 FLAG basecamp todolist reorder --todolist type=string
 FLAG basecamp todolist reorder --verbose type=count
 FLAG basecamp todolist restore --account type=string
@@ -15774,6 +15886,32 @@ FLAG basecamp todolistgroup --stats type=bool
 FLAG basecamp todolistgroup --styled type=bool
 FLAG basecamp todolistgroup --todolist type=string
 FLAG basecamp todolistgroup --verbose type=count
+FLAG basecamp todolistgroup copy --account type=string
+FLAG basecamp todolistgroup copy --agent type=bool
+FLAG basecamp todolistgroup copy --cache-dir type=string
+FLAG basecamp todolistgroup copy --count type=bool
+FLAG basecamp todolistgroup copy --help type=bool
+FLAG basecamp todolistgroup copy --hints type=bool
+FLAG basecamp todolistgroup copy --ids-only type=bool
+FLAG basecamp todolistgroup copy --in type=string
+FLAG basecamp todolistgroup copy --include-comments type=bool
+FLAG basecamp todolistgroup copy --jq type=string
+FLAG basecamp todolistgroup copy --json type=bool
+FLAG basecamp todolistgroup copy --list type=string
+FLAG basecamp todolistgroup copy --markdown type=bool
+FLAG basecamp todolistgroup copy --md type=bool
+FLAG basecamp todolistgroup copy --no-hints type=bool
+FLAG basecamp todolistgroup copy --no-stats type=bool
+FLAG basecamp todolistgroup copy --profile type=string
+FLAG basecamp todolistgroup copy --project type=string
+FLAG basecamp todolistgroup copy --quiet type=bool
+FLAG basecamp todolistgroup copy --stats type=bool
+FLAG basecamp todolistgroup copy --styled type=bool
+FLAG basecamp todolistgroup copy --to-list type=string
+FLAG basecamp todolistgroup copy --to-project type=string
+FLAG basecamp todolistgroup copy --to-todoset type=string
+FLAG basecamp todolistgroup copy --todolist type=string
+FLAG basecamp todolistgroup copy --verbose type=count
 FLAG basecamp todolistgroup create --account type=string
 FLAG basecamp todolistgroup create --agent type=bool
 FLAG basecamp todolistgroup create --cache-dir type=string
@@ -15840,6 +15978,9 @@ FLAG basecamp todolistgroup move --project type=string
 FLAG basecamp todolistgroup move --quiet type=bool
 FLAG basecamp todolistgroup move --stats type=bool
 FLAG basecamp todolistgroup move --styled type=bool
+FLAG basecamp todolistgroup move --to-list type=string
+FLAG basecamp todolistgroup move --to-project type=string
+FLAG basecamp todolistgroup move --to-todoset type=string
 FLAG basecamp todolistgroup move --todolist type=string
 FLAG basecamp todolistgroup move --verbose type=count
 FLAG basecamp todolistgroup position --account type=string
@@ -15864,6 +16005,9 @@ FLAG basecamp todolistgroup position --project type=string
 FLAG basecamp todolistgroup position --quiet type=bool
 FLAG basecamp todolistgroup position --stats type=bool
 FLAG basecamp todolistgroup position --styled type=bool
+FLAG basecamp todolistgroup position --to-list type=string
+FLAG basecamp todolistgroup position --to-project type=string
+FLAG basecamp todolistgroup position --to-todoset type=string
 FLAG basecamp todolistgroup position --todolist type=string
 FLAG basecamp todolistgroup position --verbose type=count
 FLAG basecamp todolistgroup rename --account type=string
@@ -15954,6 +16098,32 @@ FLAG basecamp todolistgroups --stats type=bool
 FLAG basecamp todolistgroups --styled type=bool
 FLAG basecamp todolistgroups --todolist type=string
 FLAG basecamp todolistgroups --verbose type=count
+FLAG basecamp todolistgroups copy --account type=string
+FLAG basecamp todolistgroups copy --agent type=bool
+FLAG basecamp todolistgroups copy --cache-dir type=string
+FLAG basecamp todolistgroups copy --count type=bool
+FLAG basecamp todolistgroups copy --help type=bool
+FLAG basecamp todolistgroups copy --hints type=bool
+FLAG basecamp todolistgroups copy --ids-only type=bool
+FLAG basecamp todolistgroups copy --in type=string
+FLAG basecamp todolistgroups copy --include-comments type=bool
+FLAG basecamp todolistgroups copy --jq type=string
+FLAG basecamp todolistgroups copy --json type=bool
+FLAG basecamp todolistgroups copy --list type=string
+FLAG basecamp todolistgroups copy --markdown type=bool
+FLAG basecamp todolistgroups copy --md type=bool
+FLAG basecamp todolistgroups copy --no-hints type=bool
+FLAG basecamp todolistgroups copy --no-stats type=bool
+FLAG basecamp todolistgroups copy --profile type=string
+FLAG basecamp todolistgroups copy --project type=string
+FLAG basecamp todolistgroups copy --quiet type=bool
+FLAG basecamp todolistgroups copy --stats type=bool
+FLAG basecamp todolistgroups copy --styled type=bool
+FLAG basecamp todolistgroups copy --to-list type=string
+FLAG basecamp todolistgroups copy --to-project type=string
+FLAG basecamp todolistgroups copy --to-todoset type=string
+FLAG basecamp todolistgroups copy --todolist type=string
+FLAG basecamp todolistgroups copy --verbose type=count
 FLAG basecamp todolistgroups create --account type=string
 FLAG basecamp todolistgroups create --agent type=bool
 FLAG basecamp todolistgroups create --cache-dir type=string
@@ -16020,6 +16190,9 @@ FLAG basecamp todolistgroups move --project type=string
 FLAG basecamp todolistgroups move --quiet type=bool
 FLAG basecamp todolistgroups move --stats type=bool
 FLAG basecamp todolistgroups move --styled type=bool
+FLAG basecamp todolistgroups move --to-list type=string
+FLAG basecamp todolistgroups move --to-project type=string
+FLAG basecamp todolistgroups move --to-todoset type=string
 FLAG basecamp todolistgroups move --todolist type=string
 FLAG basecamp todolistgroups move --verbose type=count
 FLAG basecamp todolistgroups position --account type=string
@@ -16044,6 +16217,9 @@ FLAG basecamp todolistgroups position --project type=string
 FLAG basecamp todolistgroups position --quiet type=bool
 FLAG basecamp todolistgroups position --stats type=bool
 FLAG basecamp todolistgroups position --styled type=bool
+FLAG basecamp todolistgroups position --to-list type=string
+FLAG basecamp todolistgroups position --to-project type=string
+FLAG basecamp todolistgroups position --to-todoset type=string
 FLAG basecamp todolistgroups position --todolist type=string
 FLAG basecamp todolistgroups position --verbose type=count
 FLAG basecamp todolistgroups rename --account type=string
@@ -16154,6 +16330,31 @@ FLAG basecamp todolists archive --stats type=bool
 FLAG basecamp todolists archive --styled type=bool
 FLAG basecamp todolists archive --todolist type=string
 FLAG basecamp todolists archive --verbose type=count
+FLAG basecamp todolists copy --account type=string
+FLAG basecamp todolists copy --agent type=bool
+FLAG basecamp todolists copy --cache-dir type=string
+FLAG basecamp todolists copy --count type=bool
+FLAG basecamp todolists copy --help type=bool
+FLAG basecamp todolists copy --hints type=bool
+FLAG basecamp todolists copy --ids-only type=bool
+FLAG basecamp todolists copy --in type=string
+FLAG basecamp todolists copy --include-comments type=bool
+FLAG basecamp todolists copy --jq type=string
+FLAG basecamp todolists copy --json type=bool
+FLAG basecamp todolists copy --markdown type=bool
+FLAG basecamp todolists copy --md type=bool
+FLAG basecamp todolists copy --no-hints type=bool
+FLAG basecamp todolists copy --no-stats type=bool
+FLAG basecamp todolists copy --profile type=string
+FLAG basecamp todolists copy --project type=string
+FLAG basecamp todolists copy --quiet type=bool
+FLAG basecamp todolists copy --stats type=bool
+FLAG basecamp todolists copy --styled type=bool
+FLAG basecamp todolists copy --to-list type=string
+FLAG basecamp todolists copy --to-project type=string
+FLAG basecamp todolists copy --to-todoset type=string
+FLAG basecamp todolists copy --todolist type=string
+FLAG basecamp todolists copy --verbose type=count
 FLAG basecamp todolists create --account type=string
 FLAG basecamp todolists create --agent type=bool
 FLAG basecamp todolists create --cache-dir type=string
@@ -16227,6 +16428,9 @@ FLAG basecamp todolists move --quiet type=bool
 FLAG basecamp todolists move --stats type=bool
 FLAG basecamp todolists move --styled type=bool
 FLAG basecamp todolists move --to type=int
+FLAG basecamp todolists move --to-list type=string
+FLAG basecamp todolists move --to-project type=string
+FLAG basecamp todolists move --to-todoset type=string
 FLAG basecamp todolists move --todolist type=string
 FLAG basecamp todolists move --verbose type=count
 FLAG basecamp todolists position --account type=string
@@ -16250,6 +16454,9 @@ FLAG basecamp todolists position --quiet type=bool
 FLAG basecamp todolists position --stats type=bool
 FLAG basecamp todolists position --styled type=bool
 FLAG basecamp todolists position --to type=int
+FLAG basecamp todolists position --to-list type=string
+FLAG basecamp todolists position --to-project type=string
+FLAG basecamp todolists position --to-todoset type=string
 FLAG basecamp todolists position --todolist type=string
 FLAG basecamp todolists position --verbose type=count
 FLAG basecamp todolists reorder --account type=string
@@ -16273,6 +16480,9 @@ FLAG basecamp todolists reorder --quiet type=bool
 FLAG basecamp todolists reorder --stats type=bool
 FLAG basecamp todolists reorder --styled type=bool
 FLAG basecamp todolists reorder --to type=int
+FLAG basecamp todolists reorder --to-list type=string
+FLAG basecamp todolists reorder --to-project type=string
+FLAG basecamp todolists reorder --to-todoset type=string
 FLAG basecamp todolists reorder --todolist type=string
 FLAG basecamp todolists reorder --verbose type=count
 FLAG basecamp todolists restore --account type=string
@@ -16427,6 +16637,30 @@ FLAG basecamp todos complete --stats type=bool
 FLAG basecamp todos complete --styled type=bool
 FLAG basecamp todos complete --todolist type=string
 FLAG basecamp todos complete --verbose type=count
+FLAG basecamp todos copy --account type=string
+FLAG basecamp todos copy --agent type=bool
+FLAG basecamp todos copy --cache-dir type=string
+FLAG basecamp todos copy --count type=bool
+FLAG basecamp todos copy --help type=bool
+FLAG basecamp todos copy --hints type=bool
+FLAG basecamp todos copy --ids-only type=bool
+FLAG basecamp todos copy --in type=string
+FLAG basecamp todos copy --include-comments type=bool
+FLAG basecamp todos copy --jq type=string
+FLAG basecamp todos copy --json type=bool
+FLAG basecamp todos copy --markdown type=bool
+FLAG basecamp todos copy --md type=bool
+FLAG basecamp todos copy --no-hints type=bool
+FLAG basecamp todos copy --no-stats type=bool
+FLAG basecamp todos copy --profile type=string
+FLAG basecamp todos copy --project type=string
+FLAG basecamp todos copy --quiet type=bool
+FLAG basecamp todos copy --stats type=bool
+FLAG basecamp todos copy --styled type=bool
+FLAG basecamp todos copy --to-list type=string
+FLAG basecamp todos copy --to-project type=string
+FLAG basecamp todos copy --todolist type=string
+FLAG basecamp todos copy --verbose type=count
 FLAG basecamp todos create --account type=string
 FLAG basecamp todos create --agent type=bool
 FLAG basecamp todos create --assignee type=string
@@ -16516,6 +16750,8 @@ FLAG basecamp todos move --quiet type=bool
 FLAG basecamp todos move --stats type=bool
 FLAG basecamp todos move --styled type=bool
 FLAG basecamp todos move --to type=int
+FLAG basecamp todos move --to-list type=string
+FLAG basecamp todos move --to-project type=string
 FLAG basecamp todos move --todolist type=string
 FLAG basecamp todos move --verbose type=count
 FLAG basecamp todos position --account type=string
@@ -16540,6 +16776,8 @@ FLAG basecamp todos position --quiet type=bool
 FLAG basecamp todos position --stats type=bool
 FLAG basecamp todos position --styled type=bool
 FLAG basecamp todos position --to type=int
+FLAG basecamp todos position --to-list type=string
+FLAG basecamp todos position --to-project type=string
 FLAG basecamp todos position --todolist type=string
 FLAG basecamp todos position --verbose type=count
 FLAG basecamp todos reopen --account type=string
@@ -16585,6 +16823,8 @@ FLAG basecamp todos reorder --quiet type=bool
 FLAG basecamp todos reorder --stats type=bool
 FLAG basecamp todos reorder --styled type=bool
 FLAG basecamp todos reorder --to type=int
+FLAG basecamp todos reorder --to-list type=string
+FLAG basecamp todos reorder --to-project type=string
 FLAG basecamp todos reorder --todolist type=string
 FLAG basecamp todos reorder --verbose type=count
 FLAG basecamp todos restore --account type=string
@@ -20169,6 +20409,7 @@ SUB basecamp timesheet project
 SUB basecamp timesheet recording
 SUB basecamp timesheet report
 SUB basecamp tlgroup
+SUB basecamp tlgroup copy
 SUB basecamp tlgroup create
 SUB basecamp tlgroup list
 SUB basecamp tlgroup move
@@ -20177,6 +20418,7 @@ SUB basecamp tlgroup rename
 SUB basecamp tlgroup show
 SUB basecamp tlgroup update
 SUB basecamp tlgroups
+SUB basecamp tlgroups copy
 SUB basecamp tlgroups create
 SUB basecamp tlgroups list
 SUB basecamp tlgroups move
@@ -20186,6 +20428,7 @@ SUB basecamp tlgroups show
 SUB basecamp tlgroups update
 SUB basecamp todolist
 SUB basecamp todolist archive
+SUB basecamp todolist copy
 SUB basecamp todolist create
 SUB basecamp todolist list
 SUB basecamp todolist move
@@ -20196,6 +20439,7 @@ SUB basecamp todolist show
 SUB basecamp todolist trash
 SUB basecamp todolist update
 SUB basecamp todolistgroup
+SUB basecamp todolistgroup copy
 SUB basecamp todolistgroup create
 SUB basecamp todolistgroup list
 SUB basecamp todolistgroup move
@@ -20204,6 +20448,7 @@ SUB basecamp todolistgroup rename
 SUB basecamp todolistgroup show
 SUB basecamp todolistgroup update
 SUB basecamp todolistgroups
+SUB basecamp todolistgroups copy
 SUB basecamp todolistgroups create
 SUB basecamp todolistgroups list
 SUB basecamp todolistgroups move
@@ -20213,6 +20458,7 @@ SUB basecamp todolistgroups show
 SUB basecamp todolistgroups update
 SUB basecamp todolists
 SUB basecamp todolists archive
+SUB basecamp todolists copy
 SUB basecamp todolists create
 SUB basecamp todolists list
 SUB basecamp todolists move
@@ -20225,6 +20471,7 @@ SUB basecamp todolists update
 SUB basecamp todos
 SUB basecamp todos archive
 SUB basecamp todos complete
+SUB basecamp todos copy
 SUB basecamp todos create
 SUB basecamp todos list
 SUB basecamp todos move

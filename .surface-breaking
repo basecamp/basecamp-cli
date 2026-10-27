@@ -19,6 +19,9 @@ ARG basecamp message 01 [body]
 ARG basecamp react 00 <content>
 ARG basecamp reopen 00 <id|url>...
 ARG basecamp todo 00 <content>
+ARG basecamp todos move 00 <id|url>
+ARG basecamp todos position 00 <id|url>
+ARG basecamp todos reorder 00 <id|url>
 ARG basecamp unassign 00 <id>
 ARG basecamp unassign 00 <todo_id>
 ARG basecamp upload archive 00 <id|url>
