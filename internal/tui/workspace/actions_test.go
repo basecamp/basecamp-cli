@@ -1,10 +1,16 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"sync"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -299,7 +305,7 @@ func TestCompleteCmd_Error(t *testing.T) {
 }
 
 func TestTrashCmd_Success_ProducesStatusAndNavigateBack(t *testing.T) {
-	cmd := trashCmd(func() error { return nil })
+	cmd := trashCmd(func() (bool, error) { return false, nil })
 	msg := cmd()
 
 	batch, ok := msg.(tea.BatchMsg)
@@ -317,14 +323,134 @@ func TestTrashCmd_Success_ProducesStatusAndNavigateBack(t *testing.T) {
 }
 
 func TestTrashCmd_Error(t *testing.T) {
-	cmd := trashCmd(func() error { return fmt.Errorf("boom") })
+	cmd := trashCmd(func() (bool, error) { return false, fmt.Errorf("boom") })
 	msg := cmd()
 	errMsg, ok := msg.(ErrorMsg)
 	require.True(t, ok, "error should produce ErrorMsg")
 	assert.Equal(t, "trashing recording", errMsg.Context)
 }
 
+// pingLineJSON is a line in a Ping as bc3's recording JSON has it: its parent
+// is the Ping's Campfire, and its bucket is the Ping, of type Circle.
+const pingLineJSON = `{"id":111,"status":"active","type":"Chat::Lines::Text","title":"Lunch?",` +
+	`"parent":{"id":222,"title":"Ping","type":"Chat::Transcript"},` +
+	`"bucket":{"id":333,"name":"Jason Fried","type":"Circle"}}`
+
+// The palette's :trash on a Campfire line deletes it through its Campfire,
+// never through the generic trash route, which bc3 refuses for anything in a
+// Ping (bc3#14171). The scope's type is only a label, so the line is read to
+// learn what it is: a deep link to a Ping line labels it Campfire::Line, and a
+// quick jump not at all.
+func TestAction_Trash_CampfireLineDeletesThroughItsCampfire(t *testing.T) {
+	for _, label := range []string{"Chat::Lines::Text", "Campfire::Line", ""} {
+		t.Run("label "+label, func(t *testing.T) {
+			transport := &actionTransport{routes: map[string]actionReply{
+				"GET /99999/recordings/111.json":    {http.StatusOK, pingLineJSON},
+				"DELETE /99999/chats/222/lines/111": {http.StatusNoContent, ""},
+			}}
+			session := actionSession(transport, Scope{AccountID: "99999", ProjectID: 333, RecordingID: 111, RecordingType: label})
+
+			msg := trashAction(t).Execute(session)()
+
+			assert.Equal(t, []string{"DELETE /99999/chats/222/lines/111"}, transport.writes())
+			assert.Equal(t, "Deleted", firstStatus(t, msg))
+		})
+	}
+}
+
+// Anything else is trashed as before.
+func TestAction_Trash_OtherRecordingTrashes(t *testing.T) {
+	transport := &actionTransport{routes: map[string]actionReply{
+		"GET /99999/recordings/100.json":                {http.StatusOK, `{"id":100,"type":"Todo","title":"Ship it"}`},
+		"PUT /99999/recordings/100/status/trashed.json": {http.StatusNoContent, ""},
+	}}
+	session := actionSession(transport, Scope{AccountID: "99999", ProjectID: 333, RecordingID: 100, RecordingType: "Todo"})
+
+	msg := trashAction(t).Execute(session)()
+
+	assert.Equal(t, []string{"PUT /99999/recordings/100/status/trashed.json"}, transport.writes())
+	assert.Equal(t, "Trashed", firstStatus(t, msg))
+}
+
 // -- helpers --
+
+type actionReply struct {
+	status int
+	body   string
+}
+
+// actionTransport answers from a table keyed by "METHOD path" and records
+// every request; anything without a route answers 404.
+type actionTransport struct {
+	mu       sync.Mutex
+	routes   map[string]actionReply
+	requests []string
+}
+
+func (at *actionTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	call := req.Method + " " + req.URL.Path
+	at.mu.Lock()
+	at.requests = append(at.requests, call)
+	at.mu.Unlock()
+	reply, ok := at.routes[call]
+	if !ok {
+		reply = actionReply{http.StatusNotFound, `{"error":"Not Found"}`}
+	}
+	return &http.Response{
+		StatusCode: reply.status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(reply.body)),
+		Request:    req,
+	}, nil
+}
+
+// writes returns the requests that change something, in order.
+func (at *actionTransport) writes() []string {
+	at.mu.Lock()
+	defer at.mu.Unlock()
+	var writes []string
+	for _, call := range at.requests {
+		if !strings.HasPrefix(call, http.MethodGet+" ") {
+			writes = append(writes, call)
+		}
+	}
+	return writes
+}
+
+type actionTestToken struct{}
+
+func (actionTestToken) AccessToken(context.Context) (string, error) { return "test-token", nil }
+
+func actionSession(transport http.RoundTripper, scope Scope) *Session {
+	sdk := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, actionTestToken{},
+		basecamp.WithTransport(transport), basecamp.WithMaxRetries(1))
+	return NewTestSessionWithClient(sdk, scope)
+}
+
+func trashAction(t *testing.T) Action {
+	t.Helper()
+	for _, a := range DefaultActions().All() {
+		if a.Name == ":trash" {
+			return a
+		}
+	}
+	require.FailNow(t, "no :trash action")
+	return Action{}
+}
+
+// firstStatus returns the text of the StatusMsg a result batch starts with,
+// failing on an ErrorMsg.
+func firstStatus(t *testing.T, msg tea.Msg) string {
+	t.Helper()
+	if errMsg, ok := msg.(ErrorMsg); ok {
+		require.FailNow(t, "unexpected error", "%s: %v", errMsg.Context, errMsg.Err)
+	}
+	batch, ok := msg.(tea.BatchMsg)
+	require.True(t, ok, "expected a BatchMsg, got %T", msg)
+	status, ok := batch[0]().(StatusMsg)
+	require.True(t, ok)
+	return status.Text
+}
 
 func actionNames(actions []Action) map[string]bool {
 	m := make(map[string]bool, len(actions))

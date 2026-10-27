@@ -24,8 +24,9 @@ type heyCompleteResultMsg struct {
 	err    error
 }
 type heyTrashResultMsg struct {
-	itemID string
-	err    error
+	itemID  string
+	deleted bool // a Campfire line, deleted rather than trashed
+	err     error
 }
 type heyTrashTimeoutMsg struct{}
 
@@ -189,7 +190,11 @@ func (v *Hey) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 		if snap.Usable() {
 			v.syncEntries(snap.Data)
 		}
-		return v, workspace.SetStatus("Trashed", false)
+		status := "Trashed"
+		if msg.deleted {
+			status = "Deleted"
+		}
+		return v, workspace.SetStatus(status, false)
 
 	case heyTrashTimeoutMsg:
 		v.trashPending = false
@@ -399,14 +404,20 @@ func (v *Hey) trashSelected() tea.Cmd {
 		ctx := hub.Global().Context()
 		itemID := item.ID
 		return func() tea.Msg {
-			err := hub.TrashRecording(ctx, meta.AccountID, meta.ProjectID, meta.ID)
-			return heyTrashResultMsg{itemID: itemID, err: err}
+			// meta.Type is the API's type, so a Campfire line would be
+			// deleted through its Campfire rather than trashed.
+			deleted, err := hub.RemoveRecording(ctx, meta.AccountID, meta.ID, meta.Type, 0)
+			return heyTrashResultMsg{itemID: itemID, deleted: deleted, err: err}
 		}
 	}
 	v.trashPending = true
 	v.trashPendingID = item.ID
+	prompt := "Press t again to trash"
+	if data.IsCampfireLine(meta.Type) {
+		prompt = "Press t again to delete this line for good"
+	}
 	return tea.Batch(
-		workspace.SetStatus("Press t again to trash", false),
+		workspace.SetStatus(prompt, false),
 		tea.Tick(3*time.Second, func(time.Time) tea.Msg { return heyTrashTimeoutMsg{} }),
 	)
 }

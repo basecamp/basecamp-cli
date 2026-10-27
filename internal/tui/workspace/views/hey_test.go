@@ -2,10 +2,12 @@ package views
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -86,6 +88,51 @@ func TestHey_Trash_DoublePress(t *testing.T) {
 	result, ok := msg.(heyTrashResultMsg)
 	require.True(t, ok)
 	assert.Equal(t, "acct1:1", result.itemID)
+}
+
+// heyOverTransport is testHey with an SDK client that talks to transport.
+func heyOverTransport(transport http.RoundTripper, entries []data.ActivityEntryInfo) *Hey {
+	v := testHey(entries)
+	sdk := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, starTestToken{},
+		basecamp.WithTransport(transport), basecamp.WithMaxRetries(1))
+	v.session = workspace.NewTestSessionWithClient(sdk, workspace.Scope{AccountID: "99999"})
+	return v
+}
+
+// A message, to-do or document in Hey is trashed through the generic route.
+func TestHey_Trash_TrashesARecording(t *testing.T) {
+	transport := &routeTransport{routes: map[string]stubReply{
+		"PUT /99999/recordings/2/status/trashed.json": {http.StatusNoContent, ""},
+	}}
+	v := heyOverTransport(transport, []data.ActivityEntryInfo{
+		{ID: 2, Title: "Weekly update", Type: "Message", AccountID: "99999", ProjectID: 10, UpdatedAtTS: 100},
+	})
+
+	assert.Equal(t, "Press t again to trash", statusText(t, v.trashSelected()))
+	result, ok := v.trashSelected()().(heyTrashResultMsg)
+	require.True(t, ok)
+	require.NoError(t, result.err)
+	assert.False(t, result.deleted)
+	assert.Equal(t, []string{"PUT /99999/recordings/2/status/trashed.json"}, transport.writes())
+}
+
+// Hey lists no Campfire lines today, but its trash decides by the entry's API
+// type, so a line would be deleted through its Campfire, read to find it.
+func TestHey_Trash_DeletesACampfireLine(t *testing.T) {
+	transport := &routeTransport{routes: map[string]stubReply{
+		"GET /99999/recordings/111.json":    {http.StatusOK, pingLineJSON},
+		"DELETE /99999/chats/222/lines/111": {http.StatusNoContent, ""},
+	}}
+	v := heyOverTransport(transport, []data.ActivityEntryInfo{
+		{ID: 111, Title: "Lunch?", Type: "Chat::Lines::Text", AccountID: "99999", ProjectID: 333, UpdatedAtTS: 100},
+	})
+
+	assert.Equal(t, "Press t again to delete this line for good", statusText(t, v.trashSelected()))
+	result, ok := v.trashSelected()().(heyTrashResultMsg)
+	require.True(t, ok)
+	require.NoError(t, result.err)
+	assert.True(t, result.deleted)
+	assert.Equal(t, []string{"DELETE /99999/chats/222/lines/111"}, transport.writes())
 }
 
 func TestHey_FilterBlocksMutationKeys(t *testing.T) {

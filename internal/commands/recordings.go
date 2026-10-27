@@ -1,7 +1,10 @@
 package commands
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -363,6 +366,9 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, ne
 	}
 
 	if err != nil {
+		if refusal := pingWriteRefusal(cmd.Context(), app, recordingID, err); refusal != nil {
+			return refusal
+		}
 		return convertSDKError(err)
 	}
 
@@ -436,6 +442,9 @@ You can pass either an ID or a Basecamp URL:
 
 			recording, err := app.Account().Recordings().SetClientVisibility(cmd.Context(), recordingID, isVisible)
 			if err != nil {
+				if refusal := pingWriteRefusal(cmd.Context(), app, recordingID, err); refusal != nil {
+					return refusal
+				}
 				return convertSDKError(err)
 			}
 
@@ -465,6 +474,53 @@ You can pass either an ID or a Basecamp URL:
 	cmd.Flags().BoolVar(&hidden, "hide", false, "Hide from clients (alias)")
 
 	return cmd
+}
+
+// pingWriteRefusal explains a 403 that bc3 gave a generic recording route
+// because the recording is in a Ping. bc3 takes no write to a Ping's Campfire
+// or its lines through those routes, but subscribing or unsubscribing yourself
+// and bubbling a line up (bc3#14171): the lines change through their Campfire.
+// Its 403 is empty, the same one a person without permission gets, so on that
+// status the recording is read back once to tell the two apart, as
+// clientsForbiddenError does for a project. It returns nil when the error is
+// anything else, or the recording isn't in a Ping or can't be read, leaving
+// the caller's own conversion to stand.
+func pingWriteRefusal(ctx context.Context, app *appctx.App, recordingID int64, err error) *output.Error {
+	var sdkErr *basecamp.Error
+	if !errors.As(err, &sdkErr) || sdkErr.Code != basecamp.CodeForbidden {
+		return nil
+	}
+	resp, readErr := app.Account().Get(ctx, fmt.Sprintf("/recordings/%d.json", recordingID))
+	if readErr != nil || resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	var recording struct {
+		Type   string `json:"type"`
+		Parent *struct {
+			ID int64 `json:"id"`
+		} `json:"parent"`
+		Bucket *struct {
+			ID   int64  `json:"id"`
+			Type string `json:"type"`
+		} `json:"bucket"`
+	}
+	if resp.UnmarshalData(&recording) != nil || recording.Bucket == nil || recording.Bucket.Type != "Circle" {
+		return nil
+	}
+
+	refusal := &output.Error{
+		Code:       output.CodeForbidden,
+		Message:    "Basecamp doesn't change a Ping's Campfire through this command",
+		Hint:       fmt.Sprintf("In a Ping you change only your own subscription: basecamp subscriptions subscribe %d or basecamp subscriptions unsubscribe %d", recordingID, recordingID),
+		HTTPStatus: sdkErr.HTTPStatus,
+		Cause:      sdkErr,
+	}
+	if strings.HasPrefix(recording.Type, "Chat::Lines::") && recording.Parent != nil {
+		refusal.Message = "Basecamp doesn't change a line in a Ping through this command"
+		refusal.Hint = fmt.Sprintf("A Ping's lines change only through its Campfire. To delete this one: basecamp chat delete %d --room %d --in %d",
+			recordingID, recording.Parent.ID, recording.Bucket.ID)
+	}
+	return refusal
 }
 
 // newRecordableTrashCmd creates a trash subcommand for a recordable entity.

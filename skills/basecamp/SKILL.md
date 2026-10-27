@@ -217,6 +217,10 @@ basecamp pings messages "Jane Smith" --agent
 - A message URL (`/circles/<id>@<line>`) works with `basecamp show` and
   `chat line`; edit or delete such a message with `chat update` or `chat delete`
   on that URL.
+- Nothing in a ping changes through the generic recording commands: `recordings
+  trash`, `archive`, `restore` and `visibility`, `subscriptions add` and
+  `remove`, and `spotlight` are refused (exit 4). Only your own subscription
+  changes there, with `subscriptions subscribe` or `subscriptions unsubscribe`.
 
 ## Spotlights
 

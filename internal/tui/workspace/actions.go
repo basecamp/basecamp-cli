@@ -370,8 +370,11 @@ func DefaultActions() *Registry {
 			scope := session.Scope()
 			hub := session.Hub()
 			ctx := hub.ProjectContext()
-			return trashCmd(func() error {
-				return hub.TrashRecording(ctx, scope.AccountID, scope.ProjectID, scope.RecordingID)
+			return trashCmd(func() (bool, error) {
+				// The scope's RecordingType is a view's label, not the API's
+				// type, so the hub reads the recording to learn whether it
+				// is a Campfire line, which it deletes rather than trashes.
+				return hub.RemoveRecording(ctx, scope.AccountID, scope.RecordingID, "", 0)
 			})
 		},
 	})
@@ -389,14 +392,21 @@ func completeCmd(completeFn func() error) tea.Cmd {
 	}
 }
 
-// trashCmd builds a tea.Cmd that calls trashFn and returns StatusMsg + NavigateBack on success.
-func trashCmd(trashFn func() error) tea.Cmd {
+// trashCmd builds a tea.Cmd that calls trashFn and returns StatusMsg +
+// NavigateBack on success. trashFn says whether it deleted the recording, as
+// it does a Campfire line, rather than trashing it.
+func trashCmd(trashFn func() (deleted bool, err error)) tea.Cmd {
 	return func() tea.Msg {
-		if err := trashFn(); err != nil {
+		deleted, err := trashFn()
+		if err != nil {
 			return ErrorMsg{Err: err, Context: "trashing recording"}
 		}
+		text := "Trashed"
+		if deleted {
+			text = "Deleted"
+		}
 		return tea.BatchMsg{
-			func() tea.Msg { return StatusMsg{Text: "Trashed"} },
+			func() tea.Msg { return StatusMsg{Text: text} },
 			func() tea.Msg { return NavigateBackMsg{} },
 		}
 	}

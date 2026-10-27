@@ -293,6 +293,9 @@ func runSubscriptionsUpdate(cmd *cobra.Command, args []string, peopleIDs, mode s
 
 	subscription, err := app.Account().Subscriptions().Update(cmd.Context(), recordingID, req)
 	if err != nil {
+		if refusal := pingWriteRefusal(cmd.Context(), app, recordingID, err); refusal != nil {
+			return refusal
+		}
 		return convertSDKError(err)
 	}
 
