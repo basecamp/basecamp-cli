@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -493,7 +494,32 @@ func TestTodosCopySeveralToAnotherProjectNeverRetriesAFailedCopy(t *testing.T) {
 	assert.False(t, e.Retryable)
 	assert.Contains(t, e.Message, "Copied 0 of 2 to-dos")
 	assert.Contains(t, e.Hint, "may have started the copy")
-	assert.Contains(t, e.Hint, "basecamp todos list --in 999 --list 902")
+	assert.Contains(t, e.Hint, "basecamp todos list --in 999 --list 902 --all")
+}
+
+// A copy keeps the source's completion and status, so the listing that looks
+// for it must show that state, and every page of it.
+func TestTodoCopyRecoveryListingShowsTheCopyInItsState(t *testing.T) {
+	list := &basecamp.Todolist{ID: 902, Bucket: &basecamp.Bucket{ID: 999}}
+	for name, tc := range map[string]struct {
+		todo *basecamp.Todo
+		want string
+	}{
+		"incomplete": {&basecamp.Todo{ID: 1, Status: "active"}, "basecamp todos list --in 999 --list 902 --all"},
+		"completed":  {&basecamp.Todo{ID: 1, Status: "active", Completed: true}, "basecamp todos list --in 999 --list 902 --all --completed"},
+		"archived":   {&basecamp.Todo{ID: 1, Status: "archived"}, "basecamp todos list --in 999 --list 902 --all --status archived"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.want, todoCopyLookFor(tc.todo, list))
+		})
+	}
+}
+
+func TestTodolistCopyRecoveryListingShowsTheCopyInItsState(t *testing.T) {
+	assert.Equal(t, "basecamp todolists list --in 999 --todoset 50 --all",
+		todolistCopyLookFor(&basecamp.Todolist{ID: 1, Status: "active"}, 999, 50))
+	assert.Equal(t, "basecamp todolists list --in 999 --todoset 50 --all --archived",
+		todolistCopyLookFor(&basecamp.Todolist{ID: 1, Status: "archived"}, 999, 50))
 }
 
 func TestTodosCopyIntoTheListItIsInIsAllowed(t *testing.T) {
