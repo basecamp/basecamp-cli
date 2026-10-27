@@ -164,3 +164,25 @@ func TestFilesMoveAndCopyAreOnEveryFilesGroup(t *testing.T) {
 		})
 	}
 }
+
+func TestFilesRefuseAnItemNamedTwiceBeforeFilingAny(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args    []string
+		message string
+	}{
+		"the same id twice":                  {[]string{"copy", "456", "456", "--to-project", "Dest"}, "456 and 456 are both file #456"},
+		"copy by its old id and its new one": {[]string{"copy", "457", "111", "456", "--to-project", "Dest"}, "111 and 456 are both file #456"},
+		"move by its old id and its new one": {[]string{"move", "111", "456", "--to-project", "Dest"}, "111 and 456 are both file #456"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := filesFilingTransport()
+			transport.gets["/documents/111"] = transport.gets["/documents/456"]
+			run := runFamilyCommand(t, transport, NewFilesCmd(), tc.args...)
+			e := run.failure(t)
+
+			assert.Equal(t, output.CodeUsage, e.Code)
+			assert.Equal(t, tc.message, e.Message)
+			assert.Empty(t, transport.posts, "nothing is filed")
+		})
+	}
+}

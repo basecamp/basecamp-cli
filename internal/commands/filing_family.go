@@ -299,7 +299,9 @@ func familyFilingSet(cmd *cobra.Command, fam filingFamily) bool {
 }
 
 // runFamilyFiling moves or copies each recording in args into the destination
-// the flags name, one filing each.
+// the flags name, one filing each. Every recording is read before any is
+// filed, so a bad ID, a recording named twice or one already in the
+// destination stops the command before anything moves.
 func runFamilyFiling(cmd *cobra.Command, fam filingFamily, kind basecamp.FilingType, args []string, toProject, toContainer string, includeComments bool) error {
 	filingSet := familyFilingSet(cmd, fam)
 	for _, name := range fam.ownFlags {
@@ -354,12 +356,16 @@ func runFamilyFiling(cmd *cobra.Command, fam filingFamily, kind basecamp.FilingT
 	}
 
 	filings := make([]recordingFiling, 0, len(refs))
-	for _, ref := range refs {
+	named := filingNames{}
+	for i, ref := range refs {
 		_, src, err := fam.get(cmd.Context(), app, ref.id)
 		if err != nil {
 			return convertSDKError(err)
 		}
 		if err := fam.checkSource(src, ref.id); err != nil {
+			return err
+		}
+		if err := named.add(fam.noun, args[i], src.id); err != nil {
 			return err
 		}
 		if err := rejectProjectConflict(cmd, app, fam.noun, flagValue(cmd, "project"), ref.project, src.bucket.ID); err != nil {

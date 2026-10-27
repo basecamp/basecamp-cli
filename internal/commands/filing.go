@@ -361,6 +361,25 @@ func runFilings(cmd *cobra.Command, app *appctx.App, scope followUpScope, filing
 	}
 }
 
+// filingNames holds the recordings a bulk move or copy names, each by the id
+// it read as and the argument that named it. A moved recording's old id reads
+// as its new one, so two arguments can name one recording, and filing it twice
+// moves it twice or makes two copies. Comparing what each argument read as,
+// before anything is filed, catches that where comparing the arguments cannot.
+type filingNames map[int64]string
+
+// add records that arg read as recording id, refusing a second name for it.
+func (named filingNames) add(noun, arg string, id int64) error {
+	if first, ok := named[id]; ok {
+		return output.ErrUsageHint(
+			fmt.Sprintf("%s and %s are both %s #%d", first, arg, noun, id),
+			fmt.Sprintf("A moved %s's old id reads as its new one. Name %s #%d once", noun, noun, id),
+		)
+	}
+	named[id] = arg
+	return nil
+}
+
 // sourceList names recordings by id: "#456, #457".
 func sourceList(ids []int64) string {
 	names := make([]string, len(ids))

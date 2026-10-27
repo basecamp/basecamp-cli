@@ -2560,7 +2560,7 @@ func fileTodos(cmd *cobra.Command, kind basecamp.FilingType, args []string, toPr
 	}
 
 	filings := make([]recordingFiling, 0, len(refs))
-	named := map[int64]string{}
+	named := filingNames{}
 	for i, ref := range refs {
 		todo, err := app.Account().Todos().Get(cmd.Context(), ref.id)
 		if err != nil {
@@ -2569,13 +2569,9 @@ func fileTodos(cmd *cobra.Command, kind basecamp.FilingType, args []string, toPr
 		if err := requireFilableTodo(todo, ref.id); err != nil {
 			return err
 		}
-		if first, ok := named[todo.ID]; ok {
-			return output.ErrUsageHint(
-				fmt.Sprintf("%s and %s are both to-do #%d", first, tokens[i], todo.ID),
-				fmt.Sprintf("A moved to-do's old id reads as its new one. Name to-do #%d once", todo.ID),
-			)
+		if err := named.add("to-do", tokens[i], todo.ID); err != nil {
+			return err
 		}
-		named[todo.ID] = tokens[i]
 		if err := rejectProjectConflict(cmd, app, "to-do", "", ref.project, todo.Bucket.ID); err != nil {
 			return err
 		}
