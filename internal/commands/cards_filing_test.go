@@ -75,8 +75,10 @@ func TestPollUntilHonoursCancellation(t *testing.T) {
 //   - A move or copy POST answers filing 70, pending. Each GET of the filing
 //     takes the next of statuses, holding the last; "completed" names card 4560.
 type mockFilingTransport struct {
-	twoTables bool
-	statuses  []string
+	twoTables      bool
+	duplicateTitle bool
+	postStatus     int
+	statuses       []string
 
 	mu        sync.Mutex
 	posts     []string
@@ -101,6 +103,9 @@ func (m *mockFilingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 			m.body = map[string]any{}
 			_ = json.Unmarshal(raw, &m.body)
 		}
+		if m.postStatus != 0 {
+			return respond(m.postStatus, `{"error":"upstream"}`)
+		}
 		if strings.HasSuffix(path, "/card_tables/cards/456/moves") {
 			// Basecamp finds column_id only in the card's own project.
 			return respond(404, `{"error":"not found"}`)
@@ -123,6 +128,9 @@ func (m *mockFilingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 		dock := `{"name":"kanban_board","id":900,"title":"Ideas","enabled":true},{"name":"kanban_board","id":960,"title":"Old","enabled":false}`
 		if m.twoTables {
 			dock += `,{"name":"kanban_board","id":950,"title":"Roadmap","enabled":true}`
+		}
+		if m.duplicateTitle {
+			dock += `,{"name":"kanban_board","id":970,"title":"roadmap","enabled":true}`
 		}
 		return respond(200, `{"id":999,"dock":[`+dock+`]}`)
 	case strings.HasSuffix(path, "/card_tables/555"):
@@ -220,6 +228,38 @@ func TestCardsMoveToProjectWithoutCardTableNamesTheProject(t *testing.T) {
 	assert.Equal(t, "Project Bare has no card table", e.Message)
 	assert.NotEmpty(t, e.Hint)
 	assert.Empty(t, transport.posts)
+}
+
+func TestCardsMoveToCardTableNameSharedByTwoTablesIsAmbiguous(t *testing.T) {
+	transport := &mockFilingTransport{twoTables: true, duplicateTitle: true}
+	run := runFilingCommand(t, transport, "move", "456", "--to-project", "Dest", "--to-card-table", "Roadmap")
+	e := requireFilingError(t, run)
+
+	assert.Equal(t, output.CodeAmbiguous, e.Code)
+	assert.Contains(t, e.Hint, "950  Roadmap")
+	assert.Contains(t, e.Hint, "970  roadmap")
+	assert.NotContains(t, e.Hint, "900", "only the tables with that name are candidates")
+	assert.Empty(t, transport.posts)
+}
+
+func TestCardsCopyThatFailsUpstreamIsNotRetryable(t *testing.T) {
+	transport := &mockFilingTransport{postStatus: 502}
+	run := runFilingCommand(t, transport, "copy", "456", "--to-project", "Dest")
+	e := requireFilingError(t, run)
+
+	assert.False(t, e.Retryable, "a 502 can follow a copy Basecamp already started")
+	assert.Contains(t, e.Hint, "may have started the copy")
+	assert.Contains(t, e.Hint, "basecamp cards list --in 999 --card-table 900")
+	assert.Len(t, transport.posts, 1)
+}
+
+func TestCardsCopyThatIsRateLimitedStaysRetryable(t *testing.T) {
+	transport := &mockFilingTransport{postStatus: 429}
+	run := runFilingCommand(t, transport, "copy", "456", "--to-project", "Dest")
+	e := requireFilingError(t, run)
+
+	assert.True(t, e.Retryable, "Basecamp refuses a rate-limited request before copying")
+	assert.NotContains(t, e.Hint, "may have started the copy")
 }
 
 func TestCardsMoveToExplicitCardTable(t *testing.T) {

@@ -2015,10 +2015,21 @@ func resolveFilingTable(cmd *cobra.Command, app *appctx.App, toProject, toCardTa
 			return nil, ambiguousCardTablesErrorFor("--to-card-table", tables)
 		}
 	}
+	var named []projectCardTable
 	for _, ct := range tables {
-		if strconv.FormatInt(ct.ID, 10) == toCardTable || strings.EqualFold(ct.Title, toCardTable) {
+		if strconv.FormatInt(ct.ID, 10) == toCardTable {
 			return getCardTable(cmd, app, ct.ID)
 		}
+		if strings.EqualFold(ct.Title, toCardTable) {
+			named = append(named, ct)
+		}
+	}
+	switch len(named) {
+	case 1:
+		return getCardTable(cmd, app, named[0].ID)
+	case 0:
+	default:
+		return nil, ambiguousCardTablesErrorFor("--to-card-table", named)
 	}
 	return nil, output.ErrUsageHint(
 		fmt.Sprintf("Card table '%s' not found in project %s", toCardTable, projectID),
@@ -2062,6 +2073,22 @@ func (f cardFiling) start(ctx context.Context, app *appctx.App) (*basecamp.Filin
 	return recordings.Move(ctx, f.card.ID, &basecamp.MoveRecordingRequest{FilingDestinationID: f.table.ID})
 }
 
+// copyStartError keeps a failed copy request from inviting a retry. A 5xx or a
+// dropped connection can arrive after Basecamp already started the copy, so
+// retrying would make a second copy. A rate limit is the one retryable failure
+// Basecamp answers before doing anything.
+func copyStartError(f cardFiling, err error) error {
+	e := output.AsError(err)
+	if f.kind != basecamp.FilingCopy || e == nil || !e.Retryable || e.Code == output.CodeRateLimit {
+		return err
+	}
+	unsure := *e
+	unsure.Retryable = false
+	unsure.Hint = fmt.Sprintf("Basecamp may have started the copy before this failed, and copying again makes another copy. Check first: basecamp cards list --in %d --card-table %d",
+		cardTableProjectID(f.table), f.table.ID)
+	return &unsure
+}
+
 // verbs returns the filing's verb as an infinitive, a progressive and a past.
 func (f cardFiling) verbs() (string, string, string) {
 	if f.kind == basecamp.FilingCopy {
@@ -2076,7 +2103,7 @@ func (f cardFiling) verbs() (string, string, string) {
 func runCardFiling(cmd *cobra.Command, app *appctx.App, f cardFiling) error {
 	filing, err := f.start(cmd.Context(), app)
 	if err != nil {
-		return convertSDKError(err)
+		return copyStartError(f, convertSDKError(err))
 	}
 
 	finished := func() bool {
