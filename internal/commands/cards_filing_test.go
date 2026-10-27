@@ -398,3 +398,43 @@ func TestCardsMoveToAForeignColumnPointsAtCrossProjectMoves(t *testing.T) {
 	assert.Contains(t, e.Hint, "basecamp cards move 456 --to-project <project>")
 	assert.Contains(t, e.Hint, "--to-wormhole")
 }
+
+func TestCardsFilingRefusesAProjectTheCardIsNotIn(t *testing.T) {
+	foreignURL := "https://3.basecamp.com/99999/buckets/888/card_tables/cards/456"
+	for name, args := range map[string][]string{
+		"move with --in":          {"move", "456", "--in", "888", "--to-project", "Dest"},
+		"move by a card URL":      {"move", foreignURL, "--to-project", "Dest"},
+		"copy with --in":          {"copy", "456", "--in", "888", "--to-project", "Dest"},
+		"copy onto its own table": {"copy", "456", "--in", "Bare"},
+		"copy by a card URL":      {"copy", foreignURL},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockFilingTransport{statuses: []string{"completed"}}
+			run := runFilingCommand(t, transport, args...)
+			e := requireFilingError(t, run)
+
+			assert.Equal(t, output.CodeUsage, e.Code)
+			assert.Contains(t, e.Message, "The card is in project 123")
+			assert.Contains(t, e.Message, "project 888")
+			assert.Empty(t, transport.posts)
+		})
+	}
+}
+
+func TestCardsFilingAcceptsTheCardsOwnProject(t *testing.T) {
+	ownURL := "https://3.basecamp.com/99999/buckets/123/card_tables/cards/456"
+	for name, args := range map[string][]string{
+		"move with --in":     {"move", "456", "--in", "Source", "--to-project", "Dest"},
+		"move by a card URL": {"move", ownURL, "--to-project", "Dest"},
+		"copy with --in":     {"copy", "456", "--in", "123"},
+		"copy by a card URL": {"copy", ownURL, "--to-project", "Dest"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockFilingTransport{statuses: []string{"completed"}}
+			run := runFilingCommand(t, transport, args...)
+			require.NoError(t, run.err)
+			assert.Len(t, transport.posts, 1)
+			assert.Equal(t, float64(4560), run.envelope.Data["id"])
+		})
+	}
+}

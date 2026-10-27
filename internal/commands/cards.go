@@ -44,7 +44,7 @@ func NewCardsCmd() *cobra.Command {
 		newCardsCreateCmd(&project, &cardTable),
 		newCardsUpdateCmd(),
 		newCardsMoveCmd(&project, &cardTable),
-		newCardsCopyCmd(&cardTable),
+		newCardsCopyCmd(&project, &cardTable),
 		newCardsDoneCmd(&project, &cardTable),
 		newCardsColumnsCmd(&project, &cardTable),
 		newCardsColumnCmd(&project, &cardTable),
@@ -1414,7 +1414,7 @@ Basecamp to finish the move and shows the card where it landed.`,
 			}
 
 			if filingSet {
-				return moveCardToCardTable(cmd, app, cardID, toProject, toCardTable)
+				return moveCardToCardTable(cmd, app, cardID, *project, urlProjectID, toProject, toCardTable)
 			}
 
 			// --to-wormhole: teleport across projects. Self-contained — it derives
@@ -1609,7 +1609,7 @@ func moveCardThroughWormhole(cmd *cobra.Command, app *appctx.App, cardID int64, 
 
 	// Reject an explicit project (flag or card URL) that contradicts the card's
 	// own project — the card's bucket is authoritative for a cross-project move.
-	if err := rejectWormholeProjectConflict(cmd, app, flagProject, urlProjectID, card.Bucket.ID); err != nil {
+	if err := rejectCardProjectConflict(cmd, app, flagProject, urlProjectID, card.Bucket.ID); err != nil {
 		return err
 	}
 
@@ -1702,11 +1702,12 @@ func wormholeMoveBreadcrumbs(sourceProjectID, cardTableID string) []output.Bread
 	}}
 }
 
-// rejectWormholeProjectConflict fails when an explicitly supplied project (the
+// rejectCardProjectConflict fails when an explicitly supplied project (the
 // --in/--project flag or a card URL's bucket) resolves to a different project
-// than the card's own bucket. Config/interactive defaults are not checked — only
-// explicit caller context can conflict.
-func rejectWormholeProjectConflict(cmd *cobra.Command, app *appctx.App, flagProject, urlProjectID string, cardBucketID int64) error {
+// than the card's own bucket, before a wormhole move, a move into another card
+// table, or a copy acts on the card. Config/interactive defaults are not
+// checked — only explicit caller context can conflict.
+func rejectCardProjectConflict(cmd *cobra.Command, app *appctx.App, flagProject, urlProjectID string, cardBucketID int64) error {
 	want := strconv.FormatInt(cardBucketID, 10)
 	check := func(value, label string) error {
 		if value == "" {
@@ -1719,7 +1720,7 @@ func rejectWormholeProjectConflict(cmd *cobra.Command, app *appctx.App, flagProj
 		if resolved != want {
 			return output.ErrUsageHint(
 				fmt.Sprintf("The card is in project %s, but %s points at project %s", want, label, resolved),
-				"Omit the conflicting project — a wormhole move always uses the card's own project",
+				"Omit the conflicting project — the card's own project is always used",
 			)
 		}
 		return nil
@@ -1730,7 +1731,7 @@ func rejectWormholeProjectConflict(cmd *cobra.Command, app *appctx.App, flagProj
 	// app.Flags.Project carries a root-level --project (e.g.
 	// `basecamp --project 999 cards move …`), which lands here rather than in the
 	// card command's own flag — check it too so a root-level conflict can't slip
-	// past into a destructive move.
+	// past into a move or copy.
 	if err := check(app.Flags.Project, "--project"); err != nil {
 		return err
 	}
@@ -1828,7 +1829,7 @@ func parseColumnID(ref string) (int64, error) {
 	return id, nil
 }
 
-func newCardsCopyCmd(cardTable *string) *cobra.Command {
+func newCardsCopyCmd(project, cardTable *string) *cobra.Command {
 	var toProject, toCardTable string
 	var includeComments bool
 
@@ -1868,7 +1869,7 @@ the new card.`,
 				return err
 			}
 
-			cardIDStr, err := extractID(args[0])
+			cardIDStr, urlProjectID, err := extractWithProject(args[0])
 			if err != nil {
 				return err
 			}
@@ -1881,14 +1882,17 @@ the new card.`,
 			if err != nil {
 				return convertSDKError(err)
 			}
+			if card.Bucket == nil {
+				return output.ErrNotFound("card", cardIDStr)
+			}
+			if err := rejectCardProjectConflict(cmd, app, *project, urlProjectID, card.Bucket.ID); err != nil {
+				return err
+			}
 
 			var table *basecamp.CardTable
 			if filingSet {
 				table, err = resolveFilingTable(cmd, app, toProject, toCardTable)
 			} else {
-				if card.Bucket == nil {
-					return output.ErrNotFound("card", cardIDStr)
-				}
 				_, table, err = resolveCardTableForCard(cmd, app, strconv.FormatInt(card.Bucket.ID, 10), "", card)
 			}
 			if err != nil {
@@ -1942,10 +1946,16 @@ func validateFilingFlags(sourceCardTable, toProject, toCardTable string) error {
 // moveCardToCardTable moves a card into another card table, usually in
 // another project, as the web's Move… dialog does. A move within the card's
 // own table is a column change, which --to makes directly.
-func moveCardToCardTable(cmd *cobra.Command, app *appctx.App, cardID int64, toProject, toCardTable string) error {
+func moveCardToCardTable(cmd *cobra.Command, app *appctx.App, cardID int64, flagProject, urlProjectID, toProject, toCardTable string) error {
 	card, err := app.Account().Cards().Get(cmd.Context(), cardID)
 	if err != nil {
 		return convertSDKError(err)
+	}
+	if card.Bucket == nil {
+		return output.ErrNotFound("card", strconv.FormatInt(cardID, 10))
+	}
+	if err := rejectCardProjectConflict(cmd, app, flagProject, urlProjectID, card.Bucket.ID); err != nil {
+		return err
 	}
 	table, err := resolveFilingTable(cmd, app, toProject, toCardTable)
 	if err != nil {
