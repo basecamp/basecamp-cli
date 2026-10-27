@@ -2413,6 +2413,7 @@ func newCardsColumnCmd(project, cardTable *string) *cobra.Command {
 		newCardsColumnCreateCmd(project, cardTable),
 		newCardsColumnUpdateCmd(),
 		newCardsColumnMoveCmd(project, cardTable),
+		newFilingCmd(columnFamily(), basecamp.FilingCopy, cardsColumnCopyHelp, false),
 		newCardsColumnWatchCmd(),
 		newCardsColumnUnwatchCmd(),
 		newCardsColumnOnHoldCmd(project),
@@ -2660,17 +2661,40 @@ You can pass either a column ID or a Basecamp URL:
 
 func newCardsColumnMoveCmd(project, cardTable *string) *cobra.Command {
 	var position int
+	var toProject, toCardTable string
 
 	cmd := &cobra.Command{
 		Use:   "move <id|url>",
-		Short: "Move a column",
-		Long: `Reposition a column within the card table.
+		Short: "Move a column within its card table or to another project's card table",
+		Long: `Reposition a column within its card table, or move it with its cards to a
+card table in another project.
 
-You can pass either a column ID or a Basecamp URL:
+--position repositions it within its card table. You can pass either a column
+ID or a Basecamp URL:
   basecamp cards column move 789 --position 2 --in my-project
-  basecamp cards column move https://3.basecamp.com/123/buckets/456/card_tables/columns/789 --position 2`,
+  basecamp cards column move https://3.basecamp.com/123/buckets/456/card_tables/columns/789 --position 2
+
+--to-project and --to-card-table move it, cards and all, onto another card
+table, as the web's Move… does. It lands under a new ID:
+  basecamp cards column move 789 --to-project "Marketing"
+  basecamp cards column move 789 --to-project "Marketing" --to-card-table "Roadmap"
+  basecamp cards column move 789 --to-card-table https://3.basecamp.com/123/buckets/999/card_tables/555
+Only the columns you add move this way; Basecamp refuses Triage, Not now, Done
+and On hold, which every card table has.`,
 		Args: cobra.ExactArgs(1),
+		Annotations: map[string]string{"agent_notes": "--position repositions the column within its card table and keeps its ID. " +
+			"--to-project/--to-card-table move the column with its cards onto another card table (usually in another project) under a NEW id: output data.id is the new id and data.source_id the old. " +
+			"--to-project alone needs a project with one card table, otherwise add --to-card-table. --position and --card-table (the column's own table) cannot be combined with them; the column's own table is refused. " +
+			"Triage, Not now, Done and On hold columns cannot be moved or copied. " +
+			"An in_progress error means Basecamp is still moving it: basecamp cards column show <old id> returns it once it lands."},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if familyFilingSet(cmd, columnFamily()) {
+				if cmd.Flags().Changed("position") || cmd.Flags().Changed("pos") {
+					return output.ErrUsageHint("--position repositions the column within its card table, and cannot be combined with --to-project or --to-card-table",
+						"Move it to the other card table first, then reposition it there with --position")
+				}
+				return runFamilyFiling(cmd, columnFamily(), basecamp.FilingMove, args, toProject, toCardTable, false)
+			}
 			app := appctx.FromContext(cmd.Context())
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -2733,7 +2757,13 @@ You can pass either a column ID or a Basecamp URL:
 
 			err = app.Account().CardColumns().Move(cmd.Context(), cardTableIDInt, req)
 			if err != nil {
-				return convertSDKError(err)
+				e := output.AsError(convertSDKError(err))
+				if e.Code == output.CodeNotFound {
+					notFound := *e
+					notFound.Hint = fmt.Sprintf("--position reorders a column within its own card table, which may not be card table %d. To move it to a card table in another project use: basecamp cards column move %d --to-card-table %d", cardTableIDInt, columnID, cardTableIDInt)
+					return &notFound
+				}
+				return e
 			}
 
 			return app.OK(map[string]any{
@@ -2746,8 +2776,89 @@ You can pass either a column ID or a Basecamp URL:
 
 	cmd.Flags().IntVar(&position, "position", 0, "Target position (1-indexed)")
 	cmd.Flags().IntVar(&position, "pos", 0, "Target position (alias for --position)")
+	addFamilyFilingFlags(cmd, columnFamily(), "Move", &toProject, &toCardTable)
 
 	return guardFilingFlags(cmd, "card-table")
+}
+
+var cardsColumnCopyHelp = filingHelp{
+	use:   "copy <id|url>",
+	short: "Copy a column with its cards to a card table in this or another project",
+	long: `Copy a column, with its cards, onto a card table, as the web's Copy… does.
+The original stays where it is.
+
+With no destination, the copy goes onto the column's own card table:
+  basecamp cards column copy 789
+  basecamp cards column copy 789 --to-project "Marketing"
+  basecamp cards column copy 789 --to-project "Marketing" --to-card-table "Roadmap" --include-comments
+
+Only the columns you add copy this way; Basecamp refuses Triage, Not now, Done
+and On hold. The command waits for Basecamp to make the copy and shows it.`,
+	notes: "Without --to-project/--to-card-table the copy goes onto the column's own card table. " +
+		"--to-project alone uses that project's only card table and fails as ambiguous when it has several; add --to-card-table. " +
+		"Output is the new column; its id is data.id and the original's is data.source_id. Triage, Not now, Done and On hold columns cannot be copied. " +
+		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy.",
+}
+
+// columnTypes are the columns a card table has: Kanban::Column is one a
+// person added, the rest are the ones every card table has.
+var columnTypes = []string{standardColumnType, "Kanban::Triage", "Kanban::NotNowColumn", "Kanban::DoneColumn", "Kanban::OnHold"}
+
+// columnFamily is how a card table's columns move and copy between card
+// tables, cards and all.
+func columnFamily() filingFamily {
+	return filingFamily{
+		noun:     "column",
+		group:    "basecamp cards column",
+		types:    columnTypes,
+		urlKinds: []string{"columns"},
+		urlShape: "…/card_tables/columns/<id>",
+		into: filingContainer{
+			dockName: "kanban_board",
+			noun:     "card table",
+			flag:     "--to-card-table",
+			urlKind:  "card_tables",
+			urlShape: "…/card_tables/<id>",
+			get: func(ctx context.Context, app *appctx.App, id int64) (filingTarget, error) {
+				table, err := app.Account().CardTables().Get(ctx, id)
+				if err != nil {
+					return filingTarget{}, err
+				}
+				return bucketTarget(table.ID, table.Title, table.Bucket), nil
+			},
+		},
+		ownFlags: []string{"card-table"},
+		get: func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
+			c, err := app.Account().CardColumns().Get(ctx, id)
+			if err != nil {
+				return nil, filingSource{}, err
+			}
+			return c, filingSource{id: c.ID, typ: c.Type, title: c.Title, bucket: c.Bucket, parent: c.Parent}, nil
+		},
+		check: func(src filingSource) error {
+			if src.typ == standardColumnType {
+				return nil
+			}
+			return output.ErrUsageHint(
+				fmt.Sprintf("Column #%d (%s) is one every card table has, which Basecamp does not move or copy", src.id, src.title),
+				"Only the columns you add move and copy; move its cards instead with: basecamp cards move <card> --to-project <project>",
+			)
+		},
+		sameHint: func(src filingSource, target filingTarget) string {
+			return fmt.Sprintf("Reposition it within that card table with: basecamp cards column move %d --position <n> --card-table %d --in %d", src.id, target.id, target.projectID)
+		},
+		landing: "The copy lands on that card table",
+		lookFor: func(t filingTarget) string {
+			return fmt.Sprintf("basecamp cards columns --in %d --card-table %d", t.projectID, t.id)
+		},
+		crumbs: func(id, projectID int64) []output.Breadcrumb {
+			return []output.Breadcrumb{{
+				Action:      "show",
+				Cmd:         fmt.Sprintf("basecamp cards column show %d --in %d", id, projectID),
+				Description: "View the column",
+			}}
+		},
+	}
 }
 
 func newCardsColumnWatchCmd() *cobra.Command {
