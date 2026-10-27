@@ -1162,6 +1162,12 @@ You can pass either a todo ID or a Basecamp URL:
 		if err != nil {
 			return convertSDKError(err)
 		}
+		// A moved to-do's old id redirects to the to-do at its new id, and the
+		// old id 404s for everything after this read.
+		if todo.ID != 0 && todo.ID != todoID {
+			todoID = todo.ID
+			todoIDStr = strconv.FormatInt(todoID, 10)
+		}
 		if todo.Steps, err = everySubtask(cmd.Context(), app, todoID, todo.Steps, todo.SubtasksCount); err != nil {
 			return err
 		}

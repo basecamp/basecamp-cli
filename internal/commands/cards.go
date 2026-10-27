@@ -813,6 +813,12 @@ You can pass either a card ID or a Basecamp URL:
 		if err != nil {
 			return convertSDKError(err)
 		}
+		// A moved card's old id redirects to the card at its new id, and the
+		// old id 404s for everything after this read.
+		if card.ID != 0 && card.ID != cardID {
+			cardID = card.ID
+			cardIDStr = strconv.FormatInt(cardID, 10)
+		}
 		if card.Steps, err = everySubtask(cmd.Context(), app, cardID, card.Steps, card.SubtasksCount); err != nil {
 			return err
 		}
@@ -3431,6 +3437,15 @@ func newCardsStepsCmd(project *string) *cobra.Command {
 			card, err := app.Account().Cards().Get(cmd.Context(), cardIDInt)
 			if err != nil {
 				return convertSDKError(err)
+			}
+			// A moved card's old id redirects to the card at its new id, in
+			// another project, and the old id 404s for everything after this.
+			if card.ID != 0 && card.ID != cardIDInt {
+				cardIDInt = card.ID
+				cardID = strconv.FormatInt(card.ID, 10)
+				if card.Bucket != nil {
+					resolvedProjectID = strconv.FormatInt(card.Bucket.ID, 10)
+				}
 			}
 			steps, err := everySubtask(cmd.Context(), app, cardIDInt, card.Steps, card.SubtasksCount)
 			if err != nil {
