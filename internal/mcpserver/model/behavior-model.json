@@ -51,6 +51,17 @@
         ]
       }
     },
+    "CopyRecording": {
+      "retry": {
+        "max": 2,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
     "CreateAnswer": {
       "retry": {
         "max": 2,
@@ -1311,6 +1322,18 @@
         "style": "link",
         "maxPageSize": 5
       },
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetFiling": {
+      "readonly": true,
       "retry": {
         "max": 3,
         "base_delay_ms": 1000,
@@ -2677,6 +2700,17 @@
       }
     },
     "MoveCardColumn": {
+      "retry": {
+        "max": 2,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "MoveRecording": {
       "retry": {
         "max": 2,
         "base_delay_ms": 1000,
