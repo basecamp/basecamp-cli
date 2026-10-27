@@ -347,7 +347,7 @@ func TestAction_Trash_RefusesACampfireLine(t *testing.T) {
 	for _, label := range []string{"Chat::Lines::Text", "Campfire::Line", ""} {
 		t.Run("label "+label, func(t *testing.T) {
 			transport := &actionTransport{routes: map[string]actionReply{
-				"GET /99999/recordings/111.json": {http.StatusOK, pingLineJSON},
+				"GET /99999/buckets/333/recordings/111.json": {http.StatusOK, pingLineJSON},
 			}}
 			session := actionSession(transport, Scope{AccountID: "99999", ProjectID: 333, RecordingID: 111, RecordingType: label})
 
@@ -373,13 +373,15 @@ func TestAction_Trash_WritesNothingWhenItCantTell(t *testing.T) {
 	assert.True(t, ok, "expected an ErrorMsg, got %T", msg)
 }
 
-// Anything else is trashed as before.
+// Anything else is trashed as before, a card included: its type is read
+// through its bucket, since bc3's bucket-less /recordings/<id>.json answers
+// 404 for one.
 func TestAction_Trash_OtherRecordingTrashes(t *testing.T) {
 	transport := &actionTransport{routes: map[string]actionReply{
-		"GET /99999/recordings/100.json":                {http.StatusOK, `{"id":100,"type":"Todo","title":"Ship it"}`},
+		"GET /99999/buckets/333/recordings/100.json":    {http.StatusOK, `{"id":100,"type":"Kanban::Card","title":"Ship it"}`},
 		"PUT /99999/recordings/100/status/trashed.json": {http.StatusNoContent, ""},
 	}}
-	session := actionSession(transport, Scope{AccountID: "99999", ProjectID: 333, RecordingID: 100, RecordingType: "Todo"})
+	session := actionSession(transport, Scope{AccountID: "99999", ProjectID: 333, RecordingID: 100, RecordingType: "Card"})
 
 	msg := trashAction(t).Execute(session)()
 

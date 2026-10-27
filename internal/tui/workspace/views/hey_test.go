@@ -120,8 +120,8 @@ func TestHey_Trash_TrashesARecording(t *testing.T) {
 // type, so a line would be deleted through its Campfire, read to find it.
 func TestHey_Trash_DeletesACampfireLine(t *testing.T) {
 	transport := &routeTransport{routes: map[string]stubReply{
-		"GET /99999/recordings/111.json":    {http.StatusOK, pingLineJSON},
-		"DELETE /99999/chats/222/lines/111": {http.StatusNoContent, ""},
+		"GET /99999/buckets/333/recordings/111.json": {http.StatusOK, pingLineJSON},
+		"DELETE /99999/chats/222/lines/111":          {http.StatusNoContent, ""},
 	}}
 	v := heyOverTransport(transport, []data.ActivityEntryInfo{
 		{ID: 111, Title: "Lunch?", Type: "Chat::Lines::Text", AccountID: "99999", ProjectID: 333, UpdatedAtTS: 100},

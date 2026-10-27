@@ -47,7 +47,7 @@ nothing. Requires edit access to the project.`,
 
 			recording, err := app.Account().Recordings().Spotlight(cmd.Context(), recordingID)
 			if err != nil {
-				if refusal := pingWriteRefusal(cmd, app, recordingID, err); refusal != nil {
+				if refusal := pingWriteRefusal(cmd, app, scope, recordingID, err); refusal != nil {
 					return refusal
 				}
 				return spotlightError(err)
@@ -100,7 +100,7 @@ nothing. Requires edit access to the project.`,
 			}
 
 			if err := app.Account().Recordings().Unspotlight(cmd.Context(), recordingID); err != nil {
-				if refusal := pingWriteRefusal(cmd, app, recordingID, err); refusal != nil {
+				if refusal := pingWriteRefusal(cmd, app, scope, recordingID, err); refusal != nil {
 					return refusal
 				}
 				return convertSDKError(err)

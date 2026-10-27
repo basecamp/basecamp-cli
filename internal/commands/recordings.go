@@ -332,6 +332,7 @@ A comment's URL (…#__recording_<id>) restores that comment.`,
 // recordings and comments, false for a typed noun such as cards, which acts
 // on the item the link names, as that noun's show does.
 func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, newStatus string, followComment bool) error {
+	scope := newFollowUpScope(app)
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
@@ -366,7 +367,7 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, ne
 	}
 
 	if err != nil {
-		if refusal := pingWriteRefusal(cmd, app, recordingID, err); refusal != nil {
+		if refusal := pingWriteRefusal(cmd, app, scope, recordingID, err); refusal != nil {
 			return refusal
 		}
 		return convertSDKError(err)
@@ -414,6 +415,7 @@ You can pass either an ID or a Basecamp URL:
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
@@ -442,7 +444,7 @@ You can pass either an ID or a Basecamp URL:
 
 			recording, err := app.Account().Recordings().SetClientVisibility(cmd.Context(), recordingID, isVisible)
 			if err != nil {
-				if refusal := pingWriteRefusal(cmd, app, recordingID, err); refusal != nil {
+				if refusal := pingWriteRefusal(cmd, app, scope, recordingID, err); refusal != nil {
 					return refusal
 				}
 				return convertSDKError(err)
@@ -482,10 +484,12 @@ You can pass either an ID or a Basecamp URL:
 // and bubbling a line up (bc3#14171): the lines change through their Campfire.
 // Its 403 is empty, the same one a person without permission gets, so on that
 // status the recording is read back once to tell the two apart, as
-// clientsForbiddenError does for a project. It returns nil when the error is
-// anything else, or the recording isn't in a Ping or can't be read, leaving
-// the caller's own conversion to stand.
-func pingWriteRefusal(cmd *cobra.Command, app *appctx.App, recordingID int64, err error) *output.Error {
+// clientsForbiddenError does for a project. The commands it names carry the
+// profile and account this one ran under, from scope, read before the account
+// was resolved. It returns nil when the error is anything else, or the
+// recording isn't in a Ping or can't be read, leaving the caller's own
+// conversion to stand.
+func pingWriteRefusal(cmd *cobra.Command, app *appctx.App, scope followUpScope, recordingID int64, err error) *output.Error {
 	var sdkErr *basecamp.Error
 	if !errors.As(err, &sdkErr) || sdkErr.Code != basecamp.CodeForbidden {
 		return nil
@@ -495,17 +499,20 @@ func pingWriteRefusal(cmd *cobra.Command, app *appctx.App, recordingID int64, er
 		return nil
 	}
 
+	scopeArgs := scope.args(app.Config.AccountID)
 	refusal := &output.Error{
-		Code:       output.CodeForbidden,
-		Message:    "Basecamp doesn't change a Ping's Campfire through this command",
-		Hint:       fmt.Sprintf("In a Ping you change only your own subscription: basecamp subscriptions subscribe %d or basecamp subscriptions unsubscribe %d", recordingID, recordingID),
+		Code:    output.CodeForbidden,
+		Message: "Basecamp doesn't change a Ping's Campfire through this command",
+		Hint: fmt.Sprintf("In a Ping you change only your own subscription: basecamp subscriptions subscribe %d%s or basecamp subscriptions unsubscribe %d%s",
+			recordingID, scopeArgs, recordingID, scopeArgs),
 		HTTPStatus: sdkErr.HTTPStatus,
 		Cause:      sdkErr,
 	}
 	if strings.HasPrefix(recording.Type, "Chat::Lines::") && recording.Parent != nil {
 		refusal.Message = "Basecamp doesn't change a line in a Ping through this command"
 		refusal.Hint = "A Ping's lines change only through its Campfire. To delete this one: " +
-			deleteLineCmd(cmd, strconv.FormatInt(recordingID, 10), strconv.FormatInt(recording.Parent.ID, 10), strconv.FormatInt(recording.Bucket.ID, 10))
+			deleteLineCmd(cmd, strconv.FormatInt(recordingID, 10), strconv.FormatInt(recording.Parent.ID, 10), strconv.FormatInt(recording.Bucket.ID, 10)) +
+			scopeArgs
 	}
 	return refusal
 }

@@ -993,8 +993,9 @@ func IsCampfireLine(recordingType string) bool {
 // ("Todo", "Campfire::Line"): a caller with only a label reads the type with
 // RecordingKind first. Without one nothing is written, since the confirmation
 // the caller showed can't have said which of the two would happen. campfireID
-// is a line's Campfire, read from the line when the caller passes 0.
-func (h *Hub) RemoveRecording(ctx context.Context, accountID string, recordingID int64, recordingType string, campfireID int64) (deleted bool, err error) {
+// is a line's Campfire, read from the line in projectID, its bucket, when the
+// caller passes 0.
+func (h *Hub) RemoveRecording(ctx context.Context, accountID string, projectID, recordingID int64, recordingType string, campfireID int64) (deleted bool, err error) {
 	client := h.multi.ClientFor(accountID)
 	if client == nil {
 		return false, fmt.Errorf("no client for account %s", accountID)
@@ -1006,7 +1007,7 @@ func (h *Hub) RemoveRecording(ctx context.Context, accountID string, recordingID
 		return false, client.Recordings().Trash(ctx, recordingID)
 	}
 	if campfireID == 0 {
-		if _, campfireID, err = readRecordingKind(ctx, client, recordingID); err != nil {
+		if _, campfireID, err = readRecordingKind(ctx, client, projectID, recordingID); err != nil {
 			return false, err
 		}
 	}
@@ -1019,17 +1020,19 @@ func (h *Hub) RemoveRecording(ctx context.Context, accountID string, recordingID
 // RecordingKind reads a recording's API type and its parent's ID, which for a
 // Campfire line is its Campfire, for a caller that knows the recording only by
 // a view's label.
-func (h *Hub) RecordingKind(ctx context.Context, accountID string, recordingID int64) (recordingType string, parentID int64, err error) {
+func (h *Hub) RecordingKind(ctx context.Context, accountID string, projectID, recordingID int64) (recordingType string, parentID int64, err error) {
 	client := h.multi.ClientFor(accountID)
 	if client == nil {
 		return "", 0, fmt.Errorf("no client for account %s", accountID)
 	}
-	return readRecordingKind(ctx, client, recordingID)
+	return readRecordingKind(ctx, client, projectID, recordingID)
 }
 
-// readRecordingKind reads a recording's API type and its parent's ID.
-func readRecordingKind(ctx context.Context, client *basecamp.AccountClient, recordingID int64) (recordingType string, parentID int64, err error) {
-	resp, err := client.Get(ctx, fmt.Sprintf("/recordings/%d.json", recordingID))
+// readRecordingKind reads a recording's API type and its parent's ID, through
+// its bucket: bc3 answers the bucket-less /recordings/<id>.json with a 404 for
+// some types, such as Kanban::Card.
+func readRecordingKind(ctx context.Context, client *basecamp.AccountClient, projectID, recordingID int64) (recordingType string, parentID int64, err error) {
+	resp, err := client.Get(ctx, fmt.Sprintf("/buckets/%d/recordings/%d.json", projectID, recordingID))
 	if err != nil {
 		return "", 0, err
 	}

@@ -342,14 +342,17 @@ func runPingGatedWrite(t *testing.T, w pingGatedWrite, readStatus int, readBody 
 }
 
 // runPingGatedWriteIn is runPingGatedWrite with the output in format, and
-// returns the app it ran in too.
-func runPingGatedWriteIn(t *testing.T, format output.Format, w pingGatedWrite, readStatus int, readBody string) (*output.Error, *appctx.App) {
+// returns the app it ran in too. setup, when given, adjusts the app first.
+func runPingGatedWriteIn(t *testing.T, format output.Format, w pingGatedWrite, readStatus int, readBody string, setup ...func(*appctx.App)) (*output.Error, *appctx.App) {
 	t.Helper()
 	app, transport := setupRecordingTestApp(t,
 		stubRoute{method: w.method, path: w.path, status: http.StatusForbidden},
 		stubRoute{method: http.MethodGet, path: "/99999/recordings/111.json", status: readStatus, body: readBody},
 	)
 	app.Output = output.New(output.Options{Format: format, Writer: &bytes.Buffer{}})
+	for _, adjust := range setup {
+		adjust(app)
+	}
 
 	err := executeRecordingCommand(w.cmd(), app, w.args...)
 
@@ -393,6 +396,28 @@ func TestRecordingWritesExplainAPingLineToAPerson(t *testing.T) {
 	e, _ := runPingGatedWriteIn(t, output.FormatStyled, pingGatedWrites[0], http.StatusOK, pingLine)
 
 	assert.Equal(t, "A Ping's lines change only through its Campfire. To delete this one: basecamp chat delete 111 --room 222 --in 333", e.Hint)
+}
+
+// The commands a refusal names carry the profile and the account it ran under,
+// so pasting one into a fresh shell acts on the same account.
+func TestRecordingWritesNameTheirScopeInAPingRefusal(t *testing.T) {
+	const campfire = `{"id":111,"type":"Chat::Transcript","bucket":{"id":333,"type":"Circle"}}`
+	scoped := func(app *appctx.App) {
+		app.Config.ActiveProfile = "work"
+		app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
+	}
+	for _, w := range pingGatedWrites {
+		t.Run(w.name, func(t *testing.T) {
+			line, _ := runPingGatedWriteIn(t, output.FormatJSON, w, http.StatusOK, pingLine, scoped)
+			assert.Equal(t, "A Ping's lines change only through its Campfire. To delete this one: "+
+				"basecamp chat delete 111 --room 222 --in 333 --force --profile work --account 99999", line.Hint)
+
+			ping, _ := runPingGatedWriteIn(t, output.FormatJSON, w, http.StatusOK, campfire, scoped)
+			assert.Equal(t, "In a Ping you change only your own subscription: "+
+				"basecamp subscriptions subscribe 111 --profile work --account 99999 or "+
+				"basecamp subscriptions unsubscribe 111 --profile work --account 99999", ping.Hint)
+		})
+	}
 }
 
 // A 403 on a Ping's Campfire says that only your own subscription changes there.

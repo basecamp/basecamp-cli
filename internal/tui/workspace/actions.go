@@ -378,7 +378,7 @@ func DefaultActions() *Registry {
 				// Campfire line. A line can't be trashed, only deleted for
 				// good, which the palette doesn't do unasked; t in the line's
 				// view asks first.
-				recordingType, _, err := hub.RecordingKind(ctx, scope.AccountID, scope.RecordingID)
+				recordingType, _, err := hub.RecordingKind(ctx, scope.AccountID, scope.ProjectID, scope.RecordingID)
 				if err != nil {
 					return err
 				}

@@ -724,7 +724,7 @@ func (v *Detail) trashRecording() tea.Cmd {
 	ctx := hub.ProjectContext()
 	recordingID, apiType, parentID := v.recordingID, v.data.apiType, v.data.parentID
 	return func() tea.Msg {
-		deleted, err := hub.RemoveRecording(ctx, scope.AccountID, recordingID, apiType, parentID)
+		deleted, err := hub.RemoveRecording(ctx, scope.AccountID, scope.ProjectID, recordingID, apiType, parentID)
 		return trashResultMsg{deleted: deleted, err: err}
 	}
 }

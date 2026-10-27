@@ -406,7 +406,7 @@ func (v *Hey) trashSelected() tea.Cmd {
 		return func() tea.Msg {
 			// meta.Type is the API's type, so a Campfire line would be
 			// deleted through its Campfire rather than trashed.
-			deleted, err := hub.RemoveRecording(ctx, meta.AccountID, meta.ID, meta.Type, 0)
+			deleted, err := hub.RemoveRecording(ctx, meta.AccountID, meta.ProjectID, meta.ID, meta.Type, 0)
 			return heyTrashResultMsg{itemID: itemID, deleted: deleted, err: err}
 		}
 	}

@@ -17,7 +17,7 @@ const (
 	lineInPing = `{"id":111,"type":"Chat::Lines::Text","parent":{"id":222,"type":"Chat::Transcript"},"bucket":{"id":333,"type":"Circle"}}`
 	deleteLine = "DELETE /99999/chats/222/lines/111"
 	trashLine  = "PUT /99999/recordings/111/status/trashed.json"
-	readLine   = "GET /99999/recordings/111.json"
+	readLine   = "GET /99999/buckets/333/recordings/111.json"
 )
 
 type removeReply struct {
@@ -68,7 +68,7 @@ func removeHub(routes map[string]removeReply) (*Hub, *removeTransport) {
 func TestRemoveRecording_KnownLineDeletes(t *testing.T) {
 	h, transport := removeHub(map[string]removeReply{deleteLine: {http.StatusNoContent, ""}})
 
-	deleted, err := h.RemoveRecording(context.Background(), "99999", 111, "Chat::Lines::RichText", 222)
+	deleted, err := h.RemoveRecording(context.Background(), "99999", 333, 111, "Chat::Lines::RichText", 222)
 
 	require.NoError(t, err)
 	assert.True(t, deleted)
@@ -83,7 +83,7 @@ func TestRemoveRecording_ReadsALinesCampfire(t *testing.T) {
 		deleteLine: {http.StatusNoContent, ""},
 	})
 
-	deleted, err := h.RemoveRecording(context.Background(), "99999", 111, "Chat::Lines::Text", 0)
+	deleted, err := h.RemoveRecording(context.Background(), "99999", 333, 111, "Chat::Lines::Text", 0)
 
 	require.NoError(t, err)
 	assert.True(t, deleted)
@@ -95,7 +95,7 @@ func TestRemoveRecording_OtherRecordingsTrash(t *testing.T) {
 	const trashTodo = "PUT /99999/recordings/100/status/trashed.json"
 	h, transport := removeHub(map[string]removeReply{trashTodo: {http.StatusNoContent, ""}})
 
-	deleted, err := h.RemoveRecording(context.Background(), "99999", 100, "Todo", 0)
+	deleted, err := h.RemoveRecording(context.Background(), "99999", 333, 100, "Todo", 0)
 
 	require.NoError(t, err)
 	assert.False(t, deleted)
@@ -110,7 +110,7 @@ func TestRemoveRecording_WritesNothingWithoutAType(t *testing.T) {
 		trashLine:  {http.StatusNoContent, ""},
 	})
 
-	_, err := h.RemoveRecording(context.Background(), "99999", 111, "", 0)
+	_, err := h.RemoveRecording(context.Background(), "99999", 333, 111, "", 0)
 
 	require.Error(t, err)
 	assert.Empty(t, transport.recorded())
@@ -135,7 +135,7 @@ func TestRemoveRecording_WritesNothingWithoutALinesCampfire(t *testing.T) {
 				trashLine:  {http.StatusNoContent, ""},
 			})
 
-			_, err := h.RemoveRecording(context.Background(), "99999", 111, "Chat::Lines::Text", 0)
+			_, err := h.RemoveRecording(context.Background(), "99999", 333, 111, "Chat::Lines::Text", 0)
 
 			require.Error(t, err)
 			assert.Equal(t, []string{readLine}, transport.recorded())
@@ -148,7 +148,7 @@ func TestRemoveRecording_WritesNothingWithoutALinesCampfire(t *testing.T) {
 func TestRecordingKind(t *testing.T) {
 	h, _ := removeHub(map[string]removeReply{readLine: {http.StatusOK, lineInPing}})
 
-	recordingType, parentID, err := h.RecordingKind(context.Background(), "99999", 111)
+	recordingType, parentID, err := h.RecordingKind(context.Background(), "99999", 333, 111)
 
 	require.NoError(t, err)
 	assert.Equal(t, "Chat::Lines::Text", recordingType)

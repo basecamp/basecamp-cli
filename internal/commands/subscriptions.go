@@ -244,6 +244,7 @@ You can pass either an ID or a Basecamp URL:
 
 func runSubscriptionsUpdate(cmd *cobra.Command, args []string, peopleIDs, mode string) error {
 	app := appctx.FromContext(cmd.Context())
+	scope := newFollowUpScope(app)
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
@@ -293,7 +294,7 @@ func runSubscriptionsUpdate(cmd *cobra.Command, args []string, peopleIDs, mode s
 
 	subscription, err := app.Account().Subscriptions().Update(cmd.Context(), recordingID, req)
 	if err != nil {
-		if refusal := pingWriteRefusal(cmd, app, recordingID, err); refusal != nil {
+		if refusal := pingWriteRefusal(cmd, app, scope, recordingID, err); refusal != nil {
 			return refusal
 		}
 		return convertSDKError(err)
