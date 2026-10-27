@@ -311,3 +311,45 @@ func TestWithSourceIDKeepsLargeIDsExact(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"id":9007199254740993,"source_id":7}`, string(raw))
 }
+
+// A copy keeps its source's status, so a copy that may have landed is looked
+// for among recordings in that status, every page; a type the recordings
+// listing does not serve is looked for in its own listing, every page, or in
+// the timeline when that listing leaves its status out.
+func TestCopyRecoveryListsWhereTheCopyShows(t *testing.T) {
+	for name, tc := range map[string]struct {
+		transport func() *familyTransport
+		cmd       func() *cobra.Command
+		source    string
+		archived  bool
+		want      string
+	}{
+		"a message":                     {messagesTransport, NewMessagesCmd, "/messages/456", false, "basecamp recordings list Message --in 999 --status active --sort created_at --direction desc --all"},
+		"an archived message":           {messagesTransport, NewMessagesCmd, "/messages/456", true, "basecamp recordings list Message --in 999 --status archived --sort created_at --direction desc --all"},
+		"an event":                      {scheduleFilingTransport, NewScheduleCmd, "/schedule_entries/456", false, "basecamp recordings list Schedule::Entry --in 999 --status active --sort created_at --direction desc --all"},
+		"an archived event":             {scheduleFilingTransport, NewScheduleCmd, "/schedule_entries/456", true, "basecamp recordings list Schedule::Entry --in 999 --status archived --sort created_at --direction desc --all"},
+		"a check-in question":           {checkinsFilingTransport, NewCheckinsCmd, "/questions/456", false, "basecamp checkins questions --in 999 --questionnaire 900 --all"},
+		"an archived check-in question": {checkinsFilingTransport, NewCheckinsCmd, "/questions/456", true, "basecamp timeline --in 999 --all"},
+		"an email forward":              {forwardsFilingTransport, NewForwardsCmd, "/inbox_forwards/456", false, "basecamp forwards list --in 999 --inbox 900 --all"},
+		"an archived email forward":     {forwardsFilingTransport, NewForwardsCmd, "/inbox_forwards/456", true, "basecamp timeline --in 999 --all"},
+		"a card table column":           {columnsTransport, NewCardsCmd, "/card_tables/columns/456", false, "basecamp cards columns --in 999 --card-table 900"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := tc.transport()
+			if tc.archived {
+				transport.gets[tc.source] = strings.Replace(transport.gets[tc.source], `"id":456,`, `"id":456,"status":"archived",`, 1)
+			}
+			transport.stuck = map[int64]bool{456: true}
+			args := []string{"copy", "456", "--to-project", "Dest"}
+			switch {
+			case strings.Contains(name, "check-in"):
+				args = append([]string{"question"}, args...)
+			case strings.Contains(name, "column"):
+				args = append([]string{"column"}, args...)
+			}
+			e := runFamilyCommand(t, transport, tc.cmd(), args...).failure(t)
+			assert.Equal(t, output.CodeInProgress, e.Code)
+			assert.Contains(t, e.Hint, tc.want)
+		})
+	}
+}

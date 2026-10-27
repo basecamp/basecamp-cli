@@ -1716,11 +1716,14 @@ func questionFamily() filingFamily {
 			if err != nil {
 				return nil, filingSource{}, err
 			}
-			return q, filingSource{id: q.ID, typ: q.Type, title: q.Title, bucket: q.Bucket, parent: q.Parent}, nil
+			return q, filingSource{id: q.ID, typ: q.Type, status: q.Status, title: q.Title, bucket: q.Bucket, parent: q.Parent}, nil
 		},
 		landing: "The copy lands in that Automatic Check-ins",
-		lookFor: func(t filingTarget) string {
-			return fmt.Sprintf("basecamp checkins questions --in %d --questionnaire %d", t.projectID, t.id)
+		lookFor: func(src filingSource, t filingTarget) string {
+			if src.status == "archived" {
+				return copiesInTimeline(t.projectID)
+			}
+			return fmt.Sprintf("basecamp checkins questions --in %d --questionnaire %d --all", t.projectID, t.id)
 		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
 			return []output.Breadcrumb{{

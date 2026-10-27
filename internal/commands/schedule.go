@@ -999,8 +999,8 @@ func scheduleEntryFamily() filingFamily {
 		ownFlags: []string{"schedule"},
 		get:      getScheduleEntryForFiling,
 		landing:  "The copy lands on that schedule",
-		lookFor: func(t filingTarget) string {
-			return fmt.Sprintf("basecamp schedule entries --in %d --schedule %d", t.projectID, t.id)
+		lookFor: func(src filingSource, t filingTarget) string {
+			return recordingCopyLookFor("Schedule::Entry", t.projectID, src.status)
 		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
 			return []output.Breadcrumb{{
@@ -1025,7 +1025,7 @@ func getScheduleEntryForFiling(ctx context.Context, app *appctx.App, id int64) (
 	if err != nil {
 		return nil, filingSource{}, err
 	}
-	src := filingSource{id: e.ID, typ: e.Type, title: e.Summary, bucket: e.Bucket, parent: e.Parent}
+	src := filingSource{id: e.ID, typ: e.Type, status: e.Status, title: e.Summary, bucket: e.Bucket, parent: e.Parent}
 	if e.Type != occurrenceType || e.Parent == nil {
 		return e, src, nil
 	}

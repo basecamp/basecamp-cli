@@ -1135,11 +1135,11 @@ func messageFamily() filingFamily {
 			if err != nil {
 				return nil, filingSource{}, err
 			}
-			return m, filingSource{id: m.ID, typ: m.Type, title: m.Subject, bucket: m.Bucket, parent: m.Parent}, nil
+			return m, filingSource{id: m.ID, typ: m.Type, status: m.Status, title: m.Subject, bucket: m.Bucket, parent: m.Parent}, nil
 		},
 		landing: "The copy lands on that message board",
-		lookFor: func(t filingTarget) string {
-			return fmt.Sprintf("basecamp messages list --in %d --message-board %d", t.projectID, t.id)
+		lookFor: func(src filingSource, t filingTarget) string {
+			return recordingCopyLookFor("Message", t.projectID, src.status)
 		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
 			return []output.Breadcrumb{{

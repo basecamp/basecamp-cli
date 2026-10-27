@@ -703,11 +703,14 @@ func forwardFamily() filingFamily {
 			if err != nil {
 				return nil, filingSource{}, err
 			}
-			return f, filingSource{id: f.ID, typ: f.Type, title: f.Subject, bucket: f.Bucket, parent: f.Parent}, nil
+			return f, filingSource{id: f.ID, typ: f.Type, status: f.Status, title: f.Subject, bucket: f.Bucket, parent: f.Parent}, nil
 		},
 		landing: "The copy lands in that Email Forwards",
-		lookFor: func(t filingTarget) string {
-			return fmt.Sprintf("basecamp forwards list --in %d --inbox %d", t.projectID, t.id)
+		lookFor: func(src filingSource, t filingTarget) string {
+			if src.status == "archived" {
+				return copiesInTimeline(t.projectID)
+			}
+			return fmt.Sprintf("basecamp forwards list --in %d --inbox %d --all", t.projectID, t.id)
 		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
 			return []output.Breadcrumb{{

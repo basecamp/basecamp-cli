@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -185,4 +186,62 @@ func TestFilesRefuseAnItemNamedTwiceBeforeFilingAny(t *testing.T) {
 			assert.Empty(t, transport.posts, "nothing is filed")
 		})
 	}
+}
+
+func TestFilesShowFindsCloudFilesAndGoogleDocuments(t *testing.T) {
+	for name, tc := range map[string]struct {
+		id, typ string
+	}{
+		"a cloud file":        {"4580", "CloudFile"},
+		"a Google document":   {"4590", "GoogleDocument"},
+		"a typed cloud file":  {"4580", "CloudFile"},
+		"a typed Google file": {"4590", "GoogleDocument"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := filesFilingTransport()
+			transport.gets["/google_documents/4590"] = `{"id":4590,"type":"GoogleDocument","title":"Roadmap","bucket":{"id":999,"name":"Dest"},"parent":{"id":900,"title":"Docs & Files","type":"Vault"}}`
+			args := []string{"show", tc.id, "--in", "Dest"}
+			if strings.HasPrefix(name, "a typed") {
+				args = append(args, "--type", map[string]string{"CloudFile": "cloud_file", "GoogleDocument": "google_document"}[tc.typ])
+			}
+			run := runFamilyCommand(t, transport, NewFilesCmd(), args...)
+			require.NoError(t, run.err)
+			assert.Equal(t, tc.typ, run.data(t)["type"])
+		})
+	}
+}
+
+func TestFilesCopyOfACloudFileFollowsUpWithCommandsThatFindIt(t *testing.T) {
+	transport := filesFilingTransport()
+	run := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "458", "--to-project", "Dest")
+	require.NoError(t, run.err)
+	require.NotEmpty(t, run.envelope.Breadcrumbs)
+	show := strings.Fields(run.envelope.Breadcrumbs[0].Cmd)[1:]
+	shown := runFamilyCommand(t, transport, NewFilesCmd(), show[1:]...)
+	require.NoError(t, shown.err, "the breadcrumb %v finds the copy", show)
+	assert.Equal(t, float64(4580), shown.data(t)["id"])
+
+	transport.stuck = map[int64]bool{458: true}
+	e := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "458", "--to-project", "Dest").failure(t)
+	assert.Equal(t, output.CodeInProgress, e.Code)
+	assert.Contains(t, e.Hint, "basecamp timeline --in 999 --all", "files list does not list cloud files, so the check is the timeline")
+	assert.NotContains(t, e.Hint, "files list")
+}
+
+func TestFilesCopyRecoveryListsArchivedItemsWhereTheyShow(t *testing.T) {
+	transport := filesFilingTransport()
+	transport.gets["/documents/456"] = strings.Replace(transport.gets["/documents/456"], `"type":"Document"`, `"type":"Document","status":"archived"`, 1)
+	transport.stuck = map[int64]bool{456: true}
+	e := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "456", "--to-project", "Dest").failure(t)
+	assert.Contains(t, e.Hint, "basecamp recordings list Document --in 999 --status archived --sort created_at --direction desc --all")
+}
+
+func TestFilesCopyOfAGoogleDocumentPointsAtItsFolderInBasecamp(t *testing.T) {
+	transport := filesFilingTransport()
+	transport.gets["/google_documents/459"] = `{"id":459,"type":"GoogleDocument","title":"Roadmap","bucket":{"id":123,"name":"Source"},"parent":{"id":501,"title":"Specs","type":"Vault"}}`
+	transport.stuck = map[int64]bool{459: true}
+	e := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "459", "--to-project", "Dest", "--to-folder", "Contracts").failure(t)
+	assert.Equal(t, output.CodeInProgress, e.Code)
+	assert.Contains(t, e.Hint, "basecamp files show 950 --in 999, and open its app_url in Basecamp")
+	assert.NotContains(t, e.Hint, "timeline", "the timeline never shows a Google document")
 }

@@ -210,6 +210,7 @@ func formatDockTools(tools []DockTool) string {
 type filingSource struct {
 	id     int64
 	typ    string
+	status string
 	title  string
 	bucket *basecamp.Bucket
 	parent *basecamp.Parent
@@ -245,8 +246,10 @@ type filingFamily struct {
 	sameHint func(src filingSource, target filingTarget) string
 	// landing says where in the container a copy lands.
 	landing string
-	// lookFor lists the container a filing goes into.
-	lookFor func(target filingTarget) string
+	// lookFor lists where a copy of src lands in target, so one that may have
+	// started is checked for before copying again. A copy keeps its source's
+	// status, so the listing shows recordings in that status, every page.
+	lookFor func(src filingSource, target filingTarget) string
 	// crumbs are the follow-ups for a filed recording.
 	crumbs func(id, projectID int64) []output.Breadcrumb
 }
@@ -456,7 +459,7 @@ func (fam filingFamily) filing(app *appctx.App, kind basecamp.FilingType, src fi
 		includeComments: includeComments,
 		destination:     target.describe(fam.into.noun),
 		showCmd:         fam.showCmd(),
-		lookFor:         fam.lookFor(target),
+		lookFor:         fam.lookFor(src, target),
 		landing:         fam.landing,
 		match:           copyMatch(src.id, src.title, target.title, target.id),
 		read: func(ctx context.Context, id int64) (filedRecording, error) {
@@ -477,6 +480,13 @@ func (fam filingFamily) filing(app *appctx.App, kind basecamp.FilingType, src fi
 			}, nil
 		},
 	}
+}
+
+// copiesInTimeline finds a copy of a recording the recordings listing does
+// not serve, in any status: its project's timeline, every page, where the
+// copy shows as reposted. A Google document never shows there.
+func copiesInTimeline(projectID int64) string {
+	return fmt.Sprintf("basecamp timeline --in %d --all", projectID)
 }
 
 // withSourceID adds source_id, the recording a filing came from, to a filed

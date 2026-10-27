@@ -1429,7 +1429,8 @@ func newFilesShowCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id|url>",
 		Short: "Show item details",
-		Long: `Show details for a vault, document, or upload.
+		Long: `Show details for a folder (vault), document, upload, cloud file or Google
+document.
 
 You can pass either an item ID or a Basecamp URL:
   basecamp files show 789 --in my-project
@@ -1510,6 +1511,14 @@ You can pass either an item ID or a Basecamp URL:
 							result = doc
 							detectedType = "document"
 							title = doc.Title
+						} else if cloud, err := app.Account().CloudFiles().Get(cmd.Context(), itemID); err == nil {
+							result = cloud
+							detectedType = "cloud_file"
+							title = cloud.Title
+						} else if google, err := app.Account().GoogleDocuments().Get(cmd.Context(), itemID); err == nil {
+							result = google
+							detectedType = "google_document"
+							title = google.Title
 						}
 					}
 				}
@@ -1550,10 +1559,26 @@ You can pass either an item ID or a Basecamp URL:
 					result = doc
 					detectedType = "document"
 					title = doc.Title
+				case "cloud_file", "cloud":
+					cloud, err := app.Account().CloudFiles().Get(cmd.Context(), itemID)
+					if err != nil {
+						return convertSDKError(err)
+					}
+					result = cloud
+					detectedType = "cloud_file"
+					title = cloud.Title
+				case "google_document", "google_doc", "gdoc":
+					google, err := app.Account().GoogleDocuments().Get(cmd.Context(), itemID)
+					if err != nil {
+						return convertSDKError(err)
+					}
+					result = google
+					detectedType = "google_document"
+					title = google.Title
 				default:
 					return output.ErrUsageHint(
 						fmt.Sprintf("Invalid type: %s", itemType),
-						"Use: vault, upload, or document",
+						"Use: vault, upload, document, cloud_file, or google_document",
 					)
 				}
 			}
@@ -1564,12 +1589,13 @@ You can pass either an item ID or a Basecamp URL:
 
 			summary := fmt.Sprintf("%s: %s", detectedType, title)
 
-			breadcrumbs := []output.Breadcrumb{
-				{
+			var breadcrumbs []output.Breadcrumb
+			if detectedType != "cloud_file" && detectedType != "google_document" {
+				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 					Action:      "update",
 					Cmd:         fmt.Sprintf("basecamp files update %s --in %s", itemIDStr, resolvedProjectID),
 					Description: "Update item",
-				},
+				})
 			}
 
 			if detectedType == "vault" {
@@ -1619,7 +1645,7 @@ You can pass either an item ID or a Basecamp URL:
 		},
 	}
 
-	cmd.Flags().StringVarP(&itemType, "type", "t", "", "Item type (vault, upload, document)")
+	cmd.Flags().StringVarP(&itemType, "type", "t", "", "Item type (vault, upload, document, cloud_file, google_document)")
 	dlDir = addDownloadAttachmentsFlag(cmd)
 	cf = addCommentFlags(cmd, false)
 
@@ -2312,7 +2338,7 @@ Basecamp to finish and shows each item where it landed.`,
 			"--to-project/--to-folder move into another project's Docs & Files under a NEW id: output data.id is the new id and data.source_id the old (several IDs: a list). Write to the new id; the old id stops taking changes, and reading it follows the move. " +
 			"--to-project alone lands at the top of that project's Docs & Files; --to-folder <id|url> picks any folder, nested ones included, and --to-folder <title> with --to-project a top-level folder. " +
 			"--to/--position cannot be combined with --to-project/--to-folder. A --to folder in another project, or a --to-folder in the item's own project, is refused with the command that fits. " +
-			"Several IDs move one by one; if any fails the command exits non-zero naming what each became. " +
+			"Several IDs move one by one, and naming one item twice (even by its old and new id) is refused before any moves. If any is not moved the command exits non-zero and reports each: run it again only for the ones it says Basecamp refused, never for one it reports moved or not settled. " +
 			"An in_progress error means Basecamp is still moving it: basecamp files show <old id> returns it once it lands."},
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -2825,7 +2851,7 @@ background; the command waits and shows the new items.`,
 	notes: "Without --to-project/--to-folder each copy goes into its original's own folder. " +
 		"--to-project <project> (ID or name) copies into the top of that project's Docs & Files; --to-folder <id|url> picks any folder, nested ones included, and --to-folder <title> with --to-project a top-level folder. " +
 		"Output is the new item (several: a list); data.id is the copy and data.source_id the original. " +
-		"Several IDs are copied one by one; if any fails the command exits non-zero naming what each became, so copy again only the ones that failed. " +
+		"Several IDs are copied one by one, and naming one item twice (even by its old and new id) is refused before any is copied. If any is not copied the command exits non-zero and reports each: copy again only the ones it says Basecamp refused, never one it reports copied, not read back or not settled, since that makes another copy. " +
 		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy. " +
 		"--vault/--folder name a folder to list and are refused here; use --to-folder.",
 }
@@ -2855,35 +2881,35 @@ var fileKinds = []struct {
 		if err != nil {
 			return nil, filingSource{}, err
 		}
-		return d, filingSource{id: d.ID, typ: d.Type, title: d.Title, bucket: d.Bucket, parent: d.Parent}, nil
+		return d, filingSource{id: d.ID, typ: d.Type, status: d.Status, title: d.Title, bucket: d.Bucket, parent: d.Parent}, nil
 	}},
 	{"Upload", "uploads", func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
 		u, err := app.Account().Uploads().Get(ctx, id)
 		if err != nil {
 			return nil, filingSource{}, err
 		}
-		return u, filingSource{id: u.ID, typ: u.Type, title: cmp.Or(u.Filename, u.Title), bucket: u.Bucket, parent: u.Parent}, nil
+		return u, filingSource{id: u.ID, typ: u.Type, status: u.Status, title: cmp.Or(u.Filename, u.Title), bucket: u.Bucket, parent: u.Parent}, nil
 	}},
 	{"Vault", "vaults", func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
 		v, err := app.Account().Vaults().Get(ctx, id)
 		if err != nil {
 			return nil, filingSource{}, err
 		}
-		return v, filingSource{id: v.ID, typ: v.Type, title: v.Title, bucket: v.Bucket, parent: v.Parent}, nil
+		return v, filingSource{id: v.ID, typ: v.Type, status: v.Status, title: v.Title, bucket: v.Bucket, parent: v.Parent}, nil
 	}},
 	{"CloudFile", "cloud_files", func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
 		c, err := app.Account().CloudFiles().Get(ctx, id)
 		if err != nil {
 			return nil, filingSource{}, err
 		}
-		return c, filingSource{id: c.ID, typ: c.Type, title: c.Title, bucket: c.Bucket, parent: c.Parent}, nil
+		return c, filingSource{id: c.ID, typ: c.Type, status: c.Status, title: c.Title, bucket: c.Bucket, parent: c.Parent}, nil
 	}},
 	{"GoogleDocument", "google_documents", func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
 		g, err := app.Account().GoogleDocuments().Get(ctx, id)
 		if err != nil {
 			return nil, filingSource{}, err
 		}
-		return g, filingSource{id: g.ID, typ: g.Type, title: g.Title, bucket: g.Bucket, parent: g.Parent}, nil
+		return g, filingSource{id: g.ID, typ: g.Type, status: g.Status, title: g.Title, bucket: g.Bucket, parent: g.Parent}, nil
 	}},
 }
 
@@ -2962,9 +2988,17 @@ func filesFamily() filingFamily {
 				fmt.Sprintf("Move it to that folder and keep its ID with: basecamp files move %d --to %d", src.id, folder),
 			)
 		},
-		landing: "The copy lands in that folder",
-		lookFor: func(t filingTarget) string {
-			return fmt.Sprintf("basecamp files list --in %d --vault %d", t.projectID, cmp.Or(t.parentID, t.id))
+		landing: "Look for the copy with",
+		lookFor: func(src filingSource, t filingTarget) string {
+			switch src.typ {
+			case "CloudFile":
+				return copiesInTimeline(t.projectID)
+			case "GoogleDocument":
+				// No API listing or timeline shows a Google document.
+				return fmt.Sprintf("basecamp files show %d --in %d, and open its app_url in Basecamp, since Basecamp's API lists no Google documents",
+					cmp.Or(t.parentID, t.id), t.projectID)
+			}
+			return recordingCopyLookFor(src.typ, t.projectID, src.status)
 		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
 			return []output.Breadcrumb{{

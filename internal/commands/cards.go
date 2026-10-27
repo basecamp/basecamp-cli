@@ -2833,7 +2833,7 @@ func columnFamily() filingFamily {
 			if err != nil {
 				return nil, filingSource{}, err
 			}
-			return c, filingSource{id: c.ID, typ: c.Type, title: c.Title, bucket: c.Bucket, parent: c.Parent}, nil
+			return c, filingSource{id: c.ID, typ: c.Type, status: c.Status, title: c.Title, bucket: c.Bucket, parent: c.Parent}, nil
 		},
 		check: func(src filingSource) error {
 			if src.typ == standardColumnType {
@@ -2848,7 +2848,7 @@ func columnFamily() filingFamily {
 			return fmt.Sprintf("Reposition it within that card table with: basecamp cards column move %d --position <n> --card-table %d --in %d", src.id, target.id, target.projectID)
 		},
 		landing: "The copy lands on that card table",
-		lookFor: func(t filingTarget) string {
+		lookFor: func(_ filingSource, t filingTarget) string {
 			return fmt.Sprintf("basecamp cards columns --in %d --card-table %d", t.projectID, t.id)
 		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
