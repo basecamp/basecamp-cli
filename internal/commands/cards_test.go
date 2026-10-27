@@ -2054,6 +2054,8 @@ type mockWormholeTransport struct {
 	linked         *bool
 	secondTable    bool
 	cardNoParent   bool // card 456 comes back without a parent column
+	stuck          bool // a teleported card never lands
+	moved          bool
 	method         string
 	path           string
 	body           []byte
@@ -2088,6 +2090,9 @@ func (t *mockWormholeTransport) RoundTrip(req *http.Request) (*http.Response, er
 			} else {
 				body = `{"id": 123, "dock": [{"name": "kanban_board", "id": 555, "title": "Board"}]}`
 			}
+		case strings.Contains(req.URL.Path, "/card_tables/cards/456") && t.moved && !t.stuck:
+			// Reading a teleported card's old id follows the redirect to its new one.
+			body = `{"id": 4560, "title": "Test Card", "bucket": {"id": 999, "name": "Anniversary", "type": "Project"}, "parent": {"id": 888, "title": "Triage", "type": "Kanban::Triage"}}`
 		case strings.Contains(req.URL.Path, "/card_tables/cards/456"):
 			if t.cardNoParent {
 				body = `{"id": 456, "title": "Test Card", "bucket": {"id": 123, "name": "Test Project", "type": "Project"}}`
@@ -2116,6 +2121,7 @@ func (t *mockWormholeTransport) RoundTrip(req *http.Request) (*http.Response, er
 	switch req.Method {
 	case "POST":
 		if strings.Contains(req.URL.Path, "/moves.json") {
+			t.moved = true
 			return &http.Response{StatusCode: 204, Body: io.NopCloser(strings.NewReader("")), Header: header}, nil
 		}
 		return &http.Response{StatusCode: 201, Body: io.NopCloser(strings.NewReader(t.wormholeJSON())), Header: header}, nil
@@ -2163,16 +2169,46 @@ func TestCardsMoveToWormholeByID(t *testing.T) {
 	require.NoError(t, json.Unmarshal(transport.body, &body))
 	assert.Equal(t, float64(111), body["column_id"])
 
-	// Output reports source_id (not id) and status teleporting, and carries no
-	// same-id "view card" breadcrumb (that id is about to 404).
+	// Output is the card where it landed, read through the old id's redirect.
 	var envelope struct {
-		Data map[string]any `json:"data"`
+		Data    map[string]any `json:"data"`
+		Summary string         `json:"summary"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+	assert.Equal(t, float64(4560), envelope.Data["id"])
+	assert.Equal(t, float64(456), envelope.Data["source_id"])
+	assert.Equal(t, "Teleported card #456 to Anniversary › Triage as card #4560", envelope.Summary)
+}
+
+// TestCardsMoveToWormholeStillTeleporting verifies that when the card has not
+// landed by the end of the wait, the output reports the source under source_id
+// (not id), says the teleport is still in progress, and carries no same-id
+// "view card" breadcrumb.
+func TestCardsMoveToWormholeStillTeleporting(t *testing.T) {
+	shortFilingWait(t)
+	transport := &mockWormholeTransport{stuck: true}
+	app, buf := newTestAppWithTransport(t, transport)
+	app.Flags.Hints = true
+
+	project := ""
+	cardTable := ""
+	err := executeCommand(newCardsMoveCmd(&project, &cardTable), app, "456", "--to-wormhole", "111")
+	require.NoError(t, err)
+
+	var envelope struct {
+		Data        map[string]any      `json:"data"`
+		Summary     string              `json:"summary"`
+		Breadcrumbs []output.Breadcrumb `json:"breadcrumbs"`
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
 	assert.Equal(t, "456", envelope.Data["source_id"])
 	assert.Equal(t, "teleporting", envelope.Data["status"])
 	assert.NotContains(t, envelope.Data, "id")
-	assert.NotContains(t, buf.String(), "cards show 456")
+	assert.Contains(t, envelope.Summary, "still in progress")
+	require.NotEmpty(t, envelope.Breadcrumbs)
+	for _, crumb := range envelope.Breadcrumbs {
+		assert.NotContains(t, crumb.Cmd, "cards show 456")
+	}
 }
 
 // TestCardsMoveToWormholeByDestinationURL verifies a destination-column URL is

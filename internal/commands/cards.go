@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -1543,15 +1544,15 @@ the project doesn't need one.`,
 //
 // The teleport is destructive and asynchronous: Cards().Move returns once it is
 // accepted, then the server copies the card into the destination column under a
-// new id and deletes the original — so the original id 404s once filing
-// completes. The move endpoint resolves the column_id against the whole project
-// bucket, so a sibling board's wormhole would happily teleport the card
-// elsewhere. Because that is irreversible, this fails closed: it always fetches
+// new id and deletes the original. Once that is done, reading the original id
+// redirects to the new card, which is how the command learns where it landed.
+// The move endpoint resolves the column_id against the whole project bucket, so
+// a sibling board's wormhole would happily teleport the card elsewhere. Because that is irreversible, this fails closed: it always fetches
 // the card, derives the source project and table from the card itself, rejects
 // conflicting caller context, and requires the referenced wormhole to be present
-// and linked on that exact table before issuing the move. The output reports the
-// source under source_id (not id) and omits a same-id "view card" breadcrumb,
-// because that id is about to 404.
+// and linked on that exact table before issuing the move. The output is the new
+// card; if it has not landed when the wait runs out, the output reports the
+// source under source_id (not id) and omits a same-id "view card" breadcrumb.
 func moveCardThroughWormhole(cmd *cobra.Command, app *appctx.App, cardID int64, cardIDStr, flagProject, urlProjectID, cardTableFlag, wormholeRef string) error {
 	// Validate the reference before any network call.
 	byID := isNumericID(wormholeRef)
@@ -1622,13 +1623,28 @@ func moveCardThroughWormhole(cmd *cobra.Command, app *appctx.App, cardID int64, 
 		return convertSDKError(err)
 	}
 
+	var landed *basecamp.Card
+	if moved, _ := pollUntil(cmd.Context(), func(ctx context.Context) (bool, error) {
+		card, err := app.Account().Cards().Get(ctx, cardID)
+		if httpStatus(err) == http.StatusNotFound {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		landed = card
+		return card.ID != cardID, nil
+	}); moved {
+		return filedCardOK(app, landed, cardID, "Teleported")
+	}
+
 	result := map[string]any{
 		"source_id":   cardIDStr,
 		"status":      "teleporting",
 		"wormhole":    wormhole.ID,
 		"destination": wormhole.Title,
 	}
-	summary := fmt.Sprintf("Teleporting card #%s through wormhole %d (%s) — asynchronous; a new card appears in the destination and the original 404s once filing completes", cardIDStr, wormhole.ID, wormhole.Title)
+	summary := fmt.Sprintf("Teleporting card #%s through wormhole %d (%s) — still in progress; once it lands, basecamp cards show %s returns the card at its new id", cardIDStr, wormhole.ID, wormhole.Title, cardIDStr)
 
 	return app.OK(result,
 		output.WithSummary(summary),
