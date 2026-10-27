@@ -20,7 +20,9 @@ Interpret every check by status:
 
 Report failures and warnings with their `hint` fields. Also inspect the top-level `breadcrumbs` array and preserve its structured `cmd` next steps, because a breadcrumb can provide a more specific action than a check hint. Use these common remediations when relevant:
 
-- Basecamp authentication: `basecamp auth login`. Guard a replacement login
+- Basecamp authentication: `basecamp auth login`. At a terminal it may first
+  ask whether to connect as the person's agent or as themselves; `--as me`
+  signs the person in without asking. Guard a replacement login
   with `--expect-identity <id>` so a browser signed in as someone else cannot
   become the profile. A bot or CI profile that must never sign in interactively
   imports a personal access token instead:

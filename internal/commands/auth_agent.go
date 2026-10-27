@@ -53,7 +53,9 @@ code, and opens the link in your browser. Sign in, check the code matches,
 pick which agent this computer acts as, and approve it. The credential is
 the agent's own OAuth client: this CLI mints an access token from it
 whenever it needs one, so there is no token to paste and none to renew by
-hand.
+hand. On the approval page you can also create your agent, if you don't have
+one yet. ` + "`basecamp auth login --as agent`" + ` runs this same connection, and at a
+terminal ` + "`basecamp auth login`" + ` asks whether to.
 
 An approval may add a connection or replace an existing one; read the
 approval page before proceeding. An agent, personal or team, keeps several
@@ -149,6 +151,17 @@ type agentConnectFlags struct {
 	// machine reads the ceremony out as data: the verification line and
 	// the result envelope on stdout, the operator's words on stderr.
 	machine bool
+
+	// provider is the authorization server already discovered, when the
+	// caller had to find it first (auth login does, to know whether to
+	// ask); nil discovers it here.
+	provider *auth.Provider
+
+	// sayDefault, for a person reading at a terminal, says how to make the
+	// profile this computer's default when connecting did not: auth login
+	// connects "this computer", and a profile commands don't use by
+	// default is not quite that.
+	sayDefault bool
 }
 
 // refuseAgentConnectOutputMode lets the ceremony run under --json (and
@@ -227,6 +240,7 @@ func connectAgentProfile(cmd *cobra.Command, app *appctx.App, f agentConnectFlag
 		Scope:        f.scope,
 		NoBrowser:    f.noBrowser,
 		Local:        f.local,
+		Provider:     f.provider,
 		Logger:       func(msg string) { fmt.Fprintln(human, msg) },
 		Progress:     human,
 		OnIntake:     onIntake,
@@ -270,6 +284,9 @@ func connectAgentProfile(cmd *cobra.Command, app *appctx.App, f agentConnectFlag
 		}
 		fmt.Fprintln(w, r.Muted.Render(line))
 	}
+	if f.sayDefault && !isDefault {
+		fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("It isn't the default profile. To make it the default: basecamp profile set-default %s", target.name)))
+	}
 	fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("Check it any time: basecamp auth status -P %s", target.name)))
 	return nil
 }
@@ -283,12 +300,16 @@ func connectDeviceName(named string) string {
 	if named != "" {
 		return named
 	}
-	host, err := os.Hostname()
+	host, err := connectHostname()
 	if err != nil {
 		return ""
 	}
 	return host
 }
+
+// connectHostname is this computer's name. A variable so tests can make it
+// unreadable.
+var connectHostname = os.Hostname
 
 // refuseNonInteractiveAgentConnect is the environment gate: the ceremony
 // waits on a person opening a link, signing in, and picking the agent, so

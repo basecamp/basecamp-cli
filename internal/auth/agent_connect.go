@@ -149,6 +149,10 @@ type AgentConnectOptions struct {
 	// browser, unless the flow is not launching one at all.
 	BrowserLauncher func(url string) error
 
+	// Provider, when set, is the authorization server the caller already
+	// discovered (DiscoverProvider), used instead of discovering again.
+	Provider *Provider
+
 	// Logger receives the operator's half of the ceremony. Nil suppresses
 	// it — which, since the ceremony is the operator reading a link and a
 	// code, is only ever right for a test.
@@ -257,7 +261,7 @@ func (m *Manager) ConnectAgent(ctx context.Context, opts AgentConnectOptions) (*
 		log = func(string) {}
 	}
 
-	disc, err := m.discoverOAuth(ctx, log)
+	disc, err := m.discoverOrUse(ctx, opts.Provider, log)
 	if err != nil {
 		return nil, err
 	}
@@ -600,7 +604,10 @@ func (m *Manager) pollAgentConnection(ctx context.Context, client *http.Client, 
 	case "slow_down":
 		return nil, interval + agentConnectSlowDownStep, nil
 	case "access_denied":
-		return nil, 0, agentConnectFailure("The agent connection was declined",
+		// Basecamp answers this both when the operator declined and when
+		// its page told them agents can't be connected for them and they
+		// acknowledged it. Nothing in the answer tells the two apart.
+		return nil, 0, noAgentConnection("The agent connection was declined",
 			"Run the connect command again and approve it in the browser.")
 	case "expired_token":
 		return nil, 0, agentConnectExpired()
@@ -772,7 +779,7 @@ func agentConnectRefusal(op string, answer *agentConnectAnswer) error {
 		detail = "token error: " + code
 	}
 	if answer.status == http.StatusServiceUnavailable {
-		return agentConnectFailure(op+": "+detail,
+		return noAgentConnection(op+": "+detail,
 			"This Basecamp is not issuing agent connections right now. Ask your Basecamp administrator, or sign in as a bot user instead: basecamp auth login --device-code.")
 	}
 	return answer.failure(op + ": " + detail)
@@ -820,6 +827,22 @@ func retryAfter(header http.Header, now time.Time) time.Duration {
 func agentConnectExpired() error {
 	return agentConnectFailure("The agent connection code expired before it was approved",
 		"Run the connect command again for a new code, and approve it before it expires.")
+}
+
+// ErrNoAgentConnection marks a ceremony that ended with no agent connected
+// and nothing handed over: the operator declined, Basecamp told them agents
+// can't be connected for them, or this Basecamp isn't issuing connections.
+// A caller that offered the agent as one choice can offer the other; no
+// code was redeemed, so there is nothing to clean up.
+var ErrNoAgentConnection = errors.New("no agent was connected")
+
+// noAgentConnection is agentConnectFailure for a ceremony that connected no
+// agent, marked as ErrNoAgentConnection.
+func noAgentConnection(msg, hint string) error {
+	err := output.ErrAuth(msg)
+	err.Hint = hint
+	err.Cause = ErrNoAgentConnection
+	return err
 }
 
 // agentConnectFailure is an auth-class refusal carrying a remedy of its
