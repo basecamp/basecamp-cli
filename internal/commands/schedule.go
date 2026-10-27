@@ -1039,7 +1039,7 @@ func getScheduleEntryForFiling(ctx context.Context, app *appctx.App, id int64) (
 
 	src.id, src.typ, src.parent = e.Parent.ID, "Schedule::Entry", nil
 	if e.Bucket != nil {
-		if src.parent, err = seriesSchedule(ctx, app, e.Bucket, src.id); err != nil {
+		if src.parent, err = seriesSchedule(ctx, app, e.Bucket, src.id, e.Status); err != nil {
 			return nil, filingSource{}, err
 		}
 	}
@@ -1058,9 +1058,10 @@ func getScheduleEntryForFiling(ctx context.Context, app *appctx.App, id int64) (
 // seriesSchedule finds the schedule a recurring event is on, which its
 // occurrence's read does not name. A calendar, such as an employee's, has one
 // schedule, which the calendar's read links to; a project's schedules are on
-// its dock, and of several, the one whose entries list the event is it. It
-// returns nil when none does.
-func seriesSchedule(ctx context.Context, app *appctx.App, bucket *basecamp.Bucket, eventID int64) (*basecamp.Parent, error) {
+// its dock, and of several, the one whose entries list the event, in its
+// status (an entries listing shows one status), is it. It returns nil when
+// none does.
+func seriesSchedule(ctx context.Context, app *appctx.App, bucket *basecamp.Bucket, eventID int64, status string) (*basecamp.Parent, error) {
 	scheduleOf := func(id int64) (*basecamp.Parent, error) {
 		schedule, err := app.Account().Schedules().Get(ctx, id)
 		if err != nil {
@@ -1088,8 +1089,12 @@ func seriesSchedule(ctx context.Context, app *appctx.App, bucket *basecamp.Bucke
 	if len(schedules) == 1 {
 		return &basecamp.Parent{ID: schedules[0].ID, Title: schedules[0].Title, Type: "Schedule"}, nil
 	}
+	var opts *basecamp.ScheduleEntryListOptions
+	if status == "archived" || status == "trashed" {
+		opts = &basecamp.ScheduleEntryListOptions{Status: status}
+	}
 	for _, schedule := range schedules {
-		entries, err := app.Account().Schedules().ListEntries(ctx, schedule.ID, nil)
+		entries, err := app.Account().Schedules().ListEntries(ctx, schedule.ID, opts)
 		if err != nil {
 			return nil, err
 		}

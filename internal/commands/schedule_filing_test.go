@@ -155,6 +155,26 @@ func TestScheduleFindsARecurringEventsScheduleAmongSeveral(t *testing.T) {
 	assert.Empty(t, transport.posts)
 }
 
+// An entries listing shows active entries unless asked for another status,
+// so an archived series is found among its project's schedules only in the
+// archived listing.
+func TestScheduleFindsAnArchivedRecurringEventsScheduleAmongSeveral(t *testing.T) {
+	transport := scheduleFilingTransport()
+	transport.gets["/projects/123"] = `{"id":123,"name":"Source","dock":[{"name":"schedule","id":555,"title":"Schedule","enabled":true},{"name":"schedule","id":556,"title":"Launches","enabled":true}]}`
+	transport.gets["/schedules/556"] = `{"id":556,"title":"Launches","bucket":{"id":123,"name":"Source"}}`
+	transport.gets["/schedule_entries/457"] = `{"id":7001,"status":"archived","type":"Schedule::Entry::Occurrence","summary":"Standup","bucket":{"id":123,"name":"Source","type":"Project"},"parent":{"id":457,"title":"Standup","type":"Schedule::Entry"}}`
+	transport.gets["/schedules/555/entries"] = `[]`
+	transport.gets["/schedules/556/entries"] = `[]`
+	transport.gets["/schedules/555/entries?status=archived"] = `[]`
+	transport.gets["/schedules/556/entries?status=archived"] = `[{"id":457,"status":"archived","type":"Schedule::Entry","summary":"Standup"}]`
+	transport.gets["/schedule_entries/4570"] = `{"id":7002,"status":"archived","type":"Schedule::Entry::Occurrence","summary":"Standup","bucket":{"id":123,"name":"Source","type":"Project"},"parent":{"id":4570,"title":"Standup","type":"Schedule::Entry"}}`
+
+	run := runFamilyCommand(t, transport, NewScheduleCmd(), "copy", "457")
+	require.NoError(t, run.err)
+	assert.Equal(t, []string{"/99999/recordings/457/copies"}, transport.posts)
+	assert.Equal(t, float64(556), transport.bodies[0]["filing_destination_id"], "the copy goes onto the schedule whose archived entries list the event")
+}
+
 func TestScheduleCopyIntoACalendarIsLookedForInItsEntries(t *testing.T) {
 	transport := calendarTransport()
 	transport.stuck = map[int64]bool{456: true}

@@ -76,10 +76,15 @@ func (m *familyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return respond(200, fmt.Sprintf(`{"id":%d,"status":"completed","type":"Move","source_recording_id":%d,"destination_recording":{"id":%d0}}`, id, id, id))
 	}
 
-	// Longest suffix wins, so /projects/999 is not answered as /projects.
+	// Longest suffix wins, so /projects/999 is not answered as /projects. A
+	// key with a query answers only a request with that query.
 	best := ""
 	for suffix := range m.gets {
-		if strings.HasSuffix(path, suffix) && len(suffix) > len(best) {
+		target := path
+		if strings.Contains(suffix, "?") {
+			target = path + "?" + req.URL.RawQuery
+		}
+		if strings.HasSuffix(target, suffix) && len(suffix) > len(best) {
 			best = suffix
 		}
 	}
