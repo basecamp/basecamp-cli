@@ -21,6 +21,14 @@ updates:
       semver-major-days: 7
       semver-minor-days: 3
       semver-patch-days: 2
+    # basecamp-sdk bumps come from coworker's sdk-bump the day a release is
+    # published, as one PR that refreshes the vendorHash and opens even when
+    # the bump doesn't compile, with the errors listed. Each 0.x minor breaks
+    # the API, so Dependabot's grouped bump arrived days late and red (#911).
+    # A name-only ignore stops version updates and keeps security updates:
+    # Dependabot applies only an ignore's explicit `versions` to those.
+    ignore:
+      - dependency-name: "github.com/basecamp/basecamp-sdk/go"
     commit-message:
       prefix: "deps"
 
