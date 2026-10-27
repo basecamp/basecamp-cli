@@ -114,7 +114,9 @@ func (m *mockFilingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 
 	switch {
 	case strings.HasSuffix(path, "/projects"):
-		return respond(200, `[{"id":123,"name":"Source"},{"id":999,"name":"Dest"}]`)
+		return respond(200, `[{"id":123,"name":"Source"},{"id":999,"name":"Dest"},{"id":888,"name":"Bare"}]`)
+	case strings.HasSuffix(path, "/projects/888"):
+		return respond(200, `{"id":888,"dock":[{"name":"kanban_board","id":880,"title":"Off","enabled":false}]}`)
 	case strings.HasSuffix(path, "/projects/123"):
 		return respond(200, `{"id":123,"dock":[{"name":"kanban_board","id":555,"title":"Board","enabled":true}]}`)
 	case strings.HasSuffix(path, "/projects/999"):
@@ -206,6 +208,17 @@ func TestCardsMoveToProjectWithSeveralCardTablesIsAmbiguous(t *testing.T) {
 	assert.Contains(t, e.Hint, "--to-card-table")
 	assert.Contains(t, e.Hint, "950  Roadmap")
 	assert.NotContains(t, e.Hint, "960", "a card table off the dock is not a destination")
+	assert.Empty(t, transport.posts)
+}
+
+func TestCardsMoveToProjectWithoutCardTableNamesTheProject(t *testing.T) {
+	transport := &mockFilingTransport{}
+	run := runFilingCommand(t, transport, "move", "456", "--to-project", "Bare")
+	e := requireFilingError(t, run)
+
+	assert.Equal(t, output.CodeNotFound, e.Code)
+	assert.Equal(t, "Project Bare has no card table", e.Message)
+	assert.NotEmpty(t, e.Hint)
 	assert.Empty(t, transport.posts)
 }
 

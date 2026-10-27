@@ -1978,7 +1978,7 @@ func resolveFilingTable(cmd *cobra.Command, app *appctx.App, toProject, toCardTa
 		return getCardTable(cmd, app, tableID)
 	}
 
-	projectID, _, err := app.Names.ResolveProject(cmd.Context(), toProject)
+	projectID, projectName, err := app.Names.ResolveProject(cmd.Context(), toProject)
 	if err != nil {
 		return nil, err
 	}
@@ -1996,7 +1996,19 @@ func resolveFilingTable(cmd *cobra.Command, app *appctx.App, toProject, toCardTa
 	if toCardTable == "" {
 		switch len(tables) {
 		case 0:
-			return nil, output.ErrNotFound("card table", projectID)
+			if projectName == "" {
+				projectName = projectID
+				if id, perr := strconv.ParseInt(projectID, 10, 64); perr == nil {
+					if name, nerr := app.Names.ProjectName(cmd.Context(), id); nerr == nil && name != "" {
+						projectName = name
+					}
+				}
+			}
+			return nil, &output.Error{
+				Code:    output.CodeNotFound,
+				Message: fmt.Sprintf("Project %s has no card table", projectName),
+				Hint:    "Pick a project that has one, or add a card table there first",
+			}
 		case 1:
 			return getCardTable(cmd, app, tables[0].ID)
 		default:
