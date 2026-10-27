@@ -71,6 +71,7 @@ func TestPollUntilHonoursCancellation(t *testing.T) {
 //   - Card 456 is in project 123 ("Source"), column 777 on card table 555.
 //   - Project 999 ("Dest") has card table 900 (Triage 901); with twoTables it
 //     also has card table 950 ("Roadmap"), and always a disabled card table 960.
+//   - A move to a column 404s, as for a column in another project.
 //   - A move or copy POST answers filing 70, pending. Each GET of the filing
 //     takes the next of statuses, holding the last; "completed" names card 4560.
 type mockFilingTransport struct {
@@ -99,6 +100,10 @@ func (m *mockFilingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 			raw, _ := io.ReadAll(req.Body)
 			m.body = map[string]any{}
 			_ = json.Unmarshal(raw, &m.body)
+		}
+		if strings.HasSuffix(path, "/card_tables/cards/456/moves") {
+			// Basecamp finds column_id only in the card's own project.
+			return respond(404, `{"error":"not found"}`)
 		}
 		kind := "Move"
 		if strings.HasSuffix(path, "/copies") {
@@ -311,4 +316,15 @@ func TestCardsCopyRefusesTheSourceCardTableFlag(t *testing.T) {
 	assert.Equal(t, output.CodeUsage, e.Code)
 	assert.Contains(t, e.Hint, "--to-card-table")
 	assert.Empty(t, transport.posts)
+}
+
+func TestCardsMoveToAForeignColumnPointsAtCrossProjectMoves(t *testing.T) {
+	transport := &mockFilingTransport{}
+	run := runFilingCommand(t, transport, "move", "456", "--to", "8888", "--in", "123")
+	e := requireFilingError(t, run)
+
+	assert.Equal(t, output.CodeNotFound, e.Code)
+	assert.Contains(t, e.Message, "column 8888")
+	assert.Contains(t, e.Hint, "basecamp cards move 456 --to-project <project>")
+	assert.Contains(t, e.Hint, "--to-wormhole")
 }

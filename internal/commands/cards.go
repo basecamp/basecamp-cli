@@ -1488,6 +1488,13 @@ the project doesn't need one.`,
 			} else {
 				err = app.Account().Cards().Move(cmd.Context(), cardID, columnID, nil)
 			}
+			if isNumericColumn && httpStatus(err) == http.StatusNotFound {
+				// Basecamp looks the column up in the card's project only, so a
+				// column from another project is indistinguishable from a typo.
+				return output.ErrNotFoundHint("card or column", fmt.Sprintf("card %s, column %s", cardIDStr, targetColumn), fmt.Sprintf(
+					"--to takes a column in the card's own project. To send the card to another project, use: basecamp cards move %s --to-project <project> (or --to-wormhole)",
+					cardIDStr))
+			}
 			if err != nil {
 				return convertSDKError(err)
 			}
