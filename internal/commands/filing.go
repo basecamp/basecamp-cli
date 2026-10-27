@@ -56,9 +56,27 @@ type filedRecording struct {
 	breadcrumbs []output.Breadcrumb
 }
 
+// filingOutcome is how far a filing got, which decides whether running it
+// again is safe.
+type filingOutcome int
+
+const (
+	// filingDone filed the recording and read back what it made.
+	filingDone filingOutcome = iota
+	// filingRefused was refused by Basecamp before anything was filed, so
+	// running it again is safe.
+	filingRefused
+	// filingUnread filed the recording under a known new id but could not
+	// read it back. Running it again moves it twice or makes another copy.
+	filingUnread
+	// filingUnsettled may have started, failed inside Basecamp, or was still
+	// running when the wait ended. It must be checked before running again.
+	filingUnsettled
+)
+
 // runFiling files one recording and outputs what it made.
 func runFiling(cmd *cobra.Command, app *appctx.App, f recordingFiling) error {
-	filed, err := fileRecording(cmd.Context(), app, f)
+	filed, _, err := fileRecording(cmd.Context(), app, f)
 	if err != nil {
 		return err
 	}
@@ -69,10 +87,14 @@ func runFiling(cmd *cobra.Command, app *appctx.App, f recordingFiling) error {
 // fileRecording starts the filing once, never retrying it (each copy request
 // makes another copy), waits for Basecamp to finish it, and reads back what it
 // made.
-func fileRecording(ctx context.Context, app *appctx.App, f recordingFiling) (filedRecording, error) {
+func fileRecording(ctx context.Context, app *appctx.App, f recordingFiling) (filedRecording, filingOutcome, error) {
 	filing, err := f.start(ctx, app)
 	if err != nil {
-		return filedRecording{}, copyStartError(f, convertSDKError(err))
+		err = copyStartError(f, convertSDKError(err))
+		if refusedBeforeFiling(output.AsError(err)) {
+			return filedRecording{}, filingRefused, err
+		}
+		return filedRecording{}, filingUnsettled, err
 	}
 
 	finished := func() bool {
@@ -93,26 +115,26 @@ func fileRecording(ctx context.Context, app *appctx.App, f recordingFiling) (fil
 	verb, _, past := f.verbs()
 	switch {
 	case filing.Status == basecamp.FilingFailed:
-		return filedRecording{}, &output.Error{
+		return filedRecording{}, filingUnsettled, &output.Error{
 			Code:    output.CodeAPI,
 			Message: fmt.Sprintf("Basecamp could not %s %s #%d to %s", verb, f.noun, f.sourceID, f.destination),
 			Hint:    fmt.Sprintf("Check the %s with: %s %d", f.noun, f.showCmd, f.sourceID),
 		}
 	case filing.Status != basecamp.FilingCompleted || filing.DestinationRecording == nil:
-		return filedRecording{}, stillFilingError(f, waitErr)
+		return filedRecording{}, filingUnsettled, stillFilingError(f, waitErr)
 	}
 
 	newID := filing.DestinationRecording.ID
 	filed, err := f.read(ctx, newID)
 	if err != nil {
-		return filedRecording{}, &output.Error{
+		return filedRecording{id: newID}, filingUnread, &output.Error{
 			Code:    output.CodeAPI,
 			Message: fmt.Sprintf("%s %s #%d as %s #%d, but could not read the new %s", past, f.noun, f.sourceID, f.noun, newID, f.noun),
 			Hint:    fmt.Sprintf("Show it with: %s %d", f.showCmd, newID),
 			Cause:   textCause(err),
 		}
 	}
-	return filed, nil
+	return filed, filingDone, nil
 }
 
 func (f recordingFiling) start(ctx context.Context, app *appctx.App) (*basecamp.Filing, error) {
@@ -145,14 +167,20 @@ func (f recordingFiling) verbs() (string, string, string) {
 // anything is copied.
 func copyStartError(f recordingFiling, err error) error {
 	e := output.AsError(err)
-	refused := e.HTTPStatus >= 400 && e.HTTPStatus < 500
-	if f.kind != basecamp.FilingCopy || refused || e.Code == output.CodeRateLimit {
+	if f.kind != basecamp.FilingCopy || refusedBeforeFiling(e) {
 		return err
 	}
 	unsure := *e
 	unsure.Retryable = false
 	unsure.Hint = "Basecamp may have started the copy before this failed, and copying again makes another copy. Check first: " + f.lookFor
 	return &unsure
+}
+
+// refusedBeforeFiling reports whether a failed request to start a filing was
+// refused before anything was filed: a 4xx answer, or a rate limit, which is
+// refused before the request is handled.
+func refusedBeforeFiling(e *output.Error) bool {
+	return (e.HTTPStatus >= 400 && e.HTTPStatus < 500) || e.Code == output.CodeRateLimit
 }
 
 // stillFilingError reports a move or copy that Basecamp accepted but had not
@@ -203,44 +231,69 @@ func (filed filedRecording) place() string {
 
 // runFilings files several recordings one by one, as the web's bulk Move…
 // and Copy… do, and outputs what each made. A failure does not stop the rest,
-// and none is retried; any failure fails the command with a message naming
-// every recording that was filed, by its new id, and every one that was not.
+// and none is retried. If any is not cleanly filed the command fails, naming
+// how far each got, and asks to run again only the ones Basecamp refused
+// before filing: running again one that was filed, or may have been, moves it
+// twice or makes another copy.
 func runFilings(cmd *cobra.Command, app *appctx.App, filings []recordingFiling) error {
 	if len(filings) == 1 {
 		return runFiling(cmd, app, filings[0])
 	}
-	_, _, past := filings[0].verbs()
+	verb, _, past := filings[0].verbs()
 	nouns := output.PluralNoun(filings[0].noun)
 
 	var (
 		results     []any
 		done        []string
-		failed      []string
-		hints       []string
 		breadcrumbs []output.Breadcrumb
-		firstErr    *output.Error
+		report      []string
+		refused     []int64
+		causes      []string
+		unread      []string
+		unsettled   = map[string][]int64{}
+		checks      []string
+		worst       *output.Error
+		worstOf     filingOutcome
 	)
 	for _, f := range filings {
-		filed, err := fileRecording(cmd.Context(), app, f)
+		filed, outcome, err := fileRecording(cmd.Context(), app, f)
+		var e *output.Error
 		if err != nil {
-			e := output.AsError(err)
-			if firstErr == nil {
-				firstErr = e
+			e = output.AsError(err)
+			if worst == nil || outcome > worstOf {
+				worst, worstOf = e, outcome
 			}
-			failed = append(failed, fmt.Sprintf("#%d failed: %s", f.sourceID, e.Message))
-			if e.Hint != "" && !slices.Contains(hints, e.Hint) {
-				hints = append(hints, e.Hint)
-			}
-			continue
 		}
-		results = append(results, filed.result)
-		done = append(done, fmt.Sprintf("#%d as #%d in %s", f.sourceID, filed.id, filed.place()))
-		if breadcrumbs == nil {
-			breadcrumbs = filed.breadcrumbs
+		switch outcome {
+		case filingDone:
+			results = append(results, filed.result)
+			done = append(done, fmt.Sprintf("#%d as #%d in %s", f.sourceID, filed.id, filed.place()))
+			if breadcrumbs == nil {
+				breadcrumbs = filed.breadcrumbs
+			}
+		case filingRefused:
+			refused = append(refused, f.sourceID)
+			if e.Hint != "" && !slices.Contains(causes, e.Hint) {
+				causes = append(causes, e.Hint)
+			}
+			report = append(report, fmt.Sprintf("#%d refused: %s", f.sourceID, e.Message))
+		case filingUnread:
+			unread = append(unread, fmt.Sprintf("#%d is #%d now (%s %d)", f.sourceID, filed.id, f.showCmd, filed.id))
+			report = append(report, fmt.Sprintf("#%d %s as #%d, not read back", f.sourceID, strings.ToLower(past), filed.id))
+		case filingUnsettled:
+			check := e.Hint
+			if check == "" {
+				check = fmt.Sprintf("Check it with: %s %d", f.showCmd, f.sourceID)
+			}
+			if _, seen := unsettled[check]; !seen {
+				checks = append(checks, check)
+			}
+			unsettled[check] = append(unsettled[check], f.sourceID)
+			report = append(report, fmt.Sprintf("#%d not settled: %s", f.sourceID, e.Message))
 		}
 	}
 
-	if firstErr == nil {
+	if worst == nil {
 		summary := fmt.Sprintf("%s %d %s: %s", past, len(done), nouns, strings.Join(done, ", "))
 		return app.OK(results, output.WithSummary(summary), output.WithBreadcrumbs(breadcrumbs...))
 	}
@@ -248,15 +301,35 @@ func runFilings(cmd *cobra.Command, app *appctx.App, filings []recordingFiling) 
 	message := fmt.Sprintf("%s %d of %d %s", past, len(done), len(filings), nouns)
 	if len(done) > 0 {
 		message += " (" + strings.Join(done, ", ") + ")"
-		hints = append(hints, fmt.Sprintf("Run it again only for the %s that failed; the others are done.", nouns))
+	}
+	var hints []string
+	if len(unread) > 0 {
+		hints = append(hints, fmt.Sprintf("Do not %s these again: %s.", verb, strings.Join(unread, ", ")))
+	}
+	for _, check := range checks {
+		hints = append(hints, fmt.Sprintf("Do not %s %s again yet. %s", verb, sourceList(unsettled[check]), check))
+	}
+	if len(refused) > 0 {
+		hints = append(hints, fmt.Sprintf("Basecamp refused %s before filing anything; once the cause is fixed, run the command again for %s alone.",
+			sourceList(refused), sourceList(refused)))
+		hints = append(hints, causes...)
 	}
 	return &output.Error{
-		Code:       firstErr.Code,
-		Message:    message + "; " + strings.Join(failed, "; "),
-		Hint:       strings.Join(hints, " "),
-		HTTPStatus: firstErr.HTTPStatus,
-		Cause:      textCause(firstErr),
+		Code:       worst.Code,
+		Message:    message + "; " + strings.Join(report, "; "),
+		Hint:       strings.Join(hints, "\n"),
+		HTTPStatus: worst.HTTPStatus,
+		Cause:      textCause(worst),
 	}
+}
+
+// sourceList names recordings by id: "#456, #457".
+func sourceList(ids []int64) string {
+	names := make([]string, len(ids))
+	for i, id := range ids {
+		names[i] = fmt.Sprintf("#%d", id)
+	}
+	return strings.Join(names, ", ")
 }
 
 // filingWait bounds the wait for a recording that Basecamp moves or copies in

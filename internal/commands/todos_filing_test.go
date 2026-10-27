@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,8 +22,8 @@ import (
 // to-do lists in others to move or copy them into.
 //
 //   - Project 123 ("Source") has To-dos 300 with list 310 ("Backlog"), which
-//     holds group 311 ("Ideas"). To-dos 456 and 457 are in list 310, and 458
-//     in group 311.
+//     holds group 311 ("Ideas"). To-dos 456, 457 and 459 are in list 310,
+//     and 458 in group 311.
 //   - Project 999 ("Dest") has To-dos 900 with lists 901 ("Launch") and 902
 //     ("Later"), group 920 in list 901, and an archived list 930. With
 //     twoTodosets it also has To-dos 950 with list 951 ("Roadmap"); with
@@ -32,13 +33,16 @@ import (
 //   - Project 888 ("Bare") has only a disabled To-dos, 880.
 //   - A move or copy POST of recording N answers filing N, pending; its first
 //     GET completes it as recording N*10+1, read back in the destination it
-//     was filed into. postStatus answers every POST with that status, and
-//     refuse answers the POST for those recordings with 403.
+//     was filed into. postStatus answers every POST with that status,
+//     refuse answers the POST for those recordings with 403 and drop with
+//     502, and a read of an unreadable new recording answers 404.
 type mockTodoFilingTransport struct {
 	twoTodosets   bool
 	duplicateName bool
 	postStatus    int
 	refuse        map[string]bool
+	drop          map[string]bool
+	unreadable    map[string]bool
 
 	mu       sync.Mutex
 	requests []string
@@ -73,6 +77,9 @@ func (m *mockTodoFilingTransport) RoundTrip(req *http.Request) (*http.Response, 
 		if len(parts) == 3 && parts[0] == "recordings" {
 			if m.refuse[parts[1]] {
 				return respond(403, `{"error":"forbidden"}`)
+			}
+			if m.drop[parts[1]] {
+				return respond(502, `{"error":"upstream"}`)
 			}
 			source, _ := strconv.ParseInt(parts[1], 10, 64)
 			if m.filedTo == nil {
@@ -138,13 +145,13 @@ func (m *mockTodoFilingTransport) RoundTrip(req *http.Request) (*http.Response, 
 		return respond(200, filingListJSON(920, "Phase 2", 999, "Todolist", 901))
 	case "/todolists/930":
 		return respond(200, strings.Replace(filingListJSON(930, "Old", 999, "Todoset", 900), `"active"`, `"archived"`, 1))
-	case "/todos/456", "/todos/457":
+	case "/todos/456", "/todos/457", "/todos/459":
 		return respond(200, filingTodoJSON(parts[1], 123, 310, "Backlog"))
 	case "/todos/458":
 		return respond(200, filingTodoJSON("458", 123, 311, "Ideas"))
 	}
 
-	if len(parts) == 2 && (parts[0] == "todos" || parts[0] == "todolists") {
+	if len(parts) == 2 && (parts[0] == "todos" || parts[0] == "todolists") && !m.unreadable[parts[1]] {
 		id, _ := strconv.ParseInt(parts[1], 10, 64)
 		if into, ok := m.filedTo[id]; ok {
 			bucket, title := 999, "Launch"
@@ -253,9 +260,66 @@ func TestTodosMoveSeveralFailsWhenOneFailsAndNamesWhatMoved(t *testing.T) {
 	assert.Equal(t, []string{"/recordings/457/moves", "/recordings/456/moves"}, transport.posts, "a failure does not stop the rest")
 	assert.Equal(t, output.CodeForbidden, e.Code)
 	assert.Contains(t, e.Message, "Moved 1 of 2 to-dos (#456 as #4561 in Dest › Launch)")
-	assert.Contains(t, e.Message, "#457 failed")
-	assert.Contains(t, e.Hint, "only for the to-dos that failed")
+	assert.Contains(t, e.Message, "#457 refused")
+	assert.Contains(t, e.Hint, "run the command again for #457 alone")
 	assert.False(t, e.Retryable)
+}
+
+func TestTodosCopySeveralAsksToRunAgainOnlyForTheRefused(t *testing.T) {
+	transport := &mockTodoFilingTransport{
+		refuse:     map[string]bool{"457": true},
+		unreadable: map[string]bool{"4581": true},
+		drop:       map[string]bool{"459": true},
+	}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "copy", "456", "457", "458", "459", "--to-list", "901")
+	e := output.AsError(run.err)
+	require.NotNil(t, run.err)
+
+	assert.Equal(t, []string{"/recordings/456/copies", "/recordings/457/copies", "/recordings/458/copies", "/recordings/459/copies"},
+		transport.posts, "each is copied once and none is retried")
+	assert.NotZero(t, output.ExitCodeFor(e.Code))
+	assert.NotEqual(t, output.CodeForbidden, e.Code, "a copy that may have started outranks a refusal")
+	assert.False(t, e.Retryable)
+
+	assert.Contains(t, e.Message, "Copied 1 of 4 to-dos (#456 as #4561 in Dest › Launch)")
+	assert.Contains(t, e.Message, "#457 refused")
+	assert.Contains(t, e.Message, "#458 copied as #4581, not read back")
+	assert.Contains(t, e.Message, "#459 not settled")
+
+	assert.Contains(t, e.Hint, "Do not copy these again: #458 is #4581 now (basecamp todos show 4581)")
+	assert.Contains(t, e.Hint, "Do not copy #459 again yet. Basecamp may have started the copy")
+	runAgain := regexp.MustCompile(`(?i)\brun\b.*\bagain\b`)
+	offers := 0
+	for sentence := range strings.SplitSeq(strings.ReplaceAll(e.Hint, "\n", ". "), ". ") {
+		if runAgain.MatchString(sentence) && !strings.HasPrefix(sentence, "Do not") {
+			offers++
+			assert.Contains(t, sentence, "#457", "only the refused copy is offered to run again: %q", sentence)
+			for _, other := range []string{"#456", "#458", "#459"} {
+				assert.NotContains(t, sentence, other, "never asks to repeat a copy that was made or may have been: %q", sentence)
+			}
+		}
+	}
+	assert.Equal(t, 1, offers, "the refused copy is offered to run again: %q", e.Hint)
+}
+
+func TestTodosCopySeveralNeverAsksToRepeatACopyThatWasMadeOrMayHaveBeen(t *testing.T) {
+	for name, transport := range map[string]*mockTodoFilingTransport{
+		"copied but not read back": {unreadable: map[string]bool{"4571": true}},
+		"may have started":         {drop: map[string]bool{"457": true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			run := runTodoFilingCommand(t, transport, NewTodosCmd(), "copy", "456", "457", "--to-list", "901")
+			e := output.AsError(run.err)
+			require.NotNil(t, run.err)
+
+			assert.Len(t, transport.posts, 2)
+			assert.NotZero(t, output.ExitCodeFor(e.Code))
+			assert.Contains(t, e.Message, "Copied 1 of 2 to-dos (#456 as #4561 in Dest › Launch)")
+			assert.Contains(t, e.Hint, "Do not copy")
+			assert.NotContains(t, strings.ToLower(e.Hint), "run the command again")
+			assert.NotContains(t, strings.ToLower(e.Hint), "run it again")
+		})
+	}
 }
 
 func TestTodosMoveRefusesAListInAnotherProjectInsteadOfReportingSuccess(t *testing.T) {
