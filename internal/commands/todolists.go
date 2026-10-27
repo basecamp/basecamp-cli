@@ -37,7 +37,7 @@ to disambiguate when needed.`,
 
 	cmd.AddCommand(
 		newTodolistsListCmd(&project, &todosetID),
-		newTodolistsShowCmd(&project),
+		newTodolistsShowCmd(),
 		newTodolistsCreateCmd(&project, &todosetID),
 		newTodolistsUpdateCmd(&project),
 		newTodolistsPositionCmd(&project),
@@ -184,7 +184,7 @@ func runTodolistsList(cmd *cobra.Command, project, todosetFlag string, limit, pa
 	return app.OK(todolists, respOpts...)
 }
 
-func newTodolistsShowCmd(project *string) *cobra.Command {
+func newTodolistsShowCmd() *cobra.Command {
 	var cf *commentFlags
 
 	cmd := &cobra.Command{
@@ -206,27 +206,10 @@ You can pass either a todolist ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			todolistIDStr, urlProjectID, err := extractWithProject(args[0])
+			// The list is read by its account-wide ID, so no project is needed.
+			todolistIDStr, _, err := extractWithProject(args[0])
 			if err != nil {
 				return err
-			}
-
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
 			}
 
 			// Parse todolist ID as int64

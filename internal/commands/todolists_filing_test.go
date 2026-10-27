@@ -171,3 +171,15 @@ func TestTodolistsCopyToAnotherProjectIsNotRetried(t *testing.T) {
 	assert.False(t, e.Retryable)
 	assert.Contains(t, e.Hint, "basecamp recordings list Todolist --in 999 --status active --sort created_at --direction desc --all")
 }
+
+// A filing's recovery points at `todolists show <id>`, which reads the list by
+// its account-wide ID, so it must not need a project to be configured.
+func TestTodolistsShowNeedsNoProject(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	app, buf := newTestAppWithTransport(t, transport)
+	app.Config.ProjectID = ""
+	app.Flags.Project = ""
+
+	require.NoError(t, executeCommand(NewTodolistsCmd(), app, "show", "901"))
+	assert.Contains(t, buf.String(), `901`)
+}
