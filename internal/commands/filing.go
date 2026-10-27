@@ -31,7 +31,9 @@ type recordingFiling struct {
 	// destinationID is the container it goes into, from the destination
 	// project's dock. toProjectID is set instead for a dock tool, which goes
 	// to a project.
-	destinationID   int64
+	destinationID int64
+	// parentID is a folder inside the destination Docs & Files to put it in.
+	parentID        int64
 	toProjectID     int64
 	includeComments bool
 
@@ -45,6 +47,9 @@ type recordingFiling struct {
 	lookFor string
 	landing string
 	match   string
+	// movedHint replaces the move-still-running hint for a kind whose old id
+	// does not lead to the new one once it lands.
+	movedHint string
 	// read reads back the recording the filing made, by its new id.
 	read func(ctx context.Context, id int64) (filedRecording, error)
 
@@ -167,12 +172,14 @@ func (f recordingFiling) start(ctx context.Context, app *appctx.App) (*basecamp.
 		return recordings.Copy(ctx, f.sourceID, &basecamp.CopyRecordingRequest{
 			FilingDestinationID:  f.destinationID,
 			DestinationProjectID: f.toProjectID,
+			ParentID:             f.parentID,
 			IncludeComments:      f.includeComments,
 		})
 	}
 	return recordings.Move(ctx, f.sourceID, &basecamp.MoveRecordingRequest{
 		FilingDestinationID:  f.destinationID,
 		DestinationProjectID: f.toProjectID,
+		ParentID:             f.parentID,
 	})
 }
 
@@ -212,6 +219,9 @@ func refusedBeforeFiling(e *output.Error) bool {
 func stillFilingError(f recordingFiling, waitErr error) error {
 	_, progressive, _ := f.verbs()
 	hint := fmt.Sprintf("Once it lands, %s returns the %s at its new id", f.show(f.sourceID), f.noun)
+	if f.movedHint != "" {
+		hint = f.movedHint
+	}
 	if f.kind == basecamp.FilingCopy {
 		hint = fmt.Sprintf("Do not copy it again, which makes another copy. %s: %s", f.landing, f.check())
 	}
@@ -421,7 +431,13 @@ func pollUntil(ctx context.Context, check func(context.Context) (bool, error)) (
 // a look-alike host, in another account or on another kind of recording names
 // something else in this account. It runs after ensureAccount.
 func parseFilingRef(app *appctx.App, arg, noun, kind, urlShape string) (filesMoveRef, error) {
-	ref, err := parseFilesMoveRef(app, arg, []string{kind})
+	return parseFilingRefOf(app, arg, noun, urlShape, []string{kind})
+}
+
+// parseFilingRefOf is parseFilingRef for a recording a URL may name under
+// several kinds, such as a Docs & Files item.
+func parseFilingRefOf(app *appctx.App, arg, noun, urlShape string, kinds []string) (filesMoveRef, error) {
+	ref, err := parseFilesMoveRef(app, arg, kinds)
 	if err != nil {
 		return ref, output.ErrUsageHint(fmt.Sprintf("Expected a %s ID or URL: %v", noun, err),
 			fmt.Sprintf("Pass a %s ID or a Basecamp %s URL (%s)", noun, noun, urlShape))

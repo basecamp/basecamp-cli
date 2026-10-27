@@ -1180,112 +1180,34 @@ func readFiledTodolist(app *appctx.App, sourceID int64) func(context.Context, in
 	}
 }
 
+// todosetContainer is a project's To-dos tool, where a to-do list is filed.
+var todosetContainer = filingContainer{
+	dockName: "todoset",
+	noun:     "To-dos",
+	flag:     "--to-todoset",
+	urlKind:  "todosets",
+	urlShape: "…/todosets/<id>",
+	get: func(ctx context.Context, app *appctx.App, id int64) (filingTarget, error) {
+		todoset, err := app.Account().Todosets().Get(ctx, id)
+		if err != nil {
+			return filingTarget{}, err
+		}
+		target := filingTarget{id: todoset.ID, title: todoset.Title}
+		if todoset.Bucket != nil {
+			target.projectID, target.projectName = todoset.Bucket.ID, todoset.Bucket.Name
+		}
+		return target, nil
+	},
+}
+
 // resolveFilingTodoset finds the To-dos tool that --to-project and
-// --to-todoset name for a to-do list: an ID or URL on its own, a project's
-// only one, or one of its to-dos tools picked by ID or title. Only enabled
-// tools on the project's dock count.
+// --to-todoset name for a to-do list.
 func resolveFilingTodoset(cmd *cobra.Command, app *appctx.App, toProject, toTodoset string) (*basecamp.Todoset, error) {
-	var urlProjectID string
-	if urlarg.IsURL(toTodoset) {
-		ref, err := parseFilingRef(app, toTodoset, "To-dos", "todosets", "…/todosets/<id>")
-		if err != nil {
-			return nil, err
-		}
-		toTodoset, urlProjectID = strconv.FormatInt(ref.id, 10), ref.project
-	}
-
-	var projectID, projectName string
-	if toProject != "" {
-		var err error
-		if projectID, projectName, err = app.Names.ResolveProject(cmd.Context(), toProject); err != nil {
-			return nil, err
-		}
-		if urlProjectID != "" && !sameNumericID(urlProjectID, projectID) {
-			return nil, output.ErrUsageHint(
-				fmt.Sprintf("The --to-todoset URL is in project %s, but --to-project points at project %s", urlProjectID, projectID),
-				"Drop --to-project, since the URL names its own project",
-			)
-		}
-	}
-
-	get := func(id int64) (*basecamp.Todoset, error) {
-		todoset, err := app.Account().Todosets().Get(cmd.Context(), id)
-		if err != nil {
-			return nil, convertSDKError(err)
-		}
-		return todoset, nil
-	}
-
-	if isNumericID(toTodoset) && projectID == "" {
-		id, err := strconv.ParseInt(toTodoset, 10, 64)
-		if err != nil || id <= 0 {
-			return nil, output.ErrUsage("--to-todoset must be a positive ID")
-		}
-		todoset, err := get(id)
-		if err != nil {
-			return nil, err
-		}
-		if urlProjectID != "" && !sameNumericID(urlProjectID, strconv.FormatInt(todosetProjectID(todoset), 10)) {
-			return nil, output.ErrUsage(fmt.Sprintf("The --to-todoset URL names project %s, but To-dos %d is in project %d", urlProjectID, todoset.ID, todosetProjectID(todoset)))
-		}
-		return todoset, nil
-	}
-
-	todosets, all, err := getDockTools(cmd.Context(), app, projectID, "todoset")
+	target, err := resolveFilingTarget(cmd, app, todosetContainer, toProject, toTodoset)
 	if err != nil {
 		return nil, err
 	}
-	var candidates []DockTool
-	for _, tool := range todosets {
-		switch {
-		case toTodoset == "",
-			strconv.FormatInt(tool.ID, 10) == toTodoset,
-			!isNumericID(toTodoset) && strings.EqualFold(tool.Title, toTodoset):
-			candidates = append(candidates, tool)
-		}
-	}
-	switch len(candidates) {
-	case 1:
-		return get(candidates[0].ID)
-	case 0:
-		label := projectLabel(cmd, app, projectID, projectName)
-		if toTodoset == "" {
-			hint := "Pick a project that has To-dos"
-			if len(all) > 0 {
-				hint = fmt.Sprintf("Its To-dos is turned off. Turn it on with: basecamp tools enable %d --in %s", all[0].ID, projectID)
-			}
-			return nil, &output.Error{
-				Code:    output.CodeNotFound,
-				Message: fmt.Sprintf("Project %s has no To-dos", label),
-				Hint:    hint,
-			}
-		}
-		return nil, output.ErrUsageHint(
-			fmt.Sprintf("To-dos '%s' not found in project %s", toTodoset, label),
-			"Available To-dos: "+formatDockTools(todosets),
-		)
-	default:
-		lines := make([]string, 0, len(candidates))
-		for _, tool := range candidates {
-			lines = append(lines, fmt.Sprintf("  %d  %s", tool.ID, tool.Title))
-		}
-		return nil, &output.Error{
-			Code:    output.CodeAmbiguous,
-			Message: "Multiple To-dos found",
-			Hint:    fmt.Sprintf("Specify one with --to-todoset <id>:\n%s", strings.Join(lines, "\n")),
-		}
-	}
-}
-
-func formatDockTools(tools []DockTool) string {
-	if len(tools) == 0 {
-		return "none"
-	}
-	names := make([]string, len(tools))
-	for i, tool := range tools {
-		names[i] = fmt.Sprintf("%d (%s)", tool.ID, tool.Title)
-	}
-	return strings.Join(names, ", ")
+	return &basecamp.Todoset{ID: target.id, Title: target.title, Bucket: &basecamp.Bucket{ID: target.projectID, Name: target.projectName}}, nil
 }
 
 func todosetProjectID(todoset *basecamp.Todoset) int64 {

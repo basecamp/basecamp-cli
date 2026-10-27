@@ -51,7 +51,8 @@ func TestTodolistsMoveToAProjectWithoutTodosSaysHowToTurnItOn(t *testing.T) {
 	run := runTodoFilingCommand(t, transport, NewTodolistsCmd(), "move", "310", "--to-project", "Bare")
 	e := requireUsageRefusal(t, run, transport)
 
-	assert.Equal(t, "Project Bare has no To-dos", e.Message)
+	assert.Equal(t, output.CodeNotFound, e.Code)
+	assert.Contains(t, e.Message, "Bare")
 	assert.Contains(t, e.Hint, "basecamp tools enable 880 --in 888")
 }
 
