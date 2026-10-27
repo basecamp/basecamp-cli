@@ -8,7 +8,7 @@ buildGoModule.override { go = go_1_26; } (finalAttrs: {
   src = lib.cleanSource ./..;
 
   # To update: set to lib.fakeHash, run `nix build`, use the hash from the error.
-  vendorHash = "sha256-6RHqvaXnwckfF4WSqUhQ8q7bA3ayZ+lIZx3drlxlN8I=";
+  vendorHash = "sha256-4MRvwdsjSoeG7C1eJax2Df9uJhQ11cnvGHKQpKtWt74=";
 
   subPackages = [ "cmd/basecamp" ];
 

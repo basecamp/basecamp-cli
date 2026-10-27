@@ -15508,6 +15508,104 @@
         }
       }
     },
+    "/{accountId}/projects/{projectId}/logo.json": {
+      "delete": {
+        "description": "Remove the project's logo (returns 204 even when absent). Wallpaper is unchanged.\nPeople and agents who can edit the project may use this operation; others get 403, and projects outside the caller's visibility get 404.",
+        "operationId": "RemoveProjectLogo",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "RemoveProjectLogo 204 response"
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Projects"
+        ],
+        "x-basecamp-idempotent": {
+          "natural": true
+        },
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
     "/{accountId}/projects/{projectId}/people.json": {
       "get": {
         "description": "List all active people on a project\n\n**Pagination**: Uses Link header (RFC5988). Follow the `next` rel URL\nto fetch additional pages. X-Total-Count header provides total count.",
@@ -37097,6 +37195,9 @@
           "wallpaper": {
             "$ref": "#/components/schemas/ProjectWallpaper"
           },
+          "logo": {
+            "$ref": "#/components/schemas/ProjectLogo"
+          },
           "clientside": {
             "$ref": "#/components/schemas/ClientSide",
             "deprecated": true,
@@ -37197,6 +37298,19 @@
         },
         "required": [
           "error"
+        ]
+      },
+      "ProjectLogo": {
+        "type": "object",
+        "description": "The project's logo, included only in single-project responses when attached.\nProject lists and home responses omit it. Absent logos omit this member, not null.",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "An authenticated API-host URL that redirects to storage, not a public image link.\nUse the SDK's authenticated download helper rather than an image element."
+          }
+        },
+        "required": [
+          "url"
         ]
       },
       "ProjectWallpaper": {
@@ -40871,6 +40985,10 @@
       },
       "UpdateProjectClientAccessResponseContent": {
         "$ref": "#/components/schemas/ProjectAccessResult"
+      },
+      "UpdateProjectLogoInputPayload": {
+        "type": "string",
+        "contentEncoding": "byte"
       },
       "UpdateProjectRequestContent": {
         "type": "object",
