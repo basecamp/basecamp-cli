@@ -305,7 +305,7 @@ func TestCompleteCmd_Error(t *testing.T) {
 }
 
 func TestTrashCmd_Success_ProducesStatusAndNavigateBack(t *testing.T) {
-	cmd := trashCmd(func() (bool, error) { return false, nil })
+	cmd := trashCmd(func() error { return nil })
 	msg := cmd()
 
 	batch, ok := msg.(tea.BatchMsg)
@@ -323,7 +323,7 @@ func TestTrashCmd_Success_ProducesStatusAndNavigateBack(t *testing.T) {
 }
 
 func TestTrashCmd_Error(t *testing.T) {
-	cmd := trashCmd(func() (bool, error) { return false, fmt.Errorf("boom") })
+	cmd := trashCmd(func() error { return fmt.Errorf("boom") })
 	msg := cmd()
 	errMsg, ok := msg.(ErrorMsg)
 	require.True(t, ok, "error should produce ErrorMsg")
@@ -336,26 +336,41 @@ const pingLineJSON = `{"id":111,"status":"active","type":"Chat::Lines::Text","ti
 	`"parent":{"id":222,"title":"Ping","type":"Chat::Transcript"},` +
 	`"bucket":{"id":333,"name":"Jason Fried","type":"Circle"}}`
 
-// The palette's :trash on a Campfire line deletes it through its Campfire,
-// never through the generic trash route, which bc3 refuses for anything in a
-// Ping (bc3#14171). The scope's type is only a label, so the line is read to
-// learn what it is: a deep link to a Ping line labels it Campfire::Line, and a
-// quick jump not at all.
-func TestAction_Trash_CampfireLineDeletesThroughItsCampfire(t *testing.T) {
+// The palette's :trash never sends a Campfire line to the generic trash route,
+// which bc3 refuses for anything in a Ping (bc3#14171) and which in a project
+// would skip the line's own delete checks. Nor does it delete the line, which
+// can't be undone and which the palette would do without asking: it says to
+// press t twice in the line's view, which asks first. The scope's type is only
+// a label, so the line is read to learn what it is: a deep link to a Ping line
+// labels it Campfire::Line, and a quick jump not at all.
+func TestAction_Trash_RefusesACampfireLine(t *testing.T) {
 	for _, label := range []string{"Chat::Lines::Text", "Campfire::Line", ""} {
 		t.Run("label "+label, func(t *testing.T) {
 			transport := &actionTransport{routes: map[string]actionReply{
-				"GET /99999/recordings/111.json":    {http.StatusOK, pingLineJSON},
-				"DELETE /99999/chats/222/lines/111": {http.StatusNoContent, ""},
+				"GET /99999/recordings/111.json": {http.StatusOK, pingLineJSON},
 			}}
 			session := actionSession(transport, Scope{AccountID: "99999", ProjectID: 333, RecordingID: 111, RecordingType: label})
 
 			msg := trashAction(t).Execute(session)()
 
-			assert.Equal(t, []string{"DELETE /99999/chats/222/lines/111"}, transport.writes())
-			assert.Equal(t, "Deleted", firstStatus(t, msg))
+			assert.Empty(t, transport.writes())
+			errMsg, ok := msg.(ErrorMsg)
+			require.True(t, ok, "expected an ErrorMsg, got %T", msg)
+			assert.ErrorIs(t, errMsg.Err, errCampfireLineTrash)
 		})
 	}
+}
+
+// When the recording can't be read, :trash writes nothing rather than guess.
+func TestAction_Trash_WritesNothingWhenItCantTell(t *testing.T) {
+	transport := &actionTransport{routes: map[string]actionReply{}}
+	session := actionSession(transport, Scope{AccountID: "99999", ProjectID: 333, RecordingID: 111, RecordingType: "Message"})
+
+	msg := trashAction(t).Execute(session)()
+
+	assert.Empty(t, transport.writes())
+	_, ok := msg.(ErrorMsg)
+	assert.True(t, ok, "expected an ErrorMsg, got %T", msg)
 }
 
 // Anything else is trashed as before.

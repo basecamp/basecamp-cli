@@ -1015,8 +1015,18 @@ func (h *Hub) RemoveRecording(ctx context.Context, accountID string, recordingID
 	return true, client.Campfires().DeleteLine(ctx, campfireID, recordingID)
 }
 
-// readRecordingKind reads a recording's API type and its parent's ID, which
-// for a Campfire line is its Campfire.
+// RecordingKind reads a recording's API type and its parent's ID, which for a
+// Campfire line is its Campfire, for a caller that knows the recording only by
+// a view's label.
+func (h *Hub) RecordingKind(ctx context.Context, accountID string, recordingID int64) (recordingType string, parentID int64, err error) {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return "", 0, fmt.Errorf("no client for account %s", accountID)
+	}
+	return readRecordingKind(ctx, client, recordingID)
+}
+
+// readRecordingKind reads a recording's API type and its parent's ID.
 func readRecordingKind(ctx context.Context, client *basecamp.AccountClient, recordingID int64) (recordingType string, parentID int64, err error) {
 	resp, err := client.Get(ctx, fmt.Sprintf("/recordings/%d.json", recordingID))
 	if err != nil {

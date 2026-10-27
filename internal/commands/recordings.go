@@ -366,7 +366,7 @@ func runRecordingsStatus(cmd *cobra.Command, app *appctx.App, recordingIDStr, ne
 	}
 
 	if err != nil {
-		if refusal := pingWriteRefusal(cmd.Context(), app, recordingID, err); refusal != nil {
+		if refusal := pingWriteRefusal(cmd, app, recordingID, err); refusal != nil {
 			return refusal
 		}
 		return convertSDKError(err)
@@ -442,7 +442,7 @@ You can pass either an ID or a Basecamp URL:
 
 			recording, err := app.Account().Recordings().SetClientVisibility(cmd.Context(), recordingID, isVisible)
 			if err != nil {
-				if refusal := pingWriteRefusal(cmd.Context(), app, recordingID, err); refusal != nil {
+				if refusal := pingWriteRefusal(cmd, app, recordingID, err); refusal != nil {
 					return refusal
 				}
 				return convertSDKError(err)
@@ -485,26 +485,13 @@ You can pass either an ID or a Basecamp URL:
 // clientsForbiddenError does for a project. It returns nil when the error is
 // anything else, or the recording isn't in a Ping or can't be read, leaving
 // the caller's own conversion to stand.
-func pingWriteRefusal(ctx context.Context, app *appctx.App, recordingID int64, err error) *output.Error {
+func pingWriteRefusal(cmd *cobra.Command, app *appctx.App, recordingID int64, err error) *output.Error {
 	var sdkErr *basecamp.Error
 	if !errors.As(err, &sdkErr) || sdkErr.Code != basecamp.CodeForbidden {
 		return nil
 	}
-	resp, readErr := app.Account().Get(ctx, fmt.Sprintf("/recordings/%d.json", recordingID))
-	if readErr != nil || resp.StatusCode == http.StatusNoContent {
-		return nil
-	}
-	var recording struct {
-		Type   string `json:"type"`
-		Parent *struct {
-			ID int64 `json:"id"`
-		} `json:"parent"`
-		Bucket *struct {
-			ID   int64  `json:"id"`
-			Type string `json:"type"`
-		} `json:"bucket"`
-	}
-	if resp.UnmarshalData(&recording) != nil || recording.Bucket == nil || recording.Bucket.Type != "Circle" {
+	recording, inPing := readPingRecording(cmd.Context(), app, recordingID)
+	if !inPing {
 		return nil
 	}
 
@@ -517,10 +504,33 @@ func pingWriteRefusal(ctx context.Context, app *appctx.App, recordingID int64, e
 	}
 	if strings.HasPrefix(recording.Type, "Chat::Lines::") && recording.Parent != nil {
 		refusal.Message = "Basecamp doesn't change a line in a Ping through this command"
-		refusal.Hint = fmt.Sprintf("A Ping's lines change only through its Campfire. To delete this one: basecamp chat delete %d --room %d --in %d",
-			recordingID, recording.Parent.ID, recording.Bucket.ID)
+		refusal.Hint = "A Ping's lines change only through its Campfire. To delete this one: " +
+			deleteLineCmd(cmd, strconv.FormatInt(recordingID, 10), strconv.FormatInt(recording.Parent.ID, 10), strconv.FormatInt(recording.Bucket.ID, 10))
 	}
 	return refusal
+}
+
+// pingRecording is what pingWriteRefusal reads of a recording: its type, its
+// parent (for a line, its Campfire), and its bucket.
+type pingRecording struct {
+	Type   string `json:"type"`
+	Parent *struct {
+		ID int64 `json:"id"`
+	} `json:"parent"`
+	Bucket *struct {
+		ID   int64  `json:"id"`
+		Type string `json:"type"`
+	} `json:"bucket"`
+}
+
+// readPingRecording reads a recording and reports whether it is in a Ping,
+// whose bucket is a Circle. A recording that can't be read is not known to be.
+func readPingRecording(ctx context.Context, app *appctx.App, recordingID int64) (recording pingRecording, inPing bool) {
+	resp, err := app.Account().Get(ctx, fmt.Sprintf("/recordings/%d.json", recordingID))
+	if err == nil && resp.StatusCode != http.StatusNoContent && resp.UnmarshalData(&recording) == nil {
+		inPing = recording.Bucket != nil && recording.Bucket.Type == "Circle"
+	}
+	return recording, inPing
 }
 
 // newRecordableTrashCmd creates a trash subcommand for a recordable entity.

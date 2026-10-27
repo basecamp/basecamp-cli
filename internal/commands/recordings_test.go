@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -336,10 +337,19 @@ var pingGatedWrites = []pingGatedWrite{
 // recording 111, and returns the error it ends in.
 func runPingGatedWrite(t *testing.T, w pingGatedWrite, readStatus int, readBody string) *output.Error {
 	t.Helper()
+	e, _ := runPingGatedWriteIn(t, output.FormatJSON, w, readStatus, readBody)
+	return e
+}
+
+// runPingGatedWriteIn is runPingGatedWrite with the output in format, and
+// returns the app it ran in too.
+func runPingGatedWriteIn(t *testing.T, format output.Format, w pingGatedWrite, readStatus int, readBody string) (*output.Error, *appctx.App) {
+	t.Helper()
 	app, transport := setupRecordingTestApp(t,
 		stubRoute{method: w.method, path: w.path, status: http.StatusForbidden},
 		stubRoute{method: http.MethodGet, path: "/99999/recordings/111.json", status: readStatus, body: readBody},
 	)
+	app.Output = output.New(output.Options{Format: format, Writer: &bytes.Buffer{}})
 
 	err := executeRecordingCommand(w.cmd(), app, w.args...)
 
@@ -355,22 +365,34 @@ func runPingGatedWrite(t *testing.T, w pingGatedWrite, readStatus int, readBody 
 		}
 	}
 	assert.Equal(t, 1, writes, "the refused write is sent once and not retried another way")
-	return e
+	return e, app
 }
+
+const pingLine = `{"id":111,"type":"Chat::Lines::Text","parent":{"id":222,"type":"Chat::Transcript"},"bucket":{"id":333,"type":"Circle"}}`
 
 // A 403 on a line in a Ping says why and names the command that does delete
 // the line, with its Campfire and its Ping: bc3's 403 is empty, the same one a
 // person without permission gets, so the line is read back to tell them apart.
+// Read as JSON, the command carries --force, without which chat delete refuses
+// to run where no confirmation can be shown.
 func TestRecordingWritesExplainAPingLine(t *testing.T) {
-	const line = `{"id":111,"type":"Chat::Lines::Text","parent":{"id":222,"type":"Chat::Transcript"},"bucket":{"id":333,"type":"Circle"}}`
 	for _, w := range pingGatedWrites {
 		t.Run(w.name, func(t *testing.T) {
-			e := runPingGatedWrite(t, w, http.StatusOK, line)
+			e, app := runPingGatedWriteIn(t, output.FormatJSON, w, http.StatusOK, pingLine)
 
 			assert.Equal(t, "Basecamp doesn't change a line in a Ping through this command", e.Message)
-			assert.Equal(t, "A Ping's lines change only through its Campfire. To delete this one: basecamp chat delete 111 --room 222 --in 333", e.Hint)
+			assert.Equal(t, "A Ping's lines change only through its Campfire. To delete this one: basecamp chat delete 111 --room 222 --in 333 --force", e.Hint)
+			require.NoError(t, ensureDeleteConfirmable(deleteGuard(app), strings.Contains(e.Hint, "--force")),
+				"the hint %q is refused by the guard it would hit", e.Hint)
 		})
 	}
+}
+
+// Read by a person, the command leaves --force off: chat delete will ask them.
+func TestRecordingWritesExplainAPingLineToAPerson(t *testing.T) {
+	e, _ := runPingGatedWriteIn(t, output.FormatStyled, pingGatedWrites[0], http.StatusOK, pingLine)
+
+	assert.Equal(t, "A Ping's lines change only through its Campfire. To delete this one: basecamp chat delete 111 --room 222 --in 333", e.Hint)
 }
 
 // A 403 on a Ping's Campfire says that only your own subscription changes there.
