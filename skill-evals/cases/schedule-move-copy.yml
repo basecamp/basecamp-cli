@@ -1,0 +1,12 @@
+task: Move the calendar event 5678 to the Marketing project's schedule
+tags: [move-copy, workflow]
+mocks:
+  - match: '^schedule move(?!.*--help)'
+    output: '{"ok":true,"data":{"id":56780,"source_id":5678,"type":"Schedule::Entry"},"summary":"Moved schedule entry #5678 to Marketing › Schedule as schedule entry #56780"}'
+accept:
+  - '^schedule move (?=.*\b5678\b)(?=.*--to-project \W?Marketing)(?!.*--help)'
+reject:
+  - '^schedule (create|update)'
+  - '^calendars\b'
+  - '^recordings\b'
+max_commands: 4

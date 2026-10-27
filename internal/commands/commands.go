@@ -48,7 +48,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "cards", Category: "core", Description: "Manage Kanban cards", Actions: []string{"list", "show", "create", "update", "move", "copy", "done", "columns", "wormholes", "steps", "trash", "archive", "restore"}},
 				{Name: "files", Category: "core", Description: "Manage files, documents, and folders", Actions: []string{"list", "show", "versions", "replace", "download", "update", "move", "copy", "trash", "archive", "restore"}},
 				{Name: "checkins", Category: "core", Description: "View automatic check-ins", Actions: []string{"questions", "question", "answers", "answer", "reminders"}},
-				{Name: "schedule", Category: "core", Description: "Manage schedule entries", Actions: []string{"show", "entries", "create", "update"}},
+				{Name: "schedule", Category: "core", Description: "Manage schedule entries", Actions: []string{"show", "entries", "create", "update", "move", "copy"}},
 			},
 		},
 		{

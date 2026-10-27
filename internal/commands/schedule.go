@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -45,6 +46,8 @@ For a cross-project view of your upcoming schedule, use 'basecamp reports schedu
 		newScheduleCreateCmd(&project, &scheduleID),
 		newScheduleUpdateCmd(&project),
 		newScheduleSettingsCmd(&project, &scheduleID),
+		newFilingCmd(scheduleEntryFamily(), basecamp.FilingMove, scheduleMoveHelp, false),
+		newFilingCmd(scheduleEntryFamily(), basecamp.FilingCopy, scheduleCopyHelp, false),
 	)
 
 	return cmd
@@ -930,4 +933,121 @@ func validateScheduleTimestamp(flag, value string) error {
 		return nil
 	}
 	return output.ErrUsage(fmt.Sprintf("Invalid --%s: %q is neither an RFC 3339 timestamp (2026-06-01T09:00:00Z) nor a date (2026-06-01)", flag, value))
+}
+
+var scheduleMoveHelp = filingHelp{
+	use:   "move <id|url>",
+	short: "Move a schedule entry (event) to another project's schedule",
+	long: `Move a schedule entry, an event, to a schedule in another project, as the
+web's Move… does. A recurring event moves as a whole, every occurrence with it.
+
+  basecamp schedule move 789 --to-project "Marketing"
+  basecamp schedule move https://3.basecamp.com/123/buckets/456/schedule_entries/789 --to-project "Marketing"
+  basecamp schedule move 789 --to-schedule 1069479999
+
+--to-project alone needs a project with one schedule; add --to-schedule when it
+has several, or pass a schedule's ID or URL alone. The command waits for
+Basecamp to finish the move and shows the event where it landed, under a new ID.`,
+	notes: "--to-project <project> (ID or name) moves the event to that project's schedule; --to-schedule <id|url> names a schedule directly. " +
+		"A recurring event moves as a whole; an occurrence URL moves the whole series. " +
+		"Output is the moved event: data.id is its NEW id and data.source_id the old one. Write to the new id; the old id stops taking changes, and reading it follows the move. " +
+		"--schedule names the event's own schedule and is refused; moving onto the schedule it is already on is refused. " +
+		"An in_progress error means Basecamp is still moving it: basecamp schedule show <old id> returns it once it lands.",
+}
+
+var scheduleCopyHelp = filingHelp{
+	use:   "copy <id|url>",
+	short: "Copy a schedule entry (event) to a schedule in this or another project",
+	long: `Copy a schedule entry, an event, onto a schedule, as the web's Copy… does. The
+original stays where it is; a recurring event is copied as a whole series.
+
+With no destination, the copy goes onto the event's own schedule:
+  basecamp schedule copy 789
+  basecamp schedule copy 789 --to-project "Marketing"
+  basecamp schedule copy 789 --to-schedule 1069479999 --include-comments
+
+Basecamp makes the copy in the background; the command waits for it and shows
+the new event.`,
+	notes: "Without --to-project/--to-schedule the copy goes onto the event's own schedule. " +
+		"Output is the new event; its id is data.id and the original's is data.source_id. --include-comments copies the comments too. " +
+		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy.",
+}
+
+// scheduleEntryFamily is how schedule entries move and copy between
+// schedules.
+func scheduleEntryFamily() filingFamily {
+	return filingFamily{
+		noun:     "schedule entry",
+		group:    "basecamp schedule",
+		types:    []string{"Schedule::Entry"},
+		urlKinds: []string{"schedule_entries"},
+		urlShape: "…/schedule_entries/<id>",
+		into: filingContainer{
+			dockName: "schedule",
+			noun:     "schedule",
+			flag:     "--to-schedule",
+			urlKind:  "schedules",
+			urlShape: "…/schedules/<id>",
+			get: func(ctx context.Context, app *appctx.App, id int64) (filingTarget, error) {
+				schedule, err := app.Account().Schedules().Get(ctx, id)
+				if err != nil {
+					return filingTarget{}, err
+				}
+				return bucketTarget(schedule.ID, schedule.Title, schedule.Bucket), nil
+			},
+		},
+		ownFlags: []string{"schedule"},
+		get:      getScheduleEntryForFiling,
+		landing:  "The copy lands on that schedule",
+		lookFor: func(t filingTarget) string {
+			return fmt.Sprintf("basecamp schedule entries --in %d --schedule %d", t.projectID, t.id)
+		},
+		crumbs: func(id, projectID int64) []output.Breadcrumb {
+			return []output.Breadcrumb{{
+				Action:      "show",
+				Cmd:         fmt.Sprintf("basecamp schedule show %d --in %d", id, projectID),
+				Description: "View the event",
+			}}
+		},
+	}
+}
+
+// occurrenceType is what Basecamp answers a recurring event's read with: it
+// redirects to an occurrence, whose parent is the event.
+const occurrenceType = "Schedule::Entry::Occurrence"
+
+// getScheduleEntryForFiling reads an event to move or copy. A recurring
+// event's read answers with one occurrence, so the event is its parent and
+// files as a whole series; the output names the event, with the occurrence
+// read as occurrence_id, and the schedule it is on is its project's.
+func getScheduleEntryForFiling(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
+	e, err := app.Account().Schedules().GetEntry(ctx, id)
+	if err != nil {
+		return nil, filingSource{}, err
+	}
+	src := filingSource{id: e.ID, typ: e.Type, title: e.Summary, bucket: e.Bucket, parent: e.Parent}
+	if e.Type != occurrenceType || e.Parent == nil {
+		return e, src, nil
+	}
+
+	src.id, src.typ, src.parent = e.Parent.ID, "Schedule::Entry", nil
+	if e.Bucket != nil {
+		schedules, _, err := getDockTools(ctx, app, strconv.FormatInt(e.Bucket.ID, 10), "schedule")
+		if err != nil {
+			return nil, filingSource{}, err
+		}
+		if len(schedules) == 1 {
+			src.parent = &basecamp.Parent{ID: schedules[0].ID, Title: schedules[0].Title, Type: "Schedule"}
+		}
+	}
+	record, ok := withSourceID(e, 0).(map[string]any)
+	if !ok {
+		return e, src, nil
+	}
+	delete(record, "source_id")
+	record["occurrence_id"] = record["id"]
+	record["id"] = src.id
+	record["type"] = src.typ
+	record["parent"] = src.parent
+	return record, src, nil
 }

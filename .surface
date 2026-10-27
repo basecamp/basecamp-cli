@@ -365,7 +365,9 @@ ARG basecamp recordings trash 00 <id|url>
 ARG basecamp recordings trashed 00 <id|url>
 ARG basecamp recordings visibility 00 <id|url>
 ARG basecamp reports assigned 00 [person]
+ARG basecamp schedule copy 00 <id|url>
 ARG basecamp schedule create 00 <summary>
+ARG basecamp schedule move 00 <id|url>
 ARG basecamp schedule show 00 <id|url>
 ARG basecamp schedule update 00 <id|url>
 ARG basecamp search 00 <query>
@@ -1096,9 +1098,11 @@ CMD basecamp reports assigned
 CMD basecamp reports overdue
 CMD basecamp reports schedule
 CMD basecamp schedule
+CMD basecamp schedule copy
 CMD basecamp schedule create
 CMD basecamp schedule entries
 CMD basecamp schedule info
+CMD basecamp schedule move
 CMD basecamp schedule settings
 CMD basecamp schedule show
 CMD basecamp schedule update
@@ -14275,6 +14279,31 @@ FLAG basecamp schedule --stats type=bool
 FLAG basecamp schedule --styled type=bool
 FLAG basecamp schedule --todolist type=string
 FLAG basecamp schedule --verbose type=count
+FLAG basecamp schedule copy --account type=string
+FLAG basecamp schedule copy --agent type=bool
+FLAG basecamp schedule copy --cache-dir type=string
+FLAG basecamp schedule copy --count type=bool
+FLAG basecamp schedule copy --help type=bool
+FLAG basecamp schedule copy --hints type=bool
+FLAG basecamp schedule copy --ids-only type=bool
+FLAG basecamp schedule copy --in type=string
+FLAG basecamp schedule copy --include-comments type=bool
+FLAG basecamp schedule copy --jq type=string
+FLAG basecamp schedule copy --json type=bool
+FLAG basecamp schedule copy --markdown type=bool
+FLAG basecamp schedule copy --md type=bool
+FLAG basecamp schedule copy --no-hints type=bool
+FLAG basecamp schedule copy --no-stats type=bool
+FLAG basecamp schedule copy --profile type=string
+FLAG basecamp schedule copy --project type=string
+FLAG basecamp schedule copy --quiet type=bool
+FLAG basecamp schedule copy --schedule type=string
+FLAG basecamp schedule copy --stats type=bool
+FLAG basecamp schedule copy --styled type=bool
+FLAG basecamp schedule copy --to-project type=string
+FLAG basecamp schedule copy --to-schedule type=string
+FLAG basecamp schedule copy --todolist type=string
+FLAG basecamp schedule copy --verbose type=count
 FLAG basecamp schedule create --account type=string
 FLAG basecamp schedule create --agent type=bool
 FLAG basecamp schedule create --all-day type=bool
@@ -14364,6 +14393,30 @@ FLAG basecamp schedule info --stats type=bool
 FLAG basecamp schedule info --styled type=bool
 FLAG basecamp schedule info --todolist type=string
 FLAG basecamp schedule info --verbose type=count
+FLAG basecamp schedule move --account type=string
+FLAG basecamp schedule move --agent type=bool
+FLAG basecamp schedule move --cache-dir type=string
+FLAG basecamp schedule move --count type=bool
+FLAG basecamp schedule move --help type=bool
+FLAG basecamp schedule move --hints type=bool
+FLAG basecamp schedule move --ids-only type=bool
+FLAG basecamp schedule move --in type=string
+FLAG basecamp schedule move --jq type=string
+FLAG basecamp schedule move --json type=bool
+FLAG basecamp schedule move --markdown type=bool
+FLAG basecamp schedule move --md type=bool
+FLAG basecamp schedule move --no-hints type=bool
+FLAG basecamp schedule move --no-stats type=bool
+FLAG basecamp schedule move --profile type=string
+FLAG basecamp schedule move --project type=string
+FLAG basecamp schedule move --quiet type=bool
+FLAG basecamp schedule move --schedule type=string
+FLAG basecamp schedule move --stats type=bool
+FLAG basecamp schedule move --styled type=bool
+FLAG basecamp schedule move --to-project type=string
+FLAG basecamp schedule move --to-schedule type=string
+FLAG basecamp schedule move --todolist type=string
+FLAG basecamp schedule move --verbose type=count
 FLAG basecamp schedule settings --account type=string
 FLAG basecamp schedule settings --agent type=bool
 FLAG basecamp schedule settings --cache-dir type=string
@@ -20770,9 +20823,11 @@ SUB basecamp reports assigned
 SUB basecamp reports overdue
 SUB basecamp reports schedule
 SUB basecamp schedule
+SUB basecamp schedule copy
 SUB basecamp schedule create
 SUB basecamp schedule entries
 SUB basecamp schedule info
+SUB basecamp schedule move
 SUB basecamp schedule settings
 SUB basecamp schedule show
 SUB basecamp schedule update
