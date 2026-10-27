@@ -72,7 +72,7 @@ setup_file() {
   assert_json_value '.data.source_id' "$msg_id"
   assert_json_not_null '.data.id'
 
-  run_smoke basecamp messages trash "$(echo "$output" | jq -r '.data.id')" --json
+  run_smoke basecamp messages trash "$(echo "$output" | jq -r '.data.id')" -p "$QA_PROJECT" --json
   assert_success
 }
 

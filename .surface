@@ -268,6 +268,8 @@ ARG basecamp folders uploads create 00 <file>
 ARG basecamp folders vault create 00 <name>
 ARG basecamp folders vaults create 00 <name>
 ARG basecamp folders versions 00 <upload_id|url>
+ARG basecamp forwards copy 00 <id|url>
+ARG basecamp forwards move 00 <id|url>
 ARG basecamp forwards replies 00 <forward_id|url>
 ARG basecamp forwards reply 00 <forward_id|url>
 ARG basecamp forwards reply 01 <reply_id|url>
@@ -959,8 +961,10 @@ CMD basecamp folders vaults create
 CMD basecamp folders vaults list
 CMD basecamp folders versions
 CMD basecamp forwards
+CMD basecamp forwards copy
 CMD basecamp forwards inbox
 CMD basecamp forwards list
+CMD basecamp forwards move
 CMD basecamp forwards replies
 CMD basecamp forwards reply
 CMD basecamp forwards show
@@ -11074,6 +11078,31 @@ FLAG basecamp forwards --stats type=bool
 FLAG basecamp forwards --styled type=bool
 FLAG basecamp forwards --todolist type=string
 FLAG basecamp forwards --verbose type=count
+FLAG basecamp forwards copy --account type=string
+FLAG basecamp forwards copy --agent type=bool
+FLAG basecamp forwards copy --cache-dir type=string
+FLAG basecamp forwards copy --count type=bool
+FLAG basecamp forwards copy --help type=bool
+FLAG basecamp forwards copy --hints type=bool
+FLAG basecamp forwards copy --ids-only type=bool
+FLAG basecamp forwards copy --in type=string
+FLAG basecamp forwards copy --inbox type=string
+FLAG basecamp forwards copy --include-comments type=bool
+FLAG basecamp forwards copy --jq type=string
+FLAG basecamp forwards copy --json type=bool
+FLAG basecamp forwards copy --markdown type=bool
+FLAG basecamp forwards copy --md type=bool
+FLAG basecamp forwards copy --no-hints type=bool
+FLAG basecamp forwards copy --no-stats type=bool
+FLAG basecamp forwards copy --profile type=string
+FLAG basecamp forwards copy --project type=string
+FLAG basecamp forwards copy --quiet type=bool
+FLAG basecamp forwards copy --stats type=bool
+FLAG basecamp forwards copy --styled type=bool
+FLAG basecamp forwards copy --to-inbox type=string
+FLAG basecamp forwards copy --to-project type=string
+FLAG basecamp forwards copy --todolist type=string
+FLAG basecamp forwards copy --verbose type=count
 FLAG basecamp forwards inbox --account type=string
 FLAG basecamp forwards inbox --agent type=bool
 FLAG basecamp forwards inbox --cache-dir type=string
@@ -11122,6 +11151,30 @@ FLAG basecamp forwards list --stats type=bool
 FLAG basecamp forwards list --styled type=bool
 FLAG basecamp forwards list --todolist type=string
 FLAG basecamp forwards list --verbose type=count
+FLAG basecamp forwards move --account type=string
+FLAG basecamp forwards move --agent type=bool
+FLAG basecamp forwards move --cache-dir type=string
+FLAG basecamp forwards move --count type=bool
+FLAG basecamp forwards move --help type=bool
+FLAG basecamp forwards move --hints type=bool
+FLAG basecamp forwards move --ids-only type=bool
+FLAG basecamp forwards move --in type=string
+FLAG basecamp forwards move --inbox type=string
+FLAG basecamp forwards move --jq type=string
+FLAG basecamp forwards move --json type=bool
+FLAG basecamp forwards move --markdown type=bool
+FLAG basecamp forwards move --md type=bool
+FLAG basecamp forwards move --no-hints type=bool
+FLAG basecamp forwards move --no-stats type=bool
+FLAG basecamp forwards move --profile type=string
+FLAG basecamp forwards move --project type=string
+FLAG basecamp forwards move --quiet type=bool
+FLAG basecamp forwards move --stats type=bool
+FLAG basecamp forwards move --styled type=bool
+FLAG basecamp forwards move --to-inbox type=string
+FLAG basecamp forwards move --to-project type=string
+FLAG basecamp forwards move --todolist type=string
+FLAG basecamp forwards move --verbose type=count
 FLAG basecamp forwards replies --account type=string
 FLAG basecamp forwards replies --agent type=bool
 FLAG basecamp forwards replies --all type=bool
@@ -20786,8 +20839,10 @@ SUB basecamp folders vaults create
 SUB basecamp folders vaults list
 SUB basecamp folders versions
 SUB basecamp forwards
+SUB basecamp forwards copy
 SUB basecamp forwards inbox
 SUB basecamp forwards list
+SUB basecamp forwards move
 SUB basecamp forwards replies
 SUB basecamp forwards reply
 SUB basecamp forwards show

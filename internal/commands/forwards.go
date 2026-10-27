@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -37,6 +38,8 @@ that can receive forwarded emails.`,
 		newForwardsInboxCmd(&project, &inboxID),
 		newForwardsRepliesCmd(&project),
 		newForwardsReplyCmd(&project),
+		newFilingCmd(forwardFamily(), basecamp.FilingMove, forwardsMoveHelp, false),
+		newFilingCmd(forwardFamily(), basecamp.FilingCopy, forwardsCopyHelp, false),
 	)
 
 	return cmd
@@ -632,6 +635,86 @@ You can pass either IDs or Basecamp URLs:
 					},
 				),
 			)
+		},
+	}
+}
+
+var forwardsMoveHelp = filingHelp{
+	use:   "move <id|url>",
+	short: "Move an email forward to another project's Email Forwards",
+	long: `Move an email forward, with its replies, to the Email Forwards of another
+project, as the web's Move… does. Email Forwards must be turned on there.
+
+  basecamp forwards move 789 --to-project "Marketing"
+  basecamp forwards move https://3.basecamp.com/123/buckets/456/inbox_forwards/789 --to-inbox 1069479999
+
+The command waits for Basecamp to finish the move and shows the forward where
+it landed, under a new ID.`,
+	notes: "--to-project <project> (ID or name) moves the forward to that project's Email Forwards, which must be turned on (the error names the tools enable command when it is off); --to-inbox <id|url> names one directly. " +
+		"Output is the moved forward: data.id is its NEW id and data.source_id the old one. Write to the new id; the old id stops taking changes, and reading it follows the move. " +
+		"--inbox names the forward's own Email Forwards and is refused; moving into the one it is in is refused. Basecamp refuses moving a reply on its own. " +
+		"An in_progress error means Basecamp is still moving it: basecamp forwards show <old id> returns it once it lands.",
+}
+
+var forwardsCopyHelp = filingHelp{
+	use:   "copy <id|url>",
+	short: "Copy an email forward to Email Forwards in this or another project",
+	long: `Copy an email forward into a project's Email Forwards, as the web's Copy…
+does. The original stays where it is. Email Forwards must be turned on there.
+
+With no destination, the copy goes into the forward's own Email Forwards:
+  basecamp forwards copy 789
+  basecamp forwards copy 789 --to-project "Marketing" --include-comments
+
+Basecamp makes the copy in the background; the command waits for it and shows
+the new forward.`,
+	notes: "Without --to-project/--to-inbox the copy goes into the forward's own Email Forwards. The destination's Email Forwards must be turned on. " +
+		"Output is the new forward; its id is data.id and the original's is data.source_id. " +
+		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy.",
+}
+
+// forwardFamily is how email forwards move and copy between projects' Email
+// Forwards.
+func forwardFamily() filingFamily {
+	return filingFamily{
+		noun:     "forward",
+		group:    "basecamp forwards",
+		types:    []string{"Inbox::Forward"},
+		urlKinds: []string{"inbox_forwards"},
+		urlShape: "…/inbox_forwards/<id>",
+		into: filingContainer{
+			dockName: "inbox",
+			noun:     "Email Forwards",
+			plural:   "Email Forwards tools",
+			flag:     "--to-inbox",
+			urlKind:  "inboxes",
+			urlShape: "…/inboxes/<id>",
+			get: func(ctx context.Context, app *appctx.App, id int64) (filingTarget, error) {
+				inbox, err := app.Account().Forwards().GetInbox(ctx, id)
+				if err != nil {
+					return filingTarget{}, err
+				}
+				return bucketTarget(inbox.ID, inbox.Title, inbox.Bucket), nil
+			},
+		},
+		ownFlags: []string{"inbox"},
+		get: func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
+			f, err := app.Account().Forwards().Get(ctx, id)
+			if err != nil {
+				return nil, filingSource{}, err
+			}
+			return f, filingSource{id: f.ID, typ: f.Type, title: f.Subject, bucket: f.Bucket, parent: f.Parent}, nil
+		},
+		landing: "The copy lands in that Email Forwards",
+		lookFor: func(t filingTarget) string {
+			return fmt.Sprintf("basecamp forwards list --in %d --inbox %d", t.projectID, t.id)
+		},
+		crumbs: func(id, projectID int64) []output.Breadcrumb {
+			return []output.Breadcrumb{{
+				Action:      "show",
+				Cmd:         fmt.Sprintf("basecamp forwards show %d --in %d", id, projectID),
+				Description: "View the forward",
+			}}
 		},
 	}
 }
