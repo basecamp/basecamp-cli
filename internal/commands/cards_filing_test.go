@@ -80,6 +80,8 @@ type mockFilingTransport struct {
 	twoTables      bool
 	duplicateTitle bool
 	postStatus     int
+	postErr        error
+	postBody       string
 	statuses       []string
 
 	mu        sync.Mutex
@@ -106,6 +108,12 @@ func (m *mockFilingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 			raw, _ := io.ReadAll(req.Body)
 			m.body = map[string]any{}
 			_ = json.Unmarshal(raw, &m.body)
+		}
+		if m.postErr != nil {
+			return nil, m.postErr
+		}
+		if m.postBody != "" {
+			return respond(201, m.postBody)
 		}
 		if m.postStatus != 0 {
 			return respond(m.postStatus, `{"error":"upstream"}`)
@@ -254,6 +262,43 @@ func TestCardsCopyThatFailsUpstreamIsNotRetryable(t *testing.T) {
 	assert.False(t, e.Retryable, "a 502 can follow a copy Basecamp already started")
 	assert.Contains(t, e.Hint, "may have started the copy")
 	assert.Contains(t, e.Hint, "basecamp cards list --in 999 --card-table 900")
+	assert.Len(t, transport.posts, 1)
+}
+
+func TestCardsCopyWithNoReadableAnswerMayHaveStarted(t *testing.T) {
+	for name, transport := range map[string]*mockFilingTransport{
+		"dropped connection": {postErr: errors.New("connection reset by peer")},
+		"unreadable 201":     {postBody: `{"id":70,"status":`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			run := runFilingCommand(t, transport, "copy", "456", "--to-project", "Dest")
+			e := requireFilingError(t, run)
+
+			assert.False(t, e.Retryable, "Basecamp may have started the copy")
+			assert.Contains(t, e.Hint, "may have started the copy")
+			assert.Contains(t, e.Hint, "basecamp cards list --in 999 --card-table 900")
+			assert.Len(t, transport.posts, 1)
+		})
+	}
+}
+
+func TestCardsCopyThatBasecampRefusesKeepsItsError(t *testing.T) {
+	transport := &mockFilingTransport{postStatus: 403}
+	run := runFilingCommand(t, transport, "copy", "456", "--to-project", "Dest")
+	e := requireFilingError(t, run)
+
+	assert.Equal(t, output.CodeForbidden, e.Code)
+	assert.NotContains(t, e.Hint, "may have started the copy")
+	assert.Len(t, transport.posts, 1)
+}
+
+func TestCardsMoveWithNoReadableAnswerKeepsItsError(t *testing.T) {
+	transport := &mockFilingTransport{postErr: errors.New("connection reset by peer")}
+	run := runFilingCommand(t, transport, "move", "456", "--to-project", "Dest")
+	require.Error(t, run.err)
+
+	assert.ErrorContains(t, run.err, "connection reset by peer")
+	assert.NotContains(t, output.AsError(run.err).Hint, "may have started the copy")
 	assert.Len(t, transport.posts, 1)
 }
 

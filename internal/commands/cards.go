@@ -2115,13 +2115,15 @@ func (f cardFiling) start(ctx context.Context, app *appctx.App) (*basecamp.Filin
 	return recordings.Move(ctx, f.card.ID, &basecamp.MoveRecordingRequest{FilingDestinationID: f.table.ID})
 }
 
-// copyStartError keeps a failed copy request from inviting a retry. A 5xx or a
-// dropped connection can arrive after Basecamp already started the copy, so
-// retrying would make a second copy. A rate limit is the one retryable failure
-// Basecamp answers before doing anything.
+// copyStartError keeps a failed copy request from inviting a retry. Only a 4xx
+// answer shows Basecamp refused the copy; a 5xx, a dropped connection or an
+// unreadable answer can follow a copy it already started, so retrying would
+// make a second one. A rate limit stays retryable: it is refused before
+// anything is copied.
 func copyStartError(f cardFiling, err error) error {
 	e := output.AsError(err)
-	if f.kind != basecamp.FilingCopy || e == nil || !e.Retryable || e.Code == output.CodeRateLimit {
+	refused := e.HTTPStatus >= 400 && e.HTTPStatus < 500
+	if f.kind != basecamp.FilingCopy || refused || e.Code == output.CodeRateLimit {
 		return err
 	}
 	unsure := *e
