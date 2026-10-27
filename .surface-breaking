@@ -1512,3 +1512,4 @@ ARG basecamp files move 00 <id|url>
 ARG basecamp folders move 00 <id|url>
 ARG basecamp vault move 00 <id|url>
 ARG basecamp vaults move 00 <id|url>
+ARG basecamp tools move 00 <id>

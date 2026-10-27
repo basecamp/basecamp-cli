@@ -49,6 +49,30 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "tools move repositions a tool in its dock" {
+  local id_file="$BATS_FILE_TMPDIR/tool_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No tool created in prior test"
+  local tool_id
+  tool_id=$(<"$id_file")
+
+  run_smoke basecamp tools move "$tool_id" --position 1 -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "tools move refuses moving a tool to the project it is in" {
+  local id_file="$BATS_FILE_TMPDIR/tool_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No tool created in prior test"
+  local tool_id
+  tool_id=$(<"$id_file")
+
+  # A cross-project move would take the tool out of the QA project; the move
+  # itself is covered against local bc3.
+  run_smoke basecamp tools move "$tool_id" --to-project "$QA_PROJECT" --json
+  assert_failure
+  assert_json_value '.ok' 'false'
+}
+
 @test "tools disable disables a tool" {
   local id_file="$BATS_FILE_TMPDIR/tool_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No tool created in prior test"

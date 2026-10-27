@@ -484,7 +484,7 @@ ARG basecamp tools create 00 [title]
 ARG basecamp tools delete 00 <id>
 ARG basecamp tools disable 00 <id>
 ARG basecamp tools enable 00 <id>
-ARG basecamp tools move 00 <id>
+ARG basecamp tools move 00 <id|url>
 ARG basecamp tools rename 00 <id>
 ARG basecamp tools rename 01 <title>
 ARG basecamp tools reposition 00 <id>
@@ -17675,6 +17675,7 @@ FLAG basecamp tools move --project type=string
 FLAG basecamp tools move --quiet type=bool
 FLAG basecamp tools move --stats type=bool
 FLAG basecamp tools move --styled type=bool
+FLAG basecamp tools move --to-project type=string
 FLAG basecamp tools move --todolist type=string
 FLAG basecamp tools move --verbose type=count
 FLAG basecamp tools rename --account type=string
