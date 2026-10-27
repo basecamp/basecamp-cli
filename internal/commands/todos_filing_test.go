@@ -517,6 +517,8 @@ func TestCopyRecoveryListingShowsTheCopyInItsStatus(t *testing.T) {
 		recordingCopyLookFor("Todolist", 999, "archived"))
 	assert.Equal(t, "basecamp recordings list Kanban::Card --in 999 --status trashed --all",
 		recordingCopyLookFor("Kanban::Card", 999, "trashed"))
+	assert.Equal(t, "basecamp drafts list --all", recordingCopyLookFor("Upload", 999, "drafted"),
+		"the recordings listing serves only active, archived and trashed")
 }
 
 func TestTodosCopyIntoTheListItIsInIsAllowed(t *testing.T) {

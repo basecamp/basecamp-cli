@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -140,4 +141,17 @@ func TestMessagesCopyThatMayHaveStartedSaysWhereToLook(t *testing.T) {
 	assert.False(t, e.Retryable)
 	assert.Contains(t, e.Hint, "basecamp recordings list Message --in 999 --status active --sort created_at --direction desc --all")
 	assert.Len(t, transport.posts, 1)
+}
+
+// A copy keeps its source's status, and the recordings listing serves no
+// drafted status (Basecamp answers it with 400), so a drafted message's copy
+// is looked for among the person's drafts.
+func TestMessagesCopyOfADraftThatTimesOutIsLookedForAmongDrafts(t *testing.T) {
+	transport := messagesTransport()
+	transport.gets["/messages/456"] = strings.Replace(transport.gets["/messages/456"], `"type":"Message"`, `"type":"Message","status":"drafted"`, 1)
+	transport.stuck = map[int64]bool{456: true}
+	e := runFamilyCommand(t, transport, NewMessagesCmd(), "copy", "456", "--to-project", "Dest").failure(t)
+	assert.Equal(t, output.CodeInProgress, e.Code)
+	assert.Contains(t, e.Hint, "basecamp drafts list --all")
+	assert.NotContains(t, e.Hint, "--status drafted")
 }

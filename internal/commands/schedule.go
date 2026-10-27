@@ -1003,7 +1003,7 @@ func scheduleEntryFamily() filingFamily {
 		get:      getScheduleEntryForFiling,
 		landing:  "The copy lands on that schedule",
 		lookFor: func(src filingSource, t filingTarget) string {
-			if t.calendar {
+			if t.calendar && src.status != "drafted" {
 				// The recordings listing serves projects, not calendars.
 				return fmt.Sprintf("basecamp schedule entries --in %d --schedule %d --status %s --all", t.projectID, t.id, cmp.Or(src.status, "active"))
 			}

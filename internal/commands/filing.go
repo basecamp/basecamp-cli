@@ -404,9 +404,18 @@ var filingWait = struct{ first, max, total time.Duration }{
 // source's status, every page. A copy keeps the source's status, so this shows
 // a copy whatever state it was made in. Basecamp's recordings listing serves
 // Todo, Todolist (groups included), Message, Document, Upload, Vault,
-// Kanban::Card and Schedule::Entry.
+// Kanban::Card and Schedule::Entry, in the active, archived and trashed
+// statuses only. A drafted copy is listed only among its author's drafts,
+// which hold messages, documents and uploads.
 func recordingCopyLookFor(recordableType string, projectID int64, status string) string {
-	if status == "" {
+	switch status {
+	case "archived", "trashed":
+	case "drafted":
+		if slices.Contains([]string{"Message", "Document", "Upload"}, recordableType) {
+			return "basecamp drafts list --all"
+		}
+		return fmt.Sprintf("open the destination in Basecamp, since Basecamp's API lists no drafted %s", recordableType)
+	default:
 		status = "active"
 	}
 	return fmt.Sprintf("basecamp recordings list %s --in %d --status %s --all", recordableType, projectID, status)

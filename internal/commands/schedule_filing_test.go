@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -182,4 +183,18 @@ func TestScheduleCopyIntoACalendarIsLookedForInItsEntries(t *testing.T) {
 	assert.Equal(t, output.CodeInProgress, e.Code)
 	assert.Contains(t, e.Hint, "basecamp schedule entries --in 777 --schedule 770 --status active --all",
 		"the recordings listing does not serve a calendar")
+}
+
+// Basecamp lists drafted schedule entries nowhere in its API, neither among
+// drafts nor in a recordings or entries listing.
+func TestScheduleCopyOfADraftThatTimesOutNamesNoListing(t *testing.T) {
+	for _, dest := range []string{"900", "770"} {
+		transport := calendarTransport()
+		transport.gets["/schedule_entries/456"] = strings.Replace(transport.gets["/schedule_entries/456"], `"type":"Schedule::Entry"`, `"type":"Schedule::Entry","status":"drafted"`, 1)
+		transport.stuck = map[int64]bool{456: true}
+		e := runFamilyCommand(t, transport, NewScheduleCmd(), "copy", "456", "--to-schedule", dest).failure(t)
+		assert.Equal(t, output.CodeInProgress, e.Code)
+		assert.Contains(t, e.Hint, "Basecamp's API lists no drafted Schedule::Entry", dest)
+		assert.NotContains(t, e.Hint, "--status drafted", dest)
+	}
 }

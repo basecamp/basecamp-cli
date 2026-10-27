@@ -283,3 +283,13 @@ func TestFilesCopySeveralNamesWhereEachLanded(t *testing.T) {
 	assert.Contains(t, crumbs, "basecamp files show 4560 --in 123")
 	assert.Contains(t, crumbs, "basecamp files show 4570 --in 123")
 }
+
+func TestFilesCopyOfADraftDocumentThatTimesOutIsLookedForAmongDrafts(t *testing.T) {
+	transport := filesFilingTransport()
+	transport.gets["/documents/456"] = strings.Replace(transport.gets["/documents/456"], `"type":"Document"`, `"type":"Document","status":"drafted"`, 1)
+	transport.stuck = map[int64]bool{456: true}
+	e := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "456", "--to-project", "Dest").failure(t)
+	assert.Equal(t, output.CodeInProgress, e.Code)
+	assert.Contains(t, e.Hint, "basecamp drafts list --all")
+	assert.NotContains(t, e.Hint, "--status drafted")
+}
