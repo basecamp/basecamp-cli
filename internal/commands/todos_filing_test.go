@@ -23,7 +23,7 @@ import (
 //
 //   - Project 123 ("Source") has To-dos 300 with list 310 ("Backlog"), which
 //     holds group 311 ("Ideas"). To-dos 456, 457 and 459 are in list 310,
-//     and 458 in group 311.
+//     and 458 in group 311. To-do 460 is loose, on To-dos 300 in no list.
 //   - Project 999 ("Dest") has To-dos 900 with lists 901 ("Launch") and 902
 //     ("Later"), group 920 in list 901, and an archived list 930. With
 //     twoTodosets it also has To-dos 950 with list 951 ("Roadmap"); with
@@ -149,6 +149,8 @@ func (m *mockTodoFilingTransport) RoundTrip(req *http.Request) (*http.Response, 
 		return respond(200, filingTodoJSON(parts[1], 123, 310, "Backlog"))
 	case "/todos/458":
 		return respond(200, filingTodoJSON("458", 123, 311, "Ideas"))
+	case "/todos/460":
+		return respond(200, strings.Replace(filingTodoJSON("460", 123, 300, "To-dos"), `"type":"Todolist"`, `"type":"Todoset"`, 1))
 	}
 
 	if len(parts) == 2 && (parts[0] == "todos" || parts[0] == "todolists") && !m.unreadable[parts[1]] {
@@ -506,4 +508,37 @@ func TestTodosCopyRefusesAListURLThatDisagreesWithToProject(t *testing.T) {
 	e := requireUsageRefusal(t, run, transport)
 
 	assert.Contains(t, e.Message, "--to-list URL is in project 999, but --to-project points at project 777")
+}
+
+func TestTodosMoveAndCopyALooseTodoIntoAList(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args    []string
+		post    string
+		into    float64
+		summary string
+	}{
+		"move to another project":         {[]string{"move", "460", "--to-project", "Dest", "--to-list", "Launch"}, "/recordings/460/moves", 901, "Moved to-do #460 to Dest › Launch as to-do #4601"},
+		"move into a list in its project": {[]string{"move", "460", "--to-list", "310"}, "/recordings/460/moves", 310, "Moved to-do #460 to Source › Backlog as to-do #4601"},
+		"copy to another project":         {[]string{"copy", "460", "--to-list", "901"}, "/recordings/460/copies", 901, "Copied to-do #460 to Dest › Launch as to-do #4601"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockTodoFilingTransport{}
+			run := runTodoFilingCommand(t, transport, NewTodosCmd(), tc.args...)
+			require.NoError(t, run.err)
+
+			assert.Equal(t, []string{tc.post}, transport.posts)
+			assert.Equal(t, tc.into, transport.bodies[0]["filing_destination_id"])
+			assert.Equal(t, tc.summary, run.summary)
+		})
+	}
+}
+
+func TestTodosCopyALooseTodoWithoutADestinationIsRefused(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "copy", "460")
+	e := requireUsageRefusal(t, run, transport)
+
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Contains(t, e.Message, "To-do #460 is loose")
+	assert.Contains(t, e.Hint, "basecamp todos copy 460 --to-project 123 --to-list <list>")
 }

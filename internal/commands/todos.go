@@ -2577,6 +2577,12 @@ func fileTodos(cmd *cobra.Command, kind basecamp.FilingType, args []string, toPr
 		if into == nil {
 			into = home
 		}
+		if into == nil {
+			return output.ErrUsageHint(
+				fmt.Sprintf("To-do #%d is loose in its project's To-dos, not in a list, so a copy needs a destination list", todo.ID),
+				fmt.Sprintf("Name the list (an ID or name) to copy it into: basecamp todos copy %d --to-project %d --to-list <list>", todo.ID, todo.Bucket.ID),
+			)
+		}
 		if kind == basecamp.FilingMove && slices.Contains(lists, into.ID) {
 			return output.ErrUsageHint(
 				fmt.Sprintf("To-do #%d is already in to-do list %d (%s)", todo.ID, into.ID, into.Name),
@@ -2603,8 +2609,12 @@ func requireFilableTodo(todo *basecamp.Todo, requestedID int64) error {
 // todoLists reads the list a to-do is in. home is the top-level list, which a
 // copy with no destination goes into, since Basecamp files to-dos into lists,
 // never groups. lists holds the to-do's group, if any, and its list: Basecamp
-// refuses to move a to-do into either.
+// refuses to move a to-do into either. A loose to-do sits on its To-dos, in
+// no list, so it has neither and may be filed into any list.
 func todoLists(cmd *cobra.Command, app *appctx.App, todo *basecamp.Todo) (home *basecamp.Todolist, lists []int64, err error) {
+	if todo.Parent.Type == "Todoset" {
+		return nil, nil, nil
+	}
 	parent, err := app.Account().Todolists().Get(cmd.Context(), todo.Parent.ID)
 	if err != nil {
 		return nil, nil, convertSDKError(err)
