@@ -2024,7 +2024,14 @@ func resolveFilingTable(cmd *cobra.Command, app *appctx.App, toProject, toCardTa
 		if err != nil || tableID <= 0 {
 			return nil, output.ErrUsage("--to-card-table must be a positive card table ID")
 		}
-		return getCardTable(cmd, app, tableID)
+		table, err := getCardTable(cmd, app, tableID)
+		if err != nil {
+			return nil, err
+		}
+		if urlProjectID != "" && !sameNumericID(urlProjectID, strconv.FormatInt(cardTableProjectID(table), 10)) {
+			return nil, output.ErrUsage(fmt.Sprintf("The --to-card-table URL names project %s, but card table %d is in project %d", urlProjectID, table.ID, cardTableProjectID(table)))
+		}
+		return table, nil
 	}
 
 	projectID, projectName, err := app.Names.ResolveProject(cmd.Context(), toProject)

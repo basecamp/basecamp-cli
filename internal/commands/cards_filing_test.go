@@ -563,6 +563,29 @@ func TestCardsFilingRefusesACardTableURLInAnotherProjectThanToProject(t *testing
 	}
 }
 
+func TestCardsFilingRefusesACardTableURLWhoseProjectIsNotTheTables(t *testing.T) {
+	for _, verb := range []string{"move", "copy"} {
+		t.Run(verb, func(t *testing.T) {
+			transport := &mockFilingTransport{statuses: []string{"completed"}}
+			run := runFilingCommand(t, transport, verb, "456",
+				"--to-card-table", "https://3.basecamp.com/99999/buckets/123/card_tables/900")
+			e := requireFilingError(t, run)
+
+			assert.Equal(t, output.CodeUsage, e.Code)
+			assert.Equal(t, "The --to-card-table URL names project 123, but card table 900 is in project 999", e.Message)
+			assert.Empty(t, transport.posts)
+		})
+	}
+}
+
+func TestCardsFilingAcceptsACardTableURLOnItsOwn(t *testing.T) {
+	transport := &mockFilingTransport{statuses: []string{"completed"}}
+	run := runFilingCommand(t, transport, "copy", "456",
+		"--to-card-table", "https://3.basecamp.com/99999/buckets/999/card_tables/900")
+	require.NoError(t, run.err)
+	assert.Equal(t, float64(900), transport.body["filing_destination_id"])
+}
+
 func TestCardsFilingAcceptsACardTableURLInToProject(t *testing.T) {
 	transport := &mockFilingTransport{twoTables: true, statuses: []string{"completed"}}
 	run := runFilingCommand(t, transport, "copy", "456",
