@@ -391,3 +391,55 @@ func TestTodosMoveRefusesAListNameWithoutAProject(t *testing.T) {
 	assert.Contains(t, e.Hint, "--to-project")
 	assert.Empty(t, transport.requests)
 }
+
+func TestTodosCopyWithoutDestinationGoesIntoTheTodosOwnList(t *testing.T) {
+	for name, tc := range map[string]struct {
+		todo string
+		into float64
+	}{
+		"in a list":  {"456", 310},
+		"in a group": {"458", 310},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockTodoFilingTransport{}
+			run := runTodoFilingCommand(t, transport, NewTodosCmd(), "copy", tc.todo, "--include-comments")
+			require.NoError(t, run.err)
+
+			assert.Equal(t, []string{"/recordings/" + tc.todo + "/copies"}, transport.posts)
+			assert.Equal(t, tc.into, transport.bodies[0]["filing_destination_id"], "Basecamp files into a list, not a group")
+			assert.Equal(t, true, transport.bodies[0]["include_comments"])
+			assert.Equal(t, "Copied to-do #"+tc.todo+" to Source › Backlog as to-do #"+tc.todo+"1", run.summary)
+		})
+	}
+}
+
+func TestTodosCopySeveralToAnotherProjectNeverRetriesAFailedCopy(t *testing.T) {
+	transport := &mockTodoFilingTransport{postStatus: 502}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "copy", "456", "457", "--to-project", "Dest", "--to-list", "Later")
+	e := output.AsError(run.err)
+	require.NotNil(t, run.err)
+
+	assert.Equal(t, []string{"/recordings/456/copies", "/recordings/457/copies"}, transport.posts, "one request per to-do")
+	assert.Equal(t, float64(902), transport.bodies[0]["filing_destination_id"])
+	assert.False(t, e.Retryable)
+	assert.Contains(t, e.Message, "Copied 0 of 2 to-dos")
+	assert.Contains(t, e.Hint, "may have started the copy")
+	assert.Contains(t, e.Hint, "basecamp todos list --in 999 --list 902")
+}
+
+func TestTodosCopyIntoTheListItIsInIsAllowed(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "copy", "456", "--to-list", "https://3.basecamp.com/99999/buckets/123/todolists/310")
+	require.NoError(t, run.err)
+
+	assert.Equal(t, float64(310), transport.bodies[0]["filing_destination_id"])
+}
+
+func TestTodosCopyRefusesAListURLThatDisagreesWithToProject(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "copy", "456", "--to-project", "Solo",
+		"--to-list", "https://3.basecamp.com/99999/buckets/999/todolists/901")
+	e := requireUsageRefusal(t, run, transport)
+
+	assert.Contains(t, e.Message, "--to-list URL is in project 999, but --to-project points at project 777")
+}

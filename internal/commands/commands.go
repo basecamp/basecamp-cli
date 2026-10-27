@@ -35,7 +35,7 @@ func CommandCategories() []CommandCategory {
 			Name: "Core Commands",
 			Commands: []CommandInfo{
 				{Name: "projects", Category: "core", Description: "Manage projects", Actions: []string{"list", "show", "create", "update", "delete", "wallpaper"}},
-				{Name: "todos", Category: "core", Description: "Manage to-dos", Actions: []string{"list", "show", "create", "update", "complete", "uncomplete", "position", "trash", "archive", "restore"}},
+				{Name: "todos", Category: "core", Description: "Manage to-dos", Actions: []string{"list", "show", "create", "update", "complete", "uncomplete", "position", "copy", "trash", "archive", "restore"}},
 				{Name: "subtasks", Category: "core", Description: "Manage subtasks on to-dos and cards", Actions: []string{"list", "show", "create", "update", "complete", "uncomplete", "move", "delete"}},
 				{Name: "todolists", Category: "core", Description: "Manage to-do lists", Actions: []string{"list", "show", "create", "update", "position", "trash", "archive", "restore"}},
 				{Name: "todosets", Category: "core", Description: "Manage to-do set containers", Actions: []string{"list", "show"}},

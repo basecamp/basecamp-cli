@@ -61,6 +61,7 @@ func NewTodosCmd() *cobra.Command {
 		newTodosUncompleteCmd(),
 		newTodosSweepCmd(),
 		newTodosPositionCmd(),
+		newTodosCopyCmd(),
 		newRecordableTrashCmd("todo"),
 		newRecordableArchiveCmd("todo"),
 		newRecordableRestoreCmd("todo"),
@@ -2465,6 +2466,46 @@ its ID, with --to (1 = top) and --list:
 	cmd.Flags().IntVar(&position, "position", 0, "Target position (alias for --to)")
 	cmd.Flags().StringVarP(&list, "list", "l", "", "With --to: a list in the to-do's own project to move it into, keeping its id (ID, name, or URL); for another project use --to-list")
 	addToListFlags(cmd, &toProject, &toList, "Move the to-dos")
+
+	return cmd
+}
+
+func newTodosCopyCmd() *cobra.Command {
+	var toProject, toList string
+	var includeComments bool
+
+	cmd := &cobra.Command{
+		Use:   "copy <id|url>...",
+		Short: "Copy to-dos to a list in this or another project",
+		Long: `Copy to-dos into a to-do list, as the web's Copy… does. The originals stay
+where they are.
+
+With no destination, each copy goes into the list its to-do is in:
+  basecamp todos copy 789
+  basecamp todos copy 789 --to-project "Marketing" --to-list "Launch"
+  basecamp todos copy 789 790 791 --to-list 1069479999 --include-comments
+  basecamp todos copy 789 --to-list https://3.basecamp.com/123/buckets/456/todolists/321
+
+Basecamp makes each copy in the background; the command waits for it and
+shows the new to-dos.`,
+		Annotations: map[string]string{
+			"agent_notes": "Without --to-project/--to-list each copy goes into the list its to-do is in. " +
+				"--to-list takes a list ID, URL, or a name looked up in --to-project; --to-project alone needs a project with one to-do list. " +
+				"Several IDs copy one by one; each is reported, and the command fails if any failed, naming which were copied. " +
+				"Output is the new to-do; its id is data.id and the original's is data.source_id. " +
+				"Basecamp refuses a group as the destination (use its list) and an archived list. " +
+				"Never re-run a copy that failed with in_progress or a may-have-started hint: each run makes another copy.",
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<id|url>...")
+			}
+			return fileTodos(cmd, basecamp.FilingCopy, args, toProject, toList, includeComments)
+		},
+	}
+
+	addToListFlags(cmd, &toProject, &toList, "Copy the to-dos")
+	cmd.Flags().BoolVar(&includeComments, "include-comments", false, "Copy the to-dos' comments too")
 
 	return cmd
 }
