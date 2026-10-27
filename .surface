@@ -59,6 +59,7 @@ ARG basecamp cards column show 00 <id|url>
 ARG basecamp cards column unwatch 00 <id|url>
 ARG basecamp cards column update 00 <id|url>
 ARG basecamp cards column watch 00 <id|url>
+ARG basecamp cards copy 00 <id|url>
 ARG basecamp cards create 00 <title>
 ARG basecamp cards create 01 [body]
 ARG basecamp cards done 00 <id|url>
@@ -624,6 +625,7 @@ CMD basecamp cards column unwatch
 CMD basecamp cards column update
 CMD basecamp cards column watch
 CMD basecamp cards columns
+CMD basecamp cards copy
 CMD basecamp cards create
 CMD basecamp cards done
 CMD basecamp cards list
@@ -3358,6 +3360,31 @@ FLAG basecamp cards columns --stats type=bool
 FLAG basecamp cards columns --styled type=bool
 FLAG basecamp cards columns --todolist type=string
 FLAG basecamp cards columns --verbose type=count
+FLAG basecamp cards copy --account type=string
+FLAG basecamp cards copy --agent type=bool
+FLAG basecamp cards copy --cache-dir type=string
+FLAG basecamp cards copy --card-table type=string
+FLAG basecamp cards copy --count type=bool
+FLAG basecamp cards copy --help type=bool
+FLAG basecamp cards copy --hints type=bool
+FLAG basecamp cards copy --ids-only type=bool
+FLAG basecamp cards copy --in type=string
+FLAG basecamp cards copy --include-comments type=bool
+FLAG basecamp cards copy --jq type=string
+FLAG basecamp cards copy --json type=bool
+FLAG basecamp cards copy --markdown type=bool
+FLAG basecamp cards copy --md type=bool
+FLAG basecamp cards copy --no-hints type=bool
+FLAG basecamp cards copy --no-stats type=bool
+FLAG basecamp cards copy --profile type=string
+FLAG basecamp cards copy --project type=string
+FLAG basecamp cards copy --quiet type=bool
+FLAG basecamp cards copy --stats type=bool
+FLAG basecamp cards copy --styled type=bool
+FLAG basecamp cards copy --to-card-table type=string
+FLAG basecamp cards copy --to-project type=string
+FLAG basecamp cards copy --todolist type=string
+FLAG basecamp cards copy --verbose type=count
 FLAG basecamp cards create --account type=string
 FLAG basecamp cards create --agent type=bool
 FLAG basecamp cards create --assignee type=string
@@ -3468,6 +3495,8 @@ FLAG basecamp cards move --quiet type=bool
 FLAG basecamp cards move --stats type=bool
 FLAG basecamp cards move --styled type=bool
 FLAG basecamp cards move --to type=string
+FLAG basecamp cards move --to-card-table type=string
+FLAG basecamp cards move --to-project type=string
 FLAG basecamp cards move --to-wormhole type=string
 FLAG basecamp cards move --todolist type=string
 FLAG basecamp cards move --verbose type=count
@@ -3495,6 +3524,8 @@ FLAG basecamp cards mv --quiet type=bool
 FLAG basecamp cards mv --stats type=bool
 FLAG basecamp cards mv --styled type=bool
 FLAG basecamp cards mv --to type=string
+FLAG basecamp cards mv --to-card-table type=string
+FLAG basecamp cards mv --to-project type=string
 FLAG basecamp cards mv --to-wormhole type=string
 FLAG basecamp cards mv --todolist type=string
 FLAG basecamp cards mv --verbose type=count
@@ -19647,6 +19678,7 @@ SUB basecamp cards column unwatch
 SUB basecamp cards column update
 SUB basecamp cards column watch
 SUB basecamp cards columns
+SUB basecamp cards copy
 SUB basecamp cards create
 SUB basecamp cards done
 SUB basecamp cards list

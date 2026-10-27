@@ -1309,8 +1309,9 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "move <id|url>",
-		Short: "Move a card to another column",
-		Long: `Move a card to another column in its project.
+		Short: "Move a card to another column, card table or project",
+		Long: `Move a card to another column in its project, or into a card table in
+another project.
 
 --to accepts any column in the card's project, including a column on another
 card table in the same project; the card moves there directly, with no wormhole
@@ -1330,10 +1331,20 @@ through a wormhole already on the card's card table. Pass a wormhole ID, or the
 URL of the destination column it targets:
   basecamp cards move 789 --to-wormhole 1069480287 --in my-project
   basecamp cards move 789 --to-wormhole https://3.basecamp.com/123/buckets/456/card_tables/columns/999
-This is asynchronous: a new card appears in the destination project and the
-original card 404s once the server finishes filing it away. A wormhole is a
-standing shortcut ("cards wormholes"), not a step of each move; a move within
-the project doesn't need one.`,
+The teleport mints a new card id. The command waits for the card to land and
+shows it; if it is still teleporting when the wait runs out, basecamp cards show
+<old id> returns the card at its new id once it lands. A wormhole is a standing
+shortcut ("cards wormholes"), not a step of each move; a move within the project
+doesn't need one.
+
+--to-project and --to-card-table move a card into any card table, as the web's
+Move… does, with no wormhole. The card lands in that table's Triage, or in Done
+if it is completed, under a new id; move it on with --to afterward:
+  basecamp cards move 789 --to-project "Marketing"
+  basecamp cards move 789 --to-project "Marketing" --to-card-table "Roadmap"
+  basecamp cards move 789 --to-card-table https://3.basecamp.com/123/buckets/456/card_tables/999
+--to-project alone needs a project with one card table. The command waits for
+Basecamp to finish the move and shows the card where it landed.`,
 		Args:    cobra.ExactArgs(1),
 		Aliases: []string{"mv"},
 		Annotations: map[string]string{
@@ -1343,8 +1354,11 @@ the project doesn't need one.`,
 				"When --on-hold is used with --to, the card moves to the on-hold section of the target column. " +
 				"--position cannot be combined with --on-hold. " +
 				"--to-wormhole sends the card to another project's card table through a wormhole already on its card table; it is mutually exclusive with --to/--on-hold/--position. " +
-				"The teleport is asynchronous and mints a new card id — the original id 404s afterward, so do not reuse it. " +
-				"Do not create a wormhole just to move a card, and do not delete one afterward.",
+				"The teleport mints a new card id; the output is the card where it landed (data.id new, data.source_id old). Write to the new id, not the old. " +
+				"Do not create a wormhole just to move a card, and do not delete one afterward. " +
+				"--to-project/--to-card-table move the card into another card table (usually another project) with no wormhole, landing in Triage (Done if completed) under a new id; " +
+				"--to-project alone needs a project with one card table, otherwise add --to-card-table. They are mutually exclusive with --to/--on-hold/--position/--to-wormhole, and --card-table there is refused because it names the card's own table. " +
+				"An in_progress error means Basecamp is still moving it: basecamp cards show <old id> returns the new card once it lands.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			positionSet := cmd.Flags().Changed("position") || cmd.Flags().Changed("pos")

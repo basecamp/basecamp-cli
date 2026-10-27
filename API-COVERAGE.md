@@ -6,12 +6,17 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 55 | 213 |
+| ✅ Implemented | 56 | 216 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **59** | **225** |
+| **Total tracked** | **60** | **228** |
 
-**213 of 213 tracked in-scope endpoints.** Uploading and removing a project's
+**216 of 216 tracked in-scope endpoints.** Moving and copying a recording
+into another project (`POST /recordings/:id/moves.json`,
+`POST /recordings/:id/copies.json`) and reading the background filing they
+start (`GET /filings/:id.json`), modelled by
+[basecamp/basecamp-sdk#1053](https://github.com/basecamp/basecamp-sdk/pull/1053),
+land for cards as `cards move --to-project`/`--to-card-table` and `cards copy`. Uploading and removing a project's
 wallpaper (`PUT`/`DELETE /projects/:id/wallpaper.json`, added by
 [bc3#14062](https://github.com/basecamp/bc3/pull/14062) and shipped in
 [SDK v0.28.0](https://github.com/basecamp/basecamp-sdk/releases/tag/v0.28.0))
@@ -231,7 +236,8 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | card_table_cards | 9 | `cards` | ✅ | BC4 | - | list, show, create, update, move |
 | card_table_columns | 11 | `cards columns` | ✅ | BC4 | - | list columns. SDK v0.12.0 added `Subscribe`/`Unsubscribe`; `cards column watch\|unwatch` already performs the same action through the generic recording-subscription endpoint and returns the resulting subscription details the specific endpoint does not, so the CLI keeps one spelling |
 | card_table_steps | 4 | `cards steps` | ✅ | BC4 | - | Workflow steps on cards. The card-scoped aliases of `subtasks`, which bc3 keeps serving; `cards step move --position` is 1-based (the SDK refuses 0 since basecamp/basecamp-sdk#883) |
-| card_table_wormholes | 3 | `cards wormholes` | ✅ | BC5 | - | list (via `wormholes[]` on card table), create, update, delete; `cards move --to-wormhole` teleports a card across projects (async, new id) |
+| card_table_wormholes | 3 | `cards wormholes` | ✅ | BC5 | - | list (via `wormholes[]` on card table), create, update, delete; `cards move --to-wormhole` teleports a card across projects and reports the new card once it lands |
+| recordings (moves, copies) | 3 | `cards move --to-project`, `cards copy` | ✅ | BC5 | - | `POST /recordings/:id/moves.json` and `POST /recordings/:id/copies.json` file a card into a card table in this or another project, landing in Triage (Done if completed); `GET /filings/:id.json` reports the background filing, which the commands wait on before showing the new card. `--to-project` picks the project's only card table on its dock, `--to-card-table` one by ID, URL or name. `cards copy --include-comments` sends `include_comments`; a copy is never retried. Moving or copying other recording types is not exposed yet |
 | **Personal (My)** |
 | my_bookmarks | 4 | `bookmarks` | ✅ | BC5 | - | list, check, add, remove. Private to the authenticated user; `add`/`remove` are idempotent, and `check` returns a bool reported in the payload rather than through the exit code. Bounded like the account-wide listings |
 | drafts | 1 | `drafts` | ✅ | BC5 | - | list unpublished drafts across projects (server caps at 250). Bounded like the account-wide listings; publishing happens through the command for the draft's type |
