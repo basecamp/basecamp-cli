@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -268,6 +269,8 @@ func newCheckinsQuestionCmd(project *string) *cobra.Command {
 		newCheckinsQuestionResumeCmd(),
 		newCheckinsQuestionNotifyCmd(),
 		newCheckinsQuestionAnswerersCmd(),
+		newFilingCmd(questionFamily(), basecamp.FilingMove, checkinsQuestionMoveHelp, false),
+		newFilingCmd(questionFamily(), basecamp.FilingCopy, checkinsQuestionCopyHelp, false),
 	)
 
 	return cmd
@@ -1645,4 +1648,86 @@ func parseTimeOfDay(t string) (int, int, error) {
 	}
 
 	return hour, minute, nil
+}
+
+var checkinsQuestionMoveHelp = filingHelp{
+	use:   "move <id|url>",
+	short: "Move a check-in question to another project's Automatic Check-ins",
+	long: `Move a check-in question, with its answers, to the Automatic Check-ins of
+another project, as the web's Move… does.
+
+  basecamp checkins question move 789 --to-project "Marketing"
+  basecamp checkins question move https://3.basecamp.com/123/buckets/456/questions/789 --to-questionnaire 1069479999
+
+--to-project alone needs a project with one Automatic Check-ins. The command
+waits for Basecamp to finish the move and shows the question where it landed,
+under a new ID.`,
+	notes: "--to-project <project> (ID or name) moves the question and its answers to that project's Automatic Check-ins; --to-questionnaire <id|url> names one directly. " +
+		"Output is the moved question: data.id is its NEW id and data.source_id the old one. Write to the new id; the old id stops taking changes, and reading it follows the move. " +
+		"--questionnaire names the question's own Automatic Check-ins and is refused; moving onto the one it is in is refused. Basecamp refuses moving an answer on its own. " +
+		"An in_progress error means Basecamp is still moving it: basecamp checkins question show <old id> returns it once it lands.",
+}
+
+var checkinsQuestionCopyHelp = filingHelp{
+	use:   "copy <id|url>",
+	short: "Copy a check-in question to Automatic Check-ins in this or another project",
+	long: `Copy a check-in question into a project's Automatic Check-ins, as the web's
+Copy… does. The original stays where it is.
+
+With no destination, the copy goes into the question's own Automatic Check-ins:
+  basecamp checkins question copy 789
+  basecamp checkins question copy 789 --to-project "Marketing"
+  basecamp checkins question copy 789 --to-questionnaire 1069479999 --include-comments
+
+Basecamp makes the copy in the background; the command waits for it and shows
+the new question.`,
+	notes: "Without --to-project/--to-questionnaire the copy goes into the question's own Automatic Check-ins. " +
+		"Output is the new question; its id is data.id and the original's is data.source_id. " +
+		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy.",
+}
+
+// questionFamily is how check-in questions move and copy between projects'
+// Automatic Check-ins.
+func questionFamily() filingFamily {
+	return filingFamily{
+		noun:     "question",
+		group:    "basecamp checkins question",
+		types:    []string{"Question"},
+		urlKinds: []string{"questions"},
+		urlShape: "…/questions/<id>",
+		into: filingContainer{
+			dockName: "questionnaire",
+			noun:     "Automatic Check-ins",
+			plural:   "Automatic Check-ins tools",
+			flag:     "--to-questionnaire",
+			urlKind:  "questionnaires",
+			urlShape: "…/questionnaires/<id>",
+			get: func(ctx context.Context, app *appctx.App, id int64) (filingTarget, error) {
+				q, err := app.Account().Checkins().GetQuestionnaire(ctx, id)
+				if err != nil {
+					return filingTarget{}, err
+				}
+				return bucketTarget(q.ID, q.Title, q.Bucket), nil
+			},
+		},
+		ownFlags: []string{"questionnaire"},
+		get: func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
+			q, err := app.Account().Checkins().GetQuestion(ctx, id)
+			if err != nil {
+				return nil, filingSource{}, err
+			}
+			return q, filingSource{id: q.ID, typ: q.Type, title: q.Title, bucket: q.Bucket, parent: q.Parent}, nil
+		},
+		landing: "The copy lands in that Automatic Check-ins",
+		lookFor: func(t filingTarget) string {
+			return fmt.Sprintf("basecamp checkins questions --in %d --questionnaire %d", t.projectID, t.id)
+		},
+		crumbs: func(id, projectID int64) []output.Breadcrumb {
+			return []output.Breadcrumb{{
+				Action:      "show",
+				Cmd:         fmt.Sprintf("basecamp checkins question show %d --in %d", id, projectID),
+				Description: "View the question",
+			}}
+		},
+	}
 }

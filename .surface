@@ -97,7 +97,9 @@ ARG basecamp checkin answer update 01 <content>
 ARG basecamp checkin answers 00 [question_id|url]
 ARG basecamp checkin question 00 <id|url>
 ARG basecamp checkin question answerers 00 <id|url>
+ARG basecamp checkin question copy 00 <id|url>
 ARG basecamp checkin question create 00 <title>
+ARG basecamp checkin question move 00 <id|url>
 ARG basecamp checkin question notify 00 <id|url>
 ARG basecamp checkin question pause 00 <id|url>
 ARG basecamp checkin question resume 00 <id|url>
@@ -113,7 +115,9 @@ ARG basecamp checkins answer update 01 <content>
 ARG basecamp checkins answers 00 [question_id|url]
 ARG basecamp checkins question 00 <id|url>
 ARG basecamp checkins question answerers 00 <id|url>
+ARG basecamp checkins question copy 00 <id|url>
 ARG basecamp checkins question create 00 <title>
+ARG basecamp checkins question move 00 <id|url>
 ARG basecamp checkins question notify 00 <id|url>
 ARG basecamp checkins question pause 00 <id|url>
 ARG basecamp checkins question resume 00 <id|url>
@@ -691,7 +695,9 @@ CMD basecamp checkin answer update
 CMD basecamp checkin answers
 CMD basecamp checkin question
 CMD basecamp checkin question answerers
+CMD basecamp checkin question copy
 CMD basecamp checkin question create
+CMD basecamp checkin question move
 CMD basecamp checkin question notify
 CMD basecamp checkin question pause
 CMD basecamp checkin question resume
@@ -707,7 +713,9 @@ CMD basecamp checkins answer update
 CMD basecamp checkins answers
 CMD basecamp checkins question
 CMD basecamp checkins question answerers
+CMD basecamp checkins question copy
 CMD basecamp checkins question create
+CMD basecamp checkins question move
 CMD basecamp checkins question notify
 CMD basecamp checkins question pause
 CMD basecamp checkins question resume
@@ -4448,6 +4456,31 @@ FLAG basecamp checkin question answerers --stats type=bool
 FLAG basecamp checkin question answerers --styled type=bool
 FLAG basecamp checkin question answerers --todolist type=string
 FLAG basecamp checkin question answerers --verbose type=count
+FLAG basecamp checkin question copy --account type=string
+FLAG basecamp checkin question copy --agent type=bool
+FLAG basecamp checkin question copy --cache-dir type=string
+FLAG basecamp checkin question copy --count type=bool
+FLAG basecamp checkin question copy --help type=bool
+FLAG basecamp checkin question copy --hints type=bool
+FLAG basecamp checkin question copy --ids-only type=bool
+FLAG basecamp checkin question copy --in type=string
+FLAG basecamp checkin question copy --include-comments type=bool
+FLAG basecamp checkin question copy --jq type=string
+FLAG basecamp checkin question copy --json type=bool
+FLAG basecamp checkin question copy --markdown type=bool
+FLAG basecamp checkin question copy --md type=bool
+FLAG basecamp checkin question copy --no-hints type=bool
+FLAG basecamp checkin question copy --no-stats type=bool
+FLAG basecamp checkin question copy --profile type=string
+FLAG basecamp checkin question copy --project type=string
+FLAG basecamp checkin question copy --questionnaire type=string
+FLAG basecamp checkin question copy --quiet type=bool
+FLAG basecamp checkin question copy --stats type=bool
+FLAG basecamp checkin question copy --styled type=bool
+FLAG basecamp checkin question copy --to-project type=string
+FLAG basecamp checkin question copy --to-questionnaire type=string
+FLAG basecamp checkin question copy --todolist type=string
+FLAG basecamp checkin question copy --verbose type=count
 FLAG basecamp checkin question create --account type=string
 FLAG basecamp checkin question create --agent type=bool
 FLAG basecamp checkin question create --cache-dir type=string
@@ -4474,6 +4507,30 @@ FLAG basecamp checkin question create --time type=string
 FLAG basecamp checkin question create --todolist type=string
 FLAG basecamp checkin question create --verbose type=count
 FLAG basecamp checkin question create --visible-to-clients type=bool
+FLAG basecamp checkin question move --account type=string
+FLAG basecamp checkin question move --agent type=bool
+FLAG basecamp checkin question move --cache-dir type=string
+FLAG basecamp checkin question move --count type=bool
+FLAG basecamp checkin question move --help type=bool
+FLAG basecamp checkin question move --hints type=bool
+FLAG basecamp checkin question move --ids-only type=bool
+FLAG basecamp checkin question move --in type=string
+FLAG basecamp checkin question move --jq type=string
+FLAG basecamp checkin question move --json type=bool
+FLAG basecamp checkin question move --markdown type=bool
+FLAG basecamp checkin question move --md type=bool
+FLAG basecamp checkin question move --no-hints type=bool
+FLAG basecamp checkin question move --no-stats type=bool
+FLAG basecamp checkin question move --profile type=string
+FLAG basecamp checkin question move --project type=string
+FLAG basecamp checkin question move --questionnaire type=string
+FLAG basecamp checkin question move --quiet type=bool
+FLAG basecamp checkin question move --stats type=bool
+FLAG basecamp checkin question move --styled type=bool
+FLAG basecamp checkin question move --to-project type=string
+FLAG basecamp checkin question move --to-questionnaire type=string
+FLAG basecamp checkin question move --todolist type=string
+FLAG basecamp checkin question move --verbose type=count
 FLAG basecamp checkin question notify --account type=string
 FLAG basecamp checkin question notify --agent type=bool
 FLAG basecamp checkin question notify --cache-dir type=string
@@ -4837,6 +4894,31 @@ FLAG basecamp checkins question answerers --stats type=bool
 FLAG basecamp checkins question answerers --styled type=bool
 FLAG basecamp checkins question answerers --todolist type=string
 FLAG basecamp checkins question answerers --verbose type=count
+FLAG basecamp checkins question copy --account type=string
+FLAG basecamp checkins question copy --agent type=bool
+FLAG basecamp checkins question copy --cache-dir type=string
+FLAG basecamp checkins question copy --count type=bool
+FLAG basecamp checkins question copy --help type=bool
+FLAG basecamp checkins question copy --hints type=bool
+FLAG basecamp checkins question copy --ids-only type=bool
+FLAG basecamp checkins question copy --in type=string
+FLAG basecamp checkins question copy --include-comments type=bool
+FLAG basecamp checkins question copy --jq type=string
+FLAG basecamp checkins question copy --json type=bool
+FLAG basecamp checkins question copy --markdown type=bool
+FLAG basecamp checkins question copy --md type=bool
+FLAG basecamp checkins question copy --no-hints type=bool
+FLAG basecamp checkins question copy --no-stats type=bool
+FLAG basecamp checkins question copy --profile type=string
+FLAG basecamp checkins question copy --project type=string
+FLAG basecamp checkins question copy --questionnaire type=string
+FLAG basecamp checkins question copy --quiet type=bool
+FLAG basecamp checkins question copy --stats type=bool
+FLAG basecamp checkins question copy --styled type=bool
+FLAG basecamp checkins question copy --to-project type=string
+FLAG basecamp checkins question copy --to-questionnaire type=string
+FLAG basecamp checkins question copy --todolist type=string
+FLAG basecamp checkins question copy --verbose type=count
 FLAG basecamp checkins question create --account type=string
 FLAG basecamp checkins question create --agent type=bool
 FLAG basecamp checkins question create --cache-dir type=string
@@ -4863,6 +4945,30 @@ FLAG basecamp checkins question create --time type=string
 FLAG basecamp checkins question create --todolist type=string
 FLAG basecamp checkins question create --verbose type=count
 FLAG basecamp checkins question create --visible-to-clients type=bool
+FLAG basecamp checkins question move --account type=string
+FLAG basecamp checkins question move --agent type=bool
+FLAG basecamp checkins question move --cache-dir type=string
+FLAG basecamp checkins question move --count type=bool
+FLAG basecamp checkins question move --help type=bool
+FLAG basecamp checkins question move --hints type=bool
+FLAG basecamp checkins question move --ids-only type=bool
+FLAG basecamp checkins question move --in type=string
+FLAG basecamp checkins question move --jq type=string
+FLAG basecamp checkins question move --json type=bool
+FLAG basecamp checkins question move --markdown type=bool
+FLAG basecamp checkins question move --md type=bool
+FLAG basecamp checkins question move --no-hints type=bool
+FLAG basecamp checkins question move --no-stats type=bool
+FLAG basecamp checkins question move --profile type=string
+FLAG basecamp checkins question move --project type=string
+FLAG basecamp checkins question move --questionnaire type=string
+FLAG basecamp checkins question move --quiet type=bool
+FLAG basecamp checkins question move --stats type=bool
+FLAG basecamp checkins question move --styled type=bool
+FLAG basecamp checkins question move --to-project type=string
+FLAG basecamp checkins question move --to-questionnaire type=string
+FLAG basecamp checkins question move --todolist type=string
+FLAG basecamp checkins question move --verbose type=count
 FLAG basecamp checkins question notify --account type=string
 FLAG basecamp checkins question notify --agent type=bool
 FLAG basecamp checkins question notify --cache-dir type=string
@@ -20416,7 +20522,9 @@ SUB basecamp checkin answer update
 SUB basecamp checkin answers
 SUB basecamp checkin question
 SUB basecamp checkin question answerers
+SUB basecamp checkin question copy
 SUB basecamp checkin question create
+SUB basecamp checkin question move
 SUB basecamp checkin question notify
 SUB basecamp checkin question pause
 SUB basecamp checkin question resume
@@ -20432,7 +20540,9 @@ SUB basecamp checkins answer update
 SUB basecamp checkins answers
 SUB basecamp checkins question
 SUB basecamp checkins question answerers
+SUB basecamp checkins question copy
 SUB basecamp checkins question create
+SUB basecamp checkins question move
 SUB basecamp checkins question notify
 SUB basecamp checkins question pause
 SUB basecamp checkins question resume
