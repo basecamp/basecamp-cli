@@ -22,11 +22,11 @@ import (
 
 func shortFilingWait(t *testing.T) {
 	t.Helper()
-	saved := cardFilingWait
-	cardFilingWait.first = time.Millisecond
-	cardFilingWait.max = 2 * time.Millisecond
-	cardFilingWait.total = 50 * time.Millisecond
-	t.Cleanup(func() { cardFilingWait = saved })
+	saved := filingWait
+	filingWait.first = time.Millisecond
+	filingWait.max = 2 * time.Millisecond
+	filingWait.total = 50 * time.Millisecond
+	t.Cleanup(func() { filingWait = saved })
 }
 
 func TestPollUntilStopsWhenDone(t *testing.T) {
@@ -52,7 +52,7 @@ func TestPollUntilGivesUpAfterTotal(t *testing.T) {
 
 func TestPollUntilHonoursCancellation(t *testing.T) {
 	shortFilingWait(t)
-	cardFilingWait.total = time.Minute
+	filingWait.total = time.Minute
 	ctx, cancel := context.WithCancel(context.Background())
 	checks := 0
 	done, err := pollUntil(ctx, func(context.Context) (bool, error) {
@@ -315,14 +315,13 @@ func TestCardsCopyThatIsRateLimitedStaysRetryable(t *testing.T) {
 }
 
 func TestAcceptedCopyStaysNotRetryableWhenTheWaitHitsTheRateLimitGate(t *testing.T) {
-	f := cardFiling{
-		kind:  basecamp.FilingCopy,
-		card:  &basecamp.Card{ID: 456},
-		table: &basecamp.CardTable{ID: 900, Title: "Ideas", Bucket: &basecamp.Bucket{ID: 999}},
-	}
+	f := cardFiling(nil, basecamp.FilingCopy,
+		&basecamp.Card{ID: 456},
+		&basecamp.CardTable{ID: 900, Title: "Ideas", Bucket: &basecamp.Bucket{ID: 999}},
+		false)
 	gate := &resilience.GateError{Message: "rate limited by a recent 429", Hint: "Re-run in 30s"}
 
-	e := output.AsError(stillFilingError(f, "copying", gate))
+	e := output.AsError(stillFilingError(f, gate))
 
 	assert.Equal(t, output.CodeInProgress, e.Code)
 	assert.False(t, e.Retryable, "the copy was accepted, so re-running makes a second one")
