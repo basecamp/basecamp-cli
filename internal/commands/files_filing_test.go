@@ -245,3 +245,23 @@ func TestFilesCopyOfAGoogleDocumentPointsAtItsFolderInBasecamp(t *testing.T) {
 	assert.Contains(t, e.Hint, "basecamp files show 950 --in 999, and open its app_url in Basecamp")
 	assert.NotContains(t, e.Hint, "timeline", "the timeline never shows a Google document")
 }
+
+func TestFilesFolderTitleSharedWithItsDocsAndFilesIsAmbiguous(t *testing.T) {
+	transport := filesFilingTransport()
+	transport.gets["/vaults/900/vaults"] = `[{"id":950,"type":"Vault","title":"Contracts"},{"id":951,"type":"Vault","title":"Docs & Files"}]`
+	run := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "456", "--to-project", "Dest", "--to-folder", "docs & files")
+	e := run.failure(t)
+
+	assert.Equal(t, output.CodeAmbiguous, e.Code)
+	assert.Contains(t, e.Hint, "900  Docs & Files (the top of Docs & Files)")
+	assert.Contains(t, e.Hint, "951  Docs & Files")
+	assert.Empty(t, transport.posts)
+}
+
+func TestFilesFolderTitleOfItsDocsAndFilesAloneIsTheTop(t *testing.T) {
+	transport := filesFilingTransport()
+	run := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "456", "--to-project", "Dest", "--to-folder", "Docs & Files")
+	require.NoError(t, run.err)
+	assert.Equal(t, float64(900), transport.bodies[0]["filing_destination_id"])
+	assert.NotContains(t, transport.bodies[0], "parent_id")
+}

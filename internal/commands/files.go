@@ -3060,20 +3060,21 @@ func resolveFilesTarget(cmd *cobra.Command, app *appctx.App, toProject, toFolder
 }
 
 // filesFolderByTitle finds a folder at the top of a project's Docs & Files by
-// title, or the Docs & Files itself.
+// title, or the Docs & Files itself. A folder can share the Docs & Files'
+// title, so the Docs & Files is one of the candidates, not a match that wins.
 func filesFolderByTitle(cmd *cobra.Command, app *appctx.App, toProject, toFolder string) (filingTarget, error) {
 	root, err := resolveFilingTarget(cmd, app, docsAndFiles(), toProject, "")
 	if err != nil {
 		return filingTarget{}, err
-	}
-	if strings.EqualFold(toFolder, root.title) {
-		return root, nil
 	}
 	folders, err := app.Account().Vaults().List(cmd.Context(), root.id, nil)
 	if err != nil {
 		return filingTarget{}, convertSDKError(err)
 	}
 	var named []basecamp.Vault
+	if strings.EqualFold(toFolder, root.title) {
+		named = append(named, basecamp.Vault{ID: root.id, Title: root.title})
+	}
 	for _, folder := range folders.Vaults {
 		if strings.EqualFold(folder.Title, toFolder) {
 			named = append(named, folder)
@@ -3081,7 +3082,9 @@ func filesFolderByTitle(cmd *cobra.Command, app *appctx.App, toProject, toFolder
 	}
 	switch len(named) {
 	case 1:
-		root.parentID, root.parentTitle = named[0].ID, named[0].Title
+		if named[0].ID != root.id {
+			root.parentID, root.parentTitle = named[0].ID, named[0].Title
+		}
 		return root, nil
 	case 0:
 		titles := make([]string, len(folders.Vaults))
@@ -3098,10 +3101,13 @@ func filesFolderByTitle(cmd *cobra.Command, app *appctx.App, toProject, toFolder
 		lines := make([]string, len(named))
 		for i, folder := range named {
 			lines[i] = fmt.Sprintf("  %d  %s", folder.ID, folder.Title)
+			if folder.ID == root.id {
+				lines[i] += " (the top of Docs & Files)"
+			}
 		}
 		return filingTarget{}, &output.Error{
 			Code:    output.CodeAmbiguous,
-			Message: fmt.Sprintf("%s's Docs & Files has %d folders called %q", root.projectName, len(named), toFolder),
+			Message: fmt.Sprintf("%s's Docs & Files has %d places called %q", root.projectName, len(named), toFolder),
 			Hint:    "Specify one with --to-folder <id>:\n" + strings.Join(lines, "\n"),
 		}
 	}
