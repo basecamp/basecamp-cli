@@ -1889,8 +1889,8 @@ the new card.`,
 			if err != nil {
 				return convertSDKError(err)
 			}
-			if card.Bucket == nil {
-				return output.ErrNotFound("card", strconv.FormatInt(ref.id, 10))
+			if err := requireFilableCard(card, ref.id); err != nil {
+				return err
 			}
 			if err := rejectCardProjectConflict(cmd, app, *project, ref.project, card.Bucket.ID); err != nil {
 				return err
@@ -1966,6 +1966,19 @@ func validateFilingFlags(sourceCardTable, toProject, toCardTable string) error {
 // moveCardToCardTable moves a card into another card table, usually in
 // another project, as the web's Move… dialog does. A move within the card's
 // own table is a column change, which --to makes directly.
+// requireFilableCard refuses what the card read returned when it is not a
+// card. A moved message's old id redirects through the card endpoint to the
+// message, so the read alone does not prove the id names a card.
+func requireFilableCard(card *basecamp.Card, requestedID int64) error {
+	if card.Bucket == nil {
+		return output.ErrNotFound("card", strconv.FormatInt(requestedID, 10))
+	}
+	if card.Type != "" && card.Type != "Kanban::Card" {
+		return output.ErrUsage(fmt.Sprintf("%d is a %s, not a card", requestedID, card.Type))
+	}
+	return nil
+}
+
 func moveCardToCardTable(cmd *cobra.Command, app *appctx.App, cardID int64, flagProject, urlProjectID, toProject, toCardTable string) error {
 	table, err := resolveFilingTable(cmd, app, toProject, toCardTable)
 	if err != nil {
@@ -1975,8 +1988,8 @@ func moveCardToCardTable(cmd *cobra.Command, app *appctx.App, cardID int64, flag
 	if err != nil {
 		return convertSDKError(err)
 	}
-	if card.Bucket == nil {
-		return output.ErrNotFound("card", strconv.FormatInt(cardID, 10))
+	if err := requireFilableCard(card, cardID); err != nil {
+		return err
 	}
 	if err := rejectCardProjectConflict(cmd, app, flagProject, urlProjectID, card.Bucket.ID); err != nil {
 		return err

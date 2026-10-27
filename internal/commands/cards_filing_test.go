@@ -153,6 +153,9 @@ func (m *mockFilingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 		return respond(200, `{"id":950,"title":"Roadmap","bucket":{"id":999,"name":"Dest"},"lists":[{"id":951,"title":"Triage","type":"Kanban::Triage"}]}`)
 	case strings.HasSuffix(path, "/card_tables/columns/777"):
 		return respond(200, `{"id":777,"title":"Developing","parent":{"id":555,"title":"Board","type":"Kanban::Board"}}`)
+	case strings.HasSuffix(path, "/card_tables/cards/458"):
+		// A moved message's old id redirects through the card endpoint to the message.
+		return respond(200, `{"id":459,"title":"Kickoff","type":"Message","bucket":{"id":123,"name":"Source","type":"Project"},"parent":{"id":555,"title":"Message Board","type":"Message::Board"}}`)
 	case strings.HasSuffix(path, "/card_tables/cards/456"):
 		return respond(200, `{"id":456,"title":"Test Card","bucket":{"id":123,"name":"Source","type":"Project"},"parent":{"id":777,"title":"Developing","type":"Kanban::Column"}}`)
 	case strings.HasSuffix(path, "/card_tables/cards/4560"):
@@ -324,6 +327,23 @@ func TestAcceptedCopyStaysNotRetryableWhenTheWaitHitsTheRateLimitGate(t *testing
 	assert.Equal(t, output.CodeInProgress, e.Code)
 	assert.False(t, e.Retryable, "the copy was accepted, so re-running makes a second one")
 	assert.Contains(t, e.Hint, "Do not copy it again")
+}
+
+func TestCardsFilingRefusesARecordThatIsNotACard(t *testing.T) {
+	for name, args := range map[string][]string{
+		"move": {"move", "458", "--to-card-table", "900"},
+		"copy": {"copy", "458", "--to-card-table", "900"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockFilingTransport{}
+			run := runFilingCommand(t, transport, args...)
+			e := requireFilingError(t, run)
+
+			assert.Equal(t, output.CodeUsage, e.Code)
+			assert.Equal(t, "458 is a Message, not a card", e.Message)
+			assert.Empty(t, transport.posts)
+		})
+	}
 }
 
 func TestCardsMoveToExplicitCardTable(t *testing.T) {
