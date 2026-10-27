@@ -2512,8 +2512,10 @@ shows the new to-dos.`,
 
 // fileTodos moves or copies to-dos into a to-do list, one filing each, as the
 // web's Move… and Copy… do. Every to-do is read before any is filed, so a bad
-// ID or a to-do already in the destination stops the command before anything
-// moves. With no destination, a copy goes into its to-do's own list.
+// ID, a to-do named twice or a to-do already in the destination stops the
+// command before anything moves. A moved to-do's old id reads as its new one,
+// so a to-do is named twice when two arguments read as the same to-do. With no
+// destination, a copy goes into its to-do's own list.
 func fileTodos(cmd *cobra.Command, kind basecamp.FilingType, args []string, toProject, toList string, includeComments bool) error {
 	destinationSet := cmd.Flags().Changed("to-project") || cmd.Flags().Changed("to-list")
 	if destinationSet {
@@ -2527,8 +2529,10 @@ func fileTodos(cmd *cobra.Command, kind basecamp.FilingType, args []string, toPr
 		return err
 	}
 
-	var refs []filesMoveRef
-	seen := map[int64]bool{}
+	var (
+		refs   []filesMoveRef
+		tokens []string
+	)
 	for _, arg := range args {
 		for token := range strings.SplitSeq(arg, ",") {
 			if token = strings.TrimSpace(token); token == "" {
@@ -2538,11 +2542,8 @@ func fileTodos(cmd *cobra.Command, kind basecamp.FilingType, args []string, toPr
 			if err != nil {
 				return err
 			}
-			if seen[ref.id] {
-				return output.ErrUsage(fmt.Sprintf("To-do %d is listed twice", ref.id))
-			}
-			seen[ref.id] = true
 			refs = append(refs, ref)
+			tokens = append(tokens, token)
 		}
 	}
 	if len(refs) == 0 {
@@ -2558,7 +2559,8 @@ func fileTodos(cmd *cobra.Command, kind basecamp.FilingType, args []string, toPr
 	}
 
 	filings := make([]recordingFiling, 0, len(refs))
-	for _, ref := range refs {
+	named := map[int64]string{}
+	for i, ref := range refs {
 		todo, err := app.Account().Todos().Get(cmd.Context(), ref.id)
 		if err != nil {
 			return convertSDKError(err)
@@ -2566,6 +2568,13 @@ func fileTodos(cmd *cobra.Command, kind basecamp.FilingType, args []string, toPr
 		if err := requireFilableTodo(todo, ref.id); err != nil {
 			return err
 		}
+		if first, ok := named[todo.ID]; ok {
+			return output.ErrUsageHint(
+				fmt.Sprintf("%s and %s are both to-do #%d", first, tokens[i], todo.ID),
+				fmt.Sprintf("A moved to-do's old id reads as its new one. Name to-do #%d once", todo.ID),
+			)
+		}
+		named[todo.ID] = tokens[i]
 		if err := rejectProjectConflict(cmd, app, "to-do", "", ref.project, todo.Bucket.ID); err != nil {
 			return err
 		}

@@ -24,6 +24,7 @@ import (
 //   - Project 123 ("Source") has To-dos 300 with list 310 ("Backlog"), which
 //     holds group 311 ("Ideas"). To-dos 456, 457 and 459 are in list 310,
 //     and 458 in group 311. To-do 460 is loose, on To-dos 300 in no list.
+//     To-do 111 was moved and is 457 now, so reading 111 answers 457.
 //   - Project 999 ("Dest") has To-dos 900 with lists 901 ("Launch") and 902
 //     ("Later"), group 920 in list 901, and an archived list 930. With
 //     twoTodosets it also has To-dos 950 with list 951 ("Roadmap"); with
@@ -147,6 +148,8 @@ func (m *mockTodoFilingTransport) RoundTrip(req *http.Request) (*http.Response, 
 		return respond(200, strings.Replace(filingListJSON(930, "Old", 999, "Todoset", 900), `"active"`, `"archived"`, 1))
 	case "/todos/456", "/todos/457", "/todos/459":
 		return respond(200, filingTodoJSON(parts[1], 123, 310, "Backlog"))
+	case "/todos/111":
+		return respond(200, filingTodoJSON("457", 123, 310, "Backlog"))
 	case "/todos/458":
 		return respond(200, filingTodoJSON("458", 123, 311, "Ideas"))
 	case "/todos/460":
@@ -541,4 +544,24 @@ func TestTodosCopyALooseTodoWithoutADestinationIsRefused(t *testing.T) {
 	assert.Equal(t, output.CodeUsage, e.Code)
 	assert.Contains(t, e.Message, "To-do #460 is loose")
 	assert.Contains(t, e.Hint, "basecamp todos copy 460 --to-project 123 --to-list <list>")
+}
+
+func TestTodosRefuseATodoNamedTwiceBeforeFilingAny(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args    []string
+		message string
+	}{
+		"copy by its old id and its new one": {[]string{"copy", "456", "111", "457", "--to-list", "901"}, "111 and 457 are both to-do #457"},
+		"move by its old id and its new one": {[]string{"move", "111", "457", "--to-list", "901"}, "111 and 457 are both to-do #457"},
+		"the same id twice":                  {[]string{"copy", "456", "456", "--to-list", "901"}, "456 and 456 are both to-do #456"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockTodoFilingTransport{}
+			run := runTodoFilingCommand(t, transport, NewTodosCmd(), tc.args...)
+			e := requireUsageRefusal(t, run, transport)
+
+			assert.Equal(t, output.CodeUsage, e.Code)
+			assert.Equal(t, tc.message, e.Message)
+		})
+	}
 }
