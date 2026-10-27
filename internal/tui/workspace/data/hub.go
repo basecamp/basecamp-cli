@@ -989,25 +989,26 @@ func IsCampfireLine(recordingType string) bool {
 // project it would skip the line endpoint's checks on who may delete a line
 // and until when. Anything else is trashed.
 //
-// recordingType is the API's type for the recording and campfireID a line's
-// Campfire, when the caller has them. A view's scope carries only a label for
-// the type ("Todo", "Campfire::Line") or none, so a caller with no more than
-// that passes "", and the recording is read to learn its type; a line is read
-// too when its Campfire isn't given. A recording that can't be read is left
-// alone rather than trashed on a guess.
+// recordingType is the API's type for the recording, never a view's label
+// ("Todo", "Campfire::Line"): a caller with only a label reads the type with
+// RecordingKind first. Without one nothing is written, since the confirmation
+// the caller showed can't have said which of the two would happen. campfireID
+// is a line's Campfire, read from the line when the caller passes 0.
 func (h *Hub) RemoveRecording(ctx context.Context, accountID string, recordingID int64, recordingType string, campfireID int64) (deleted bool, err error) {
 	client := h.multi.ClientFor(accountID)
 	if client == nil {
 		return false, fmt.Errorf("no client for account %s", accountID)
 	}
-	if recordingType == "" || (IsCampfireLine(recordingType) && campfireID == 0) {
-		recordingType, campfireID, err = readRecordingKind(ctx, client, recordingID)
-		if err != nil {
-			return false, err
-		}
+	if recordingType == "" {
+		return false, fmt.Errorf("can't tell what recording %d is, so it was left alone", recordingID)
 	}
 	if !IsCampfireLine(recordingType) {
 		return false, client.Recordings().Trash(ctx, recordingID)
+	}
+	if campfireID == 0 {
+		if _, campfireID, err = readRecordingKind(ctx, client, recordingID); err != nil {
+			return false, err
+		}
 	}
 	if campfireID == 0 {
 		return false, fmt.Errorf("line %d names no Campfire to delete it from", recordingID)

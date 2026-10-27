@@ -1514,6 +1514,11 @@ func (v *Detail) fetchDetail() tea.Cmd {
 				Creator   *struct {
 					Name string `json:"name"`
 				} `json:"creator"`
+			}
+			// The type and parent, which decide what t does, are read on
+			// their own, so a field the display can't parse doesn't lose them.
+			var kind struct {
+				Type   string `json:"type"`
 				Parent *struct {
 					ID int64 `json:"id"`
 				} `json:"parent"`
@@ -1538,14 +1543,16 @@ func (v *Detail) fetchDetail() tea.Cmd {
 				data = detailData{
 					title:      title,
 					recordType: titleCase(recordingType),
-					apiType:    generic.Type,
 					content:    generic.Content,
 					creator:    creator,
 					createdAt:  generic.CreatedAt,
 					appURL:     generic.AppURL,
 				}
-				if generic.Parent != nil {
-					data.parentID = generic.Parent.ID
+			}
+			if err := resp.UnmarshalData(&kind); err == nil {
+				data.apiType = kind.Type
+				if kind.Parent != nil {
+					data.parentID = kind.Parent.ID
 				}
 			}
 		}

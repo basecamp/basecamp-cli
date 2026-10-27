@@ -75,66 +75,57 @@ func TestRemoveRecording_KnownLineDeletes(t *testing.T) {
 	assert.Equal(t, []string{deleteLine}, transport.recorded())
 }
 
-// A line whose Campfire the caller lacks, or a recording whose type it knows
-// only by a label or not at all, is read first, and a line found that way is
-// deleted, never trashed.
-func TestRemoveRecording_ReadsWhatItLacks(t *testing.T) {
-	for _, recordingType := range []string{"Chat::Lines::Text", ""} {
-		t.Run("type "+recordingType, func(t *testing.T) {
-			h, transport := removeHub(map[string]removeReply{
-				readLine:   {http.StatusOK, lineInPing},
-				deleteLine: {http.StatusNoContent, ""},
-			})
+// A line whose Campfire the caller lacks is read to find it, and deleted from
+// it, never trashed.
+func TestRemoveRecording_ReadsALinesCampfire(t *testing.T) {
+	h, transport := removeHub(map[string]removeReply{
+		readLine:   {http.StatusOK, lineInPing},
+		deleteLine: {http.StatusNoContent, ""},
+	})
 
-			deleted, err := h.RemoveRecording(context.Background(), "99999", 111, recordingType, 0)
+	deleted, err := h.RemoveRecording(context.Background(), "99999", 111, "Chat::Lines::Text", 0)
 
-			require.NoError(t, err)
-			assert.True(t, deleted)
-			assert.Equal(t, []string{readLine, deleteLine}, transport.recorded())
-		})
-	}
+	require.NoError(t, err)
+	assert.True(t, deleted)
+	assert.Equal(t, []string{readLine, deleteLine}, transport.recorded())
 }
 
-// Anything that isn't a line is trashed: read first when its type is unknown,
-// straight away when the caller has it.
+// Anything that isn't a line is trashed, with no read.
 func TestRemoveRecording_OtherRecordingsTrash(t *testing.T) {
 	const trashTodo = "PUT /99999/recordings/100/status/trashed.json"
-	const readTodo = "GET /99999/recordings/100.json"
-	cases := []struct {
-		recordingType string
-		want          []string
-	}{
-		{"Todo", []string{trashTodo}},
-		{"", []string{readTodo, trashTodo}},
-	}
-	for _, c := range cases {
-		t.Run("type "+c.recordingType, func(t *testing.T) {
-			h, transport := removeHub(map[string]removeReply{
-				readTodo:  {http.StatusOK, `{"id":100,"type":"Todo","parent":{"id":50,"type":"Todolist"}}`},
-				trashTodo: {http.StatusNoContent, ""},
-			})
+	h, transport := removeHub(map[string]removeReply{trashTodo: {http.StatusNoContent, ""}})
 
-			deleted, err := h.RemoveRecording(context.Background(), "99999", 100, c.recordingType, 0)
+	deleted, err := h.RemoveRecording(context.Background(), "99999", 100, "Todo", 0)
 
-			require.NoError(t, err)
-			assert.False(t, deleted)
-			assert.Equal(t, c.want, transport.recorded())
-		})
-	}
+	require.NoError(t, err)
+	assert.False(t, deleted)
+	assert.Equal(t, []string{trashTodo}, transport.recorded())
 }
 
-// When the read can't say what the recording is, or a line names no
-// Campfire, nothing is written: trashing on a guess is how a line would reach
-// the generic route.
-func TestRemoveRecording_WritesNothingItCantDecide(t *testing.T) {
+// Without the recording's type nothing is sent: the caller's confirmation
+// can't have said whether this would trash it or delete it for good.
+func TestRemoveRecording_WritesNothingWithoutAType(t *testing.T) {
+	h, transport := removeHub(map[string]removeReply{
+		deleteLine: {http.StatusNoContent, ""},
+		trashLine:  {http.StatusNoContent, ""},
+	})
+
+	_, err := h.RemoveRecording(context.Background(), "99999", 111, "", 0)
+
+	require.Error(t, err)
+	assert.Empty(t, transport.recorded())
+}
+
+// When the read can't name a line's Campfire, nothing is written: trashing it
+// instead is how a line would reach the generic route.
+func TestRemoveRecording_WritesNothingWithoutALinesCampfire(t *testing.T) {
 	cases := []struct {
 		name string
 		read removeReply
 	}{
 		{"unreadable", removeReply{http.StatusNotFound, `{"error":"Not Found"}`}},
 		{"no content", removeReply{http.StatusNoContent, ""}},
-		{"no type", removeReply{http.StatusOK, `{"id":111}`}},
-		{"line without a parent", removeReply{http.StatusOK, `{"id":111,"type":"Chat::Lines::Text"}`}},
+		{"no parent", removeReply{http.StatusOK, `{"id":111,"type":"Chat::Lines::Text"}`}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -144,12 +135,24 @@ func TestRemoveRecording_WritesNothingItCantDecide(t *testing.T) {
 				trashLine:  {http.StatusNoContent, ""},
 			})
 
-			_, err := h.RemoveRecording(context.Background(), "99999", 111, "", 0)
+			_, err := h.RemoveRecording(context.Background(), "99999", 111, "Chat::Lines::Text", 0)
 
 			require.Error(t, err)
 			assert.Equal(t, []string{readLine}, transport.recorded())
 		})
 	}
+}
+
+// RecordingKind reads the API's type and the parent for a caller that has
+// only a label.
+func TestRecordingKind(t *testing.T) {
+	h, _ := removeHub(map[string]removeReply{readLine: {http.StatusOK, lineInPing}})
+
+	recordingType, parentID, err := h.RecordingKind(context.Background(), "99999", 111)
+
+	require.NoError(t, err)
+	assert.Equal(t, "Chat::Lines::Text", recordingType)
+	assert.Equal(t, int64(222), parentID)
 }
 
 func TestIsCampfireLine(t *testing.T) {

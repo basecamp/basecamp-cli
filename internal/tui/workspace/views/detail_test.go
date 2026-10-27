@@ -1097,6 +1097,24 @@ func TestDetail_Trash_CampfireLineDeletesThroughItsCampfire(t *testing.T) {
 	}
 }
 
+// A field the view can't display doesn't hide what the recording is: a line
+// whose timestamp won't parse is still confirmed and deleted as a line.
+func TestDetail_Trash_CampfireLineWithAFieldItCantRead(t *testing.T) {
+	unreadable := strings.Replace(pingLineJSON, `"2026-10-27T10:00:00Z"`, `"yesterday"`, 1)
+	require.NotEqual(t, pingLineJSON, unreadable)
+	transport := &routeTransport{routes: map[string]stubReply{
+		"GET /99999/buckets/333/recordings/111.json": {http.StatusOK, unreadable},
+		"DELETE /99999/chats/222/lines/111":          {http.StatusNoContent, ""},
+	}}
+	v := loadedDetail(t, transport, 111, "Chat::Lines::Text")
+
+	assert.Equal(t, "Press t again to delete this line for good", statusText(t, v.handleKey(runeKey('t'))))
+	result, ok := v.handleKey(runeKey('t'))().(trashResultMsg)
+	require.True(t, ok)
+	require.NoError(t, result.err)
+	assert.Equal(t, []string{"DELETE /99999/chats/222/lines/111"}, transport.writes())
+}
+
 // Anything else Detail opens through the generic recording read is trashed as
 // before, decided by the type bc3 returns.
 func TestDetail_Trash_OtherRecordingTrashes(t *testing.T) {
