@@ -2067,7 +2067,7 @@ func cardFiling(app *appctx.App, kind basecamp.FilingType, card *basecamp.Card, 
 		includeComments: includeComments,
 		destination:     fmt.Sprintf("card table %d (%s)", table.ID, table.Title),
 		showCmd:         "basecamp cards show",
-		lookFor:         fmt.Sprintf("basecamp cards list --in %d --card-table %d --all", cardTableProjectID(table), table.ID),
+		lookFor:         recordingCopyLookFor("Kanban::Card", cardTableProjectID(table), card.Status),
 		landing:         "The copy lands in that table's Triage, or Done if completed",
 		read: func(ctx context.Context, id int64) (filedRecording, error) {
 			filed, err := app.Account().Cards().Get(ctx, id)

@@ -264,7 +264,7 @@ func TestCardsCopyThatFailsUpstreamIsNotRetryable(t *testing.T) {
 
 	assert.False(t, e.Retryable, "a 502 can follow a copy Basecamp already started")
 	assert.Contains(t, e.Hint, "may have started the copy")
-	assert.Contains(t, e.Hint, "basecamp cards list --in 999 --card-table 900")
+	assert.Contains(t, e.Hint, "basecamp recordings list Kanban::Card --in 999 --status active --sort created_at --direction desc --all")
 	assert.Len(t, transport.posts, 1)
 }
 
@@ -279,7 +279,7 @@ func TestCardsCopyWithNoReadableAnswerMayHaveStarted(t *testing.T) {
 
 			assert.False(t, e.Retryable, "Basecamp may have started the copy")
 			assert.Contains(t, e.Hint, "may have started the copy")
-			assert.Contains(t, e.Hint, "basecamp cards list --in 999 --card-table 900")
+			assert.Contains(t, e.Hint, "basecamp recordings list Kanban::Card --in 999 --status active --sort created_at --direction desc --all")
 			assert.Len(t, transport.posts, 1)
 		})
 	}
@@ -440,7 +440,7 @@ func TestCardsCopyStillRunningSaysNotToCopyAgain(t *testing.T) {
 
 	assert.Equal(t, output.CodeInProgress, e.Code)
 	assert.Contains(t, e.Hint, "Do not copy it again")
-	assert.Contains(t, e.Hint, "basecamp cards list --in 999 --card-table 900")
+	assert.Contains(t, e.Hint, "basecamp recordings list Kanban::Card --in 999 --status active --sort created_at --direction desc --all")
 	assert.Len(t, transport.posts, 1)
 }
 

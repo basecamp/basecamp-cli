@@ -1137,7 +1137,7 @@ func listFiling(cmd *cobra.Command, app *appctx.App, kind basecamp.FilingType, l
 		destinationID: todoset.ID,
 		destination:   fmt.Sprintf("To-dos %d in project %d", todoset.ID, projectID),
 		showCmd:       "basecamp todolists show",
-		lookFor:       todolistCopyLookFor(list, projectID, todoset.ID),
+		lookFor:       recordingCopyLookFor("Todolist", projectID, list.Status),
 		landing:       "The copy lands in that To-dos",
 		read:          readFiledTodolist(app, list.ID),
 	}, nil
@@ -1171,7 +1171,7 @@ func groupFiling(cmd *cobra.Command, app *appctx.App, kind basecamp.FilingType, 
 		destinationID: into.ID,
 		destination:   fmt.Sprintf("to-do list %d (%s)", into.ID, into.Name),
 		showCmd:       "basecamp todolists show",
-		lookFor:       fmt.Sprintf("basecamp todolistgroups list --in %d --list %d", todolistProjectID(into), into.ID),
+		lookFor:       recordingCopyLookFor("Todolist", todolistProjectID(into), group.Status),
 		landing:       "The copy lands in that list",
 		read:          readFiledTodolist(app, group.ID),
 	}, nil
@@ -1182,17 +1182,6 @@ func groupFiling(cmd *cobra.Command, app *appctx.App, kind basecamp.FilingType, 
 type filedTodolistResult struct {
 	*basecamp.Todolist
 	SourceID int64 `json:"source_id"`
-}
-
-// todolistCopyLookFor lists every list in the To-dos in the source's state: a
-// copy keeps the source's status, and `todolists list` shows active lists one
-// page at a time unless asked otherwise.
-func todolistCopyLookFor(list *basecamp.Todolist, projectID, todosetID int64) string {
-	cmd := fmt.Sprintf("basecamp todolists list --in %d --todoset %d --all", projectID, todosetID)
-	if list.Status == "archived" {
-		return cmd + " --archived"
-	}
-	return cmd
 }
 
 func readFiledTodolist(app *appctx.App, sourceID int64) func(context.Context, int64) (filedRecording, error) {

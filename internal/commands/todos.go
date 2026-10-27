@@ -2648,7 +2648,7 @@ func todoFiling(app *appctx.App, kind basecamp.FilingType, todo *basecamp.Todo, 
 		includeComments: includeComments,
 		destination:     fmt.Sprintf("to-do list %d (%s)", list.ID, list.Name),
 		showCmd:         "basecamp todos show",
-		lookFor:         todoCopyLookFor(todo, list),
+		lookFor:         recordingCopyLookFor("Todo", todolistProjectID(list), todo.Status),
 		landing:         "The copy lands in that list",
 		read: func(ctx context.Context, id int64) (filedRecording, error) {
 			filed, err := app.Account().Todos().Get(ctx, id)
@@ -2658,20 +2658,6 @@ func todoFiling(app *appctx.App, kind basecamp.FilingType, todo *basecamp.Todo, 
 			return filedTodo(filed, todo.ID), nil
 		},
 	}
-}
-
-// todoCopyLookFor lists every to-do in the list in the source's state: a copy
-// keeps the source's completion and status, and `todos list` shows only
-// incomplete, active to-dos, one page at a time, unless asked otherwise.
-func todoCopyLookFor(todo *basecamp.Todo, list *basecamp.Todolist) string {
-	cmd := fmt.Sprintf("basecamp todos list --in %d --list %d --all", todolistProjectID(list), list.ID)
-	switch {
-	case todo.Status == "archived":
-		return cmd + " --status archived"
-	case todo.Completed:
-		return cmd + " --completed"
-	}
-	return cmd
 }
 
 // filedTodoResult is a to-do that a move or copy made, with the id of the

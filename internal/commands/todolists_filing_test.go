@@ -169,5 +169,5 @@ func TestTodolistsCopyToAnotherProjectIsNotRetried(t *testing.T) {
 
 	assert.Len(t, transport.posts, 1)
 	assert.False(t, e.Retryable)
-	assert.Contains(t, e.Hint, "basecamp todolists list --in 999 --todoset 900")
+	assert.Contains(t, e.Hint, "basecamp recordings list Todolist --in 999 --status active --sort created_at --direction desc --all")
 }

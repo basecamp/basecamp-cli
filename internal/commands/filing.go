@@ -341,6 +341,18 @@ var filingWait = struct{ first, max, total time.Duration }{
 	total: time.Minute,
 }
 
+// recordingCopyLookFor lists the recordings of one type in a project in the
+// source's status, newest first and every page. A copy keeps the source's
+// status, so this shows a copy whatever state it was made in. Basecamp's
+// recordings listing serves Todo, Todolist (groups included), Message,
+// Document, Upload, Vault, Kanban::Card and Schedule::Entry.
+func recordingCopyLookFor(recordableType string, projectID int64, status string) string {
+	if status == "" {
+		status = "active"
+	}
+	return fmt.Sprintf("basecamp recordings list %s --in %d --status %s --sort created_at --direction desc --all", recordableType, projectID, status)
+}
+
 // pollUntil runs check, backing off between runs, until it reports done or
 // filingWait.total passes. It returns false with no error when the wait runs
 // out, and ctx's error when ctx is canceled first.
