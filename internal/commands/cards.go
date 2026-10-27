@@ -7,6 +7,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -1767,6 +1768,38 @@ func parseColumnID(ref string) (int64, error) {
 		return invalid()
 	}
 	return id, nil
+}
+
+// cardFilingWait bounds the wait for a card that Basecamp moves or copies in
+// the background: checks start first apart, back off to max, and stop after
+// total. Tests shorten it.
+var cardFilingWait = struct{ first, max, total time.Duration }{
+	first: 250 * time.Millisecond,
+	max:   2 * time.Second,
+	total: time.Minute,
+}
+
+// pollUntil runs check, backing off between runs, until it reports done or
+// cardFilingWait.total passes. It returns false with no error when the wait
+// runs out, and ctx's error when ctx is canceled first.
+func pollUntil(ctx context.Context, check func(context.Context) (bool, error)) (bool, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, cardFilingWait.total)
+	defer cancel()
+
+	for delay := cardFilingWait.first; ; delay = min(2*delay, cardFilingWait.max) {
+		done, err := check(waitCtx)
+		if err == nil && done {
+			return true, nil
+		}
+		if err != nil && waitCtx.Err() == nil {
+			return false, err
+		}
+		select {
+		case <-waitCtx.Done():
+			return false, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
 }
 
 func newCardsDoneCmd(project, cardTable *string) *cobra.Command {
