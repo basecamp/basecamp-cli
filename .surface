@@ -332,6 +332,7 @@ ARG basecamp profile set-default 00 <name>
 ARG basecamp profile show 00 [name]
 ARG basecamp project create 00 <name>
 ARG basecamp project delete 00 <id>
+ARG basecamp project logo set 00 <file>
 ARG basecamp project show 00 <id>
 ARG basecamp project trash 00 <id>
 ARG basecamp project update 00 <id>
@@ -339,6 +340,7 @@ ARG basecamp project wallpaper mode 00 <fill|tile>
 ARG basecamp project wallpaper set 00 <file>
 ARG basecamp projects create 00 <name>
 ARG basecamp projects delete 00 <id>
+ARG basecamp projects logo set 00 <file>
 ARG basecamp projects show 00 <id>
 ARG basecamp projects trash 00 <id>
 ARG basecamp projects update 00 <id>
@@ -1031,6 +1033,9 @@ CMD basecamp project
 CMD basecamp project create
 CMD basecamp project delete
 CMD basecamp project list
+CMD basecamp project logo
+CMD basecamp project logo remove
+CMD basecamp project logo set
 CMD basecamp project show
 CMD basecamp project trash
 CMD basecamp project update
@@ -1042,6 +1047,9 @@ CMD basecamp projects
 CMD basecamp projects create
 CMD basecamp projects delete
 CMD basecamp projects list
+CMD basecamp projects logo
+CMD basecamp projects logo remove
+CMD basecamp projects logo set
 CMD basecamp projects show
 CMD basecamp projects trash
 CMD basecamp projects update
@@ -13213,6 +13221,69 @@ FLAG basecamp project list --status type=string
 FLAG basecamp project list --styled type=bool
 FLAG basecamp project list --todolist type=string
 FLAG basecamp project list --verbose type=count
+FLAG basecamp project logo --account type=string
+FLAG basecamp project logo --agent type=bool
+FLAG basecamp project logo --cache-dir type=string
+FLAG basecamp project logo --count type=bool
+FLAG basecamp project logo --help type=bool
+FLAG basecamp project logo --hints type=bool
+FLAG basecamp project logo --ids-only type=bool
+FLAG basecamp project logo --in type=string
+FLAG basecamp project logo --jq type=string
+FLAG basecamp project logo --json type=bool
+FLAG basecamp project logo --markdown type=bool
+FLAG basecamp project logo --md type=bool
+FLAG basecamp project logo --no-hints type=bool
+FLAG basecamp project logo --no-stats type=bool
+FLAG basecamp project logo --profile type=string
+FLAG basecamp project logo --project type=string
+FLAG basecamp project logo --quiet type=bool
+FLAG basecamp project logo --stats type=bool
+FLAG basecamp project logo --styled type=bool
+FLAG basecamp project logo --todolist type=string
+FLAG basecamp project logo --verbose type=count
+FLAG basecamp project logo remove --account type=string
+FLAG basecamp project logo remove --agent type=bool
+FLAG basecamp project logo remove --cache-dir type=string
+FLAG basecamp project logo remove --count type=bool
+FLAG basecamp project logo remove --help type=bool
+FLAG basecamp project logo remove --hints type=bool
+FLAG basecamp project logo remove --ids-only type=bool
+FLAG basecamp project logo remove --in type=string
+FLAG basecamp project logo remove --jq type=string
+FLAG basecamp project logo remove --json type=bool
+FLAG basecamp project logo remove --markdown type=bool
+FLAG basecamp project logo remove --md type=bool
+FLAG basecamp project logo remove --no-hints type=bool
+FLAG basecamp project logo remove --no-stats type=bool
+FLAG basecamp project logo remove --profile type=string
+FLAG basecamp project logo remove --project type=string
+FLAG basecamp project logo remove --quiet type=bool
+FLAG basecamp project logo remove --stats type=bool
+FLAG basecamp project logo remove --styled type=bool
+FLAG basecamp project logo remove --todolist type=string
+FLAG basecamp project logo remove --verbose type=count
+FLAG basecamp project logo set --account type=string
+FLAG basecamp project logo set --agent type=bool
+FLAG basecamp project logo set --cache-dir type=string
+FLAG basecamp project logo set --count type=bool
+FLAG basecamp project logo set --help type=bool
+FLAG basecamp project logo set --hints type=bool
+FLAG basecamp project logo set --ids-only type=bool
+FLAG basecamp project logo set --in type=string
+FLAG basecamp project logo set --jq type=string
+FLAG basecamp project logo set --json type=bool
+FLAG basecamp project logo set --markdown type=bool
+FLAG basecamp project logo set --md type=bool
+FLAG basecamp project logo set --no-hints type=bool
+FLAG basecamp project logo set --no-stats type=bool
+FLAG basecamp project logo set --profile type=string
+FLAG basecamp project logo set --project type=string
+FLAG basecamp project logo set --quiet type=bool
+FLAG basecamp project logo set --stats type=bool
+FLAG basecamp project logo set --styled type=bool
+FLAG basecamp project logo set --todolist type=string
+FLAG basecamp project logo set --verbose type=count
 FLAG basecamp project show --account type=string
 FLAG basecamp project show --agent type=bool
 FLAG basecamp project show --all type=bool
@@ -13455,6 +13526,69 @@ FLAG basecamp projects list --status type=string
 FLAG basecamp projects list --styled type=bool
 FLAG basecamp projects list --todolist type=string
 FLAG basecamp projects list --verbose type=count
+FLAG basecamp projects logo --account type=string
+FLAG basecamp projects logo --agent type=bool
+FLAG basecamp projects logo --cache-dir type=string
+FLAG basecamp projects logo --count type=bool
+FLAG basecamp projects logo --help type=bool
+FLAG basecamp projects logo --hints type=bool
+FLAG basecamp projects logo --ids-only type=bool
+FLAG basecamp projects logo --in type=string
+FLAG basecamp projects logo --jq type=string
+FLAG basecamp projects logo --json type=bool
+FLAG basecamp projects logo --markdown type=bool
+FLAG basecamp projects logo --md type=bool
+FLAG basecamp projects logo --no-hints type=bool
+FLAG basecamp projects logo --no-stats type=bool
+FLAG basecamp projects logo --profile type=string
+FLAG basecamp projects logo --project type=string
+FLAG basecamp projects logo --quiet type=bool
+FLAG basecamp projects logo --stats type=bool
+FLAG basecamp projects logo --styled type=bool
+FLAG basecamp projects logo --todolist type=string
+FLAG basecamp projects logo --verbose type=count
+FLAG basecamp projects logo remove --account type=string
+FLAG basecamp projects logo remove --agent type=bool
+FLAG basecamp projects logo remove --cache-dir type=string
+FLAG basecamp projects logo remove --count type=bool
+FLAG basecamp projects logo remove --help type=bool
+FLAG basecamp projects logo remove --hints type=bool
+FLAG basecamp projects logo remove --ids-only type=bool
+FLAG basecamp projects logo remove --in type=string
+FLAG basecamp projects logo remove --jq type=string
+FLAG basecamp projects logo remove --json type=bool
+FLAG basecamp projects logo remove --markdown type=bool
+FLAG basecamp projects logo remove --md type=bool
+FLAG basecamp projects logo remove --no-hints type=bool
+FLAG basecamp projects logo remove --no-stats type=bool
+FLAG basecamp projects logo remove --profile type=string
+FLAG basecamp projects logo remove --project type=string
+FLAG basecamp projects logo remove --quiet type=bool
+FLAG basecamp projects logo remove --stats type=bool
+FLAG basecamp projects logo remove --styled type=bool
+FLAG basecamp projects logo remove --todolist type=string
+FLAG basecamp projects logo remove --verbose type=count
+FLAG basecamp projects logo set --account type=string
+FLAG basecamp projects logo set --agent type=bool
+FLAG basecamp projects logo set --cache-dir type=string
+FLAG basecamp projects logo set --count type=bool
+FLAG basecamp projects logo set --help type=bool
+FLAG basecamp projects logo set --hints type=bool
+FLAG basecamp projects logo set --ids-only type=bool
+FLAG basecamp projects logo set --in type=string
+FLAG basecamp projects logo set --jq type=string
+FLAG basecamp projects logo set --json type=bool
+FLAG basecamp projects logo set --markdown type=bool
+FLAG basecamp projects logo set --md type=bool
+FLAG basecamp projects logo set --no-hints type=bool
+FLAG basecamp projects logo set --no-stats type=bool
+FLAG basecamp projects logo set --profile type=string
+FLAG basecamp projects logo set --project type=string
+FLAG basecamp projects logo set --quiet type=bool
+FLAG basecamp projects logo set --stats type=bool
+FLAG basecamp projects logo set --styled type=bool
+FLAG basecamp projects logo set --todolist type=string
+FLAG basecamp projects logo set --verbose type=count
 FLAG basecamp projects show --account type=string
 FLAG basecamp projects show --agent type=bool
 FLAG basecamp projects show --all type=bool
@@ -20084,6 +20218,9 @@ SUB basecamp project
 SUB basecamp project create
 SUB basecamp project delete
 SUB basecamp project list
+SUB basecamp project logo
+SUB basecamp project logo remove
+SUB basecamp project logo set
 SUB basecamp project show
 SUB basecamp project trash
 SUB basecamp project update
@@ -20095,6 +20232,9 @@ SUB basecamp projects
 SUB basecamp projects create
 SUB basecamp projects delete
 SUB basecamp projects list
+SUB basecamp projects logo
+SUB basecamp projects logo remove
+SUB basecamp projects logo set
 SUB basecamp projects show
 SUB basecamp projects trash
 SUB basecamp projects update
