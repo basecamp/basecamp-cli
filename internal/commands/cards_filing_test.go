@@ -83,6 +83,7 @@ type mockFilingTransport struct {
 	statuses       []string
 
 	mu        sync.Mutex
+	requests  int
 	posts     []string
 	body      map[string]any
 	filingGet int
@@ -91,6 +92,7 @@ type mockFilingTransport struct {
 func (m *mockFilingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.requests++
 	path := strings.TrimSuffix(req.URL.Path, ".json")
 	respond := func(status int, body string) (*http.Response, error) {
 		header := make(http.Header)
@@ -436,5 +438,27 @@ func TestCardsFilingAcceptsTheCardsOwnProject(t *testing.T) {
 			assert.Len(t, transport.posts, 1)
 			assert.Equal(t, float64(4560), run.envelope.Data["id"])
 		})
+	}
+}
+
+func TestCardsFilingRefusesASourceURLThatIsNotThisAccountsCard(t *testing.T) {
+	for name, tc := range map[string]struct{ url, message string }{
+		"untrusted host":  {"https://3.basecamp.com.evil.example/99999/buckets/123/card_tables/cards/456", "not a Basecamp URL"},
+		"another account": {"https://3.basecamp.com/11111/buckets/123/card_tables/cards/456", "URL is for account 11111"},
+		"a to-do":         {"https://3.basecamp.com/99999/buckets/123/todos/456", "the URL names something else"},
+		"a cards listing": {"https://3.basecamp.com/99999/buckets/123/card_tables/lists/456/cards", "the URL names something else"},
+		"a card table":    {"https://3.basecamp.com/99999/buckets/123/card_tables/456", "the URL names something else"},
+	} {
+		for _, verb := range []string{"move", "copy"} {
+			t.Run(verb+" "+name, func(t *testing.T) {
+				transport := &mockFilingTransport{statuses: []string{"completed"}}
+				run := runFilingCommand(t, transport, verb, tc.url, "--to-project", "Dest")
+				e := requireFilingError(t, run)
+
+				assert.Equal(t, output.CodeUsage, e.Code)
+				assert.Contains(t, e.Message, tc.message)
+				assert.Zero(t, transport.requests, "refused before any request")
+			})
+		}
 	}
 }

@@ -1403,6 +1403,14 @@ Basecamp to finish the move and shows the card where it landed.`,
 				return err
 			}
 
+			if filingSet {
+				card, err := parseFilingRef(app, args[0], "card", "cards", "…/card_tables/cards/<id>")
+				if err != nil {
+					return err
+				}
+				return moveCardToCardTable(cmd, app, card.id, *project, card.project, toProject, toCardTable)
+			}
+
 			cardIDStr, urlProjectID, err := extractWithProject(args[0])
 			if err != nil {
 				return err
@@ -1411,10 +1419,6 @@ Basecamp to finish the move and shows the card where it landed.`,
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid card ID")
-			}
-
-			if filingSet {
-				return moveCardToCardTable(cmd, app, cardID, *project, urlProjectID, toProject, toCardTable)
 			}
 
 			// --to-wormhole: teleport across projects. Self-contained — it derives
@@ -1869,23 +1873,19 @@ the new card.`,
 				return err
 			}
 
-			cardIDStr, urlProjectID, err := extractWithProject(args[0])
+			ref, err := parseFilingRef(app, args[0], "card", "cards", "…/card_tables/cards/<id>")
 			if err != nil {
 				return err
 			}
-			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid card ID")
-			}
 
-			card, err := app.Account().Cards().Get(cmd.Context(), cardID)
+			card, err := app.Account().Cards().Get(cmd.Context(), ref.id)
 			if err != nil {
 				return convertSDKError(err)
 			}
 			if card.Bucket == nil {
-				return output.ErrNotFound("card", cardIDStr)
+				return output.ErrNotFound("card", strconv.FormatInt(ref.id, 10))
 			}
-			if err := rejectCardProjectConflict(cmd, app, *project, urlProjectID, card.Bucket.ID); err != nil {
+			if err := rejectCardProjectConflict(cmd, app, *project, ref.project, card.Bucket.ID); err != nil {
 				return err
 			}
 
@@ -1912,6 +1912,23 @@ the new card.`,
 	cmd.Flags().BoolVar(&includeComments, "include-comments", false, "Copy the card's comments too")
 
 	return cmd
+}
+
+// parseFilingRef reads the card or card table a cross-table move or copy names:
+// a positive ID, or a URL to one recording of kind on a trusted Basecamp host in
+// the session's account. extractID keeps only a URL's trailing number, which on
+// a look-alike host, in another account or on another kind of recording names
+// something else in this account. It runs after ensureAccount.
+func parseFilingRef(app *appctx.App, arg, noun, kind, urlShape string) (filesMoveRef, error) {
+	ref, err := parseFilesMoveRef(app, arg, []string{kind})
+	if err != nil {
+		return ref, output.ErrUsageHint(fmt.Sprintf("Expected a %s ID or URL: %v", noun, err),
+			fmt.Sprintf("Pass a %s ID or a Basecamp %s URL (%s)", noun, noun, urlShape))
+	}
+	if ref.account != "" && !accountIDsEqual(ref.account, app.Config.AccountID) {
+		return ref, output.ErrUsage(fmt.Sprintf("URL is for account %s, but this session uses account %s", ref.account, app.Config.AccountID))
+	}
+	return ref, nil
 }
 
 // addFilingDestinationFlags adds --to-project and --to-card-table, which name
