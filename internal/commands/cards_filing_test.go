@@ -462,3 +462,46 @@ func TestCardsFilingRefusesASourceURLThatIsNotThisAccountsCard(t *testing.T) {
 		}
 	}
 }
+
+func TestCardsFilingRefusesADestinationURLThatIsNotThisAccountsCardTable(t *testing.T) {
+	for name, tc := range map[string]struct{ url, message string }{
+		"untrusted host":  {"https://3.basecamp.com.evil.example/99999/buckets/999/card_tables/900", "not a Basecamp URL"},
+		"another account": {"https://3.basecamp.com/11111/buckets/999/card_tables/900", "URL is for account 11111"},
+		"a column":        {"https://3.basecamp.com/99999/buckets/999/card_tables/columns/901", "the URL names something else"},
+	} {
+		for _, verb := range []string{"move", "copy"} {
+			t.Run(verb+" "+name, func(t *testing.T) {
+				transport := &mockFilingTransport{statuses: []string{"completed"}}
+				run := runFilingCommand(t, transport, verb, "456", "--to-card-table", tc.url)
+				e := requireFilingError(t, run)
+
+				assert.Equal(t, output.CodeUsage, e.Code)
+				assert.Contains(t, e.Message, tc.message)
+				assert.Zero(t, transport.requests, "refused before any request")
+			})
+		}
+	}
+}
+
+func TestCardsFilingRefusesACardTableURLInAnotherProjectThanToProject(t *testing.T) {
+	for _, verb := range []string{"move", "copy"} {
+		t.Run(verb, func(t *testing.T) {
+			transport := &mockFilingTransport{statuses: []string{"completed"}}
+			run := runFilingCommand(t, transport, verb, "456",
+				"--to-project", "Dest", "--to-card-table", "https://3.basecamp.com/99999/buckets/123/card_tables/900")
+			e := requireFilingError(t, run)
+
+			assert.Equal(t, output.CodeUsage, e.Code)
+			assert.Contains(t, e.Message, "URL is in project 123, but --to-project points at project 999")
+			assert.Empty(t, transport.posts)
+		})
+	}
+}
+
+func TestCardsFilingAcceptsACardTableURLInToProject(t *testing.T) {
+	transport := &mockFilingTransport{twoTables: true, statuses: []string{"completed"}}
+	run := runFilingCommand(t, transport, "copy", "456",
+		"--to-project", "Dest", "--to-card-table", "https://3.basecamp.com/99999/buckets/999/card_tables/950")
+	require.NoError(t, run.err)
+	assert.Equal(t, float64(950), transport.body["filing_destination_id"])
+}

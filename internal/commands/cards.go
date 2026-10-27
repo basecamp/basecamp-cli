@@ -1878,6 +1878,13 @@ the new card.`,
 				return err
 			}
 
+			var table *basecamp.CardTable
+			if filingSet {
+				if table, err = resolveFilingTable(cmd, app, toProject, toCardTable); err != nil {
+					return err
+				}
+			}
+
 			card, err := app.Account().Cards().Get(cmd.Context(), ref.id)
 			if err != nil {
 				return convertSDKError(err)
@@ -1889,14 +1896,10 @@ the new card.`,
 				return err
 			}
 
-			var table *basecamp.CardTable
-			if filingSet {
-				table, err = resolveFilingTable(cmd, app, toProject, toCardTable)
-			} else {
-				_, table, err = resolveCardTableForCard(cmd, app, strconv.FormatInt(card.Bucket.ID, 10), "", card)
-			}
-			if err != nil {
-				return err
+			if table == nil {
+				if _, table, err = resolveCardTableForCard(cmd, app, strconv.FormatInt(card.Bucket.ID, 10), "", card); err != nil {
+					return err
+				}
 			}
 
 			return runCardFiling(cmd, app, cardFiling{
@@ -1964,6 +1967,10 @@ func validateFilingFlags(sourceCardTable, toProject, toCardTable string) error {
 // another project, as the web's Move… dialog does. A move within the card's
 // own table is a column change, which --to makes directly.
 func moveCardToCardTable(cmd *cobra.Command, app *appctx.App, cardID int64, flagProject, urlProjectID, toProject, toCardTable string) error {
+	table, err := resolveFilingTable(cmd, app, toProject, toCardTable)
+	if err != nil {
+		return err
+	}
 	card, err := app.Account().Cards().Get(cmd.Context(), cardID)
 	if err != nil {
 		return convertSDKError(err)
@@ -1972,10 +1979,6 @@ func moveCardToCardTable(cmd *cobra.Command, app *appctx.App, cardID int64, flag
 		return output.ErrNotFound("card", strconv.FormatInt(cardID, 10))
 	}
 	if err := rejectCardProjectConflict(cmd, app, flagProject, urlProjectID, card.Bucket.ID); err != nil {
-		return err
-	}
-	table, err := resolveFilingTable(cmd, app, toProject, toCardTable)
-	if err != nil {
 		return err
 	}
 	if card.Parent != nil && cardTableContainsColumn(table.Lists, card.Parent.ID) {
@@ -1990,17 +1993,17 @@ func moveCardToCardTable(cmd *cobra.Command, app *appctx.App, cardID int64, flag
 // resolveFilingTable finds the card table named by --to-project and
 // --to-card-table: a card table ID or URL on its own, a project's only card
 // table, or one of a project's card tables picked by ID or title. Only card
-// tables on the project's dock count, as in the web's dialogs.
+// tables on the project's dock count, as in the web's dialogs. A URL is held
+// to parseFilingRef's host and account checks, and its project must agree
+// with --to-project.
 func resolveFilingTable(cmd *cobra.Command, app *appctx.App, toProject, toCardTable string) (*basecamp.CardTable, error) {
+	var urlProjectID string
 	if urlarg.IsURL(toCardTable) {
-		parsed := urlarg.Parse(toCardTable)
-		if parsed == nil || parsed.Type != "card_tables" || parsed.IsCollection {
-			return nil, output.ErrUsageHint(
-				fmt.Sprintf("Invalid card table %q", toCardTable),
-				"Pass a card table ID, a Basecamp card table URL (.../card_tables/{id}), or a card table name with --to-project",
-			)
+		ref, err := parseFilingRef(app, toCardTable, "card table", "card_tables", "…/card_tables/<id>")
+		if err != nil {
+			return nil, err
 		}
-		toCardTable = parsed.RecordingID
+		toCardTable, urlProjectID = strconv.FormatInt(ref.id, 10), ref.project
 	}
 
 	if toProject == "" {
@@ -2014,6 +2017,12 @@ func resolveFilingTable(cmd *cobra.Command, app *appctx.App, toProject, toCardTa
 	projectID, projectName, err := app.Names.ResolveProject(cmd.Context(), toProject)
 	if err != nil {
 		return nil, err
+	}
+	if urlProjectID != "" && !sameNumericID(urlProjectID, projectID) {
+		return nil, output.ErrUsageHint(
+			fmt.Sprintf("The --to-card-table URL is in project %s, but --to-project points at project %s", urlProjectID, projectID),
+			"Drop --to-project, since the card table URL names its own project",
+		)
 	}
 	all, err := listProjectCardTables(cmd, app, projectID)
 	if err != nil {
