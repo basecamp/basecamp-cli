@@ -116,9 +116,9 @@ func TestTodolistsRepositionStillReordersWithoutFilingFlags(t *testing.T) {
 	assert.Equal(t, "Moved todolist #310 to position 2", run.summary)
 }
 
-func TestEveryTodolistGroupAliasMovesTheSameWay(t *testing.T) {
+func TestEveryTodolistGroupAliasMovesAndCopiesTheSameWay(t *testing.T) {
 	for _, group := range []string{"todolists", "todolist", "todolistgroups", "todolistgroup", "tlgroups", "tlgroup"} {
-		for verb, path := range map[string]string{"move": "/recordings/311/moves"} {
+		for verb, path := range map[string]string{"move": "/recordings/311/moves", "copy": "/recordings/311/copies"} {
 			t.Run(group+" "+verb, func(t *testing.T) {
 				root := &cobra.Command{Use: "basecamp"}
 				root.AddCommand(NewTodolistsCmd(), NewTodolistgroupsCmd())
@@ -139,4 +139,35 @@ func TestTodolistgroupsMoveRefusesItsOwnListFlagAsTheDestination(t *testing.T) {
 	e := requireUsageRefusal(t, run, transport)
 
 	assert.Equal(t, "Use --to-list for the destination list", e.Hint)
+}
+
+func TestTodolistsCopyWithoutDestinationGoesNextToTheOriginal(t *testing.T) {
+	for name, tc := range map[string]struct {
+		id   string
+		into float64
+	}{
+		"a list":  {"310", 300},
+		"a group": {"311", 310},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockTodoFilingTransport{}
+			run := runTodoFilingCommand(t, transport, NewTodolistsCmd(), "copy", tc.id, "--include-comments")
+			require.NoError(t, run.err)
+
+			assert.Equal(t, []string{"/recordings/" + tc.id + "/copies"}, transport.posts)
+			assert.Equal(t, tc.into, transport.bodies[0]["filing_destination_id"])
+			assert.Equal(t, true, transport.bodies[0]["include_comments"])
+		})
+	}
+}
+
+func TestTodolistsCopyToAnotherProjectIsNotRetried(t *testing.T) {
+	transport := &mockTodoFilingTransport{postStatus: 502}
+	run := runTodoFilingCommand(t, transport, NewTodolistsCmd(), "copy", "310", "--to-project", "Dest")
+	e := output.AsError(run.err)
+	require.NotNil(t, run.err)
+
+	assert.Len(t, transport.posts, 1)
+	assert.False(t, e.Retryable)
+	assert.Contains(t, e.Hint, "basecamp todolists list --in 999 --todoset 900")
 }

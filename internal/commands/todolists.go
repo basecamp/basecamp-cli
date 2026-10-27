@@ -41,6 +41,7 @@ to disambiguate when needed.`,
 		newTodolistsCreateCmd(&project, &todosetID),
 		newTodolistsUpdateCmd(&project),
 		newTodolistsPositionCmd(&project),
+		newTodolistsCopyCmd(&project, nil),
 		newRecordableTrashCmd("todolist"),
 		newRecordableArchiveCmd("todolist"),
 		newRecordableRestoreCmd("todolist"),
@@ -986,6 +987,51 @@ const todolistFilingNotes = "A top-level to-do list goes into a project's To-dos
 	"--to-todoset for a group, or --to-list for a list, is refused. " +
 	"The new list or group comes with its to-dos and has a NEW id (data.id; the original's is data.source_id). " +
 	"Basecamp refuses a group as the destination and an archived list."
+
+func newTodolistsCopyCmd(project, sourceList *string) *cobra.Command {
+	var dest todolistDestination
+	var includeComments bool
+
+	cmd := &cobra.Command{
+		Use:   "copy <id|url>",
+		Short: "Copy a to-do list or group to this or another project",
+		Long: `Copy a to-do list, with its to-dos, as the web's Copy… does. The original
+stays where it is.
+
+A to-do list goes into a project's To-dos; with no destination, into its own:
+  basecamp todolists copy 789
+  basecamp todolists copy 789 --to-project "Marketing"
+  basecamp todolists copy 789 --to-project "Marketing" --to-todoset 1069478882
+
+A group (a list inside a list) goes into a to-do list and stays a group there;
+with no destination, into its own list:
+  basecamp todolistgroups copy 456 --to-project "Marketing" --to-list "Launch"
+  basecamp todolistgroups copy 456 --to-list 1069479999 --include-comments
+
+Basecamp makes the copy in the background; the command waits for it and shows
+the new list or group.`,
+		Args: cobra.ExactArgs(1),
+		Annotations: map[string]string{
+			"agent_notes": "Without a destination the copy goes next to the original. " + todolistFilingNotes +
+				" Never re-run a copy that failed with in_progress or a may-have-started hint: each run makes another copy.",
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return fileTodolist(cmd, basecamp.FilingCopy, args[0], *project, sourceListValue(sourceList), dest, includeComments)
+		},
+	}
+
+	dest.addFlags(cmd, "Copy")
+	cmd.Flags().BoolVar(&includeComments, "include-comments", false, "Copy the comments too")
+
+	return cmd
+}
+
+func sourceListValue(sourceList *string) string {
+	if sourceList == nil {
+		return ""
+	}
+	return *sourceList
+}
 
 // fileTodolist moves or copies a to-do list or a group, as the web's Move… and
 // Copy… do. Which it is decides where it may go: a list into a todoset, a

@@ -36,6 +36,7 @@ Todolist groups allow you to organize todolists into collapsible sections.`,
 		newTodolistgroupsCreateCmd(&project, &todolist),
 		newTodolistgroupsUpdateCmd(),
 		newTodolistgroupsPositionCmd(&project, &todolist),
+		newTodolistsCopyCmd(&project, &todolist),
 	)
 
 	return cmd
