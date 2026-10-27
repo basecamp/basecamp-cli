@@ -728,3 +728,199 @@ Confirm with ` + "`basecamp todolists list`" + `.`,
 
 	return cmd
 }
+
+// addToListFlags adds --to-project and --to-list, which name the to-do list a
+// to-do or a group is moved or copied into.
+func addToListFlags(cmd *cobra.Command, toProject, toList *string, verb string) {
+	cmd.Flags().StringVar(toProject, "to-project", "", verb+" into this project (ID or name); add --to-list unless it has one to-do list")
+	cmd.Flags().StringVar(toList, "to-list", "", verb+" into this to-do list (ID, URL, or a name with --to-project)")
+}
+
+// validateToListFlags checks --to-project and --to-list before any request.
+func validateToListFlags(toProject, toList string) error {
+	if toProject == "" && toList == "" {
+		return output.ErrUsage("--to-project or --to-list needs a value")
+	}
+	if toProject == "" && !isNumericID(toList) && !urlarg.IsURL(toList) {
+		return output.ErrUsageHint(
+			fmt.Sprintf("To-do list %q is a name, which needs a project to look it up in", toList),
+			"Add --to-project <project>, or pass the list's ID or URL",
+		)
+	}
+	return nil
+}
+
+// resolveFilingTodolist finds the to-do list that --to-project and --to-list
+// name for a to-do or a group: a list ID or URL on its own, a project's only
+// list, or one of its lists picked by ID or name. Only lists in the to-dos
+// tools on the project's dock count, as in the web's dialogs. A URL is held to
+// parseFilingRef's host and account checks, and a list's project must agree
+// with --to-project.
+func resolveFilingTodolist(cmd *cobra.Command, app *appctx.App, toProject, toList string) (*basecamp.Todolist, error) {
+	var urlProjectID string
+	if urlarg.IsURL(toList) {
+		ref, err := parseFilingRef(app, toList, "to-do list", "todolists", "…/todolists/<id>")
+		if err != nil {
+			return nil, err
+		}
+		toList, urlProjectID = strconv.FormatInt(ref.id, 10), ref.project
+	}
+
+	var projectID, projectName string
+	if toProject != "" {
+		var err error
+		if projectID, projectName, err = app.Names.ResolveProject(cmd.Context(), toProject); err != nil {
+			return nil, err
+		}
+		if urlProjectID != "" && !sameNumericID(urlProjectID, projectID) {
+			return nil, output.ErrUsageHint(
+				fmt.Sprintf("The --to-list URL is in project %s, but --to-project points at project %s", urlProjectID, projectID),
+				"Drop --to-project, since the list URL names its own project",
+			)
+		}
+	}
+
+	if isNumericID(toList) {
+		id, err := strconv.ParseInt(toList, 10, 64)
+		if err != nil || id <= 0 {
+			return nil, output.ErrUsage("--to-list must be a positive to-do list ID")
+		}
+		list, err := app.Account().Todolists().Get(cmd.Context(), id)
+		if err != nil {
+			return nil, convertSDKError(err)
+		}
+		listProject := strconv.FormatInt(todolistProjectID(list), 10)
+		if urlProjectID != "" && !sameNumericID(urlProjectID, listProject) {
+			return nil, output.ErrUsage(fmt.Sprintf("The --to-list URL names project %s, but to-do list %d is in project %s", urlProjectID, list.ID, listProject))
+		}
+		if projectID != "" && !sameNumericID(projectID, listProject) {
+			return nil, output.ErrUsageHint(
+				fmt.Sprintf("To-do list %d is in project %s, not in --to-project %s", list.ID, listProject, projectID),
+				"Drop --to-project, since a list ID names its own project",
+			)
+		}
+		return list, requireFilingDestinationList(list)
+	}
+
+	lists, err := projectTodolists(cmd, app, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if toList == "" {
+		switch len(lists) {
+		case 0:
+			return nil, &output.Error{
+				Code:    output.CodeNotFound,
+				Message: fmt.Sprintf("Project %s has no to-do list", projectLabel(cmd, app, projectID, projectName)),
+				Hint:    fmt.Sprintf("Add one first with: basecamp todolists create <name> --in %s", projectID),
+			}
+		case 1:
+			return &lists[0], nil
+		default:
+			return nil, ambiguousTodolistsError(lists)
+		}
+	}
+	var named []basecamp.Todolist
+	for _, list := range lists {
+		if strings.EqualFold(list.Name, toList) {
+			named = append(named, list)
+		}
+	}
+	switch len(named) {
+	case 1:
+		return &named[0], nil
+	case 0:
+		return nil, output.ErrUsageHint(
+			fmt.Sprintf("To-do list '%s' not found in project %s", toList, projectLabel(cmd, app, projectID, projectName)),
+			"Available lists: "+formatTodolists(lists),
+		)
+	default:
+		return nil, ambiguousTodolistsError(named)
+	}
+}
+
+// requireFilingDestinationList refuses a destination Basecamp refuses: a group
+// (to-dos and groups go into a list, never a group) or a list that is not
+// active.
+func requireFilingDestinationList(list *basecamp.Todolist) error {
+	if list.Type != "" && list.Type != "Todolist" {
+		return output.ErrUsage(fmt.Sprintf("%d is a %s, not a to-do list", list.ID, list.Type))
+	}
+	if isTodolistGroup(list) {
+		return output.ErrUsageHint(
+			fmt.Sprintf("%d (%s) is a group in to-do list %d (%s); Basecamp files into a list, not a group", list.ID, list.Name, list.Parent.ID, list.Parent.Title),
+			fmt.Sprintf("Use its list: --to-list %d", list.Parent.ID),
+		)
+	}
+	if list.Status != "" && list.Status != "active" {
+		return output.ErrUsage(fmt.Sprintf("To-do list %d (%s) is %s; Basecamp files only into an active list", list.ID, list.Name, list.Status))
+	}
+	return nil
+}
+
+// projectTodolists lists the active to-do lists in the to-dos tools on a
+// project's dock.
+func projectTodolists(cmd *cobra.Command, app *appctx.App, projectID string) ([]basecamp.Todolist, error) {
+	todosets, _, err := getDockTools(cmd.Context(), app, projectID, "todoset")
+	if err != nil {
+		return nil, err
+	}
+	var lists []basecamp.Todolist
+	for _, todoset := range todosets {
+		result, err := app.Account().Todolists().List(cmd.Context(), todoset.ID, nil)
+		if err != nil {
+			return nil, convertSDKError(err)
+		}
+		lists = append(lists, result.Todolists...)
+	}
+	return lists, nil
+}
+
+func ambiguousTodolistsError(lists []basecamp.Todolist) error {
+	lines := make([]string, 0, len(lists))
+	for _, list := range lists {
+		lines = append(lines, fmt.Sprintf("  %d  %s", list.ID, list.Name))
+	}
+	return &output.Error{
+		Code:    output.CodeAmbiguous,
+		Message: "Multiple to-do lists found",
+		Hint:    fmt.Sprintf("Specify one with --to-list <id>:\n%s", strings.Join(lines, "\n")),
+	}
+}
+
+func formatTodolists(lists []basecamp.Todolist) string {
+	if len(lists) == 0 {
+		return "none"
+	}
+	names := make([]string, len(lists))
+	for i, list := range lists {
+		names[i] = fmt.Sprintf("%d (%s)", list.ID, list.Name)
+	}
+	return strings.Join(names, ", ")
+}
+
+// projectLabel names a project for a message: its name when known or
+// readable, otherwise its ID.
+func projectLabel(cmd *cobra.Command, app *appctx.App, projectID, projectName string) string {
+	if projectName != "" {
+		return projectName
+	}
+	if id, err := strconv.ParseInt(projectID, 10, 64); err == nil {
+		if name, err := app.Names.ProjectName(cmd.Context(), id); err == nil && name != "" {
+			return name
+		}
+	}
+	return projectID
+}
+
+// isTodolistGroup reports whether a to-do list is a group, a list inside a list.
+func isTodolistGroup(list *basecamp.Todolist) bool {
+	return list.Parent != nil && list.Parent.Type == "Todolist"
+}
+
+func todolistProjectID(list *basecamp.Todolist) int64 {
+	if list.Bucket == nil {
+		return 0
+	}
+	return list.Bucket.ID
+}

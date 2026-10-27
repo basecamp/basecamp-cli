@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -55,18 +56,29 @@ type filedRecording struct {
 	breadcrumbs []output.Breadcrumb
 }
 
-// runFiling starts the filing once, never retrying it (each copy request makes
-// another copy), waits for Basecamp to finish it, and outputs what it made.
+// runFiling files one recording and outputs what it made.
 func runFiling(cmd *cobra.Command, app *appctx.App, f recordingFiling) error {
-	filing, err := f.start(cmd.Context(), app)
+	filed, err := fileRecording(cmd.Context(), app, f)
 	if err != nil {
-		return copyStartError(f, convertSDKError(err))
+		return err
+	}
+	_, _, past := f.verbs()
+	return filedOK(app, f.noun, past, f.sourceID, filed)
+}
+
+// fileRecording starts the filing once, never retrying it (each copy request
+// makes another copy), waits for Basecamp to finish it, and reads back what it
+// made.
+func fileRecording(ctx context.Context, app *appctx.App, f recordingFiling) (filedRecording, error) {
+	filing, err := f.start(ctx, app)
+	if err != nil {
+		return filedRecording{}, copyStartError(f, convertSDKError(err))
 	}
 
 	finished := func() bool {
 		return filing.Status == basecamp.FilingCompleted || filing.Status == basecamp.FilingFailed
 	}
-	_, waitErr := pollUntil(cmd.Context(), func(ctx context.Context) (bool, error) {
+	_, waitErr := pollUntil(ctx, func(ctx context.Context) (bool, error) {
 		if finished() {
 			return true, nil
 		}
@@ -81,26 +93,26 @@ func runFiling(cmd *cobra.Command, app *appctx.App, f recordingFiling) error {
 	verb, _, past := f.verbs()
 	switch {
 	case filing.Status == basecamp.FilingFailed:
-		return &output.Error{
+		return filedRecording{}, &output.Error{
 			Code:    output.CodeAPI,
 			Message: fmt.Sprintf("Basecamp could not %s %s #%d to %s", verb, f.noun, f.sourceID, f.destination),
 			Hint:    fmt.Sprintf("Check the %s with: %s %d", f.noun, f.showCmd, f.sourceID),
 		}
 	case filing.Status != basecamp.FilingCompleted || filing.DestinationRecording == nil:
-		return stillFilingError(f, waitErr)
+		return filedRecording{}, stillFilingError(f, waitErr)
 	}
 
 	newID := filing.DestinationRecording.ID
-	filed, err := f.read(cmd.Context(), newID)
+	filed, err := f.read(ctx, newID)
 	if err != nil {
-		return &output.Error{
+		return filedRecording{}, &output.Error{
 			Code:    output.CodeAPI,
 			Message: fmt.Sprintf("%s %s #%d as %s #%d, but could not read the new %s", past, f.noun, f.sourceID, f.noun, newID, f.noun),
 			Hint:    fmt.Sprintf("Show it with: %s %d", f.showCmd, newID),
 			Cause:   textCause(err),
 		}
 	}
-	return filedOK(app, f.noun, past, f.sourceID, filed)
+	return filed, nil
 }
 
 func (f recordingFiling) start(ctx context.Context, app *appctx.App) (*basecamp.Filing, error) {
@@ -173,6 +185,12 @@ func textCause(err error) error {
 // filedOK outputs a recording that a move, copy or teleport made, with a
 // summary naming the one it came from and where it landed.
 func filedOK(app *appctx.App, noun, past string, sourceID int64, filed filedRecording) error {
+	summary := fmt.Sprintf("%s %s #%d to %s as %s #%d", past, noun, sourceID, filed.place(), noun, filed.id)
+	return app.OK(filed.result, output.WithSummary(summary), output.WithBreadcrumbs(filed.breadcrumbs...))
+}
+
+// place names where a filed recording landed: "Dest › Triage".
+func (filed filedRecording) place() string {
 	place := []string{}
 	if filed.bucket != nil {
 		place = append(place, filed.bucket.Name)
@@ -180,8 +198,65 @@ func filedOK(app *appctx.App, noun, past string, sourceID int64, filed filedReco
 	if filed.parent != nil {
 		place = append(place, filed.parent.Title)
 	}
-	summary := fmt.Sprintf("%s %s #%d to %s as %s #%d", past, noun, sourceID, strings.Join(place, " › "), noun, filed.id)
-	return app.OK(filed.result, output.WithSummary(summary), output.WithBreadcrumbs(filed.breadcrumbs...))
+	return strings.Join(place, " › ")
+}
+
+// runFilings files several recordings one by one, as the web's bulk Move…
+// and Copy… do, and outputs what each made. A failure does not stop the rest,
+// and none is retried; any failure fails the command with a message naming
+// every recording that was filed, by its new id, and every one that was not.
+func runFilings(cmd *cobra.Command, app *appctx.App, filings []recordingFiling) error {
+	if len(filings) == 1 {
+		return runFiling(cmd, app, filings[0])
+	}
+	_, _, past := filings[0].verbs()
+	nouns := output.PluralNoun(filings[0].noun)
+
+	var (
+		results     []any
+		done        []string
+		failed      []string
+		hints       []string
+		breadcrumbs []output.Breadcrumb
+		firstErr    *output.Error
+	)
+	for _, f := range filings {
+		filed, err := fileRecording(cmd.Context(), app, f)
+		if err != nil {
+			e := output.AsError(err)
+			if firstErr == nil {
+				firstErr = e
+			}
+			failed = append(failed, fmt.Sprintf("#%d failed: %s", f.sourceID, e.Message))
+			if e.Hint != "" && !slices.Contains(hints, e.Hint) {
+				hints = append(hints, e.Hint)
+			}
+			continue
+		}
+		results = append(results, filed.result)
+		done = append(done, fmt.Sprintf("#%d as #%d in %s", f.sourceID, filed.id, filed.place()))
+		if breadcrumbs == nil {
+			breadcrumbs = filed.breadcrumbs
+		}
+	}
+
+	if firstErr == nil {
+		summary := fmt.Sprintf("%s %d %s: %s", past, len(done), nouns, strings.Join(done, ", "))
+		return app.OK(results, output.WithSummary(summary), output.WithBreadcrumbs(breadcrumbs...))
+	}
+
+	message := fmt.Sprintf("%s %d of %d %s", past, len(done), len(filings), nouns)
+	if len(done) > 0 {
+		message += " (" + strings.Join(done, ", ") + ")"
+		hints = append(hints, fmt.Sprintf("Run it again only for the %s that failed; the others are done.", nouns))
+	}
+	return &output.Error{
+		Code:       firstErr.Code,
+		Message:    message + "; " + strings.Join(failed, "; "),
+		Hint:       strings.Join(hints, " "),
+		HTTPStatus: firstErr.HTTPStatus,
+		Cause:      textCause(firstErr),
+	}
 }
 
 // filingWait bounds the wait for a recording that Basecamp moves or copies in

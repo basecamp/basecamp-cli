@@ -1,0 +1,393 @@
+package commands
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/output"
+)
+
+// mockTodoFilingTransport serves to-dos, lists and groups in one project and
+// to-do lists in others to move or copy them into.
+//
+//   - Project 123 ("Source") has To-dos 300 with list 310 ("Backlog"), which
+//     holds group 311 ("Ideas"). To-dos 456 and 457 are in list 310, and 458
+//     in group 311.
+//   - Project 999 ("Dest") has To-dos 900 with lists 901 ("Launch") and 902
+//     ("Later"), group 920 in list 901, and an archived list 930. With
+//     twoTodosets it also has To-dos 950 with list 951 ("Roadmap"); with
+//     duplicateName, list 903 ("launch") in To-dos 900. A disabled To-dos 960
+//     is always on its dock.
+//   - Project 777 ("Solo") has To-dos 700 with one list, 701 ("Only").
+//   - Project 888 ("Bare") has only a disabled To-dos, 880.
+//   - A move or copy POST of recording N answers filing N, pending; its first
+//     GET completes it as recording N*10+1, read back in the destination it
+//     was filed into. postStatus answers every POST with that status, and
+//     refuse answers the POST for those recordings with 403.
+type mockTodoFilingTransport struct {
+	twoTodosets   bool
+	duplicateName bool
+	postStatus    int
+	refuse        map[string]bool
+
+	mu       sync.Mutex
+	requests []string
+	posts    []string
+	bodies   []map[string]any
+	filedTo  map[int64]int64
+}
+
+func (m *mockTodoFilingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	path := strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/99999"), ".json")
+	m.requests = append(m.requests, req.Method+" "+path)
+	respond := func(status int, body string) (*http.Response, error) {
+		header := make(http.Header)
+		header.Set("Content-Type", "application/json")
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+	}
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+
+	if req.Method == http.MethodPost {
+		m.posts = append(m.posts, path)
+		body := map[string]any{}
+		if req.Body != nil {
+			raw, _ := io.ReadAll(req.Body)
+			_ = json.Unmarshal(raw, &body)
+		}
+		m.bodies = append(m.bodies, body)
+		if m.postStatus != 0 {
+			return respond(m.postStatus, `{"error":"upstream"}`)
+		}
+		if len(parts) == 3 && parts[0] == "recordings" {
+			if m.refuse[parts[1]] {
+				return respond(403, `{"error":"forbidden"}`)
+			}
+			source, _ := strconv.ParseInt(parts[1], 10, 64)
+			if m.filedTo == nil {
+				m.filedTo = map[int64]int64{}
+			}
+			dest, _ := body["filing_destination_id"].(float64)
+			m.filedTo[source*10+1] = int64(dest)
+			return respond(201, fmt.Sprintf(`{"id":%d,"status":"pending","type":"Move","source_recording_id":%d}`, source, source))
+		}
+	}
+	if req.Method == http.MethodPut {
+		return respond(204, ``)
+	}
+
+	if len(parts) == 2 && parts[0] == "filings" {
+		source, _ := strconv.ParseInt(parts[1], 10, 64)
+		return respond(200, fmt.Sprintf(`{"id":%d,"status":"completed","type":"Move","source_recording_id":%d,"destination_recording":{"id":%d}}`, source, source, source*10+1))
+	}
+
+	dock := func(id int, tools ...string) string {
+		return fmt.Sprintf(`{"id":%d,"dock":[%s]}`, id, strings.Join(tools, ","))
+	}
+	todoset := func(id int, enabled bool) string {
+		return fmt.Sprintf(`{"name":"todoset","id":%d,"title":"To-dos","enabled":%t}`, id, enabled)
+	}
+	switch path {
+	case "/projects":
+		return respond(200, `[{"id":123,"name":"Source"},{"id":999,"name":"Dest"},{"id":777,"name":"Solo"},{"id":888,"name":"Bare"}]`)
+	case "/projects/123":
+		return respond(200, dock(123, todoset(300, true)))
+	case "/projects/999":
+		tools := []string{todoset(900, true), todoset(960, false)}
+		if m.twoTodosets {
+			tools = append(tools, todoset(950, true))
+		}
+		return respond(200, dock(999, tools...))
+	case "/projects/777":
+		return respond(200, dock(777, todoset(700, true)))
+	case "/projects/888":
+		return respond(200, dock(888, todoset(880, false)))
+	case "/todosets/300/todolists":
+		return respond(200, "["+filingListJSON(310, "Backlog", 123, "Todoset", 300)+"]")
+	case "/todosets/900/todolists":
+		lists := []string{filingListJSON(901, "Launch", 999, "Todoset", 900), filingListJSON(902, "Later", 999, "Todoset", 900)}
+		if m.duplicateName {
+			lists = append(lists, filingListJSON(903, "launch", 999, "Todoset", 900))
+		}
+		return respond(200, "["+strings.Join(lists, ",")+"]")
+	case "/todosets/950/todolists":
+		return respond(200, "["+filingListJSON(951, "Roadmap", 999, "Todoset", 950)+"]")
+	case "/todosets/700/todolists":
+		return respond(200, "["+filingListJSON(701, "Only", 777, "Todoset", 700)+"]")
+	case "/todosets/300", "/todosets/900", "/todosets/950", "/todosets/700":
+		bucket := map[string]int{"300": 123, "900": 999, "950": 999, "700": 777}[parts[1]]
+		return respond(200, fmt.Sprintf(`{"id":%s,"title":"To-dos","bucket":{"id":%d,"name":%q}}`, parts[1], bucket, filingProjectNames[bucket]))
+	case "/todolists/310":
+		return respond(200, filingListJSON(310, "Backlog", 123, "Todoset", 300))
+	case "/todolists/311":
+		return respond(200, filingListJSON(311, "Ideas", 123, "Todolist", 310))
+	case "/todolists/901":
+		return respond(200, filingListJSON(901, "Launch", 999, "Todoset", 900))
+	case "/todolists/920":
+		return respond(200, filingListJSON(920, "Phase 2", 999, "Todolist", 901))
+	case "/todolists/930":
+		return respond(200, strings.Replace(filingListJSON(930, "Old", 999, "Todoset", 900), `"active"`, `"archived"`, 1))
+	case "/todos/456", "/todos/457":
+		return respond(200, filingTodoJSON(parts[1], 123, 310, "Backlog"))
+	case "/todos/458":
+		return respond(200, filingTodoJSON("458", 123, 311, "Ideas"))
+	}
+
+	if len(parts) == 2 && (parts[0] == "todos" || parts[0] == "todolists") {
+		id, _ := strconv.ParseInt(parts[1], 10, 64)
+		if into, ok := m.filedTo[id]; ok {
+			bucket, title := 999, "Launch"
+			switch into {
+			case 300:
+				bucket, title = 123, "To-dos"
+			case 310:
+				bucket, title = 123, "Backlog"
+			case 701:
+				bucket, title = 777, "Only"
+			case 900, 950:
+				title = "To-dos"
+			}
+			if parts[0] == "todos" {
+				return respond(200, filingTodoJSON(parts[1], bucket, into, title))
+			}
+			return respond(200, fmt.Sprintf(`{"id":%d,"name":"Filed","type":"Todolist","status":"active","bucket":{"id":%d,"name":%q},"parent":{"id":%d,"title":%q}}`, id, bucket, filingProjectNames[bucket], into, title))
+		}
+	}
+	return respond(404, `{"error":"not found"}`)
+}
+
+var filingProjectNames = map[int]string{123: "Source", 999: "Dest", 777: "Solo"}
+
+func filingListJSON(id int, name string, bucket int, parentType string, parent int) string {
+	return fmt.Sprintf(`{"id":%d,"name":%q,"title":%q,"type":"Todolist","status":"active","bucket":{"id":%d,"name":%q},"parent":{"id":%d,"title":"Parent","type":%q}}`,
+		id, name, name, bucket, filingProjectNames[bucket], parent, parentType)
+}
+
+func filingTodoJSON(id string, bucket int, parent int64, parentTitle string) string {
+	return fmt.Sprintf(`{"id":%s,"title":"Task %s","type":"Todo","bucket":{"id":%d,"name":%q},"parent":{"id":%d,"title":%q,"type":"Todolist"}}`,
+		id, id, bucket, filingProjectNames[bucket], parent, parentTitle)
+}
+
+type todoFilingRun struct {
+	err      error
+	output   string
+	summary  string
+	data     json.RawMessage
+	requests []string
+}
+
+func runTodoFilingCommand(t *testing.T, transport *mockTodoFilingTransport, group *cobra.Command, args ...string) todoFilingRun {
+	t.Helper()
+	shortFilingWait(t)
+	app, buf := newTestAppWithTransport(t, transport)
+	app.Flags.Hints = true
+	run := todoFilingRun{err: executeCommand(group, app, args...), output: buf.String()}
+	if run.err == nil {
+		var envelope struct {
+			Data    json.RawMessage `json:"data"`
+			Summary string          `json:"summary"`
+		}
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope))
+		run.summary, run.data = envelope.Summary, envelope.Data
+	}
+	run.requests = transport.requests
+	return run
+}
+
+func requireUsageRefusal(t *testing.T, run todoFilingRun, transport *mockTodoFilingTransport) *output.Error {
+	t.Helper()
+	e := output.AsError(run.err)
+	require.NotNil(t, run.err)
+	assert.Empty(t, transport.posts, "nothing is filed")
+	for _, r := range transport.requests {
+		assert.False(t, strings.HasPrefix(r, "PUT"), "nothing is repositioned: %s", r)
+	}
+	return e
+}
+
+func TestTodosMoveToAListInAnotherProjectByName(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "456", "--to-project", "Dest", "--to-list", "launch")
+	require.NoError(t, run.err)
+
+	assert.Equal(t, []string{"/recordings/456/moves"}, transport.posts)
+	assert.Equal(t, float64(901), transport.bodies[0]["filing_destination_id"])
+	var todo map[string]any
+	require.NoError(t, json.Unmarshal(run.data, &todo))
+	assert.Equal(t, float64(4561), todo["id"])
+	assert.Equal(t, float64(456), todo["source_id"])
+	assert.Equal(t, "Moved to-do #456 to Dest › Launch as to-do #4561", run.summary)
+	assert.Contains(t, run.output, "basecamp todos show 4561")
+}
+
+func TestTodosMoveSeveralFilesEachAndReportsEach(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "456", "457", "--to-list", "901")
+	require.NoError(t, run.err)
+
+	assert.Equal(t, []string{"/recordings/456/moves", "/recordings/457/moves"}, transport.posts)
+	var todos []map[string]any
+	require.NoError(t, json.Unmarshal(run.data, &todos))
+	require.Len(t, todos, 2)
+	assert.Equal(t, float64(457), todos[1]["source_id"])
+	assert.Equal(t, "Moved 2 to-dos: #456 as #4561 in Dest › Launch, #457 as #4571 in Dest › Launch", run.summary)
+}
+
+func TestTodosMoveSeveralFailsWhenOneFailsAndNamesWhatMoved(t *testing.T) {
+	transport := &mockTodoFilingTransport{refuse: map[string]bool{"457": true}}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "457", "456", "--to-list", "901")
+	e := output.AsError(run.err)
+	require.NotNil(t, run.err)
+
+	assert.Equal(t, []string{"/recordings/457/moves", "/recordings/456/moves"}, transport.posts, "a failure does not stop the rest")
+	assert.Equal(t, output.CodeForbidden, e.Code)
+	assert.Contains(t, e.Message, "Moved 1 of 2 to-dos (#456 as #4561 in Dest › Launch)")
+	assert.Contains(t, e.Message, "#457 failed")
+	assert.Contains(t, e.Hint, "only for the to-dos that failed")
+	assert.False(t, e.Retryable)
+}
+
+func TestTodosMoveRefusesAListInAnotherProjectInsteadOfReportingSuccess(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "456", "--to", "1", "--list", "901")
+	e := requireUsageRefusal(t, run, transport)
+
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Equal(t, "To-do list 901 is in project 999, not in the to-do's project 123", e.Message)
+	assert.Contains(t, e.Hint, "basecamp todos move 456 --to-project 999 --to-list 901")
+}
+
+func TestTodosMoveRefusesAListURLInAnotherProjectWithTheFilingCommand(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "position",
+		"https://3.basecamp.com/99999/buckets/123/todos/456", "--to", "1",
+		"--list", "https://3.basecamp.com/99999/buckets/999/todolists/901")
+	e := requireUsageRefusal(t, run, transport)
+
+	assert.Contains(t, e.Hint, "basecamp todos move 456 --to-project 999 --to-list 901")
+	assert.Empty(t, transport.requests, "both URLs name their projects")
+}
+
+func TestTodosMoveToAnotherListInItsProjectStillRepositions(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "456", "--to", "2", "--list", "310")
+	require.NoError(t, run.err)
+
+	assert.Contains(t, transport.requests, "PUT /todos/456/position")
+	assert.Empty(t, transport.posts, "a move within the project keeps the to-do's id")
+	assert.Equal(t, "Moved todo #456 to list #310 at position 2", run.summary)
+}
+
+func TestTodosRepositionRefusesSeveralTodos(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "456", "457", "--to", "1")
+	e := requireUsageRefusal(t, run, transport)
+
+	assert.Contains(t, e.Hint, "--to-list")
+}
+
+func TestTodosMoveRefusesFilingFlagsWithRepositionFlags(t *testing.T) {
+	for name, args := range map[string][]string{
+		"--to":   {"move", "456", "--to-project", "Dest", "--to-list", "Launch", "--to", "1"},
+		"--list": {"move", "456", "--to-project", "Dest", "--list", "Launch"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockTodoFilingTransport{}
+			run := runTodoFilingCommand(t, transport, NewTodosCmd(), args...)
+			e := requireUsageRefusal(t, run, transport)
+
+			assert.Equal(t, output.CodeUsage, e.Code)
+			assert.Contains(t, e.Hint, "use --to-list")
+			assert.Empty(t, transport.requests)
+		})
+	}
+}
+
+func TestTodosMoveToAProjectWithSeveralListsIsAmbiguous(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "456", "--to-project", "Dest")
+	e := requireUsageRefusal(t, run, transport)
+
+	assert.Equal(t, output.CodeAmbiguous, e.Code)
+	assert.Contains(t, e.Hint, "--to-list")
+	assert.Contains(t, e.Hint, "901  Launch")
+	assert.Contains(t, e.Hint, "902  Later")
+}
+
+func TestTodosMoveToAProjectWithOneListUsesIt(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "456", "--to-project", "Solo")
+	require.NoError(t, run.err)
+
+	assert.Equal(t, float64(701), transport.bodies[0]["filing_destination_id"])
+	assert.Equal(t, "Moved to-do #456 to Solo › Only as to-do #4561", run.summary)
+}
+
+func TestTodosMoveToAListNameTwoListsShareIsAmbiguous(t *testing.T) {
+	transport := &mockTodoFilingTransport{duplicateName: true}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "456", "--to-project", "Dest", "--to-list", "Launch")
+	e := requireUsageRefusal(t, run, transport)
+
+	assert.Equal(t, output.CodeAmbiguous, e.Code)
+	assert.Contains(t, e.Hint, "901  Launch")
+	assert.Contains(t, e.Hint, "903  launch")
+	assert.NotContains(t, e.Hint, "902", "only the lists with that name are candidates")
+}
+
+func TestTodosMoveToAProjectWithoutAListNamesTheProject(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "456", "--to-project", "Bare")
+	e := requireUsageRefusal(t, run, transport)
+
+	assert.Equal(t, output.CodeNotFound, e.Code)
+	assert.Equal(t, "Project Bare has no to-do list", e.Message)
+}
+
+func TestTodosMoveRefusesADestinationBasecampRefuses(t *testing.T) {
+	for name, tc := range map[string]struct{ list, message, hint string }{
+		"a group":         {"920", "920 (Phase 2) is a group in to-do list 901", "--to-list 901"},
+		"an archived one": {"930", "To-do list 930 (Old) is archived", ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockTodoFilingTransport{}
+			run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "456", "--to-list", tc.list)
+			e := requireUsageRefusal(t, run, transport)
+
+			assert.Contains(t, e.Message, tc.message)
+			assert.Contains(t, e.Hint, tc.hint)
+		})
+	}
+}
+
+func TestTodosMoveRefusesTheListTheTodoIsIn(t *testing.T) {
+	for name, todo := range map[string]string{"in the list": "456", "in a group in the list": "458"} {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockTodoFilingTransport{}
+			run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", todo, "--to-list", "310")
+			e := requireUsageRefusal(t, run, transport)
+
+			assert.Contains(t, e.Message, "is already in to-do list 310")
+			assert.Contains(t, e.Hint, "basecamp todos move "+todo+" --to <position>")
+		})
+	}
+}
+
+func TestTodosMoveRefusesAListNameWithoutAProject(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "456", "--to-list", "Launch")
+	e := requireUsageRefusal(t, run, transport)
+
+	assert.Contains(t, e.Hint, "--to-project")
+	assert.Empty(t, transport.requests)
+}
