@@ -306,8 +306,10 @@ func runFilings(cmd *cobra.Command, app *appctx.App, scope followUpScope, filing
 		case filingDone:
 			results = append(results, filed.result)
 			done = append(done, fmt.Sprintf("#%d as #%d in %s", f.sourceID, filed.id, filed.place()))
-			if breadcrumbs == nil {
-				breadcrumbs = filed.breadcrumbs
+			for _, crumb := range filed.breadcrumbs {
+				if !slices.ContainsFunc(breadcrumbs, func(b output.Breadcrumb) bool { return b.Cmd == crumb.Cmd }) {
+					breadcrumbs = append(breadcrumbs, crumb)
+				}
 			}
 		case filingRefused:
 			refused = append(refused, f.sourceID)

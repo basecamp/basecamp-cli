@@ -265,3 +265,21 @@ func TestFilesFolderTitleOfItsDocsAndFilesAloneIsTheTop(t *testing.T) {
 	assert.Equal(t, float64(900), transport.bodies[0]["filing_destination_id"])
 	assert.NotContains(t, transport.bodies[0], "parent_id")
 }
+
+func TestFilesCopySeveralNamesWhereEachLanded(t *testing.T) {
+	transport := filesFilingTransport()
+	transport.gets["/documents/4560"] = `{"id":4560,"type":"Document","title":"Plan","bucket":{"id":123,"name":"Source"},"parent":{"id":500,"title":"Docs & Files","type":"Vault"}}`
+	transport.gets["/uploads/4570"] = `{"id":4570,"type":"Upload","filename":"spec.pdf","bucket":{"id":123,"name":"Source"},"parent":{"id":501,"title":"Specs","type":"Vault"}}`
+	run := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "456", "457")
+	require.NoError(t, run.err)
+
+	assert.Equal(t, float64(500), transport.bodies[0]["filing_destination_id"])
+	assert.Equal(t, float64(501), transport.bodies[1]["parent_id"], "each copy goes into its own original's folder")
+	assert.Equal(t, "Copied 2 files: #456 as #4560 in Source › Docs & Files, #457 as #4570 in Source › Specs", run.envelope.Summary)
+	crumbs := make([]string, 0, len(run.envelope.Breadcrumbs))
+	for _, b := range run.envelope.Breadcrumbs {
+		crumbs = append(crumbs, b.Cmd)
+	}
+	assert.Contains(t, crumbs, "basecamp files show 4560 --in 123")
+	assert.Contains(t, crumbs, "basecamp files show 4570 --in 123")
+}
