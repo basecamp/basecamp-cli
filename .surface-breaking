@@ -1505,3 +1505,10 @@ FLAG basecamp checkin question notify --digest-include-unanswered type=bool
 FLAG basecamp checkin question notify --no-digest-include-unanswered type=bool
 FLAG basecamp checkins question notify --digest-include-unanswered type=bool
 FLAG basecamp checkins question notify --no-digest-include-unanswered type=bool
+ARG basecamp docs move 00 <id|url>
+ARG basecamp documents move 00 <id|url>
+ARG basecamp file move 00 <id|url>
+ARG basecamp files move 00 <id|url>
+ARG basecamp folders move 00 <id|url>
+ARG basecamp vault move 00 <id|url>
+ARG basecamp vaults move 00 <id|url>

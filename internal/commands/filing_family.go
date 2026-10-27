@@ -26,11 +26,20 @@ type filingContainer struct {
 	// dockName is the tool's name in a project's dock: "message_board".
 	dockName string
 	noun     string
+	// plural is the noun's plural when appending "s" is wrong.
+	plural   string
 	flag     string
 	urlKind  string
 	urlShape string
 	// get reads one by ID, for a destination named without --to-project.
 	get func(ctx context.Context, app *appctx.App, id int64) (filingTarget, error)
+}
+
+func (c filingContainer) plurals() string {
+	if c.plural != "" {
+		return c.plural
+	}
+	return output.PluralNoun(c.noun)
 }
 
 // filingTarget is the container a recording is moved or copied into.
@@ -142,7 +151,7 @@ func resolveFilingTarget(cmd *cobra.Command, app *appctx.App, c filingContainer,
 	}
 	return filingTarget{}, output.ErrUsageHint(
 		fmt.Sprintf("%s %q is not a %s in %s", c.flag, toContainer, c.noun, projectName),
-		fmt.Sprintf("Its %s: %s", output.PluralNoun(c.noun), formatDockTools(enabled)),
+		fmt.Sprintf("Its %s: %s", c.plurals(), formatDockTools(enabled)),
 	)
 }
 
@@ -181,7 +190,7 @@ func ambiguousFilingContainerError(c filingContainer, projectName string, tools 
 	}
 	return &output.Error{
 		Code:    output.CodeAmbiguous,
-		Message: fmt.Sprintf("%s has %d %s that match", projectName, len(tools), output.PluralNoun(c.noun)),
+		Message: fmt.Sprintf("%s has %d %s that match", projectName, len(tools), c.plurals()),
 		Hint:    fmt.Sprintf("Specify one with %s <id>:\n%s", c.flag, strings.Join(lines, "\n")),
 	}
 }

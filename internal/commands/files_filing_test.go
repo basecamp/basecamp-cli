@@ -1,0 +1,166 @@
+package commands
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/output"
+)
+
+// filesFilingTransport has, in Source (123), Docs & Files 500 with folder 501
+// ("Specs"), document 456 at its top and upload 457 and cloud file 458 in
+// Specs. Dest (999) has Docs & Files 900 with folder 950 ("Contracts") and
+// 960 ("2026") inside that. A filed item <id> reads back as <id>0.
+func filesFilingTransport() *familyTransport {
+	return &familyTransport{gets: map[string]string{
+		"/projects":          filingProjects,
+		"/projects/123":      `{"id":123,"name":"Source","dock":[{"name":"vault","id":500,"title":"Docs & Files","enabled":true}]}`,
+		"/projects/999":      `{"id":999,"name":"Dest","dock":[{"name":"vault","id":900,"title":"Docs & Files","enabled":true}]}`,
+		"/vaults/500":        `{"id":500,"type":"Vault","title":"Docs & Files","bucket":{"id":123,"name":"Source"}}`,
+		"/vaults/501":        `{"id":501,"type":"Vault","title":"Specs","bucket":{"id":123,"name":"Source"},"parent":{"id":500,"title":"Docs & Files","type":"Vault"}}`,
+		"/vaults/900":        `{"id":900,"type":"Vault","title":"Docs & Files","bucket":{"id":999,"name":"Dest"}}`,
+		"/vaults/950":        `{"id":950,"type":"Vault","title":"Contracts","bucket":{"id":999,"name":"Dest"},"parent":{"id":900,"title":"Docs & Files","type":"Vault"}}`,
+		"/vaults/960":        `{"id":960,"type":"Vault","title":"2026","bucket":{"id":999,"name":"Dest"},"parent":{"id":950,"title":"Contracts","type":"Vault"}}`,
+		"/vaults/900/vaults": `[{"id":950,"type":"Vault","title":"Contracts"}]`,
+		"/documents/456":     `{"id":456,"type":"Document","title":"Plan","bucket":{"id":123,"name":"Source"},"parent":{"id":500,"title":"Docs & Files","type":"Vault"}}`,
+		"/documents/4560":    `{"id":4560,"type":"Document","title":"Plan","bucket":{"id":999,"name":"Dest"},"parent":{"id":900,"title":"Docs & Files","type":"Vault"}}`,
+		"/uploads/457":       `{"id":457,"type":"Upload","filename":"spec.pdf","bucket":{"id":123,"name":"Source"},"parent":{"id":501,"title":"Specs","type":"Vault"}}`,
+		"/uploads/4570":      `{"id":4570,"type":"Upload","filename":"spec.pdf","bucket":{"id":999,"name":"Dest"},"parent":{"id":900,"title":"Docs & Files","type":"Vault"}}`,
+		"/cloud_files/458":   `{"id":458,"type":"CloudFile","title":"Board deck","bucket":{"id":123,"name":"Source"},"parent":{"id":501,"title":"Specs","type":"Vault"}}`,
+		"/cloud_files/4580":  `{"id":4580,"type":"CloudFile","title":"Board deck","bucket":{"id":999,"name":"Dest"},"parent":{"id":950,"title":"Contracts","type":"Vault"}}`,
+	}}
+}
+
+func TestFilesMoveToProjectLandsAtTheTopOfItsDocsAndFiles(t *testing.T) {
+	transport := filesFilingTransport()
+	run := runFamilyCommand(t, transport, NewFilesCmd(), "move", "456", "--to-project", "Dest")
+	require.NoError(t, run.err)
+
+	assert.Equal(t, []string{"/99999/recordings/456/moves"}, transport.posts)
+	assert.Equal(t, float64(900), transport.bodies[0]["filing_destination_id"])
+	assert.NotContains(t, transport.bodies[0], "parent_id")
+	data := run.data(t)
+	assert.Equal(t, float64(4560), data["id"])
+	assert.Equal(t, float64(456), data["source_id"])
+	assert.Equal(t, "Moved file #456 to Dest › Docs & Files as file #4560", run.envelope.Summary)
+}
+
+func TestFilesMoveToATopLevelFolderByTitle(t *testing.T) {
+	transport := filesFilingTransport()
+	run := runFamilyCommand(t, transport, NewFilesCmd(), "move", "456", "--to-project", "Dest", "--to-folder", "contracts")
+	require.NoError(t, run.err)
+	assert.Equal(t, float64(900), transport.bodies[0]["filing_destination_id"])
+	assert.Equal(t, float64(950), transport.bodies[0]["parent_id"])
+}
+
+func TestFilesMoveToANestedFolderByURLFindsItsDocsAndFiles(t *testing.T) {
+	transport := filesFilingTransport()
+	run := runFamilyCommand(t, transport, NewFilesCmd(), "move", "458", "--to-folder", "https://3.basecamp.com/99999/buckets/999/vaults/960")
+	require.NoError(t, run.err)
+	assert.Equal(t, float64(900), transport.bodies[0]["filing_destination_id"])
+	assert.Equal(t, float64(960), transport.bodies[0]["parent_id"])
+	assert.Equal(t, "CloudFile", run.data(t)["type"], "a cloud file reads back as itself")
+}
+
+func TestFilesMoveFolderTitleNotAtTheTopListsWhatIs(t *testing.T) {
+	transport := filesFilingTransport()
+	run := runFamilyCommand(t, transport, NewFilesCmd(), "move", "456", "--to-project", "Dest", "--to-folder", "2026")
+	e := run.failure(t)
+	assert.Equal(t, `No folder "2026" at the top of Dest's Docs & Files`, e.Message)
+	assert.Contains(t, e.Hint, "950 (Contracts)")
+	assert.Contains(t, e.Hint, "nested folder's ID or URL")
+	assert.Empty(t, transport.posts)
+}
+
+func TestFilesMoveSeveralFilesEachOne(t *testing.T) {
+	transport := filesFilingTransport()
+	run := runFamilyCommand(t, transport, NewFilesCmd(), "move", "456", "457", "--to-project", "Dest")
+	require.NoError(t, run.err)
+
+	assert.Equal(t, []string{"/99999/recordings/456/moves", "/99999/recordings/457/moves"}, transport.posts)
+	var data []map[string]any
+	require.NoError(t, json.Unmarshal(run.envelope.Data, &data))
+	require.Len(t, data, 2)
+	assert.Equal(t, "spec.pdf", data[1]["filename"])
+	assert.Equal(t, float64(457), data[1]["source_id"])
+}
+
+func TestFilesMoveSeveralReportsEachWhenOneFails(t *testing.T) {
+	transport := filesFilingTransport()
+	transport.refuse = map[int64]int{456: 403}
+	run := runFamilyCommand(t, transport, NewFilesCmd(), "move", "456", "457", "--to-project", "Dest")
+	e := run.failure(t)
+	assert.Equal(t, output.CodeForbidden, e.Code)
+	assert.Contains(t, e.Message, "#457 as #4570 in Dest › Docs & Files")
+	assert.Contains(t, e.Message, "#456 refused")
+	assert.Contains(t, e.Hint, "run the command again for #456 alone")
+	assert.NotContains(t, e.Hint, "#457", "a file that moved is never offered for another run")
+	assert.Len(t, transport.posts, 2)
+}
+
+func TestFilesMoveToAFolderInItsOwnProjectPointsAtTo(t *testing.T) {
+	transport := filesFilingTransport()
+	run := runFamilyCommand(t, transport, NewFilesCmd(), "move", "456", "--to-folder", "501")
+	e := run.failure(t)
+	assert.Equal(t, output.CodeUsage, e.Code)
+	assert.Equal(t, "Move it to that folder and keep its ID with: basecamp files move 456 --to 501", e.Hint)
+	assert.Empty(t, transport.posts)
+}
+
+func TestFilesMoveRefusesToBesideToProject(t *testing.T) {
+	transport := filesFilingTransport()
+	run := runFamilyCommand(t, transport, NewFilesCmd(), "move", "456", "--to", "501", "--to-project", "Dest")
+	e := run.failure(t)
+	assert.Contains(t, e.Message, "cannot be combined with --to-project or --to-folder")
+	assert.Empty(t, transport.posts)
+}
+
+func TestFilesMoveToAFolderInAnotherProjectPointsAtToFolder(t *testing.T) {
+	transport := filesFilingTransport()
+	run := runFamilyCommand(t, transport, NewFilesCmd(), "move",
+		"https://3.basecamp.com/99999/buckets/123/documents/456", "--to", "https://3.basecamp.com/99999/buckets/999/vaults/950")
+	e := run.failure(t)
+	assert.Equal(t, "Move it to that project with: basecamp files move 456 --to-folder 950", e.Hint)
+	assert.Empty(t, transport.posts)
+}
+
+func TestFilesCopyWithoutDestinationGoesIntoItsOwnFolder(t *testing.T) {
+	transport := filesFilingTransport()
+	run := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "457")
+	require.NoError(t, run.err)
+	assert.Equal(t, []string{"/99999/recordings/457/copies"}, transport.posts)
+	assert.Equal(t, float64(500), transport.bodies[0]["filing_destination_id"])
+	assert.Equal(t, float64(501), transport.bodies[0]["parent_id"])
+}
+
+func TestFilesCopyRefusesTheListingFolderFlag(t *testing.T) {
+	transport := filesFilingTransport()
+	run := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "456", "--folder", "950")
+	e := run.failure(t)
+	assert.Contains(t, e.Hint, "--to-folder")
+	assert.Empty(t, transport.posts)
+}
+
+func TestFilesMoveAndCopyAreOnEveryFilesGroup(t *testing.T) {
+	for name, group := range map[string]func() *cobra.Command{
+		"uploads": NewUploadsCmd,
+		"docs":    NewDocsCmd,
+		"vaults":  NewVaultsCmd,
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := filesFilingTransport()
+			run := runFamilyCommand(t, transport, group(), "copy", "456", "--to-project", "Dest", "--include-comments")
+			require.NoError(t, run.err)
+			assert.Equal(t, true, transport.bodies[0]["include_comments"])
+
+			transport = filesFilingTransport()
+			run = runFamilyCommand(t, transport, group(), "move", "456", "--to-project", "Dest")
+			require.NoError(t, run.err)
+			assert.Equal(t, []string{"/99999/recordings/456/moves"}, transport.posts)
+		})
+	}
+}
