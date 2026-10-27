@@ -1303,6 +1303,7 @@ func newCardsMoveCmd(project, cardTable *string) *cobra.Command {
 	var position int
 	var onHold bool
 	var toWormhole string
+	var toProject, toCardTable string
 
 	cmd := &cobra.Command{
 		Use:   "move <id|url>",
@@ -1346,8 +1347,16 @@ the project doesn't need one.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			positionSet := cmd.Flags().Changed("position") || cmd.Flags().Changed("pos")
 			wormholeSet := cmd.Flags().Changed("to-wormhole")
+			filingSet := cmd.Flags().Changed("to-project") || cmd.Flags().Changed("to-card-table")
 
-			if wormholeSet {
+			if filingSet {
+				if targetColumn != "" || onHold || positionSet || wormholeSet {
+					return output.ErrUsage("--to-project and --to-card-table cannot be combined with --to, --on-hold, --position, or --to-wormhole")
+				}
+				if err := validateFilingFlags(*cardTable, toProject, toCardTable); err != nil {
+					return err
+				}
+			} else if wormholeSet {
 				if targetColumn != "" || onHold || positionSet {
 					return output.ErrUsage("--to-wormhole cannot be combined with --to, --on-hold, or --position")
 				}
@@ -1380,6 +1389,10 @@ the project doesn't need one.`,
 			cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid card ID")
+			}
+
+			if filingSet {
+				return moveCardToCardTable(cmd, app, cardID, toProject, toCardTable)
 			}
 
 			// --to-wormhole: teleport across projects. Self-contained — it derives
@@ -1515,6 +1528,7 @@ the project doesn't need one.`,
 	cmd.Flags().IntVar(&position, "pos", 0, "Position in column (alias for --position)")
 	cmd.Flags().BoolVar(&onHold, "on-hold", false, "Move card to the on-hold section of its current (or target) column")
 	cmd.Flags().StringVar(&toWormhole, "to-wormhole", "", "Send the card to another project's card table through an existing wormhole (wormhole ID or destination-column URL)")
+	addFilingDestinationFlags(cmd, &toProject, &toCardTable, "Move")
 
 	return cmd
 }
@@ -1768,6 +1782,256 @@ func parseColumnID(ref string) (int64, error) {
 		return invalid()
 	}
 	return id, nil
+}
+
+// addFilingDestinationFlags adds --to-project and --to-card-table, which name
+// the card table a card is moved or copied into.
+func addFilingDestinationFlags(cmd *cobra.Command, toProject, toCardTable *string, verb string) {
+	cmd.Flags().StringVar(toProject, "to-project", "", verb+" the card into this project's card table (ID or name); it lands in Triage, or Done if completed")
+	cmd.Flags().StringVar(toCardTable, "to-card-table", "", verb+" the card into this card table (ID, URL, or a name with --to-project)")
+}
+
+// validateFilingFlags checks --to-project and --to-card-table before any
+// request. The group's --card-table names the card's own table, so it is
+// refused here rather than mistaken for the destination.
+func validateFilingFlags(sourceCardTable, toProject, toCardTable string) error {
+	if sourceCardTable != "" {
+		return output.ErrUsageHint(
+			"--card-table names the card's own card table, not where it goes",
+			"Use --to-card-table for the destination card table",
+		)
+	}
+	if toProject == "" && toCardTable == "" {
+		return output.ErrUsage("--to-project or --to-card-table needs a value")
+	}
+	if toProject == "" && !isNumericID(toCardTable) && !urlarg.IsURL(toCardTable) {
+		return output.ErrUsageHint(
+			fmt.Sprintf("Card table %q is a name, which needs a project to look it up in", toCardTable),
+			"Add --to-project <project>, or pass the card table's ID or URL",
+		)
+	}
+	return nil
+}
+
+// moveCardToCardTable moves a card into another card table, usually in
+// another project, as the web's Move… dialog does. A move within the card's
+// own table is a column change, which --to makes directly.
+func moveCardToCardTable(cmd *cobra.Command, app *appctx.App, cardID int64, toProject, toCardTable string) error {
+	card, err := app.Account().Cards().Get(cmd.Context(), cardID)
+	if err != nil {
+		return convertSDKError(err)
+	}
+	table, err := resolveFilingTable(cmd, app, toProject, toCardTable)
+	if err != nil {
+		return err
+	}
+	if card.Parent != nil && cardTableContainsColumn(table.Lists, card.Parent.ID) {
+		return output.ErrUsageHint(
+			fmt.Sprintf("Card #%d is already on card table %d (%s)", cardID, table.ID, table.Title),
+			fmt.Sprintf("Move it between that table's columns with: basecamp cards move %d --to <column> --card-table %d --in %d", cardID, table.ID, cardTableProjectID(table)),
+		)
+	}
+	return runCardFiling(cmd, app, cardFiling{kind: basecamp.FilingMove, card: card, table: table})
+}
+
+// resolveFilingTable finds the card table named by --to-project and
+// --to-card-table: a card table ID or URL on its own, a project's only card
+// table, or one of a project's card tables picked by ID or title. Only card
+// tables on the project's dock count, as in the web's dialogs.
+func resolveFilingTable(cmd *cobra.Command, app *appctx.App, toProject, toCardTable string) (*basecamp.CardTable, error) {
+	if urlarg.IsURL(toCardTable) {
+		parsed := urlarg.Parse(toCardTable)
+		if parsed == nil || parsed.Type != "card_tables" || parsed.IsCollection {
+			return nil, output.ErrUsageHint(
+				fmt.Sprintf("Invalid card table %q", toCardTable),
+				"Pass a card table ID, a Basecamp card table URL (.../card_tables/{id}), or a card table name with --to-project",
+			)
+		}
+		toCardTable = parsed.RecordingID
+	}
+
+	if toProject == "" {
+		tableID, err := strconv.ParseInt(toCardTable, 10, 64)
+		if err != nil || tableID <= 0 {
+			return nil, output.ErrUsage("--to-card-table must be a positive card table ID")
+		}
+		return getCardTable(cmd, app, tableID)
+	}
+
+	projectID, _, err := app.Names.ResolveProject(cmd.Context(), toProject)
+	if err != nil {
+		return nil, err
+	}
+	all, err := listProjectCardTables(cmd, app, projectID)
+	if err != nil {
+		return nil, err
+	}
+	var tables []projectCardTable
+	for _, ct := range all {
+		if ct.Enabled {
+			tables = append(tables, ct)
+		}
+	}
+
+	if toCardTable == "" {
+		switch len(tables) {
+		case 0:
+			return nil, output.ErrNotFound("card table", projectID)
+		case 1:
+			return getCardTable(cmd, app, tables[0].ID)
+		default:
+			return nil, ambiguousCardTablesErrorFor("--to-card-table", tables)
+		}
+	}
+	for _, ct := range tables {
+		if strconv.FormatInt(ct.ID, 10) == toCardTable || strings.EqualFold(ct.Title, toCardTable) {
+			return getCardTable(cmd, app, ct.ID)
+		}
+	}
+	return nil, output.ErrUsageHint(
+		fmt.Sprintf("Card table '%s' not found in project %s", toCardTable, projectID),
+		fmt.Sprintf("Available card tables: %s", formatCardTableIDs(tables)),
+	)
+}
+
+func getCardTable(cmd *cobra.Command, app *appctx.App, tableID int64) (*basecamp.CardTable, error) {
+	table, err := app.Account().CardTables().Get(cmd.Context(), tableID)
+	if err != nil {
+		return nil, convertSDKError(err)
+	}
+	return table, nil
+}
+
+func cardTableProjectID(table *basecamp.CardTable) int64 {
+	if table.Bucket == nil {
+		return 0
+	}
+	return table.Bucket.ID
+}
+
+// cardFiling is one Move… or Copy… of a card into a card table, as the web's
+// dialogs make it: the card lands in the table's Triage, or in Done if it is
+// completed. Basecamp files it in the background, so runCardFiling waits.
+type cardFiling struct {
+	kind            basecamp.FilingType
+	card            *basecamp.Card
+	table           *basecamp.CardTable
+	includeComments bool
+}
+
+func (f cardFiling) start(ctx context.Context, app *appctx.App) (*basecamp.Filing, error) {
+	recordings := app.Account().Recordings()
+	if f.kind == basecamp.FilingCopy {
+		return recordings.Copy(ctx, f.card.ID, &basecamp.CopyRecordingRequest{
+			FilingDestinationID: f.table.ID,
+			IncludeComments:     f.includeComments,
+		})
+	}
+	return recordings.Move(ctx, f.card.ID, &basecamp.MoveRecordingRequest{FilingDestinationID: f.table.ID})
+}
+
+// verbs returns the filing's verb as an infinitive, a progressive and a past.
+func (f cardFiling) verbs() (string, string, string) {
+	if f.kind == basecamp.FilingCopy {
+		return "copy", "copying", "Copied"
+	}
+	return "move", "moving", "Moved"
+}
+
+// runCardFiling starts the filing once, never retrying it (each copy request
+// makes another copy), waits for Basecamp to finish it, and outputs the card it
+// made.
+func runCardFiling(cmd *cobra.Command, app *appctx.App, f cardFiling) error {
+	filing, err := f.start(cmd.Context(), app)
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	finished := func() bool {
+		return filing.Status == basecamp.FilingCompleted || filing.Status == basecamp.FilingFailed
+	}
+	_, waitErr := pollUntil(cmd.Context(), func(ctx context.Context) (bool, error) {
+		if finished() {
+			return true, nil
+		}
+		latest, err := app.Account().Recordings().GetFiling(ctx, filing.ID)
+		if err != nil {
+			return false, err
+		}
+		filing = latest
+		return finished(), nil
+	})
+
+	verb, progressive, past := f.verbs()
+	switch {
+	case filing.Status == basecamp.FilingFailed:
+		return &output.Error{
+			Code:    output.CodeAPI,
+			Message: fmt.Sprintf("Basecamp could not %s card #%d to card table %d (%s)", verb, f.card.ID, f.table.ID, f.table.Title),
+			Hint:    fmt.Sprintf("Check the card with: basecamp cards show %d", f.card.ID),
+		}
+	case filing.Status != basecamp.FilingCompleted || filing.DestinationRecording == nil:
+		hint := fmt.Sprintf("Once it lands, basecamp cards show %d returns the card at its new id", f.card.ID)
+		if f.kind == basecamp.FilingCopy {
+			hint = fmt.Sprintf("Do not copy it again, which makes another copy. The copy lands in that table's Triage, or Done if completed: basecamp cards list --in %d --card-table %d",
+				cardTableProjectID(f.table), f.table.ID)
+		}
+		return &output.Error{
+			Code:    output.CodeInProgress,
+			Message: fmt.Sprintf("Basecamp is still %s card #%d to card table %d (%s)", progressive, f.card.ID, f.table.ID, f.table.Title),
+			Hint:    hint,
+			Cause:   waitErr,
+		}
+	}
+
+	filed, err := app.Account().Cards().Get(cmd.Context(), filing.DestinationRecording.ID)
+	if err != nil {
+		return &output.Error{
+			Code:    output.CodeAPI,
+			Message: fmt.Sprintf("%s card #%d as card #%d, but could not read the new card", past, f.card.ID, filing.DestinationRecording.ID),
+			Hint:    fmt.Sprintf("Show it with: basecamp cards show %d", filing.DestinationRecording.ID),
+			Cause:   err,
+		}
+	}
+	return filedCardOK(app, filed, f.card.ID, past)
+}
+
+// filedCardResult is a card that a move, copy or teleport made, with the id of
+// the card it came from.
+type filedCardResult struct {
+	*basecamp.Card
+	SourceID int64 `json:"source_id"`
+}
+
+func filedCardOK(app *appctx.App, card *basecamp.Card, sourceID int64, past string) error {
+	place := []string{}
+	if card.Bucket != nil {
+		place = append(place, card.Bucket.Name)
+	}
+	if card.Parent != nil {
+		place = append(place, card.Parent.Title)
+	}
+	summary := fmt.Sprintf("%s card #%d to %s as card #%d", past, sourceID, strings.Join(place, " › "), card.ID)
+
+	var projectFlag string
+	if card.Bucket != nil {
+		projectFlag = fmt.Sprintf(" --in %d", card.Bucket.ID)
+	}
+	return app.OK(filedCardResult{Card: card, SourceID: sourceID},
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "view",
+				Cmd:         fmt.Sprintf("basecamp cards show %d%s", card.ID, projectFlag),
+				Description: "View the card",
+			},
+			output.Breadcrumb{
+				Action:      "move",
+				Cmd:         fmt.Sprintf("basecamp cards move %d --to <column>%s", card.ID, projectFlag),
+				Description: "Move it to a column",
+			},
+		),
+	)
 }
 
 // cardFilingWait bounds the wait for a card that Basecamp moves or copies in
@@ -3401,8 +3665,9 @@ You can pass either a step ID or a Basecamp URL:
 }
 
 type projectCardTable struct {
-	ID    int64
-	Title string
+	ID      int64
+	Title   string
+	Enabled bool
 }
 
 // resolveCardsProjectID resolves the project for a card command from the
@@ -3534,9 +3799,10 @@ func listProjectCardTables(cmd *cobra.Command, app *appctx.App, projectID string
 
 	var project struct {
 		Dock []struct {
-			Name  string `json:"name"`
-			ID    int64  `json:"id"`
-			Title string `json:"title"`
+			Name    string `json:"name"`
+			ID      int64  `json:"id"`
+			Title   string `json:"title"`
+			Enabled bool   `json:"enabled"`
 		} `json:"dock"`
 	}
 	if err := resp.UnmarshalData(&project); err != nil {
@@ -3546,7 +3812,7 @@ func listProjectCardTables(cmd *cobra.Command, app *appctx.App, projectID string
 	var cardTables []projectCardTable
 	for _, item := range project.Dock {
 		if item.Name == "kanban_board" {
-			cardTables = append(cardTables, projectCardTable{ID: item.ID, Title: item.Title})
+			cardTables = append(cardTables, projectCardTable{ID: item.ID, Title: item.Title, Enabled: item.Enabled})
 		}
 	}
 
@@ -3668,6 +3934,10 @@ func findDoneColumn(columns []basecamp.CardColumn) *basecamp.CardColumn {
 }
 
 func ambiguousCardTablesError(cardTables []projectCardTable) error {
+	return ambiguousCardTablesErrorFor("--card-table", cardTables)
+}
+
+func ambiguousCardTablesErrorFor(flag string, cardTables []projectCardTable) error {
 	lines := make([]string, 0, len(cardTables))
 	for _, ct := range cardTables {
 		title := ct.Title
@@ -3679,7 +3949,7 @@ func ambiguousCardTablesError(cardTables []projectCardTable) error {
 	return &output.Error{
 		Code:    output.CodeAmbiguous,
 		Message: "Multiple card tables found",
-		Hint:    fmt.Sprintf("Specify one with --card-table <id>:\n%s", strings.Join(lines, "\n")),
+		Hint:    fmt.Sprintf("Specify one with %s <id>:\n%s", flag, strings.Join(lines, "\n")),
 	}
 }
 
