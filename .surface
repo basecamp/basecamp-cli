@@ -276,8 +276,10 @@ ARG basecamp lineup update 01 [name]
 ARG basecamp lineup update 02 [date]
 ARG basecamp messageboards show 00 [id]
 ARG basecamp messages archive 00 <id|url>
+ARG basecamp messages copy 00 <id|url>
 ARG basecamp messages create 00 <title>
 ARG basecamp messages create 01 [body]
+ARG basecamp messages move 00 <id|url>
 ARG basecamp messages pin 00 <id|url>
 ARG basecamp messages publish 00 <id|url>
 ARG basecamp messages restore 00 <id|url>
@@ -290,8 +292,10 @@ ARG basecamp messagetypes delete 00 <id>
 ARG basecamp messagetypes show 00 <id>
 ARG basecamp messagetypes update 00 <id>
 ARG basecamp msgs archive 00 <id|url>
+ARG basecamp msgs copy 00 <id|url>
 ARG basecamp msgs create 00 <title>
 ARG basecamp msgs create 01 [body]
+ARG basecamp msgs move 00 <id|url>
 ARG basecamp msgs pin 00 <id|url>
 ARG basecamp msgs publish 00 <id|url>
 ARG basecamp msgs restore 00 <id|url>
@@ -962,8 +966,10 @@ CMD basecamp messageboards
 CMD basecamp messageboards show
 CMD basecamp messages
 CMD basecamp messages archive
+CMD basecamp messages copy
 CMD basecamp messages create
 CMD basecamp messages list
+CMD basecamp messages move
 CMD basecamp messages pin
 CMD basecamp messages publish
 CMD basecamp messages restore
@@ -980,8 +986,10 @@ CMD basecamp messagetypes update
 CMD basecamp migrate
 CMD basecamp msgs
 CMD basecamp msgs archive
+CMD basecamp msgs copy
 CMD basecamp msgs create
 CMD basecamp msgs list
+CMD basecamp msgs move
 CMD basecamp msgs pin
 CMD basecamp msgs publish
 CMD basecamp msgs restore
@@ -11509,6 +11517,31 @@ FLAG basecamp messages archive --stats type=bool
 FLAG basecamp messages archive --styled type=bool
 FLAG basecamp messages archive --todolist type=string
 FLAG basecamp messages archive --verbose type=count
+FLAG basecamp messages copy --account type=string
+FLAG basecamp messages copy --agent type=bool
+FLAG basecamp messages copy --cache-dir type=string
+FLAG basecamp messages copy --count type=bool
+FLAG basecamp messages copy --help type=bool
+FLAG basecamp messages copy --hints type=bool
+FLAG basecamp messages copy --ids-only type=bool
+FLAG basecamp messages copy --in type=string
+FLAG basecamp messages copy --include-comments type=bool
+FLAG basecamp messages copy --jq type=string
+FLAG basecamp messages copy --json type=bool
+FLAG basecamp messages copy --markdown type=bool
+FLAG basecamp messages copy --md type=bool
+FLAG basecamp messages copy --message-board type=string
+FLAG basecamp messages copy --no-hints type=bool
+FLAG basecamp messages copy --no-stats type=bool
+FLAG basecamp messages copy --profile type=string
+FLAG basecamp messages copy --project type=string
+FLAG basecamp messages copy --quiet type=bool
+FLAG basecamp messages copy --stats type=bool
+FLAG basecamp messages copy --styled type=bool
+FLAG basecamp messages copy --to-board type=string
+FLAG basecamp messages copy --to-project type=string
+FLAG basecamp messages copy --todolist type=string
+FLAG basecamp messages copy --verbose type=count
 FLAG basecamp messages create --account type=string
 FLAG basecamp messages create --agent type=bool
 FLAG basecamp messages create --attach type=stringArray
@@ -11567,6 +11600,30 @@ FLAG basecamp messages list --stats type=bool
 FLAG basecamp messages list --styled type=bool
 FLAG basecamp messages list --todolist type=string
 FLAG basecamp messages list --verbose type=count
+FLAG basecamp messages move --account type=string
+FLAG basecamp messages move --agent type=bool
+FLAG basecamp messages move --cache-dir type=string
+FLAG basecamp messages move --count type=bool
+FLAG basecamp messages move --help type=bool
+FLAG basecamp messages move --hints type=bool
+FLAG basecamp messages move --ids-only type=bool
+FLAG basecamp messages move --in type=string
+FLAG basecamp messages move --jq type=string
+FLAG basecamp messages move --json type=bool
+FLAG basecamp messages move --markdown type=bool
+FLAG basecamp messages move --md type=bool
+FLAG basecamp messages move --message-board type=string
+FLAG basecamp messages move --no-hints type=bool
+FLAG basecamp messages move --no-stats type=bool
+FLAG basecamp messages move --profile type=string
+FLAG basecamp messages move --project type=string
+FLAG basecamp messages move --quiet type=bool
+FLAG basecamp messages move --stats type=bool
+FLAG basecamp messages move --styled type=bool
+FLAG basecamp messages move --to-board type=string
+FLAG basecamp messages move --to-project type=string
+FLAG basecamp messages move --todolist type=string
+FLAG basecamp messages move --verbose type=count
 FLAG basecamp messages pin --account type=string
 FLAG basecamp messages pin --agent type=bool
 FLAG basecamp messages pin --cache-dir type=string
@@ -11926,6 +11983,31 @@ FLAG basecamp msgs archive --stats type=bool
 FLAG basecamp msgs archive --styled type=bool
 FLAG basecamp msgs archive --todolist type=string
 FLAG basecamp msgs archive --verbose type=count
+FLAG basecamp msgs copy --account type=string
+FLAG basecamp msgs copy --agent type=bool
+FLAG basecamp msgs copy --cache-dir type=string
+FLAG basecamp msgs copy --count type=bool
+FLAG basecamp msgs copy --help type=bool
+FLAG basecamp msgs copy --hints type=bool
+FLAG basecamp msgs copy --ids-only type=bool
+FLAG basecamp msgs copy --in type=string
+FLAG basecamp msgs copy --include-comments type=bool
+FLAG basecamp msgs copy --jq type=string
+FLAG basecamp msgs copy --json type=bool
+FLAG basecamp msgs copy --markdown type=bool
+FLAG basecamp msgs copy --md type=bool
+FLAG basecamp msgs copy --message-board type=string
+FLAG basecamp msgs copy --no-hints type=bool
+FLAG basecamp msgs copy --no-stats type=bool
+FLAG basecamp msgs copy --profile type=string
+FLAG basecamp msgs copy --project type=string
+FLAG basecamp msgs copy --quiet type=bool
+FLAG basecamp msgs copy --stats type=bool
+FLAG basecamp msgs copy --styled type=bool
+FLAG basecamp msgs copy --to-board type=string
+FLAG basecamp msgs copy --to-project type=string
+FLAG basecamp msgs copy --todolist type=string
+FLAG basecamp msgs copy --verbose type=count
 FLAG basecamp msgs create --account type=string
 FLAG basecamp msgs create --agent type=bool
 FLAG basecamp msgs create --attach type=stringArray
@@ -11984,6 +12066,30 @@ FLAG basecamp msgs list --stats type=bool
 FLAG basecamp msgs list --styled type=bool
 FLAG basecamp msgs list --todolist type=string
 FLAG basecamp msgs list --verbose type=count
+FLAG basecamp msgs move --account type=string
+FLAG basecamp msgs move --agent type=bool
+FLAG basecamp msgs move --cache-dir type=string
+FLAG basecamp msgs move --count type=bool
+FLAG basecamp msgs move --help type=bool
+FLAG basecamp msgs move --hints type=bool
+FLAG basecamp msgs move --ids-only type=bool
+FLAG basecamp msgs move --in type=string
+FLAG basecamp msgs move --jq type=string
+FLAG basecamp msgs move --json type=bool
+FLAG basecamp msgs move --markdown type=bool
+FLAG basecamp msgs move --md type=bool
+FLAG basecamp msgs move --message-board type=string
+FLAG basecamp msgs move --no-hints type=bool
+FLAG basecamp msgs move --no-stats type=bool
+FLAG basecamp msgs move --profile type=string
+FLAG basecamp msgs move --project type=string
+FLAG basecamp msgs move --quiet type=bool
+FLAG basecamp msgs move --stats type=bool
+FLAG basecamp msgs move --styled type=bool
+FLAG basecamp msgs move --to-board type=string
+FLAG basecamp msgs move --to-project type=string
+FLAG basecamp msgs move --todolist type=string
+FLAG basecamp msgs move --verbose type=count
 FLAG basecamp msgs pin --account type=string
 FLAG basecamp msgs pin --agent type=bool
 FLAG basecamp msgs pin --cache-dir type=string
@@ -20248,8 +20354,10 @@ SUB basecamp messageboards
 SUB basecamp messageboards show
 SUB basecamp messages
 SUB basecamp messages archive
+SUB basecamp messages copy
 SUB basecamp messages create
 SUB basecamp messages list
+SUB basecamp messages move
 SUB basecamp messages pin
 SUB basecamp messages publish
 SUB basecamp messages restore
@@ -20266,8 +20374,10 @@ SUB basecamp messagetypes update
 SUB basecamp migrate
 SUB basecamp msgs
 SUB basecamp msgs archive
+SUB basecamp msgs copy
 SUB basecamp msgs create
 SUB basecamp msgs list
+SUB basecamp msgs move
 SUB basecamp msgs pin
 SUB basecamp msgs publish
 SUB basecamp msgs restore

@@ -47,6 +47,8 @@ use --message-board <id> to specify which one.`,
 		newMessagesPublishCmd(),
 		newMessagesPinCmd(),
 		newMessagesUnpinCmd(),
+		newFilingCmd(messageFamily(), basecamp.FilingMove, messagesMoveHelp, false),
+		newFilingCmd(messageFamily(), basecamp.FilingCopy, messagesCopyHelp, false),
 		newRecordableTrashCmd("message"),
 		newRecordableArchiveCmd("message"),
 		newRecordableRestoreCmd("message"),
@@ -1063,5 +1065,88 @@ func resolveMessageCategory(ctx context.Context, app *appctx.App, projectID, cat
 		ambiguous := output.ErrAmbiguous("message type", matches)
 		ambiguous.Hint = "Pass the message type ID instead: " + strings.Join(matches, ", ")
 		return 0, ambiguous
+	}
+}
+
+var messagesMoveHelp = filingHelp{
+	use:   "move <id|url>",
+	short: "Move a message to another project's message board",
+	long: `Move a message to a message board in another project, as the web's Move…
+does. Its comments go with it.
+
+  basecamp messages move 789 --to-project "Marketing"
+  basecamp messages move 789 --to-project "Marketing" --to-board "Announcements"
+  basecamp messages move https://3.basecamp.com/123/buckets/456/messages/789 --to-board 1069479999
+
+--to-project alone needs a project with one message board; add --to-board
+when it has several. The command waits for Basecamp to finish the move and
+shows the message where it landed, under a new ID.`,
+	notes: "--to-project <project> (ID or name) moves the message to that project's message board; add --to-board <id|title> when it has several, or pass --to-board <id|url> alone. " +
+		"Output is the moved message: data.id is its NEW id and data.source_id the old one. Write to the new id; the old id stops taking changes, and reading it follows the move. " +
+		"--message-board names the message's own board and is refused; moving onto the board it is already on is refused. " +
+		"An in_progress error means Basecamp is still moving it: basecamp messages show <old id> returns it once it lands. " +
+		"Comments move with their message; Basecamp refuses moving a comment on its own.",
+}
+
+var messagesCopyHelp = filingHelp{
+	use:   "copy <id|url>",
+	short: "Copy a message to a message board in this or another project",
+	long: `Copy a message onto a message board, as the web's Copy… does. The original
+stays where it is.
+
+With no destination, the copy goes onto the message's own board:
+  basecamp messages copy 789
+  basecamp messages copy 789 --to-project "Marketing"
+  basecamp messages copy 789 --to-project "Marketing" --to-board "Announcements" --include-comments
+
+Basecamp makes the copy in the background; the command waits for it and shows
+the new message.`,
+	notes: "Without --to-project/--to-board the copy goes onto the message's own board. " +
+		"--to-project alone uses that project's only message board and fails as ambiguous when it has several; add --to-board. " +
+		"Output is the new message; its id is data.id and the original's is data.source_id. --include-comments copies the comments too. " +
+		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy.",
+}
+
+// messageFamily is how messages move and copy between message boards.
+func messageFamily() filingFamily {
+	return filingFamily{
+		noun:     "message",
+		group:    "basecamp messages",
+		types:    []string{"Message"},
+		urlKinds: []string{"messages"},
+		urlShape: "…/messages/<id>",
+		into: filingContainer{
+			dockName: "message_board",
+			noun:     "message board",
+			flag:     "--to-board",
+			urlKind:  "message_boards",
+			urlShape: "…/message_boards/<id>",
+			get: func(ctx context.Context, app *appctx.App, id int64) (filingTarget, error) {
+				board, err := app.Account().MessageBoards().Get(ctx, id)
+				if err != nil {
+					return filingTarget{}, err
+				}
+				return bucketTarget(board.ID, board.Title, board.Bucket), nil
+			},
+		},
+		ownFlags: []string{"message-board"},
+		get: func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
+			m, err := app.Account().Messages().Get(ctx, id)
+			if err != nil {
+				return nil, filingSource{}, err
+			}
+			return m, filingSource{id: m.ID, typ: m.Type, title: m.Subject, bucket: m.Bucket, parent: m.Parent}, nil
+		},
+		landing: "The copy lands on that message board",
+		lookFor: func(t filingTarget) string {
+			return fmt.Sprintf("basecamp messages list --in %d --message-board %d", t.projectID, t.id)
+		},
+		crumbs: func(id, projectID int64) []output.Breadcrumb {
+			return []output.Breadcrumb{{
+				Action:      "show",
+				Cmd:         fmt.Sprintf("basecamp messages show %d --in %d", id, projectID),
+				Description: "View the message",
+			}}
+		},
 	}
 }

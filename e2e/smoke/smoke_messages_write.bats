@@ -60,6 +60,35 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "messages copy copies a message onto its own board" {
+  local id_file="$BATS_FILE_TMPDIR/message_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No message created in prior test"
+  local msg_id
+  msg_id=$(<"$id_file")
+
+  run_smoke basecamp messages copy "$msg_id" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.source_id' "$msg_id"
+  assert_json_not_null '.data.id'
+
+  run_smoke basecamp messages trash "$(echo "$output" | jq -r '.data.id')" --json
+  assert_success
+}
+
+@test "messages move refuses the board the message is already on" {
+  local id_file="$BATS_FILE_TMPDIR/message_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No message created in prior test"
+  local msg_id
+  msg_id=$(<"$id_file")
+
+  # A move across projects would take the QA message away, so this only
+  # checks the refusal; the cross-project move is covered against local bc3.
+  run_smoke basecamp messages move "$msg_id" --to-board "$QA_MESSAGEBOARD" --json
+  assert_failure
+  assert_json_value '.ok' 'false'
+}
+
 @test "messages pin pins a message" {
   local id_file="$BATS_FILE_TMPDIR/message_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No message created in prior test"

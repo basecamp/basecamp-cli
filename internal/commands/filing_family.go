@@ -146,6 +146,15 @@ func resolveFilingTarget(cmd *cobra.Command, app *appctx.App, c filingContainer,
 	)
 }
 
+// bucketTarget is a container read by ID, in the project its bucket names.
+func bucketTarget(id int64, title string, bucket *basecamp.Bucket) filingTarget {
+	target := filingTarget{id: id, title: title}
+	if bucket != nil {
+		target.projectID, target.projectName = bucket.ID, bucket.Name
+	}
+	return target
+}
+
 // noFilingContainerError says the project has no enabled tool of the kind,
 // and how to turn one on when it is only disabled.
 func noFilingContainerError(c filingContainer, all []DockTool, projectID, projectName string) error {

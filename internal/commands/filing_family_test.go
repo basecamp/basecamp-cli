@@ -118,6 +118,7 @@ func runFamilyCommand(t *testing.T, transport *familyTransport, cmd *cobra.Comma
 	t.Helper()
 	shortFilingWait(t)
 	app, buf := newTestAppWithTransport(t, transport)
+	app.Flags.Hints = true
 	var run familyRun
 	run.err = executeCommand(cmd, app, args...)
 	if run.err == nil {
