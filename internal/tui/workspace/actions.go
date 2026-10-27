@@ -1,12 +1,14 @@
 package workspace
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
+	"github.com/basecamp/basecamp-cli/internal/tui/workspace/data"
 )
 
 // ScopeRequirement defines what scope context an action needs.
@@ -371,6 +373,18 @@ func DefaultActions() *Registry {
 			hub := session.Hub()
 			ctx := hub.ProjectContext()
 			return trashCmd(func() error {
+				// The scope's RecordingType is a view's label, not the API's
+				// type, so the recording is read to learn whether it is a
+				// Campfire line. A line can't be trashed, only deleted for
+				// good, which the palette doesn't do unasked; t in the line's
+				// view asks first.
+				recordingType, _, err := hub.RecordingKind(ctx, scope.AccountID, scope.ProjectID, scope.RecordingID)
+				if err != nil {
+					return err
+				}
+				if data.IsCampfireLine(recordingType) {
+					return errCampfireLineTrash
+				}
 				return hub.TrashRecording(ctx, scope.AccountID, scope.ProjectID, scope.RecordingID)
 			})
 		},
@@ -388,6 +402,10 @@ func completeCmd(completeFn func() error) tea.Cmd {
 		return StatusMsg{Text: "Completed"}
 	}
 }
+
+// errCampfireLineTrash is :trash's answer for a Campfire line, which Basecamp
+// deletes rather than trashes.
+var errCampfireLineTrash = errors.New("a Campfire line can't be trashed: press t twice in its view to delete it for good")
 
 // trashCmd builds a tea.Cmd that calls trashFn and returns StatusMsg + NavigateBack on success.
 func trashCmd(trashFn func() error) tea.Cmd {

@@ -1,6 +1,10 @@
 package views
 
 import (
+	"io"
+	"net/http"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -975,4 +979,160 @@ func TestDetail_FocusMsg_NoData_ShowsSpinner(t *testing.T) {
 	v.Update(workspace.FocusMsg{})
 
 	assert.True(t, v.loading, "FocusMsg with no data should set loading to true")
+}
+
+// -- Campfire line trash tests --
+
+// pingLineJSON is a line in a Ping as bc3's recording JSON has it: its parent
+// is the Ping's Campfire, and its bucket is the Ping, of type Circle.
+const pingLineJSON = `{"id":111,"status":"active","type":"Chat::Lines::Text","title":"Lunch?",` +
+	`"content":"Lunch?","created_at":"2026-10-27T10:00:00Z",` +
+	`"parent":{"id":222,"title":"Ping","type":"Chat::Transcript"},` +
+	`"bucket":{"id":333,"name":"Jason Fried","type":"Circle"},"creator":{"id":1,"name":"Jason Fried"}}`
+
+type stubReply struct {
+	status int
+	body   string
+}
+
+// routeTransport answers from a table keyed by "METHOD path" and records
+// every request. Anything without a route answers 404, so a write sent the
+// wrong way fails instead of passing.
+type routeTransport struct {
+	mu       sync.Mutex
+	routes   map[string]stubReply
+	requests []string
+}
+
+func (rt *routeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	call := req.Method + " " + req.URL.Path
+	rt.mu.Lock()
+	rt.requests = append(rt.requests, call)
+	rt.mu.Unlock()
+	reply, ok := rt.routes[call]
+	if !ok {
+		reply = stubReply{http.StatusNotFound, `{"error":"Not Found"}`}
+	}
+	return &http.Response{
+		StatusCode: reply.status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(reply.body)),
+		Request:    req,
+	}, nil
+}
+
+// writes returns the requests that change something, in order.
+func (rt *routeTransport) writes() []string {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	var writes []string
+	for _, call := range rt.requests {
+		if !strings.HasPrefix(call, http.MethodGet+" ") {
+			writes = append(writes, call)
+		}
+	}
+	return writes
+}
+
+// loadedDetail opens a Detail view the way search, recents or a deep link
+// does, with only the scope's label for the type, and loads it through the
+// transport.
+func loadedDetail(t *testing.T, transport http.RoundTripper, recordingID int64, label string) *Detail {
+	t.Helper()
+	sdk := basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, starTestToken{},
+		basecamp.WithTransport(transport), basecamp.WithMaxRetries(1))
+	session := workspace.NewTestSessionWithClient(sdk, workspace.Scope{
+		AccountID:     "99999",
+		ProjectID:     333,
+		RecordingID:   recordingID,
+		RecordingType: label,
+	})
+	v := NewDetail(session, recordingID, label, "", "")
+	v.Update(v.fetchDetail()())
+	require.NotNil(t, v.data, "the detail should load")
+	return v
+}
+
+// statusText runs the status command a batch starts with.
+func statusText(t *testing.T, cmd tea.Cmd) string {
+	t.Helper()
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		msg = batch[0]()
+	}
+	status, ok := msg.(workspace.StatusMsg)
+	require.True(t, ok, "expected a StatusMsg, got %T", msg)
+	return status.Text
+}
+
+// A Campfire line in Detail is deleted through its Campfire, never sent to the
+// generic trash route: bc3 refuses that route for anything in a Ping
+// (bc3#14171), and in a project Campfire it would skip the line endpoint's own
+// checks on who may delete a line and until when. The type is the one bc3
+// returns, whatever label the view was opened with: a search hit carries the
+// API's, a deep link to a Ping line says Campfire::Line, and a quick jump none.
+func TestDetail_Trash_CampfireLineDeletesThroughItsCampfire(t *testing.T) {
+	for _, label := range []string{"Chat::Lines::Text", "Campfire::Line", ""} {
+		t.Run("label "+label, func(t *testing.T) {
+			transport := &routeTransport{routes: map[string]stubReply{
+				"GET /99999/buckets/333/recordings/111.json": {http.StatusOK, pingLineJSON},
+				"DELETE /99999/chats/222/lines/111":          {http.StatusNoContent, ""},
+			}}
+			v := loadedDetail(t, transport, 111, label)
+
+			armed := v.handleKey(runeKey('t'))
+			require.NotNil(t, armed)
+			assert.Equal(t, "Press t again to delete this line for good", statusText(t, armed))
+
+			cmd := v.handleKey(runeKey('t'))
+			require.NotNil(t, cmd)
+			result, ok := cmd().(trashResultMsg)
+			require.True(t, ok)
+			require.NoError(t, result.err)
+			assert.Equal(t, []string{"DELETE /99999/chats/222/lines/111"}, transport.writes())
+
+			_, done := v.Update(result)
+			assert.Equal(t, "Deleted", statusText(t, done))
+		})
+	}
+}
+
+// A field the view can't display doesn't hide what the recording is: a line
+// whose timestamp won't parse is still confirmed and deleted as a line.
+func TestDetail_Trash_CampfireLineWithAFieldItCantRead(t *testing.T) {
+	unreadable := strings.Replace(pingLineJSON, `"2026-10-27T10:00:00Z"`, `"yesterday"`, 1)
+	require.NotEqual(t, pingLineJSON, unreadable)
+	transport := &routeTransport{routes: map[string]stubReply{
+		"GET /99999/buckets/333/recordings/111.json": {http.StatusOK, unreadable},
+		"DELETE /99999/chats/222/lines/111":          {http.StatusNoContent, ""},
+	}}
+	v := loadedDetail(t, transport, 111, "Chat::Lines::Text")
+
+	assert.Equal(t, "Press t again to delete this line for good", statusText(t, v.handleKey(runeKey('t'))))
+	result, ok := v.handleKey(runeKey('t'))().(trashResultMsg)
+	require.True(t, ok)
+	require.NoError(t, result.err)
+	assert.Equal(t, []string{"DELETE /99999/chats/222/lines/111"}, transport.writes())
+}
+
+// Anything else Detail opens through the generic recording read is trashed as
+// before, decided by the type bc3 returns.
+func TestDetail_Trash_OtherRecordingTrashes(t *testing.T) {
+	transport := &routeTransport{routes: map[string]stubReply{
+		"GET /99999/buckets/333/recordings/100.json": {http.StatusOK,
+			`{"id":100,"type":"Document","title":"Notes","created_at":"2026-10-27T10:00:00Z"}`},
+		"PUT /99999/recordings/100/status/trashed.json": {http.StatusNoContent, ""},
+	}}
+	v := loadedDetail(t, transport, 100, "")
+
+	armed := v.handleKey(runeKey('t'))
+	assert.Equal(t, "Press t again to trash", statusText(t, armed))
+
+	result, ok := v.handleKey(runeKey('t'))().(trashResultMsg)
+	require.True(t, ok)
+	require.NoError(t, result.err)
+	assert.Equal(t, []string{"PUT /99999/recordings/100/status/trashed.json"}, transport.writes())
+
+	_, done := v.Update(result)
+	assert.Equal(t, "Trashed", statusText(t, done))
 }

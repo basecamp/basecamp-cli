@@ -43,6 +43,8 @@ type detailBoost struct {
 type detailData struct {
 	title        string
 	recordType   string
+	apiType      string // the API's type, e.g. "Kanban::Card" or "Chat::Lines::Text"
+	parentID     int64  // the parent's ID; for a Campfire line, its Campfire
 	content      string // HTML body
 	creator      string
 	createdAt    time.Time
@@ -82,7 +84,10 @@ type detailDueUpdatedMsg struct{ err error }
 type detailAssignResultMsg struct{ err error }
 
 type trashTimeoutMsg struct{}
-type trashResultMsg struct{ err error }
+type trashResultMsg struct {
+	deleted bool // a Campfire line, deleted rather than trashed
+	err     error
+}
 
 type editBodyResultMsg struct{ err error }
 type commentEditResultMsg struct{ err error }
@@ -250,7 +255,7 @@ func (v *Detail) ShortHelp() []key.Binding {
 		key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "subscribe")),
 		key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comment")),
 		key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "boost")),
-		key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "trash")),
+		key.NewBinding(key.WithKeys("t"), key.WithHelp("t", v.trashVerb())),
 	)
 	if v.data != nil && len(v.data.comments) > 0 {
 		hints = append(hints,
@@ -487,9 +492,17 @@ func (v *Detail) Update(msg tea.Msg) (workspace.View, tea.Cmd) {
 
 	case trashResultMsg:
 		if msg.err != nil {
-			return v, workspace.ReportError(msg.err, "trashing recording")
+			action := "trashing recording"
+			if v.isCampfireLine() {
+				action = "deleting line"
+			}
+			return v, workspace.ReportError(msg.err, action)
 		}
-		return v, tea.Batch(workspace.SetStatus("Trashed", false), workspace.NavigateBack())
+		status := "Trashed"
+		if msg.deleted {
+			status = "Deleted"
+		}
+		return v, tea.Batch(workspace.SetStatus(status, false), workspace.NavigateBack())
 
 	case trashTimeoutMsg:
 		v.trashPending = false
@@ -651,8 +664,12 @@ func (v *Detail) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return v.trashRecording()
 		}
 		v.trashPending = true
+		prompt := "Press t again to trash"
+		if v.isCampfireLine() {
+			prompt = "Press t again to delete this line for good"
+		}
 		return tea.Batch(
-			workspace.SetStatus("Press t again to trash", false),
+			workspace.SetStatus(prompt, false),
 			v.trashConfirmTimeout(),
 		)
 	case "]":
@@ -699,14 +716,31 @@ func (v *Detail) trashConfirmTimeout() tea.Cmd {
 	})
 }
 
+// trashRecording trashes the recording, or deletes it if it is a Campfire
+// line, by the type the API gave when it loaded.
 func (v *Detail) trashRecording() tea.Cmd {
 	scope := v.session.Scope()
 	hub := v.session.Hub()
 	ctx := hub.ProjectContext()
+	recordingID, apiType, parentID := v.recordingID, v.data.apiType, v.data.parentID
 	return func() tea.Msg {
-		err := hub.TrashRecording(ctx, scope.AccountID, scope.ProjectID, v.recordingID)
-		return trashResultMsg{err: err}
+		deleted, err := hub.RemoveRecording(ctx, scope.AccountID, scope.ProjectID, recordingID, apiType, parentID)
+		return trashResultMsg{deleted: deleted, err: err}
 	}
+}
+
+// isCampfireLine reports whether the loaded recording is a line in a Campfire,
+// which t deletes for good rather than trashing.
+func (v *Detail) isCampfireLine() bool {
+	return v.data != nil && data.IsCampfireLine(v.data.apiType)
+}
+
+// trashVerb is what t does to the loaded recording.
+func (v *Detail) trashVerb() string {
+	if v.isCampfireLine() {
+		return "delete"
+	}
+	return "trash"
 }
 
 func (v *Detail) goToProject() tea.Cmd {
@@ -1398,6 +1432,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 			data = detailData{
 				title:      todo.Content,
 				recordType: "Todo",
+				apiType:    "Todo",
 				content:    todo.Description,
 				creator:    creator,
 				createdAt:  todo.CreatedAt,
@@ -1424,6 +1459,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 			data = detailData{
 				title:      msg.Subject,
 				recordType: "Message",
+				apiType:    "Message",
 				content:    msg.Content,
 				creator:    creator,
 				createdAt:  msg.CreatedAt,
@@ -1448,6 +1484,7 @@ func (v *Detail) fetchDetail() tea.Cmd {
 			data = detailData{
 				title:      card.Title,
 				recordType: "Card",
+				apiType:    "Kanban::Card",
 				content:    card.Content,
 				creator:    creator,
 				createdAt:  card.CreatedAt,
@@ -1478,6 +1515,14 @@ func (v *Detail) fetchDetail() tea.Cmd {
 					Name string `json:"name"`
 				} `json:"creator"`
 			}
+			// The type and parent, which decide what t does, are read on
+			// their own, so a field the display can't parse doesn't lose them.
+			var kind struct {
+				Type   string `json:"type"`
+				Parent *struct {
+					ID int64 `json:"id"`
+				} `json:"parent"`
+			}
 			if err := resp.UnmarshalData(&generic); err != nil {
 				data = detailData{
 					title:      fmt.Sprintf("Recording #%d", recordingID),
@@ -1502,6 +1547,12 @@ func (v *Detail) fetchDetail() tea.Cmd {
 					creator:    creator,
 					createdAt:  generic.CreatedAt,
 					appURL:     generic.AppURL,
+				}
+			}
+			if err := resp.UnmarshalData(&kind); err == nil {
+				data.apiType = kind.Type
+				if kind.Parent != nil {
+					data.parentID = kind.Parent.ID
 				}
 			}
 		}
