@@ -30,18 +30,33 @@ import (
 // container flags it inherits and reads. Each other container flag it
 // inherits must be refused before anything is sent.
 var filingReads = map[string][]string{
+	"basecamp cards column copy":       {},
 	"basecamp cards column move":       {"card-table"},
 	"basecamp cards copy":              {},
 	"basecamp cards move":              {"card-table"},
+	"basecamp checkins question copy":  {},
+	"basecamp checkins question move":  {},
+	"basecamp docs copy":               {},
 	"basecamp docs move":               {},
+	"basecamp files copy":              {},
 	"basecamp files move":              {},
+	"basecamp forwards copy":           {},
+	"basecamp forwards move":           {},
+	"basecamp messages copy":           {},
+	"basecamp messages move":           {},
+	"basecamp schedule copy":           {},
+	"basecamp schedule move":           {},
 	"basecamp todolistgroups copy":     {},
 	"basecamp todolistgroups position": {},
 	"basecamp todolists copy":          {},
 	"basecamp todolists position":      {},
 	"basecamp todos copy":              {},
 	"basecamp todos position":          {},
+	"basecamp tools move":              {},
 	"basecamp tools reposition":        {},
+	"basecamp uploads copy":            {},
+	"basecamp uploads move":            {},
+	"basecamp vaults copy":             {},
 	"basecamp vaults move":             {},
 }
 

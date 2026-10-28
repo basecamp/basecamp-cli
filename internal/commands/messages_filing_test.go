@@ -62,15 +62,6 @@ func TestMessagesMoveNeedsADestination(t *testing.T) {
 	assert.Empty(t, transport.posts)
 }
 
-func TestMessagesMoveRefusesTheOwnBoardFlag(t *testing.T) {
-	transport := messagesTransport()
-	run := runFamilyCommand(t, transport, NewMessagesCmd(), "move", "456", "--message-board", "900", "--to-project", "Dest")
-	e := run.failure(t)
-	assert.Equal(t, "--message-board names the message's own message board, not where it goes", e.Message)
-	assert.Contains(t, e.Hint, "--to-board")
-	assert.Empty(t, transport.posts)
-}
-
 func TestMessagesMoveBoardNameNeedsAProject(t *testing.T) {
 	transport := messagesTransport()
 	run := runFamilyCommand(t, transport, NewMessagesCmd(), "move", "456", "--to-board", "Announcements")

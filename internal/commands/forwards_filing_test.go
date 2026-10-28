@@ -47,14 +47,6 @@ func TestForwardsMoveToTurnedOffEmailForwardsSaysHowToTurnThemOn(t *testing.T) {
 	assert.Empty(t, transport.posts)
 }
 
-func TestForwardsMoveRefusesTheOwnInboxFlag(t *testing.T) {
-	transport := forwardsFilingTransport()
-	run := runFamilyCommand(t, transport, NewForwardsCmd(), "move", "456", "--inbox", "555", "--to-project", "Dest")
-	e := run.failure(t)
-	assert.Contains(t, e.Hint, "--to-inbox")
-	assert.Empty(t, transport.posts)
-}
-
 func TestForwardsCopyWithoutDestinationGoesIntoItsOwnInbox(t *testing.T) {
 	transport := forwardsFilingTransport()
 	run := runFamilyCommand(t, transport, NewForwardsCmd(), "copy", "456", "--include-comments")

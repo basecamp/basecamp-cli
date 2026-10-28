@@ -1690,7 +1690,6 @@ func questionFamily() filingFamily {
 				return bucketTarget(q.ID, q.Title, q.AppURL, q.Bucket), nil
 			},
 		},
-		ownFlags: []string{"questionnaire"},
 		get: func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
 			q, err := app.Account().Checkins().GetQuestion(ctx, id)
 			if err != nil {

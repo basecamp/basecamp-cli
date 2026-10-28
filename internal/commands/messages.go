@@ -1132,7 +1132,6 @@ func messageFamily() filingFamily {
 				return bucketTarget(board.ID, board.Title, board.AppURL, board.Bucket), nil
 			},
 		},
-		ownFlags: []string{"message-board"},
 		get: func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
 			m, err := app.Account().Messages().Get(ctx, id)
 			if err != nil {

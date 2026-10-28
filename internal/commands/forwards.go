@@ -677,7 +677,6 @@ func forwardFamily() filingFamily {
 				return bucketTarget(inbox.ID, inbox.Title, inbox.AppURL, inbox.Bucket), nil
 			},
 		},
-		ownFlags: []string{"inbox"},
 		get: func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
 			f, err := app.Account().Forwards().Get(ctx, id)
 			if err != nil {

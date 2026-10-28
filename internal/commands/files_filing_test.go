@@ -138,14 +138,6 @@ func TestFilesCopyWithoutDestinationGoesIntoItsOwnFolder(t *testing.T) {
 	assert.Equal(t, float64(501), transport.bodies[0]["parent_id"])
 }
 
-func TestFilesCopyRefusesTheListingFolderFlag(t *testing.T) {
-	transport := filesFilingTransport()
-	run := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "456", "--folder", "950")
-	e := run.failure(t)
-	assert.Contains(t, e.Hint, "--to-folder")
-	assert.Empty(t, transport.posts)
-}
-
 func TestFilesMoveAndCopyAreOnEveryFilesGroup(t *testing.T) {
 	for name, group := range map[string]func() *cobra.Command{
 		"uploads": NewUploadsCmd,

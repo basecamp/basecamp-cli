@@ -250,9 +250,6 @@ type filingFamily struct {
 	urlKinds []string
 	urlShape string
 	into     filingContainer
-	// ownFlags are the group's flags that name the recording's own container,
-	// refused because they read as the destination.
-	ownFlags []string
 	// get reads one by ID: the record to output, and what filing needs.
 	get func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error)
 	// check refuses a recording Basecamp will not file; nil checks the type.
@@ -306,7 +303,7 @@ func newFilingCmd(fam filingFamily, kind basecamp.FilingType, help filingHelp, b
 	if kind == basecamp.FilingCopy {
 		cmd.Flags().BoolVar(&includeComments, "include-comments", false, "Copy the "+fam.noun+"'s comments too")
 	}
-	return cmd
+	return guardFilingFlags(cmd)
 }
 
 func addFamilyFilingFlags(cmd *cobra.Command, fam filingFamily, verb string, toProject, toContainer *string) {
@@ -325,14 +322,6 @@ func familyFilingSet(cmd *cobra.Command, fam filingFamily) bool {
 // destination stops the command before anything moves.
 func runFamilyFiling(cmd *cobra.Command, fam filingFamily, kind basecamp.FilingType, args []string, toProject, toContainer string, includeComments bool) error {
 	filingSet := familyFilingSet(cmd, fam)
-	for _, name := range fam.ownFlags {
-		if cmd.Flags().Changed(name) {
-			return output.ErrUsageHint(
-				fmt.Sprintf("--%s names the %s's own %s, not where it goes", name, fam.noun, fam.into.noun),
-				fmt.Sprintf("Use --to-project <project> or %s <id|url> for the destination", fam.into.flag),
-			)
-		}
-	}
 	if kind == basecamp.FilingMove && !filingSet {
 		return missingArg(cmd, "--to-project")
 	}

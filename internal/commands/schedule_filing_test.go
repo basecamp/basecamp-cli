@@ -46,14 +46,6 @@ func TestScheduleMoveTakesAnOccurrenceURLAsItsSeries(t *testing.T) {
 	assert.Equal(t, []string{"/99999/recordings/456/moves"}, transport.posts)
 }
 
-func TestScheduleMoveRefusesTheOwnScheduleFlag(t *testing.T) {
-	transport := scheduleFilingTransport()
-	run := runFamilyCommand(t, transport, NewScheduleCmd(), "move", "456", "-s", "555", "--to-project", "Dest")
-	e := run.failure(t)
-	assert.Equal(t, "--schedule names the schedule entry's own schedule, not where it goes", e.Message)
-	assert.Empty(t, transport.posts)
-}
-
 func TestScheduleMoveOntoItsOwnScheduleIsRefused(t *testing.T) {
 	transport := scheduleFilingTransport()
 	run := runFamilyCommand(t, transport, NewScheduleCmd(), "move", "456", "--to-project", "Source")

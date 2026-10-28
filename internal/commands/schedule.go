@@ -979,8 +979,7 @@ func scheduleEntryFamily() filingFamily {
 				return bucketTarget(schedule.ID, schedule.Title, schedule.AppURL, schedule.Bucket), nil
 			},
 		},
-		ownFlags: []string{"schedule"},
-		get:      getScheduleEntryForFiling,
+		get: getScheduleEntryForFiling,
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
 			return []output.Breadcrumb{{
 				Action:      "show",

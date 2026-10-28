@@ -38,14 +38,6 @@ func TestCheckinsQuestionMoveToProject(t *testing.T) {
 	assert.Equal(t, "basecamp checkins question show 4560 --in 999", run.envelope.Breadcrumbs[0].Cmd)
 }
 
-func TestCheckinsQuestionMoveRefusesTheOwnQuestionnaireFlag(t *testing.T) {
-	transport := checkinsFilingTransport()
-	run := runFamilyCommand(t, transport, NewCheckinsCmd(), "question", "move", "456", "--questionnaire", "555", "--to-project", "Dest")
-	e := run.failure(t)
-	assert.Contains(t, e.Hint, "--to-questionnaire")
-	assert.Empty(t, transport.posts)
-}
-
 func TestCheckinsQuestionMoveOntoItsOwnQuestionnaireIsRefused(t *testing.T) {
 	transport := checkinsFilingTransport()
 	run := runFamilyCommand(t, transport, NewCheckinsCmd(), "question", "move", "456", "--to-questionnaire", "555")

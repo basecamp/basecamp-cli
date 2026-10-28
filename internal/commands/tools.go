@@ -707,7 +707,7 @@ to another project.`,
 	cmd.Flags().IntVar(&position, "pos", 0, "New position (alias)")
 	cmd.Flags().StringVar(&toProject, "to-project", "", "Move the tool, with everything in it, to this project (ID or name)")
 
-	return cmd
+	return guardFilingFlags(cmd)
 }
 
 // movableToolTypes are the dock tools the web moves to another project.

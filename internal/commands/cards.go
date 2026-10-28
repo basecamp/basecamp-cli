@@ -1374,11 +1374,8 @@ Basecamp to finish the move and shows the card where it landed.`,
 				if targetColumn != "" || onHold || positionSet || wormholeSet {
 					return output.ErrUsage("--to-project and --to-card-table cannot be combined with --to, --on-hold, --position, or --to-wormhole")
 				}
-				if *cardTable != "" {
-					return output.ErrUsageHint(
-						"--card-table names the card's own card table, not where it goes",
-						"Use --to-card-table for the destination card table",
-					)
+				if err := refuseOwnCardTable(*cardTable, "card"); err != nil {
+					return err
 				}
 				if err := validateFilingFlags(toProject, toCardTable); err != nil {
 					return err
@@ -1888,6 +1885,20 @@ the new card.`,
 func addFilingDestinationFlags(cmd *cobra.Command, toProject, toCardTable *string, verb string) {
 	cmd.Flags().StringVar(toProject, "to-project", "", verb+" the card into this project's card table (ID or name); it lands in Triage, or Done if completed")
 	cmd.Flags().StringVar(toCardTable, "to-card-table", "", verb+" the card into this card table (ID, URL, or a name with --to-project)")
+}
+
+// refuseOwnCardTable refuses the group's --card-table on a move to another
+// card table. cards move and cards column move read it to find a column or
+// card table in the same project, so the guard on unread flags lets it through, but
+// there it would read as the destination.
+func refuseOwnCardTable(cardTable, noun string) error {
+	if cardTable == "" {
+		return nil
+	}
+	return output.ErrUsageHint(
+		fmt.Sprintf("--card-table names the %s's own card table, not where it goes", noun),
+		"Use --to-card-table for the destination card table",
+	)
 }
 
 // validateFilingFlags checks --to-project and --to-card-table before any
@@ -2676,6 +2687,9 @@ and On hold, which every card table has.`,
 					return output.ErrUsageHint("--position repositions the column within its card table, and cannot be combined with --to-project or --to-card-table",
 						"Move it to the other card table first, then reposition it there with --position")
 				}
+				if err := refuseOwnCardTable(*cardTable, "column"); err != nil {
+					return err
+				}
 				return runFamilyFiling(cmd, columnFamily(), basecamp.FilingMove, args, toProject, toCardTable, false)
 			}
 			app := appctx.FromContext(cmd.Context())
@@ -2810,7 +2824,6 @@ func columnFamily() filingFamily {
 				return bucketTarget(table.ID, table.Title, table.AppURL, table.Bucket), nil
 			},
 		},
-		ownFlags: []string{"card-table"},
 		get: func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
 			c, err := app.Account().CardColumns().Get(ctx, id)
 			if err != nil {

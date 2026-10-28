@@ -2931,7 +2931,6 @@ func filesFamily() filingFamily {
 		urlKinds: []string{"documents", "uploads", "vaults", "cloud_files", "google_documents"},
 		urlShape: "…/documents/<id>, …/uploads/<id>, …/vaults/<id>, …/cloud_files/<id> or …/google_documents/<id>",
 		into:     docsAndFiles(),
-		ownFlags: []string{"vault", "folder"},
 		get:      getFileItem,
 		resolve:  resolveFilesTarget,
 		own: func(ctx context.Context, app *appctx.App, src filingSource) (filingTarget, error) {
