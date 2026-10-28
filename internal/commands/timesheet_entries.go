@@ -13,6 +13,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/dateparse"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/tui"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
@@ -62,12 +63,15 @@ time is for, and the item it is logged against.
   basecamp timesheet entry show https://3.basecamp.com/123/projects/456/timesheet/entries/1069480283`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			entryID, err := timesheetEntryIDArg(args[0])
+			entryID, urlAccountID, err := timesheetEntryIDArg(args[0])
 			if err != nil {
 				return err
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			if err := timesheetURLAccount(app, args[0], urlAccountID); err != nil {
+				return err
+			}
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -108,7 +112,7 @@ project.
   basecamp timesheet entry create https://3.basecamp.com/123/buckets/456/todos/789 --hours 0:45 --date yesterday --description "Review"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			recordingID, err := timesheetRecordingIDArg(args[0])
+			recordingID, urlAccountID, err := timesheetRecordingIDArg(args[0])
 			if err != nil {
 				return err
 			}
@@ -126,6 +130,9 @@ project.
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			if err := timesheetURLAccount(app, args[0], urlAccountID); err != nil {
+				return err
+			}
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -175,7 +182,7 @@ cleared through the API, only replaced.
   basecamp timesheet entry update 1069480283 --date 2026-10-26 --description "Client call"`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			entryID, err := timesheetEntryIDArg(args[0])
+			entryID, urlAccountID, err := timesheetEntryIDArg(args[0])
 			if err != nil {
 				return err
 			}
@@ -209,6 +216,9 @@ cleared through the API, only replaced.
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			if err := timesheetURLAccount(app, args[0], urlAccountID); err != nil {
+				return err
+			}
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -255,7 +265,7 @@ who may not remove the entry are refused.
   basecamp timesheet entry delete 1069480283 --json --force`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			entryID, err := timesheetEntryIDArg(args[0])
+			entryID, urlAccountID, err := timesheetEntryIDArg(args[0])
 			if err != nil {
 				return err
 			}
@@ -267,6 +277,9 @@ who may not remove the entry are refused.
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			if err := timesheetURLAccount(app, args[0], urlAccountID); err != nil {
+				return err
+			}
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -304,56 +317,84 @@ who may not remove the entry are refused.
 }
 
 // timesheetEntryURL matches an entry's own URL: its app URL
-// (projects/:p/timesheet/entries/:id) and its API URL in either form.
-var timesheetEntryURL = regexp.MustCompile(`^https?://[^/]+/\d+/(?:(?:projects|buckets)/\d+/timesheet/entries|timesheet_entries)/(\d+)(?:\.json)?/?(?:[?#].*)?$`)
+// (projects/:p/timesheet/entries/:id) and its API URL in either form. The
+// first group is the account, the second the entry.
+var timesheetEntryURL = regexp.MustCompile(`^https?://[^/]+/(\d+)/(?:(?:projects|buckets)/\d+/timesheet/entries|timesheet_entries)/(\d+)(?:\.json)?/?(?:[?#].*)?$`)
 
 // timesheetEntryIDArg resolves the <id|url> positional the per-entry verbs
-// take: a bare id or the entry's own URL. Any other URL is refused rather than
-// read as an entry id — a to-do's URL names the item the time is logged
-// against, and `timesheet entry delete` must never aim at one of those.
-func timesheetEntryIDArg(arg string) (int64, error) {
+// take: a bare id or the entry's own URL, returning the URL's account too. Any
+// other URL is refused rather than read as an entry id — a to-do's URL names
+// the item the time is logged against, and `timesheet entry delete` must never
+// aim at one of those.
+func timesheetEntryIDArg(arg string) (id int64, urlAccountID string, err error) {
 	raw := strings.TrimSpace(arg)
 	if strings.Contains(raw, "://") {
 		m := timesheetEntryURL.FindStringSubmatch(raw)
 		if m == nil {
-			return 0, output.ErrUsageHint(
+			return 0, "", output.ErrUsageHint(
 				fmt.Sprintf("%q does not name a timesheet entry", arg),
 				"Pass the entry id, or its URL (…/timesheet/entries/<id>); "+
 					"basecamp timesheet item <id> lists the entries on an item")
 		}
-		raw = m[1]
+		urlAccountID, raw = m[1], m[2]
 	}
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || id <= 0 {
-		return 0, output.ErrUsageHint(
+	id, perr := strconv.ParseInt(raw, 10, 64)
+	if perr != nil || id <= 0 {
+		return 0, "", output.ErrUsageHint(
 			fmt.Sprintf("%q is not a timesheet entry id or URL", arg),
 			"Pass the numeric entry id, or paste its Basecamp URL")
 	}
-	return id, nil
+	return id, urlAccountID, nil
 }
 
 // timesheetRecordingIDArg resolves create's <recording-id|url>: the item the
-// time is logged against. A project's timesheet URL is refused: it carries the
-// project's id, not the id of the project's timesheet recording.
-func timesheetRecordingIDArg(arg string) (int64, error) {
-	if parsed := urlarg.Parse(arg); parsed != nil && (parsed.Type == "timesheet" || parsed.IsCollection) {
-		return 0, output.ErrUsageHint(
-			fmt.Sprintf("%q does not name one item", arg),
-			"Pass the id or URL of the to-do, message, card or other item to log time against. "+
-				"For a project-level entry, pass the project timesheet's id: the parent id of a "+
-				"project-level entry in basecamp timesheet project")
+// time is logged against, and the URL's account. A URL that names no single
+// recording is refused — a project's or a project timesheet's URL carries the
+// project's id, which extractID would otherwise fall back to.
+func timesheetRecordingIDArg(arg string) (id int64, urlAccountID string, err error) {
+	if parsed := urlarg.Parse(arg); parsed != nil {
+		if parsed.RecordingID == "" || parsed.IsCollection || parsed.Type == "timesheet" {
+			return 0, "", output.ErrUsageHint(
+				fmt.Sprintf("%q does not name one item", arg),
+				"Pass the id or URL of the to-do, message, card or other item to log time against. "+
+					"For a project-level entry, pass the project timesheet's id: the parent id of a "+
+					"project-level entry in basecamp timesheet project")
+		}
+		urlAccountID = parsed.AccountID
 	}
 	idStr, err := extractID(arg)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil || id <= 0 {
-		return 0, output.ErrUsageHint(
+	id, perr := strconv.ParseInt(idStr, 10, 64)
+	if perr != nil || id <= 0 {
+		return 0, "", output.ErrUsageHint(
 			fmt.Sprintf("%q is not an item id or Basecamp URL", arg),
 			"Pass the numeric id of the item to log time against, or paste its Basecamp URL")
 	}
-	return id, nil
+	return id, urlAccountID, nil
+}
+
+// timesheetURLAccount holds a pasted URL to the account it names, before any
+// request. The URL router is host-agnostic, so a URL must be on a trusted
+// Basecamp host; its account is adopted when none is configured and must
+// match the configured one otherwise, rather than acting on a same-numbered
+// entry or item in another account. Bare ids skip both checks.
+func timesheetURLAccount(app *appctx.App, arg, urlAccountID string) error {
+	if !strings.Contains(arg, "://") {
+		return nil
+	}
+	if !hostutil.IsTrustedBasecampHost(strings.TrimSpace(arg), app.Config.BaseURL) {
+		return output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
+	}
+	switch {
+	case urlAccountID == "":
+	case app.Config.AccountID == "":
+		app.Config.AccountID = urlAccountID
+	case urlAccountID != app.Config.AccountID:
+		return output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", urlAccountID, app.Config.AccountID))
+	}
+	return nil
 }
 
 // timesheetHours is what bc3 accepts for hours: a decimal, or hours and

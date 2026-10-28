@@ -130,6 +130,9 @@ func TestTimesheetEntryCreateRefusesBadInput(t *testing.T) {
 		// A project's timesheet URL carries the project id, not the
 		// timesheet recording's.
 		{"entry", "create", "https://3.basecamp.com/99999/projects/89/timesheet", "--hours", "1"},
+		// Neither does a project's URL, or a listing's.
+		{"entry", "create", "https://3.basecamp.com/99999/projects/89", "--hours", "1"},
+		{"entry", "create", "https://3.basecamp.com/99999/buckets/89/todolists", "--hours", "1"},
 	} {
 		transport, _, _, err := runTimesheet(t, nil, args...)
 		requireBookmarksUsageError(t, err)
@@ -235,4 +238,29 @@ func TestTimesheetEntryDeleteReportsARefusal(t *testing.T) {
 		[]stubRoute{{method: http.MethodDelete, path: timesheetEntryPath(1069480283), status: http.StatusForbidden, body: `{"error":"forbidden"}`}},
 		"entry", "delete", "1069480283", "--force")
 	require.Error(t, err)
+}
+
+// A pasted URL acts only on the account it names, on a Basecamp host: a
+// look-alike host, or a URL from another account than the configured one, is
+// refused before any request, on every verb.
+func TestTimesheetEntryVerbsHoldAURLToItsHostAndAccount(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"show untrusted host", []string{"entry", "show", "https://evil.example/99999/timesheet_entries/1069480283.json"}},
+		{"update untrusted host", []string{"entry", "update", "https://evil.example/99999/projects/89/timesheet/entries/1069480283", "--hours", "1"}},
+		{"delete untrusted host", []string{"entry", "delete", "https://evil.example/99999/timesheet_entries/1069480283", "--force"}},
+		{"create untrusted host", []string{"entry", "create", "https://evil.example/99999/buckets/89/todos/789", "--hours", "1"}},
+		{"show other account", []string{"entry", "show", "https://3.basecamp.com/11111/projects/89/timesheet/entries/1069480283"}},
+		{"update other account", []string{"entry", "update", "https://3.basecampapi.com/11111/timesheet_entries/1069480283.json", "--hours", "1"}},
+		{"delete other account", []string{"entry", "delete", "https://3.basecamp.com/11111/projects/89/timesheet/entries/1069480283", "--force"}},
+		{"create other account", []string{"entry", "create", "https://3.basecamp.com/11111/buckets/89/todos/789", "--hours", "1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			transport, _, _, err := runTimesheet(t, nil, tc.args...)
+			requireBookmarksUsageError(t, err)
+			assert.Empty(t, transport.recorded())
+		})
+	}
 }
