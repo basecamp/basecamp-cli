@@ -146,6 +146,26 @@ func TestScheduleShowListsAProjectEventsEntriesByItsSchedule(t *testing.T) {
 		"a project can have several schedules, so the entries command names the one the event is on")
 }
 
+func TestScheduleShowListsARecurringProjectEventsEntriesByItsSchedule(t *testing.T) {
+	for name, args := range map[string][]string{
+		"a recurring event":             {"show", "457"},
+		"one occurrence of a recurring": {"show", "457", "--date", "20261101"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := calendarTransport()
+			transport.gets["/projects/123"] = `{"id":123,"name":"Source","dock":[{"name":"schedule","id":555,"title":"Schedule","enabled":true},{"name":"schedule","id":556,"title":"Launches","enabled":true}]}`
+			transport.gets["/schedules/555/entries"] = `[{"id":456,"type":"Schedule::Entry","summary":"Launch"}]`
+			transport.gets["/schedules/556/entries"] = `[{"id":457,"type":"Schedule::Entry","summary":"Standup"}]`
+			transport.gets["/schedules/556"] = `{"id":556,"title":"Launches","bucket":{"id":123,"name":"Source"}}`
+			transport.gets["/schedule_entries/457/occurrences/20261101"] = `{"id":7006,"type":"Schedule::Entry::Occurrence","summary":"Standup","bucket":{"id":123,"name":"Source","type":"Project"},"parent":{"id":457,"title":"Standup","type":"Schedule::Entry"}}`
+			run := runFamilyCommand(t, transport, NewScheduleCmd(), args...)
+			require.NoError(t, run.err)
+			assert.Equal(t, "basecamp schedule entries --project 123 --schedule 556", run.envelope.Breadcrumbs[1].Cmd,
+				"a recurring event's parent is its series, so the schedule listing it is looked up")
+		})
+	}
+}
+
 func TestScheduleFilesARecurringEventIntoACalendarAndReadsItBack(t *testing.T) {
 	transport := calendarTransport()
 	run := runFamilyCommand(t, transport, NewScheduleCmd(), "move", "457", "--to-schedule", "770")
