@@ -289,6 +289,25 @@ func runTestFilings(t *testing.T, transport *familyTransport, kind basecamp.Fili
 	return runFamilyCommand(t, transport, cmd)
 }
 
+// A still-running item's line says once not to file it again, and names the
+// filing that shows where it got to.
+func TestBulkFilingStillRunningSaysNotToFileAgainOnce(t *testing.T) {
+	for _, kind := range []basecamp.FilingType{basecamp.FilingMove, basecamp.FilingCopy} {
+		t.Run(string(kind), func(t *testing.T) {
+			shortFilingWait(t)
+			transport := &familyTransport{stuck: map[int64]bool{11: true, 22: true}}
+			e := runTestFilings(t, transport, kind, 11, 22).failure(t)
+			lines := strings.Split(e.Hint, "\n")
+			require.Len(t, lines, 2, e.Hint)
+			for i, id := range []int{11, 22} {
+				assert.True(t, strings.HasPrefix(lines[i], fmt.Sprintf("#%d: ", id)), lines[i])
+				assert.Equal(t, 1, strings.Count(lines[i], "Do not"), lines[i])
+				assert.Contains(t, lines[i], fmt.Sprintf("basecamp filings show %d", id))
+			}
+		})
+	}
+}
+
 func TestBulkFilingFilesEachAndListsTheNewRecordings(t *testing.T) {
 	transport := &familyTransport{}
 	run := runTestFilings(t, transport, basecamp.FilingCopy, 11, 22)

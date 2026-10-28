@@ -279,8 +279,11 @@ func runFilings(cmd *cobra.Command, app *appctx.App, scope followUpScope, filing
 		unread      []string
 		unsettled   = map[string][]int64{}
 		checks      []string
-		worst       *output.Error
-		worstOf     filingOutcome
+		// warned holds the checks that already say not to file again: a
+		// still-running filing's.
+		warned  = map[string]bool{}
+		worst   *output.Error
+		worstOf filingOutcome
 	)
 	for _, f := range filings {
 		f.scope = scope.args(app.Config.AccountID)
@@ -321,6 +324,7 @@ func runFilings(cmd *cobra.Command, app *appctx.App, scope followUpScope, filing
 			if _, seen := unsettled[check]; !seen {
 				checks = append(checks, check)
 			}
+			warned[check] = e.Code == output.CodeInProgress
 			unsettled[check] = append(unsettled[check], f.sourceID)
 			report = append(report, fmt.Sprintf("#%d not settled: %s", f.sourceID, e.Message))
 		}
@@ -340,6 +344,10 @@ func runFilings(cmd *cobra.Command, app *appctx.App, scope followUpScope, filing
 		hints = append(hints, fmt.Sprintf("Do not %s these again: %s.", verb, strings.Join(unread, ", ")))
 	}
 	for _, check := range checks {
+		if warned[check] {
+			hints = append(hints, fmt.Sprintf("%s: %s", sourceList(unsettled[check]), check))
+			continue
+		}
 		hints = append(hints, fmt.Sprintf("Do not %s %s again yet. %s", verb, sourceList(unsettled[check]), check))
 	}
 	if len(refused) > 0 {
