@@ -223,17 +223,25 @@ func (t *mockStepUpdateTransport) RoundTrip(req *http.Request) (*http.Response, 
 		return nil, fmt.Errorf("unexpected request method: %s", req.Method)
 	}
 
-	// Echo the title back so callers see the effective value, not a constant.
+	// Echo the title and assignees back so callers see the effective values,
+	// not constants.
 	title := "Current title"
+	assignees := []string{}
 	if t.capturedPut != nil {
 		var put struct {
-			Title string `json:"title"`
+			Title       string  `json:"title"`
+			AssigneeIDs []int64 `json:"assignee_ids"`
 		}
-		if err := json.Unmarshal(t.capturedPut, &put); err == nil && put.Title != "" {
-			title = put.Title
+		if err := json.Unmarshal(t.capturedPut, &put); err == nil {
+			if put.Title != "" {
+				title = put.Title
+			}
+			for _, id := range put.AssigneeIDs {
+				assignees = append(assignees, fmt.Sprintf(`{"id": %d, "name": "Person %d"}`, id, id))
+			}
 		}
 	}
-	stepJSON := fmt.Sprintf(`{"id": 456, "title": %q, "completed": false, "assignees": []}`, title)
+	stepJSON := fmt.Sprintf(`{"id": 456, "title": %q, "completed": false, "assignees": [%s]}`, title, strings.Join(assignees, ","))
 
 	return &http.Response{
 		StatusCode: 200,
