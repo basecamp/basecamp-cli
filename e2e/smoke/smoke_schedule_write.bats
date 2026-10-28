@@ -34,3 +34,29 @@ setup_file() {
   assert_success
   assert_json_value '.ok' 'true'
 }
+
+@test "schedule copy copies a schedule entry onto its own schedule" {
+  local id_file="$BATS_FILE_TMPDIR/entry_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No schedule entry created in prior test"
+  local eid
+  eid=$(<"$id_file")
+
+  run_smoke basecamp schedule copy "$eid" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.source_id' "$eid"
+  assert_json_not_null '.data.id'
+}
+
+@test "schedule move refuses the schedule the entry is already on" {
+  local id_file="$BATS_FILE_TMPDIR/entry_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No schedule entry created in prior test"
+  local eid
+  eid=$(<"$id_file")
+
+  # A cross-project move would take the QA entry away; the move itself is
+  # covered against local bc3.
+  run_smoke basecamp schedule move "$eid" --to-schedule "$QA_SCHEDULE" --json
+  assert_failure
+  assert_json_value '.ok' 'false'
+}

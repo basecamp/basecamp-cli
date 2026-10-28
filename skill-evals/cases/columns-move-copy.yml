@@ -1,0 +1,11 @@
+task: Copy the card table column 4321 to the Marketing project's card table, comments and all
+tags: [move-copy, workflow]
+mocks:
+  - match: '^cards column copy(?!.*--help)'
+    output: '{"ok":true,"data":{"id":43210,"source_id":4321,"type":"Kanban::Column"},"summary":"Copied column #4321 to Marketing › Roadmap as column #43210"}'
+accept:
+  - '^cards column copy (?=.*\b4321\b)(?=.*--to-project \W?Marketing)(?=.*--include-comments)(?!.*--help)'
+reject:
+  - '^cards (column create|create|move)'
+  - '^recordings\b'
+max_commands: 4

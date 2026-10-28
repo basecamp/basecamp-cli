@@ -22,7 +22,8 @@ func runTestFiling(t *testing.T, transport *mockFilingTransport, f recordingFili
 	shortFilingWait(t)
 	app, buf := newTestAppWithTransport(t, transport)
 	cmd := &cobra.Command{RunE: func(cmd *cobra.Command, _ []string) error {
-		return runFiling(cmd, appctx.FromContext(cmd.Context()), f)
+		app := appctx.FromContext(cmd.Context())
+		return runFiling(cmd, app, newFollowUpScope(app), f)
 	}}
 	var run filingRun
 	run.err = executeCommand(cmd, app)

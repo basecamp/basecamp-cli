@@ -1,0 +1,12 @@
+task: Move the whole Docs & Files tool (dock tool 9753) from its project to the Marketing project
+tags: [move-copy, workflow]
+mocks:
+  - match: '^tools move(?!.*--help)'
+    output: '{"ok":true,"data":{"id":97530,"source_id":9753,"type":"Vault","bucket":{"id":222,"name":"Marketing"}},"summary":"Moved tool #9753 to Marketing as tool #97530"}'
+accept:
+  - '^tools move (?=.*\b9753\b)(?=.*--to-project \W?Marketing)(?!.*--help)'
+reject:
+  - '^tools (reposition|create|trash)'
+  - '^(files|docs|vaults) (move|copy)'
+  - '--position'
+max_commands: 4

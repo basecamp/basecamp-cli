@@ -1,0 +1,7 @@
+task: Copy to-do 4567, with its comments, into the Launch list of the Marketing project
+tags: [domain, copy]
+accept:
+  - '^(?=.*\btodos copy )(?=.*\b4567\b)(?=.*--to-project[ =]["'']?Marketing)(?=.*--to-list[ =]["'']?Launch)(?=.*--include-comments)'
+reject:
+  - '\btodos (move|position) '
+  - 'basecamp api'

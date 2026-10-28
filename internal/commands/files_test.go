@@ -1748,8 +1748,6 @@ func TestFilesMoveWithoutDestinationShowsHelp(t *testing.T) {
 
 func TestFilesMoveRefusesBadArgumentsBeforeTheWire(t *testing.T) {
 	cases := map[string][]string{
-		"--folder for --to":         {"123", "--folder", "456"},
-		"--vault beside --to":       {"123", "--to", "456", "--vault", "789"},
 		"zero position":             {"123", "--to", "456", "--position", "0"},
 		"negative position":         {"123", "--to", "456", "--position", "-1"},
 		"non-numeric destination":   {"123", "--to", "Designs"},
@@ -1790,7 +1788,7 @@ func TestFilesMoveExplainsRefusals(t *testing.T) {
 		{"vault into its own subfolder", 422, `{"error":"Parent must not be self or descendant"}`, output.CodeValidation, "", "Basecamp refused the move: Parent must not be self or descendant"},
 		{"inactive destination or item", 422, ``, output.CodeValidation, "active folder", "Basecamp refused the move"},
 		{"moves restricted", 403, ``, output.CodeForbidden, "permission", ""},
-		{"destination elsewhere", 404, `{"error":"Not found"}`, output.CodeNotFound, "same project", ""},
+		{"destination elsewhere", 404, `{"error":"Not found"}`, output.CodeNotFound, "basecamp files move 123 --to-folder 456", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
