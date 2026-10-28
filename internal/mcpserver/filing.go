@@ -60,7 +60,7 @@ var filingReads = map[string]recordingReader{
 	"CloudFile":       reader(API.CloudFiles, (*basecamp.CloudFilesService).Get),
 	"GoogleDocument":  reader(API.GoogleDocuments, (*basecamp.GoogleDocumentsService).Get),
 	"Vault":           reader(API.Vaults, (*basecamp.VaultsService).Get),
-	"Schedule::Entry": reader(API.Schedules, (*basecamp.SchedulesService).GetEntry),
+	"Schedule::Entry": seriesReader(reader(API.Schedules, (*basecamp.SchedulesService).GetEntry)),
 	"Question":        reader(API.Checkins, (*basecamp.CheckinsService).GetQuestion),
 	"Inbox::Forward":  reader(API.Forwards, (*basecamp.ForwardsService).Get),
 	"Todolist":        reader(API.Todolists, (*basecamp.TodolistsService).Get),
@@ -89,6 +89,38 @@ func reader[S, T any](service func(API) S, get func(S, context.Context, int64) (
 			return recordingRead{}, err
 		}
 		return recordingRead{record: raw, id: fields.ID, typ: fields.Type, parent: fields.Parent}, nil
+	}
+}
+
+// occurrenceType is what Basecamp answers a recurring event's read with: it
+// redirects to one occurrence, whose parent is the event.
+const occurrenceType = "Schedule::Entry::Occurrence"
+
+// seriesReader reads a recurring event as its series, which is what files: the
+// read names the event, with the occurrence it answered with kept as
+// occurrence_id. An occurrence's parent is the event, not the schedule, so the
+// record carries no parent.
+func seriesReader(read recordingReader) recordingReader {
+	return func(ctx context.Context, api API, id int64) (recordingRead, error) {
+		r, err := read(ctx, api, id)
+		if err != nil || r.typ != occurrenceType || r.parent == nil {
+			return r, err
+		}
+		fields := map[string]any{}
+		decoder := json.NewDecoder(bytes.NewReader(r.record))
+		decoder.UseNumber()
+		if err := decoder.Decode(&fields); err != nil {
+			return recordingRead{}, err
+		}
+		fields["occurrence_id"] = fields["id"]
+		fields["id"] = r.parent.ID
+		fields["type"] = r.parent.Type
+		delete(fields, "parent")
+		raw, err := json.Marshal(fields)
+		if err != nil {
+			return recordingRead{}, err
+		}
+		return recordingRead{record: raw, id: r.parent.ID, typ: r.parent.Type}, nil
 	}
 }
 
@@ -133,7 +165,7 @@ func filingOperation(kind basecamp.FilingType) *catalog.Operation {
 		"Composed in basecamp-sdk (RecordingsService." + verb + "AndWait): it reads the recording, resolves the destination, starts the " + lower + " once, waits up to a minute for Basecamp to finish it, and reads back the new recording. Not backed by any single Basecamp endpoint, so this action carries no method and no path.\n\n" +
 		"Returns the new recording, as its type's own get action returns it, with source_id naming the recording it came from. A " + lower + " always gives the recording a new id. A card lands in the card table's Triage, or Done if it is completed.\n\n" +
 		"Comments, card steps, check-in answers and other recordings that go with their parent are not filed on their own, and neither is a whole tool (a project's Docs & Files or card table itself).\n\n" +
-		"A failure says how far it got in error.type, and error.retry_safe says whether calling this action again is safe. destination_missing, destination_disabled and destination_ambiguous filed nothing and name what to pass instead (destination_disabled carries the tool_id that basecamp_automation enable_tool turns on; destination_ambiguous lists candidates for container_id). filing_refused filed nothing. filing_unsettled was still running when the wait ended: do not " + lower + " again; check it with get_filing and the filing_id it carries. filing_failed was started and reported failed by Basecamp. filed_unread was filed under recording_id but could not be read back."
+		"A failure says how far it got in error.type, and error.retry_safe says whether calling this action again is safe (a malformed call is refused as plain text instead). recording_unreadable and destination_unreadable are a read before the filing that failed, carrying the read's own error. destination_missing, destination_disabled and destination_ambiguous filed nothing and name what to pass instead (destination_disabled carries the tool_id that basecamp_automation enable_tool turns on; destination_ambiguous lists candidates for container_id). filing_refused filed nothing. filing_unsettled was still running when the wait ended: do not " + lower + " again; check it with get_filing and the filing_id it carries. filing_failed was started and reported failed by Basecamp. filed_unread was filed under recording_id but could not be read back."
 	if kind == basecamp.FilingCopy {
 		properties["include_comments"] = map[string]any{
 			"type":        "boolean",
@@ -260,7 +292,7 @@ func parseFilingRequest(kind basecamp.FilingType, op *catalog.Operation, params 
 func fileRecording(ctx context.Context, api API, req filingRequest) (json.RawMessage, error) {
 	src, err := filingReads[req.recordingType](ctx, api, req.recordingID)
 	if err != nil {
-		return nil, err
+		return nil, unreadable("recording_unreadable", fmt.Sprintf("Could not read %s %d", req.recordingType, req.recordingID), err)
 	}
 	if src.typ != req.recordingType {
 		return nil, fmt.Errorf("recording %d is a %s, not a %s", req.recordingID, src.typ, req.recordingType)
@@ -329,7 +361,7 @@ func fileRecording(ctx context.Context, api API, req filingRequest) (json.RawMes
 func destinationInProject(ctx context.Context, api API, container basecamp.FilingContainer, projectID int64) (int64, error) {
 	project, err := api.Projects().Get(ctx, projectID)
 	if err != nil {
-		return 0, err
+		return 0, unreadable("destination_unreadable", fmt.Sprintf("Could not read project %d", projectID), err)
 	}
 	toolKind := container
 	if container == basecamp.FilingIntoTodolist {
@@ -372,7 +404,7 @@ func destinationInProject(ctx context.Context, api API, container basecamp.Filin
 		for _, tool := range enabled {
 			lists, err := api.Todolists().List(ctx, tool.ID, nil)
 			if err != nil {
-				return 0, err
+				return 0, unreadable("destination_unreadable", fmt.Sprintf("Could not list the to-do lists in project %s's %s", project.Name, tool.Title), err)
 			}
 			for _, list := range lists.Todolists {
 				candidates = append(candidates, filingCandidate{ID: list.ID, Title: list.Title})
@@ -421,6 +453,12 @@ type filingCandidate struct {
 }
 
 func (f *filingError) Error() string { return f.Message }
+
+// unreadable is a read before the filing that failed: nothing was filed, so
+// trying again is safe, and the read's own error says whether it can work.
+func unreadable(kind, what string, err error) *filingError {
+	return &filingError{Type: kind, Message: fmt.Sprintf("%s, so nothing was filed: %v", what, err), RetrySafe: true}
+}
 
 func (f *filingError) result() *mcp.CallToolResult {
 	result, _ := gateway.JSONResult(map[string]any{"error": f})

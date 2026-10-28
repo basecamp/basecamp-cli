@@ -42,6 +42,11 @@ type fakeBasecamp struct {
 	parentType string
 	dock       []basecamp.DockItem
 	lists      []basecamp.Todolist
+	// recurring answers each read with an occurrence of the event read, as
+	// Basecamp does for a recurring event.
+	recurring bool
+	// unreadable answers reads of these paths with these statuses.
+	unreadable map[string]int
 	// listsIn overrides lists for the To-dos tool with that id.
 	listsIn map[string][]basecamp.Todolist
 	// start answers the POST that starts the filing; nil starts it.
@@ -61,6 +66,10 @@ func (f *fakeBasecamp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	path := r.URL.Path
+	if status, ok := f.unreadable[strings.TrimSuffix(path, ".json")]; ok {
+		f.json(w, status, map[string]any{"error": "no"})
+		return
+	}
 	switch {
 	case r.Method == http.MethodPost && (strings.HasSuffix(path, "/moves.json") || strings.HasSuffix(path, "/copies.json")):
 		f.starts++
@@ -91,6 +100,15 @@ func (f *fakeBasecamp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if id != fakeSourceID && id != fakeNewID {
 			f.t.Errorf("unexpected read: %s", path)
 			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if f.recurring {
+			f.json(w, http.StatusOK, map[string]any{
+				"id":     id + 1,
+				"type":   "Schedule::Entry::Occurrence",
+				"parent": map[string]any{"id": id, "type": "Schedule::Entry", "title": "Weekly"},
+				"bucket": map[string]any{"id": fakeProjectID, "name": "Dest", "type": "Project"},
+			})
 			return
 		}
 		f.json(w, http.StatusOK, map[string]any{
@@ -462,4 +480,44 @@ func TestFilingIsAWriteTheReadOnlyServerDrops(t *testing.T) {
 
 	text, isError := mcptest.CallText(t, session, "basecamp_recordings", map[string]any{"action": "describe", "params": map[string]any{"action": "get_filing"}})
 	assert.False(t, isError, "get_filing stays served read-only: %s", text)
+}
+
+func TestFilingFilesARecurringEventAsItsSeries(t *testing.T) {
+	fake := newFake(t, "Schedule::Entry", "Schedule")
+	fake.recurring = true
+	session := filingSession(t, fake, Config{})
+
+	answer, isError := file(t, session, moveAction, map[string]any{
+		"recording_id": fakeSourceID, "recording_type": "Schedule::Entry", "project_id": fakeProjectID,
+	})
+	require.False(t, isError, "%v", answer)
+	assert.Equal(t, fmt.Sprintf("/999/recordings/%d/moves.json", fakeSourceID), fake.started["path"], "the series is what moves")
+	assert.Equal(t, float64(fakeNewID), answer["id"])
+	assert.Equal(t, float64(fakeNewID+1), answer["occurrence_id"])
+	assert.Equal(t, "Schedule::Entry", answer["type"])
+	assert.Equal(t, float64(fakeSourceID), answer["source_id"])
+	assert.NotContains(t, answer, "parent")
+}
+
+func TestFilingTypesAFailedReadBeforeFiling(t *testing.T) {
+	t.Run("the recording", func(t *testing.T) {
+		fake := newFake(t, "Message", "Message::Board")
+		fake.unreadable = map[string]int{fmt.Sprintf("/999/messages/%d", fakeSourceID): http.StatusNotFound}
+		failure := failureOf(t, mustFail(t, filingSession(t, fake, Config{}), moveAction, map[string]any{
+			"recording_id": fakeSourceID, "recording_type": "Message", "project_id": fakeProjectID,
+		}))
+		assert.Equal(t, "recording_unreadable", failure["type"])
+		assert.Equal(t, true, failure["retry_safe"])
+		assert.Zero(t, fake.starts)
+	})
+	t.Run("the destination project", func(t *testing.T) {
+		fake := newFake(t, "Message", "Message::Board")
+		fake.unreadable = map[string]int{fmt.Sprintf("/999/projects/%d", fakeProjectID): http.StatusForbidden}
+		failure := failureOf(t, mustFail(t, filingSession(t, fake, Config{}), copyAction, map[string]any{
+			"recording_id": fakeSourceID, "recording_type": "Message", "project_id": fakeProjectID,
+		}))
+		assert.Equal(t, "destination_unreadable", failure["type"])
+		assert.Equal(t, true, failure["retry_safe"])
+		assert.Zero(t, fake.starts)
+	})
 }
