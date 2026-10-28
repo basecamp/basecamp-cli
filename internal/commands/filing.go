@@ -280,7 +280,10 @@ func runFilings(cmd *cobra.Command, app *appctx.App, scope followUpScope, filing
 		filed, outcome, err := fileRecording(cmd.Context(), app, f)
 		var e *output.Error
 		if err != nil {
-			e = output.AsError(err)
+			// The report keeps only each failure's text, so a 401's remedy
+			// for the credential sent is settled here, while the SDK error
+			// that App.Err would read is still attached.
+			e = output.AsError(app.WithAuthRemedy(err))
 			if worst == nil || outcome > worstOf {
 				worst, worstOf = e, outcome
 			}

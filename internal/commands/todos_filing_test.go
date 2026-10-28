@@ -640,3 +640,39 @@ func TestFilingFollowUpsNameTheProfileAndAnAccountGivenThisRun(t *testing.T) {
 		})
 	}
 }
+
+// A 401 partway through several filings must keep the remedy that fits the
+// credential sent, as a single filing's does: under a profile, a login to the
+// default one fixes nothing, and under BASECAMP_TOKEN no login does.
+func TestTodosFilingSeveralKeepsTheAuthRemedyForTheCredentialSent(t *testing.T) {
+	for name, tc := range map[string]struct {
+		envToken string
+		want     string
+	}{
+		"a profile":    {"", "Run: basecamp auth login -P work"},
+		"an env token": {"bc_at_env", "BASECAMP_TOKEN is set"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("BASECAMP_TOKEN", tc.envToken)
+			shortFilingWait(t)
+			transport := &mockTodoFilingTransport{postStatus: http.StatusUnauthorized}
+			app, buf := newTestAppWithTransport(t, transport)
+			app.Config.ActiveProfile = "work"
+
+			err := executeCommand(NewTodosCmd(), app, "copy", "456", "457", "--to-list", "901")
+			require.Error(t, err)
+			assert.Len(t, transport.posts, 2)
+			require.NoError(t, app.Err(err))
+
+			var envelope struct {
+				Code string `json:"code"`
+				Hint string `json:"hint"`
+			}
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+			assert.Equal(t, output.CodeAuth, envelope.Code)
+			assert.Contains(t, envelope.Hint, tc.want)
+			assert.NotRegexp(t, `basecamp auth login(\n|$)`, envelope.Hint, "the bare login hint is replaced")
+			assert.Contains(t, envelope.Hint, "run the command again for #456, #457 alone")
+		})
+	}
+}
