@@ -419,13 +419,22 @@ func TestTodosMoveToAListNameTwoListsShareIsAmbiguous(t *testing.T) {
 	assert.NotContains(t, e.Hint, "902", "only the lists with that name are candidates")
 }
 
-func TestTodosMoveToAProjectWithoutAListNamesTheProject(t *testing.T) {
-	transport := &mockTodoFilingTransport{}
-	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "456", "--to-project", "Bare")
-	e := requireUsageRefusal(t, run, transport)
+func TestTodosFilingToAProjectWithTodosTurnedOffSaysHowToTurnItOn(t *testing.T) {
+	for name, args := range map[string][]string{
+		"move":                {"move", "456", "--to-project", "Bare"},
+		"copy":                {"copy", "456", "--to-project", "Bare"},
+		"copy to a list name": {"copy", "456", "--to-project", "Bare", "--to-list", "Launch"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := &mockTodoFilingTransport{}
+			run := runTodoFilingCommand(t, transport, NewTodosCmd(), args...)
+			e := requireUsageRefusal(t, run, transport)
 
-	assert.Equal(t, output.CodeNotFound, e.Code)
-	assert.Equal(t, "Project Bare has no to-do list", e.Message)
+			assert.Equal(t, output.CodeNotFound, e.Code)
+			assert.Contains(t, e.Message, "is turned off")
+			assert.Equal(t, "Turn it on first with: basecamp tools enable 880 --in 888", e.Hint)
+		})
+	}
 }
 
 func TestTodosMoveRefusesADestinationBasecampRefuses(t *testing.T) {

@@ -828,9 +828,12 @@ func resolveFilingTodolist(cmd *cobra.Command, app *appctx.App, toProject, toLis
 		return list, requireFilingDestinationList(list)
 	}
 
-	lists, err := projectTodolists(cmd, app, projectID)
+	lists, todosets, allTodosets, err := projectTodolists(cmd, app, projectID)
 	if err != nil {
 		return nil, err
+	}
+	if len(todosets) == 0 {
+		return nil, noFilingContainerError(todosetContainer, allTodosets, projectID, projectLabel(cmd, app, projectID, projectName))
 	}
 	if toList == "" {
 		switch len(lists) {
@@ -886,20 +889,21 @@ func requireFilingDestinationList(list *basecamp.Todolist) error {
 
 // projectTodolists lists the active to-do lists in the to-dos tools on a
 // project's dock.
-func projectTodolists(cmd *cobra.Command, app *appctx.App, projectID string) ([]basecamp.Todolist, error) {
-	todosets, _, err := getDockTools(cmd.Context(), app, projectID, "todoset")
+// projectTodolists returns the lists in a project's enabled To-dos tools,
+// along with those tools and every To-dos tool on its dock.
+func projectTodolists(cmd *cobra.Command, app *appctx.App, projectID string) (lists []basecamp.Todolist, todosets, all []DockTool, err error) {
+	todosets, all, err = getDockTools(cmd.Context(), app, projectID, "todoset")
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	var lists []basecamp.Todolist
 	for _, todoset := range todosets {
 		result, err := app.Account().Todolists().List(cmd.Context(), todoset.ID, nil)
 		if err != nil {
-			return nil, convertSDKError(err)
+			return nil, nil, nil, convertSDKError(err)
 		}
 		lists = append(lists, result.Todolists...)
 	}
-	return lists, nil
+	return lists, todosets, all, nil
 }
 
 func ambiguousTodolistsError(lists []basecamp.Todolist) error {
