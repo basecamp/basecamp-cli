@@ -797,17 +797,20 @@ func existingAssigneeIDs(people []basecamp.Person) []int64 {
 }
 
 // assigneeRecord is a kind of record that takes assignees, with the command
-// that assigns someone to one that already exists.
+// that assigns someone to one that already exists. assignHint is formatted
+// with the record's ID and the people to name; when the command replaces the
+// whole set, those people include the assignees the record kept.
 type assigneeRecord struct {
 	noun       string
-	assignHint string // formatted with the record's ID
+	assignHint string
+	replaces   bool
 }
 
 var (
-	assigneeTodo     = assigneeRecord{noun: "to-do", assignHint: "basecamp assign %d --to <person>"}
-	assigneeCard     = assigneeRecord{noun: "card", assignHint: "basecamp assign %d --card --to <person>"}
-	assigneeCardStep = assigneeRecord{noun: "card step", assignHint: "basecamp assign %d --step --to <person>"}
-	assigneeSubtask  = assigneeRecord{noun: "subtask", assignHint: "basecamp subtasks update %d --assignees <person>"}
+	assigneeTodo     = assigneeRecord{noun: "to-do", assignHint: "basecamp assign %d --to %s --project <project>"}
+	assigneeCard     = assigneeRecord{noun: "card", assignHint: "basecamp assign %d --card --to %s --project <project>"}
+	assigneeCardStep = assigneeRecord{noun: "card step", assignHint: "basecamp assign %d --step --to %s --project <project>"}
+	assigneeSubtask  = assigneeRecord{noun: "subtask", assignHint: "basecamp subtasks update %d --assignees %s", replaces: true}
 )
 
 // checkAssigneesSaved fails when the saved record lacks a requested assignee.
@@ -827,6 +830,13 @@ func checkAssigneesSaved(kind assigneeRecord, id int64, requested []int64, saved
 		return nil
 	}
 
+	people := "<person>"
+	if kind.replaces {
+		for i := len(savedIDs) - 1; i >= 0; i-- {
+			people = strconv.FormatInt(savedIDs[i], 10) + "," + people
+		}
+	}
+
 	state := "it has no assignees"
 	if len(saved) > 0 {
 		names := make([]string, len(saved))
@@ -838,7 +848,7 @@ func checkAssigneesSaved(kind assigneeRecord, id int64, requested []int64, saved
 	return output.ErrUsageHint(
 		fmt.Sprintf("%s #%d was saved, but Basecamp did not assign %s: not a person who can be assigned there; %s",
 			kind.noun, id, strings.Join(dropped, ", "), state),
-		fmt.Sprintf("Assign it with "+kind.assignHint+", naming someone from basecamp people list --project <project>", id),
+		fmt.Sprintf("Assign it with "+kind.assignHint+", naming someone from basecamp people list --project <project>", id, people),
 	)
 }
 

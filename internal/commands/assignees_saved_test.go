@@ -143,6 +143,20 @@ func TestAssignBatchNamesTheItemThatDroppedTheAssignee(t *testing.T) {
 	assert.Contains(t, stderr.String(), "notice: Not assigned: 222: to-do #222 was saved, but Basecamp did not assign 822400739")
 }
 
+// Following the hint must not undo what was saved: subtasks update replaces
+// the whole set, so its hint carries the kept assignees, and assign needs the
+// project.
+func TestCheckAssigneesSavedHintKeepsWhatWasSaved(t *testing.T) {
+	kept := []basecamp.Person{{ID: 7, Name: "Ann"}, {ID: 8, Name: "Bo"}}
+
+	var e *output.Error
+	require.True(t, errors.As(checkAssigneesSaved(assigneeSubtask, 5, []int64{7, 8, 9}, kept), &e))
+	assert.Contains(t, e.Hint, "basecamp subtasks update 5 --assignees 7,8,<person>")
+
+	require.True(t, errors.As(checkAssigneesSaved(assigneeCard, 5, []int64{7, 8, 9}, kept), &e))
+	assert.Contains(t, e.Hint, "basecamp assign 5 --card --to <person> --project <project>")
+}
+
 func TestCheckAssigneesSavedNamesWhatTheRecordKept(t *testing.T) {
 	err := checkAssigneesSaved(assigneeCard, 7, []int64{1, 2, 3}, []basecamp.Person{{ID: 2, Name: "Ann"}})
 
