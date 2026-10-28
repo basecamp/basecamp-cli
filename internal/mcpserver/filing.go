@@ -145,9 +145,9 @@ var containerNouns = map[basecamp.FilingContainer]string{
 }
 
 func filingOperation(kind basecamp.FilingType) *catalog.Operation {
-	verb, action, id := "Move", moveAction, "MoveRecordingAndWait"
+	verb, verbs, action, id := "Move", "Moves", moveAction, "MoveRecordingAndWait"
 	if kind == basecamp.FilingCopy {
-		verb, action, id = "Copy", copyAction, "CopyRecordingAndWait"
+		verb, verbs, action, id = "Copy", "Copies", copyAction, "CopyRecordingAndWait"
 	}
 	lower := strings.ToLower(verb)
 	properties := map[string]any{
@@ -161,7 +161,7 @@ func filingOperation(kind basecamp.FilingType) *catalog.Operation {
 		"container_id": idSchema("The container to " + lower + " it into, of the recording's kind: a card table, message board, Docs & Files tool, schedule, Automatic Check-ins, Email Forwards or To-dos tool from a project's dock, or a to-do list for a to-do or to-do list group. A folder is not a container; pass its Docs & Files here and the folder as folder_id."),
 		"folder_id":    idSchema("A folder inside the destination Docs & Files to put it in. Only for documents, uploads, cloud files, Google documents and folders."),
 	}
-	doc := verb + "s a recording into another container, in its project or another one, as the web's " + verb + "… dialog does. " +
+	doc := verbs + " a recording into another container, in its project or another one, as the web's " + verb + "… dialog does. " +
 		"Composed in basecamp-sdk (RecordingsService." + verb + "AndWait): it reads the recording, resolves the destination, starts the " + lower + " once, waits up to a minute for Basecamp to finish it, and reads back the new recording. Not backed by any single Basecamp endpoint, so this action carries no method and no path.\n\n" +
 		"Returns the new recording, as its type's own get action returns it, with source_id naming the recording it came from. A " + lower + " always gives the recording a new id. A card lands in the card table's Triage, or Done if it is completed.\n\n" +
 		"Comments, card steps, check-in answers and other recordings that go with their parent are not filed on their own, and neither is a whole tool (a project's Docs & Files or card table itself).\n\n" +
