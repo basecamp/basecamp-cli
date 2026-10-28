@@ -22,11 +22,11 @@ import (
 
 func shortFilingWait(t *testing.T) {
 	t.Helper()
-	saved := cardFilingWait
-	cardFilingWait.first = time.Millisecond
-	cardFilingWait.max = 2 * time.Millisecond
-	cardFilingWait.total = 50 * time.Millisecond
-	t.Cleanup(func() { cardFilingWait = saved })
+	saved := filingWait
+	filingWait.first = time.Millisecond
+	filingWait.max = 2 * time.Millisecond
+	filingWait.total = 50 * time.Millisecond
+	t.Cleanup(func() { filingWait = saved })
 }
 
 func TestPollUntilStopsWhenDone(t *testing.T) {
@@ -52,7 +52,7 @@ func TestPollUntilGivesUpAfterTotal(t *testing.T) {
 
 func TestPollUntilHonoursCancellation(t *testing.T) {
 	shortFilingWait(t)
-	cardFilingWait.total = time.Minute
+	filingWait.total = time.Minute
 	ctx, cancel := context.WithCancel(context.Background())
 	checks := 0
 	done, err := pollUntil(ctx, func(context.Context) (bool, error) {
@@ -73,12 +73,15 @@ func TestPollUntilHonoursCancellation(t *testing.T) {
 //   - Card 456 is in project 123 ("Source"), column 777 on card table 555.
 //   - Project 999 ("Dest") has card table 900 (Triage 901); with twoTables it
 //     also has card table 950 ("Roadmap"), and always a disabled card table 960.
+//   - Project 888 ("Bare") has only a card table turned off, 880; project 777
+//     ("Chat only") has none.
 //   - A move to a column 404s, as for a column in another project.
 //   - A move or copy POST answers filing 70, pending. Each GET of the filing
 //     takes the next of statuses, holding the last; "completed" names card 4560.
 type mockFilingTransport struct {
 	twoTables      bool
 	duplicateTitle bool
+	numericTitle   bool
 	postStatus     int
 	postErr        error
 	postBody       string
@@ -131,9 +134,11 @@ func (m *mockFilingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 
 	switch {
 	case strings.HasSuffix(path, "/projects"):
-		return respond(200, `[{"id":123,"name":"Source"},{"id":999,"name":"Dest"},{"id":888,"name":"Bare"}]`)
+		return respond(200, `[{"id":123,"name":"Source"},{"id":999,"name":"Dest"},{"id":888,"name":"Bare"},{"id":777,"name":"Chat only"}]`)
 	case strings.HasSuffix(path, "/projects/888"):
 		return respond(200, `{"id":888,"dock":[{"name":"kanban_board","id":880,"title":"Off","enabled":false}]}`)
+	case strings.HasSuffix(path, "/projects/777"):
+		return respond(200, `{"id":777,"dock":[{"name":"chat","id":770,"title":"Chat","enabled":true}]}`)
 	case strings.HasSuffix(path, "/projects/123"):
 		return respond(200, `{"id":123,"dock":[{"name":"kanban_board","id":555,"title":"Board","enabled":true}]}`)
 	case strings.HasSuffix(path, "/projects/999"):
@@ -144,11 +149,16 @@ func (m *mockFilingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 		if m.duplicateTitle {
 			dock += `,{"name":"kanban_board","id":970,"title":"roadmap","enabled":true}`
 		}
+		if m.numericTitle {
+			dock += `,{"name":"kanban_board","id":980,"title":"2026","enabled":true}`
+		}
 		return respond(200, `{"id":999,"dock":[`+dock+`]}`)
 	case strings.HasSuffix(path, "/card_tables/555"):
 		return respond(200, `{"id":555,"title":"Board","bucket":{"id":123,"name":"Source"},"lists":[{"id":777,"title":"Developing"}]}`)
 	case strings.HasSuffix(path, "/card_tables/900"):
 		return respond(200, `{"id":900,"title":"Ideas","bucket":{"id":999,"name":"Dest"},"lists":[{"id":901,"title":"Triage","type":"Kanban::Triage"}]}`)
+	case m.numericTitle && strings.HasSuffix(path, "/card_tables/980"):
+		return respond(200, `{"id":980,"title":"2026","bucket":{"id":999,"name":"Dest"},"lists":[{"id":981,"title":"Triage","type":"Kanban::Triage"}]}`)
 	case strings.HasSuffix(path, "/card_tables/950"):
 		return respond(200, `{"id":950,"title":"Roadmap","bucket":{"id":999,"name":"Dest"},"lists":[{"id":951,"title":"Triage","type":"Kanban::Triage"}]}`)
 	case strings.HasSuffix(path, "/card_tables/columns/777"):
@@ -234,14 +244,29 @@ func TestCardsMoveToProjectWithSeveralCardTablesIsAmbiguous(t *testing.T) {
 	assert.Empty(t, transport.posts)
 }
 
+// A card table turned off is turned back on, never replaced by a second one,
+// so the refusal says which it is, as every other family's does.
+func TestCardsMoveToProjectWithCardTableTurnedOffSaysHowToTurnItOn(t *testing.T) {
+	for _, verb := range []string{"move", "copy"} {
+		transport := &mockFilingTransport{}
+		run := runFilingCommand(t, transport, verb, "456", "--to-project", "Bare")
+		e := requireFilingError(t, run)
+
+		assert.Equal(t, output.CodeNotFound, e.Code)
+		assert.Equal(t, "Bare's card table (Off) is turned off, so nothing can be moved or copied into it", e.Message)
+		assert.Equal(t, "Turn it on first with: basecamp tools enable 880 --in 888", e.Hint)
+		assert.Empty(t, transport.posts)
+	}
+}
+
 func TestCardsMoveToProjectWithoutCardTableNamesTheProject(t *testing.T) {
 	transport := &mockFilingTransport{}
-	run := runFilingCommand(t, transport, "move", "456", "--to-project", "Bare")
+	run := runFilingCommand(t, transport, "move", "456", "--to-project", "Chat only")
 	e := requireFilingError(t, run)
 
 	assert.Equal(t, output.CodeNotFound, e.Code)
-	assert.Equal(t, "Project Bare has no card table", e.Message)
-	assert.NotEmpty(t, e.Hint)
+	assert.Equal(t, "Project Chat only has no card table", e.Message)
+	assert.Equal(t, "Pick a project that has a card table", e.Hint)
 	assert.Empty(t, transport.posts)
 }
 
@@ -264,7 +289,7 @@ func TestCardsCopyThatFailsUpstreamIsNotRetryable(t *testing.T) {
 
 	assert.False(t, e.Retryable, "a 502 can follow a copy Basecamp already started")
 	assert.Contains(t, e.Hint, "may have started the copy")
-	assert.Contains(t, e.Hint, "basecamp cards list --in 999 --card-table 900")
+	assert.Contains(t, e.Hint, "basecamp recordings list Kanban::Card --in 999 --status active --all")
 	assert.Len(t, transport.posts, 1)
 }
 
@@ -279,7 +304,7 @@ func TestCardsCopyWithNoReadableAnswerMayHaveStarted(t *testing.T) {
 
 			assert.False(t, e.Retryable, "Basecamp may have started the copy")
 			assert.Contains(t, e.Hint, "may have started the copy")
-			assert.Contains(t, e.Hint, "basecamp cards list --in 999 --card-table 900")
+			assert.Contains(t, e.Hint, "basecamp recordings list Kanban::Card --in 999 --status active --all")
 			assert.Len(t, transport.posts, 1)
 		})
 	}
@@ -315,14 +340,13 @@ func TestCardsCopyThatIsRateLimitedStaysRetryable(t *testing.T) {
 }
 
 func TestAcceptedCopyStaysNotRetryableWhenTheWaitHitsTheRateLimitGate(t *testing.T) {
-	f := cardFiling{
-		kind:  basecamp.FilingCopy,
-		card:  &basecamp.Card{ID: 456},
-		table: &basecamp.CardTable{ID: 900, Title: "Ideas", Bucket: &basecamp.Bucket{ID: 999}},
-	}
+	f := cardFiling(nil, basecamp.FilingCopy,
+		&basecamp.Card{ID: 456},
+		&basecamp.CardTable{ID: 900, Title: "Ideas", Bucket: &basecamp.Bucket{ID: 999}},
+		false)
 	gate := &resilience.GateError{Message: "rate limited by a recent 429", Hint: "Re-run in 30s"}
 
-	e := output.AsError(stillFilingError(f, "copying", gate))
+	e := output.AsError(stillFilingError(f, 70, gate))
 
 	assert.Equal(t, output.CodeInProgress, e.Code)
 	assert.False(t, e.Retryable, "the copy was accepted, so re-running makes a second one")
@@ -360,6 +384,18 @@ func TestCardsMoveToExplicitCardTable(t *testing.T) {
 			assert.Equal(t, float64(4560), run.envelope.Data["id"])
 		})
 	}
+}
+
+// A flat API URL names no project, and its id can be a card table's title
+// too. A URL that names no card table of the project is refused, never read as
+// that title.
+func TestCardsCardTableURLThatNamesNoTableIsNeverATitle(t *testing.T) {
+	transport := &mockFilingTransport{numericTitle: true, statuses: []string{"completed"}}
+	url := "https://3.basecampapi.com/99999/card_tables/2026.json"
+	e := requireFilingError(t, runFilingCommand(t, transport, "copy", "456", "--to-project", "Dest", "--to-card-table", url))
+	assert.Equal(t, output.CodeNotFound, e.Code)
+	assert.Contains(t, e.Message, url)
+	assert.Empty(t, transport.posts)
 }
 
 func TestCardsMoveRefusesItsOwnCardTable(t *testing.T) {
@@ -406,7 +442,7 @@ func TestCardsMoveStillRunningWhenTheWaitRunsOut(t *testing.T) {
 
 	assert.Equal(t, output.CodeInProgress, e.Code)
 	assert.Contains(t, e.Message, "still moving card #456")
-	assert.Contains(t, e.Hint, "basecamp cards show 456")
+	assert.Contains(t, e.Hint, "basecamp filings show 70")
 	assert.Len(t, transport.posts, 1, "the move is never sent twice")
 	assert.Greater(t, transport.filingGet, 1)
 }
@@ -441,18 +477,8 @@ func TestCardsCopyStillRunningSaysNotToCopyAgain(t *testing.T) {
 
 	assert.Equal(t, output.CodeInProgress, e.Code)
 	assert.Contains(t, e.Hint, "Do not copy it again")
-	assert.Contains(t, e.Hint, "basecamp cards list --in 999 --card-table 900")
+	assert.Contains(t, e.Hint, "basecamp filings show 70")
 	assert.Len(t, transport.posts, 1)
-}
-
-func TestCardsCopyRefusesTheSourceCardTableFlag(t *testing.T) {
-	transport := &mockFilingTransport{}
-	run := runFilingCommand(t, transport, "copy", "456", "--card-table", "555")
-	e := requireFilingError(t, run)
-
-	assert.Equal(t, output.CodeUsage, e.Code)
-	assert.Contains(t, e.Hint, "--to-card-table")
-	assert.Empty(t, transport.posts)
 }
 
 func TestCardsMoveToAForeignColumnPointsAtCrossProjectMoves(t *testing.T) {

@@ -19,6 +19,9 @@ ARG basecamp message 01 [body]
 ARG basecamp react 00 <content>
 ARG basecamp reopen 00 <id|url>...
 ARG basecamp todo 00 <content>
+ARG basecamp todos move 00 <id|url>
+ARG basecamp todos position 00 <id|url>
+ARG basecamp todos reorder 00 <id|url>
 ARG basecamp unassign 00 <id>
 ARG basecamp unassign 00 <todo_id>
 ARG basecamp upload archive 00 <id|url>
@@ -1502,3 +1505,11 @@ FLAG basecamp checkin question notify --digest-include-unanswered type=bool
 FLAG basecamp checkin question notify --no-digest-include-unanswered type=bool
 FLAG basecamp checkins question notify --digest-include-unanswered type=bool
 FLAG basecamp checkins question notify --no-digest-include-unanswered type=bool
+ARG basecamp docs move 00 <id|url>
+ARG basecamp documents move 00 <id|url>
+ARG basecamp file move 00 <id|url>
+ARG basecamp files move 00 <id|url>
+ARG basecamp folders move 00 <id|url>
+ARG basecamp vault move 00 <id|url>
+ARG basecamp vaults move 00 <id|url>
+ARG basecamp tools move 00 <id>

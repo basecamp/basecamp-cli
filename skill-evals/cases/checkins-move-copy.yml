@@ -1,0 +1,11 @@
+task: Copy check-in question 2468 to the Marketing project's automatic check-ins
+tags: [move-copy, workflow]
+mocks:
+  - match: '^(checkins|checkin) question copy(?!.*--help)'
+    output: '{"ok":true,"data":{"id":24680,"source_id":2468,"type":"Question"},"summary":"Copied question #2468 to Marketing › Automatic Check-ins as question #24680"}'
+accept:
+  - '^(checkins|checkin) question copy (?=.*\b2468\b)(?=.*--to-project \W?Marketing)(?!.*--help)'
+reject:
+  - '^(checkins|checkin) question (create|update)'
+  - '^recordings\b'
+max_commands: 4

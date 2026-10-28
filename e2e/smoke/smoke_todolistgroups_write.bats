@@ -41,3 +41,16 @@ setup_file() {
   assert_success
   assert_json_value '.ok' 'true'
 }
+
+@test "todolistgroups copy copies a group into its own list" {
+  local id_file="$BATS_FILE_TMPDIR/group_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No group created in prior test"
+  local gid
+  gid=$(<"$id_file")
+
+  run_smoke basecamp todolistgroups copy "$gid" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.source_id' "$gid"
+  assert_json_not_null '.data.id'
+}
