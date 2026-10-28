@@ -62,6 +62,7 @@ the copy.
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -79,25 +80,26 @@ the copy.
 				}
 				return convertSDKError(err)
 			}
-			return app.OK(filing, filingReport(filing)...)
+			return app.OK(filing, filingReport(filing, scope.args(app.Config.AccountID))...)
 		},
 	}
 }
 
-// filingReport summarizes a filing by its status, with what to do next.
-func filingReport(filing *basecamp.Filing) []output.ResponseOption {
+// filingReport summarizes a filing by its status, with what to do next. scope
+// is the --profile and --account each next command needs from a fresh shell.
+func filingReport(filing *basecamp.Filing, scope string) []output.ResponseOption {
 	verb, past := "move", "Moved"
 	if filing.Type == basecamp.FilingCopy {
 		verb, past = "copy", "Copied"
 	}
-	again := output.Breadcrumb{Action: "check", Cmd: fmt.Sprintf("basecamp filings show %d", filing.ID), Description: "Check it again"}
+	again := output.Breadcrumb{Action: "check", Cmd: fmt.Sprintf("basecamp filings show %d%s", filing.ID, scope), Description: "Check it again"}
 
 	switch dest := filing.DestinationRecording; {
 	case filing.Status == basecamp.FilingCompleted && dest != nil:
 		summary := fmt.Sprintf("%s #%d as %s #%d", past, filing.SourceRecordingID, dest.Type, dest.ID)
 		return []output.ResponseOption{
 			output.WithSummary(summary),
-			output.WithBreadcrumbs(output.Breadcrumb{Action: "show", Cmd: filedShowCmd(dest), Description: "View it"}),
+			output.WithBreadcrumbs(output.Breadcrumb{Action: "show", Cmd: filedShowCmd(dest) + scope, Description: "View it"}),
 		}
 	case filing.Status == basecamp.FilingFailed && filing.Type == basecamp.FilingCopy:
 		return []output.ResponseOption{

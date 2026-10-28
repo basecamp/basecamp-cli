@@ -619,6 +619,27 @@ func TestFilingFollowUpsNameTheProfileAndAnAccountGivenThisRun(t *testing.T) {
 			&mockFilingTransport{statuses: []string{"completed"}}, NewCardsCmd,
 			[]string{"move", "456", "--to-project", "Dest"}, "basecamp cards show 4560 --in 999" + scope,
 		},
+		"a copy still running": {
+			&mockTodoFilingTransport{stuck: map[string]bool{"456": true}}, NewTodosCmd,
+			[]string{"copy", "456", "--to-list", "901"}, "basecamp filings show 456" + scope + ",",
+		},
+		"a message copy that may have started": {
+			func() *familyTransport {
+				transport := messagesTransport()
+				transport.refuse = map[int64]int{456: 502}
+				return transport
+			}(), NewMessagesCmd,
+			[]string{"copy", "456", "--to-project", "Dest"},
+			"basecamp recordings list Message --in 999 --status active --all" + scope + ", then",
+		},
+		"a message move still running": {
+			func() *familyTransport {
+				transport := messagesTransport()
+				transport.stuck = map[int64]bool{456: true}
+				return transport
+			}(), NewMessagesCmd,
+			[]string{"move", "456", "--to-project", "Dest"}, "basecamp filings show 456" + scope + ",",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			shortFilingWait(t)

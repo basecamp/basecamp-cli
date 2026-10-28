@@ -94,6 +94,29 @@ func TestFilingsShowCompletedNamesTheRecordItMade(t *testing.T) {
 
 // Basecamp's docs say a move is safe to retry but say nothing of what a failed
 // copy leaves behind, so only a failed move reads as safe to run again.
+// A filing is read in the account and profile that started it, so the next
+// command it prints names both when this run was given them.
+func TestFilingsShowNamesTheProfileAndAnAccountGivenThisRun(t *testing.T) {
+	const scope = " --profile work --account 99999"
+	for name, tc := range map[string]struct{ body, want string }{
+		"still running": {`{"id":4,"status":"processing","type":"Copy","source_recording_id":456}`, "basecamp filings show 4" + scope},
+		"completed":     {`{"id":4,"status":"completed","type":"Move","source_recording_id":456,"destination_recording":{"id":4560,"type":"Message"}}`, "basecamp messages show 4560" + scope},
+	} {
+		t.Run(name, func(t *testing.T) {
+			app, buf := newTestAppWithTransport(t, filingTransport{status: 200, body: tc.body})
+			app.Flags.Hints = true
+			app.Config.ActiveProfile = "work"
+			app.Config.Sources = map[string]string{"account_id": "flag"}
+			require.NoError(t, executeCommand(NewFilingsCmd(), app, "show", "4"))
+
+			var shown filingsShown
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &shown))
+			require.Len(t, shown.Breadcrumbs, 1)
+			assert.Equal(t, tc.want, shown.Breadcrumbs[0].Cmd)
+		})
+	}
+}
+
 func TestFilingsShowFailedIsSafeToRetryOnlyForAMove(t *testing.T) {
 	moved, err := showFiling(t, 200, `{"id":4,"status":"failed","type":"Move","source_recording_id":456}`)
 	require.NoError(t, err)
