@@ -43,6 +43,11 @@ type recordingFiling struct {
 	landing string
 	// read reads back the recording the filing made, by its new id.
 	read func(ctx context.Context, id int64) (filedRecording, error)
+
+	// scope is the --profile and --account every command the filing prints
+	// must carry to reach this account from a fresh shell. runFiling and
+	// runFilings set it.
+	scope string
 }
 
 // filedRecording is a recording that a filing made, read back for output:
@@ -74,8 +79,10 @@ const (
 	filingUnsettled
 )
 
-// runFiling files one recording and outputs what it made.
-func runFiling(cmd *cobra.Command, app *appctx.App, f recordingFiling) error {
+// runFiling files one recording and outputs what it made. scope is read
+// before the command resolved its account, as newFollowUpScope requires.
+func runFiling(cmd *cobra.Command, app *appctx.App, scope followUpScope, f recordingFiling) error {
+	f.scope = scope.args(app.Config.AccountID)
 	filed, _, err := fileRecording(cmd.Context(), app, f)
 	if err != nil {
 		return err
@@ -118,7 +125,7 @@ func fileRecording(ctx context.Context, app *appctx.App, f recordingFiling) (fil
 		return filedRecording{}, filingUnsettled, &output.Error{
 			Code:    output.CodeAPI,
 			Message: fmt.Sprintf("Basecamp could not %s %s #%d to %s", verb, f.noun, f.sourceID, f.destination),
-			Hint:    fmt.Sprintf("Check the %s with: %s %d", f.noun, f.showCmd, f.sourceID),
+			Hint:    fmt.Sprintf("Check the %s with: %s", f.noun, f.show(f.sourceID)),
 		}
 	case filing.Status != basecamp.FilingCompleted || filing.DestinationRecording == nil:
 		return filedRecording{}, filingUnsettled, stillFilingError(f, waitErr)
@@ -130,11 +137,24 @@ func fileRecording(ctx context.Context, app *appctx.App, f recordingFiling) (fil
 		return filedRecording{id: newID}, filingUnread, &output.Error{
 			Code:    output.CodeAPI,
 			Message: fmt.Sprintf("%s %s #%d as %s #%d, but could not read the new %s", past, f.noun, f.sourceID, f.noun, newID, f.noun),
-			Hint:    fmt.Sprintf("Show it with: %s %d", f.showCmd, newID),
+			Hint:    "Show it with: " + f.show(newID),
 			Cause:   textCause(err),
 		}
 	}
+	for i := range filed.breadcrumbs {
+		filed.breadcrumbs[i].Cmd += f.scope
+	}
 	return filed, filingDone, nil
+}
+
+// show is the command that shows a recording of this kind by its id.
+func (f recordingFiling) show(id int64) string {
+	return fmt.Sprintf("%s %d%s", f.showCmd, id, f.scope)
+}
+
+// check is the command that lists where a copy lands.
+func (f recordingFiling) check() string {
+	return f.lookFor + f.scope
 }
 
 func (f recordingFiling) start(ctx context.Context, app *appctx.App) (*basecamp.Filing, error) {
@@ -172,7 +192,7 @@ func copyStartError(f recordingFiling, err error) error {
 	}
 	unsure := *e
 	unsure.Retryable = false
-	unsure.Hint = "Basecamp may have started the copy before this failed, and copying again makes another copy. Check first: " + f.lookFor
+	unsure.Hint = "Basecamp may have started the copy before this failed, and copying again makes another copy. Check first: " + f.check()
 	return &unsure
 }
 
@@ -187,9 +207,9 @@ func refusedBeforeFiling(e *output.Error) bool {
 // finished when the wait ended.
 func stillFilingError(f recordingFiling, waitErr error) error {
 	_, progressive, _ := f.verbs()
-	hint := fmt.Sprintf("Once it lands, %s %d returns the %s at its new id", f.showCmd, f.sourceID, f.noun)
+	hint := fmt.Sprintf("Once it lands, %s returns the %s at its new id", f.show(f.sourceID), f.noun)
 	if f.kind == basecamp.FilingCopy {
-		hint = fmt.Sprintf("Do not copy it again, which makes another copy. %s: %s", f.landing, f.lookFor)
+		hint = fmt.Sprintf("Do not copy it again, which makes another copy. %s: %s", f.landing, f.check())
 	}
 	return &output.Error{
 		Code:    output.CodeInProgress,
@@ -235,9 +255,9 @@ func (filed filedRecording) place() string {
 // how far each got, and asks to run again only the ones Basecamp refused
 // before filing: running again one that was filed, or may have been, moves it
 // twice or makes another copy.
-func runFilings(cmd *cobra.Command, app *appctx.App, filings []recordingFiling) error {
+func runFilings(cmd *cobra.Command, app *appctx.App, scope followUpScope, filings []recordingFiling) error {
 	if len(filings) == 1 {
-		return runFiling(cmd, app, filings[0])
+		return runFiling(cmd, app, scope, filings[0])
 	}
 	verb, _, past := filings[0].verbs()
 	nouns := output.PluralNoun(filings[0].noun)
@@ -256,6 +276,7 @@ func runFilings(cmd *cobra.Command, app *appctx.App, filings []recordingFiling) 
 		worstOf     filingOutcome
 	)
 	for _, f := range filings {
+		f.scope = scope.args(app.Config.AccountID)
 		filed, outcome, err := fileRecording(cmd.Context(), app, f)
 		var e *output.Error
 		if err != nil {
@@ -278,12 +299,12 @@ func runFilings(cmd *cobra.Command, app *appctx.App, filings []recordingFiling) 
 			}
 			report = append(report, fmt.Sprintf("#%d refused: %s", f.sourceID, e.Message))
 		case filingUnread:
-			unread = append(unread, fmt.Sprintf("#%d is #%d now (%s %d)", f.sourceID, filed.id, f.showCmd, filed.id))
+			unread = append(unread, fmt.Sprintf("#%d is #%d now (%s)", f.sourceID, filed.id, f.show(filed.id)))
 			report = append(report, fmt.Sprintf("#%d %s as #%d, not read back", f.sourceID, strings.ToLower(past), filed.id))
 		case filingUnsettled:
 			check := e.Hint
 			if check == "" {
-				check = fmt.Sprintf("Check it with: %s %d", f.showCmd, f.sourceID)
+				check = "Check it with: " + f.show(f.sourceID)
 			}
 			if _, seen := unsettled[check]; !seen {
 				checks = append(checks, check)

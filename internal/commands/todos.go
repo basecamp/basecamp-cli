@@ -2525,6 +2525,7 @@ func fileTodos(cmd *cobra.Command, kind basecamp.FilingType, args []string, toPr
 	}
 
 	app := appctx.FromContext(cmd.Context())
+	scope := newFollowUpScope(app)
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
@@ -2600,7 +2601,7 @@ func fileTodos(cmd *cobra.Command, kind basecamp.FilingType, args []string, toPr
 		}
 		filings = append(filings, todoFiling(app, kind, todo, into, includeComments))
 	}
-	return runFilings(cmd, app, filings)
+	return runFilings(cmd, app, scope, filings)
 }
 
 // requireFilableTodo refuses what the to-do read returned when it is not a

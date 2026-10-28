@@ -1397,6 +1397,7 @@ Basecamp to finish the move and shows the card where it landed.`,
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
@@ -1407,7 +1408,7 @@ Basecamp to finish the move and shows the card where it landed.`,
 				if err != nil {
 					return err
 				}
-				return moveCardToCardTable(cmd, app, card.id, *project, card.project, toProject, toCardTable)
+				return moveCardToCardTable(cmd, app, scope, card.id, *project, card.project, toProject, toCardTable)
 			}
 
 			cardIDStr, urlProjectID, err := extractWithProject(args[0])
@@ -1832,6 +1833,7 @@ the new card.`,
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -1865,7 +1867,7 @@ the new card.`,
 				}
 			}
 
-			return runFiling(cmd, app, cardFiling(app, basecamp.FilingCopy, card, table, includeComments))
+			return runFiling(cmd, app, scope, cardFiling(app, basecamp.FilingCopy, card, table, includeComments))
 		},
 	}
 
@@ -1920,7 +1922,7 @@ func requireFilableCard(card *basecamp.Card, requestedID int64) error {
 // moveCardToCardTable moves a card into another card table, usually in
 // another project, as the web's Move… dialog does. A move within the card's
 // own table is a column change, which --to makes directly.
-func moveCardToCardTable(cmd *cobra.Command, app *appctx.App, cardID int64, flagProject, urlProjectID, toProject, toCardTable string) error {
+func moveCardToCardTable(cmd *cobra.Command, app *appctx.App, scope followUpScope, cardID int64, flagProject, urlProjectID, toProject, toCardTable string) error {
 	table, err := resolveFilingTable(cmd, app, toProject, toCardTable)
 	if err != nil {
 		return err
@@ -1941,7 +1943,7 @@ func moveCardToCardTable(cmd *cobra.Command, app *appctx.App, cardID int64, flag
 			fmt.Sprintf("Move it between that table's columns with: basecamp cards move %d --to <column> --card-table %d --in %d", cardID, table.ID, cardTableProjectID(table)),
 		)
 	}
-	return runFiling(cmd, app, cardFiling(app, basecamp.FilingMove, card, table, false))
+	return runFiling(cmd, app, scope, cardFiling(app, basecamp.FilingMove, card, table, false))
 }
 
 // resolveFilingTable finds the card table named by --to-project and

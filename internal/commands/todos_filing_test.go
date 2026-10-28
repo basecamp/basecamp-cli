@@ -576,3 +576,67 @@ func TestTodosRefuseATodoNamedTwiceBeforeFilingAny(t *testing.T) {
 		})
 	}
 }
+
+// A follow-up a filing prints must reach the same profile and account in a
+// fresh shell: a copy's recovery listing that ran against the default account
+// would miss the copy and invite a second one.
+func TestFilingFollowUpsNameTheProfileAndAnAccountGivenThisRun(t *testing.T) {
+	const scope = " --profile work --account 99999"
+	todoListing := "basecamp recordings list Todo --in 999 --status active --sort created_at --direction desc --all" + scope
+	for name, tc := range map[string]struct {
+		transport http.RoundTripper
+		group     func() *cobra.Command
+		args      []string
+		want      string
+	}{
+		"a copy that may have started": {
+			&mockTodoFilingTransport{drop: map[string]bool{"456": true}}, NewTodosCmd,
+			[]string{"copy", "456", "--to-list", "901"}, todoListing,
+		},
+		"several copies, one may have started": {
+			&mockTodoFilingTransport{drop: map[string]bool{"457": true}}, NewTodosCmd,
+			[]string{"copy", "456", "457", "--to-list", "901"}, todoListing,
+		},
+		"a move not read back": {
+			&mockTodoFilingTransport{unreadable: map[string]bool{"4561": true}}, NewTodosCmd,
+			[]string{"move", "456", "--to-list", "901"}, "basecamp todos show 4561" + scope,
+		},
+		"several moves, one not read back": {
+			&mockTodoFilingTransport{unreadable: map[string]bool{"4571": true}}, NewTodosCmd,
+			[]string{"move", "456", "457", "--to-list", "901"}, "basecamp todos show 4571" + scope,
+		},
+		"a moved to-do's breadcrumb": {
+			&mockTodoFilingTransport{}, NewTodosCmd,
+			[]string{"move", "456", "--to-list", "901"}, "basecamp todos show 4561" + scope,
+		},
+		"a list copy that may have started": {
+			&mockTodoFilingTransport{postStatus: 502}, NewTodolistsCmd,
+			[]string{"copy", "310", "--to-project", "Dest"},
+			"basecamp recordings list Todolist --in 999 --status active --sort created_at --direction desc --all" + scope,
+		},
+		"a card copy that may have started": {
+			&mockFilingTransport{postStatus: 502}, NewCardsCmd,
+			[]string{"copy", "456", "--to-project", "Dest"},
+			"basecamp recordings list Kanban::Card --in 999 --status active --sort created_at --direction desc --all" + scope,
+		},
+		"a card move's breadcrumb": {
+			&mockFilingTransport{statuses: []string{"completed"}}, NewCardsCmd,
+			[]string{"move", "456", "--to-project", "Dest"}, "basecamp cards show 4560 --in 999" + scope,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			shortFilingWait(t)
+			app, buf := newTestAppWithTransport(t, tc.transport)
+			app.Flags.Hints = true
+			app.Config.ActiveProfile = "work"
+			app.Config.Sources = map[string]string{"account_id": "flag"}
+
+			err := executeCommand(tc.group(), app, tc.args...)
+			shown := buf.String()
+			if err != nil {
+				shown = output.AsError(err).Hint
+			}
+			assert.Contains(t, shown, tc.want)
+		})
+	}
+}

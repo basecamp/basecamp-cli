@@ -1034,6 +1034,7 @@ func fileTodolist(cmd *cobra.Command, kind basecamp.FilingType, arg, flagProject
 	}
 
 	app := appctx.FromContext(cmd.Context())
+	scope := newFollowUpScope(app)
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
@@ -1066,7 +1067,7 @@ func fileTodolist(cmd *cobra.Command, kind basecamp.FilingType, arg, flagProject
 		return err
 	}
 	f.includeComments = includeComments
-	return runFiling(cmd, app, f)
+	return runFiling(cmd, app, scope, f)
 }
 
 // validateTodolistDestination checks the destination flags before any request.
