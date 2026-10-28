@@ -2,7 +2,7 @@ task: Earlier I asked you to copy to-do 4567 to the Marketing project, and it sa
 tags: [domain, copy]
 mocks:
   - match: 'filings show[ =]735(?!.*--help)'
-    output: '{"ok":true,"data":{"id":735,"status":"completed","copy_id":9001},"summary":"Copied #4567 as Todo #9001"}'
+    output: '{"ok":true,"data":{"id":735,"status":"completed","type":"Copy","source_recording_id":4567,"destination_recording":{"id":9001,"type":"Todo"}},"summary":"Copied #4567 as Todo #9001"}'
 expect_sequence:
   - match: 'filings show[ =]735(?!.*--help)'
 reject:
