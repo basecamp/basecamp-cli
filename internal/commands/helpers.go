@@ -12,6 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
+
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/dateparse"
@@ -922,4 +924,13 @@ func projectFlagChanged(cmd *cobra.Command) bool {
 		return true
 	}
 	return false
+}
+
+// recordProject names a record's project for breadcrumbs. A record read by
+// its account-wide ID names its own project, so its read needs none.
+func recordProject(bucket *basecamp.Bucket) string {
+	if bucket == nil {
+		return "<project>"
+	}
+	return strconv.FormatInt(bucket.ID, 10)
 }

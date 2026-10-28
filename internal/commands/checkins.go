@@ -258,11 +258,11 @@ func newCheckinsQuestionCmd(project *string) *cobra.Command {
 		if len(args) == 0 {
 			return missingArg(cmd, "<id|url>")
 		}
-		return runCheckinsQuestionShow(cmd, *project, args[0], cf)
+		return runCheckinsQuestionShow(cmd, args[0], cf)
 	}
 
 	cmd.AddCommand(
-		newCheckinsQuestionShowCmd(project),
+		newCheckinsQuestionShowCmd(),
 		newCheckinsQuestionCreateCmd(project),
 		newCheckinsQuestionUpdateCmd(project),
 		newCheckinsQuestionPauseCmd(),
@@ -526,14 +526,14 @@ func checkinsQuestionID(arg string) (int64, error) {
 	return id, nil
 }
 
-func newCheckinsQuestionShowCmd(project *string) *cobra.Command {
+func newCheckinsQuestionShowCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id|url>",
 		Short: "Show question details",
 		Long: `Display details of a check-in question.
 
 You can pass either a question ID or a Basecamp URL:
-  basecamp checkins question show 789 --in my-project
+  basecamp checkins question show 789
   basecamp checkins question show https://3.basecamp.com/123/buckets/456/questionnaires/questions/789`,
 		Args: cobra.ExactArgs(1),
 	}
@@ -541,44 +541,21 @@ You can pass either a question ID or a Basecamp URL:
 	cf := addCommentFlags(cmd, false)
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		return runCheckinsQuestionShow(cmd, *project, args[0], cf)
+		return runCheckinsQuestionShow(cmd, args[0], cf)
 	}
 
 	return cmd
 }
 
-func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string, cf *commentFlags) error {
+func runCheckinsQuestionShow(cmd *cobra.Command, questionIDStr string, cf *commentFlags) error {
 	app := appctx.FromContext(cmd.Context())
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Extract ID and project from URL if provided
-	questionIDStr, urlProjectID, err := extractWithProject(questionIDStr)
-	if err != nil {
-		return err
-	}
-
-	// Resolve project - use URL > flag > config, with interactive fallback
-	projectID := project
-	if projectID == "" && urlProjectID != "" {
-		projectID = urlProjectID
-	}
-	if projectID == "" {
-		projectID = app.Flags.Project
-	}
-	if projectID == "" {
-		projectID = app.Config.ProjectID
-	}
-	if projectID == "" {
-		if err := ensureProject(cmd, app); err != nil {
-			return err
-		}
-		projectID = app.Config.ProjectID
-	}
-
-	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	// The question is read by its account-wide ID, so no project is needed.
+	questionIDStr, _, err := extractWithProject(questionIDStr)
 	if err != nil {
 		return err
 	}
@@ -603,12 +580,12 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string, 
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "answers",
-				Cmd:         fmt.Sprintf("basecamp checkins answers %s --in %s", questionIDStr, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp checkins answers %s --in %s", questionIDStr, recordProject(question.Bucket)),
 				Description: "View answers",
 			},
 			output.Breadcrumb{
 				Action:      "questions",
-				Cmd:         fmt.Sprintf("basecamp checkins questions --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp checkins questions --in %s", recordProject(question.Bucket)),
 				Description: "View all questions",
 			},
 		),

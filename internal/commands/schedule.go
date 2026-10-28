@@ -45,7 +45,7 @@ For a cross-project view of your upcoming schedule, use 'basecamp reports schedu
 	cmd.AddCommand(
 		newScheduleShowCmd(&project, &scheduleID),
 		newScheduleEntriesCmd(&project, &scheduleID),
-		newScheduleEntryShowCmd(&project),
+		newScheduleEntryShowCmd(),
 		newScheduleCreateCmd(&project, &scheduleID),
 		newScheduleUpdateCmd(&project),
 		newScheduleSettingsCmd(&project, &scheduleID),
@@ -253,7 +253,7 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 	)
 }
 
-func newScheduleEntryShowCmd(project *string) *cobra.Command {
+func newScheduleEntryShowCmd() *cobra.Command {
 	var occurrenceDate string
 
 	cmd := &cobra.Command{
@@ -262,7 +262,7 @@ func newScheduleEntryShowCmd(project *string) *cobra.Command {
 		Long: `Display details of a schedule entry.
 
 You can pass either an entry ID or a Basecamp URL:
-  basecamp schedule show 789 --in my-project
+  basecamp schedule show 789
   basecamp schedule show https://3.basecamp.com/123/buckets/456/schedule_entries/789`,
 		Args: cobra.ExactArgs(1),
 	}
@@ -274,7 +274,7 @@ You can pass either an entry ID or a Basecamp URL:
 		if err := ensureAccount(cmd, app); err != nil {
 			return err
 		}
-		return runScheduleEntryShow(cmd, app, args[0], *project, occurrenceDate, cf)
+		return runScheduleEntryShow(cmd, app, args[0], occurrenceDate, cf)
 	}
 
 	cmd.Flags().StringVar(&occurrenceDate, "date", "", "Access specific occurrence of recurring entry (YYYYMMDD)")
@@ -283,11 +283,9 @@ You can pass either an entry ID or a Basecamp URL:
 	return cmd
 }
 
-func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project, occurrenceDate string, cf *commentFlags) error {
-	// Extract ID, project, and occurrence date from URL if provided.
-	// Uses Parse directly (instead of extractWithProject) to access the
-	// occurrence date that the URL encodes.
-	var urlProjectID string
+func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, occurrenceDate string, cf *commentFlags) error {
+	// Extract ID and occurrence date from URL if provided. The entry is read
+	// by its account-wide ID, so no project is needed.
 	if parsed := urlarg.Parse(entryID); parsed != nil {
 		if parsed.RecordingID == "" {
 			return output.ErrUsageHint(
@@ -296,33 +294,9 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 			)
 		}
 		entryID = parsed.RecordingID
-		urlProjectID = parsed.ProjectID
 		if occurrenceDate == "" {
 			occurrenceDate = parsed.OccurrenceDate
 		}
-	}
-
-	// Resolve project - use URL > flag > config, with interactive fallback
-	projectID := project
-	if projectID == "" && urlProjectID != "" {
-		projectID = urlProjectID
-	}
-	if projectID == "" {
-		projectID = app.Flags.Project
-	}
-	if projectID == "" {
-		projectID = app.Config.ProjectID
-	}
-	if projectID == "" {
-		if err := ensureProject(cmd, app); err != nil {
-			return err
-		}
-		projectID = app.Config.ProjectID
-	}
-
-	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-	if err != nil {
-		return err
 	}
 
 	entryIDInt, _ := strconv.ParseInt(entryID, 10, 64)
@@ -360,7 +334,7 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 				},
 				output.Breadcrumb{
 					Action:      "entries",
-					Cmd:         fmt.Sprintf("basecamp schedule entries --project %s", resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp schedule entries --project %s", recordProject(entry.Bucket)),
 					Description: "View all entries",
 				},
 			),
@@ -393,12 +367,12 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "update",
-				Cmd:         fmt.Sprintf("basecamp schedule update %s --summary \"...\" --project %s", entryID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp schedule update %s --summary \"...\" --project %s", entryID, recordProject(entry.Bucket)),
 				Description: "Update entry",
 			},
 			output.Breadcrumb{
 				Action:      "entries",
-				Cmd:         fmt.Sprintf("basecamp schedule entries --project %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp schedule entries --project %s", recordProject(entry.Bucket)),
 				Description: "View all entries",
 			},
 		),

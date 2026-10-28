@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -355,6 +357,51 @@ func TestCopyRecoveryListsWhereTheCopyShows(t *testing.T) {
 			e := runFamilyCommand(t, transport, tc.cmd(), args...).failure(t)
 			assert.Equal(t, output.CodeInProgress, e.Code)
 			assert.Contains(t, e.Hint, tc.want)
+		})
+	}
+}
+
+// A filing's breadcrumbs and its "once it lands" hint name a show command for
+// the record, which reads it by its account-wide ID, so each runs with no
+// project configured and names the record's own project in its breadcrumbs.
+func TestFilingAdvertisedShowCommandsNeedNoProject(t *testing.T) {
+	families := []struct {
+		group     string
+		transport func() *familyTransport
+		root      func() *cobra.Command
+		move      []string
+	}{
+		{"messages", messagesTransport, NewMessagesCmd, []string{"move"}},
+		{"files", filesFilingTransport, NewFilesCmd, []string{"move"}},
+		{"schedule", scheduleFilingTransport, NewScheduleCmd, []string{"move"}},
+		{"cards column", columnsTransport, NewCardsCmd, []string{"column", "move"}},
+		{"checkins question", checkinsFilingTransport, NewCheckinsCmd, []string{"question", "move"}},
+		{"forwards", forwardsFilingTransport, NewForwardsCmd, []string{"move"}},
+	}
+	showCmd := regexp.MustCompile(`basecamp [a-z ]+? show \d+( --in \d+)?`)
+	for _, f := range families {
+		t.Run(f.group, func(t *testing.T) {
+			args := append(slices.Clone(f.move), "456", "--to-project", "Dest")
+			transport := f.transport()
+			run := runFamilyCommand(t, transport, f.root(), args...)
+			require.NoError(t, run.err)
+
+			transport.stuck = map[int64]bool{456: true}
+			e := runFamilyCommand(t, transport, f.root(), args...).failure(t)
+			advertised := []string{run.envelope.Breadcrumbs[0].Cmd, showCmd.FindString(e.Hint)}
+
+			for _, line := range advertised {
+				require.Regexp(t, showCmd, line)
+				app, buf := newTestAppWithTransport(t, transport)
+				app.Config.ProjectID = ""
+				require.NoError(t, executeCommand(f.root(), app, strings.Fields(line)[2:]...), line)
+
+				var shown familyRun
+				require.NoError(t, json.Unmarshal(buf.Bytes(), &shown.envelope), line)
+				for _, crumb := range shown.envelope.Breadcrumbs {
+					assert.NotContains(t, crumb.Cmd, "<project>", line)
+				}
+			}
 		})
 	}
 }

@@ -34,7 +34,7 @@ that can receive forwarded emails.`,
 
 	cmd.AddCommand(
 		newForwardsListCmd(&project, &inboxID),
-		newForwardsShowCmd(&project),
+		newForwardsShowCmd(),
 		newForwardsInboxCmd(&project, &inboxID),
 		newForwardsRepliesCmd(&project),
 		newForwardsReplyCmd(&project),
@@ -277,7 +277,7 @@ func runForwardsListEverywhere(cmd *cobra.Command, app *appctx.App, inboxID stri
 	return app.OK(forwards, respOpts...)
 }
 
-func newForwardsShowCmd(project *string) *cobra.Command {
+func newForwardsShowCmd() *cobra.Command {
 	var cf *commentFlags
 
 	cmd := &cobra.Command{
@@ -286,7 +286,7 @@ func newForwardsShowCmd(project *string) *cobra.Command {
 		Long: `Display detailed information about an email forward.
 
 You can pass either a forward ID or a Basecamp URL:
-  basecamp forwards show 789 --in my-project
+  basecamp forwards show 789
   basecamp forwards show https://3.basecamp.com/123/buckets/456/inbox_forwards/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -296,8 +296,8 @@ You can pass either a forward ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			forwardIDStr, urlProjectID, err := extractWithProject(args[0])
+			// The forward is read by its account-wide ID, so no project is needed.
+			forwardIDStr, _, err := extractWithProject(args[0])
 			if err != nil {
 				return err
 			}
@@ -305,29 +305,6 @@ You can pass either a forward ID or a Basecamp URL:
 			forwardID, err := strconv.ParseInt(forwardIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid forward ID")
-			}
-
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
 			}
 
 			forward, err := app.Account().Forwards().Get(cmd.Context(), forwardID)
@@ -349,12 +326,12 @@ You can pass either a forward ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "replies",
-						Cmd:         fmt.Sprintf("basecamp forwards replies %s --in %s", forwardIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp forwards replies %s --in %s", forwardIDStr, recordProject(forward.Bucket)),
 						Description: "View replies",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp forwards --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp forwards --in %s", recordProject(forward.Bucket)),
 						Description: "List all forwards",
 					},
 				),

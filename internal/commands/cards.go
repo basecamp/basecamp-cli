@@ -2409,7 +2409,7 @@ func newCardsColumnCmd(project, cardTable *string) *cobra.Command {
 	}
 
 	cmd.AddCommand(
-		newCardsColumnShowCmd(project),
+		newCardsColumnShowCmd(),
 		newCardsColumnCreateCmd(project, cardTable),
 		newCardsColumnUpdateCmd(),
 		newCardsColumnMoveCmd(project, cardTable),
@@ -2424,14 +2424,14 @@ func newCardsColumnCmd(project, cardTable *string) *cobra.Command {
 	return cmd
 }
 
-func newCardsColumnShowCmd(project *string) *cobra.Command {
+func newCardsColumnShowCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id|url>",
 		Short: "Show column details",
 		Long: `Display detailed information about a column.
 
 You can pass either a column ID or a Basecamp URL:
-  basecamp cards column show 789 --in my-project
+  basecamp cards column show 789
   basecamp cards column show https://3.basecamp.com/123/buckets/456/card_tables/columns/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -2441,37 +2441,14 @@ You can pass either a column ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			columnIDStr, urlProjectID, err := extractWithProject(args[0])
+			// The column is read by its account-wide ID, so no project is needed.
+			columnIDStr, _, err := extractWithProject(args[0])
 			if err != nil {
 				return err
 			}
 			columnID, err := strconv.ParseInt(columnIDStr, 10, 64)
 			if err != nil {
 				return output.ErrUsage("Invalid column ID")
-			}
-
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
 			}
 
 			col, err := app.Account().CardColumns().Get(cmd.Context(), columnID)
@@ -2484,12 +2461,12 @@ You can pass either a column ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("basecamp cards column update %s --in %s", columnIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp cards column update %s --in %s", columnIDStr, recordProject(col.Bucket)),
 						Description: "Update column",
 					},
 					output.Breadcrumb{
 						Action:      "columns",
-						Cmd:         fmt.Sprintf("basecamp cards columns --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp cards columns --in %s", recordProject(col.Bucket)),
 						Description: "List all columns",
 					},
 				),

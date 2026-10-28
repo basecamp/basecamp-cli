@@ -49,7 +49,7 @@ Each project has a root folder containing documents, uploads, and subfolders.`,
 		newFoldersCmd(&project, &vaultID),
 		newUploadsCmd(&project, &vaultID),
 		newDocsCmd(&project, &vaultID),
-		newFilesShowCmd(&project),
+		newFilesShowCmd(),
 		newFilesVersionsCmd(&project),
 		newFilesReplaceCmd(&project),
 		newFilesUpdateCmd(&project),
@@ -101,7 +101,7 @@ func NewUploadsCmd() *cobra.Command {
 	cmd.AddCommand(
 		newUploadsListCmd(&project, &vaultID),
 		newUploadsCreateCmd(&project, &vaultID),
-		newFilesShowCmd(&project),
+		newFilesShowCmd(),
 		newFilesMoveCmd(),
 		newFilesCopyCmd(),
 	)
@@ -1421,7 +1421,7 @@ Use - as the content argument to read the document body from stdin:
 	return cmd
 }
 
-func newFilesShowCmd(project *string) *cobra.Command {
+func newFilesShowCmd() *cobra.Command {
 	var itemType string
 	var dlDir *string
 	var cf *commentFlags
@@ -1433,7 +1433,7 @@ func newFilesShowCmd(project *string) *cobra.Command {
 document.
 
 You can pass either an item ID or a Basecamp URL:
-  basecamp files show 789 --in my-project
+  basecamp files show 789
   basecamp files show https://3.basecamp.com/123/buckets/456/documents/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1443,8 +1443,8 @@ You can pass either an item ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			itemIDStr, urlProjectID, err := extractWithProject(args[0])
+			// The item is read by its account-wide ID, so no project is needed.
+			itemIDStr, _, err := extractWithProject(args[0])
 			if err != nil {
 				return err
 			}
@@ -1454,31 +1454,9 @@ You can pass either an item ID or a Basecamp URL:
 				return output.ErrUsage("Invalid item ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
 			// Try to detect type if not specified
 			var result any
+			var bucket *basecamp.Bucket
 			var detectedType string
 			var title string
 
@@ -1490,7 +1468,7 @@ You can pass either an item ID or a Basecamp URL:
 				// Try vault first
 				vault, err := app.Account().Vaults().Get(cmd.Context(), itemID)
 				if err == nil {
-					result = vault
+					result, bucket = vault, vault.Bucket
 					detectedType = "vault"
 					title = vault.Title
 				} else {
@@ -1498,7 +1476,7 @@ You can pass either an item ID or a Basecamp URL:
 					// Try upload
 					upload, err := app.Account().Uploads().Get(cmd.Context(), itemID)
 					if err == nil {
-						result = upload
+						result, bucket = upload, upload.Bucket
 						detectedType = "upload"
 						title = upload.Filename
 						if title == "" {
@@ -1508,15 +1486,15 @@ You can pass either an item ID or a Basecamp URL:
 						// Try document
 						doc, err := app.Account().Documents().Get(cmd.Context(), itemID)
 						if err == nil {
-							result = doc
+							result, bucket = doc, doc.Bucket
 							detectedType = "document"
 							title = doc.Title
 						} else if cloud, err := app.Account().CloudFiles().Get(cmd.Context(), itemID); err == nil {
-							result = cloud
+							result, bucket = cloud, cloud.Bucket
 							detectedType = "cloud_file"
 							title = cloud.Title
 						} else if google, err := app.Account().GoogleDocuments().Get(cmd.Context(), itemID); err == nil {
-							result = google
+							result, bucket = google, google.Bucket
 							detectedType = "google_document"
 							title = google.Title
 						}
@@ -1537,7 +1515,7 @@ You can pass either an item ID or a Basecamp URL:
 					if err != nil {
 						return convertSDKError(err)
 					}
-					result = vault
+					result, bucket = vault, vault.Bucket
 					detectedType = "vault"
 					title = vault.Title
 				case "upload", "file":
@@ -1545,7 +1523,7 @@ You can pass either an item ID or a Basecamp URL:
 					if err != nil {
 						return convertSDKError(err)
 					}
-					result = upload
+					result, bucket = upload, upload.Bucket
 					detectedType = "upload"
 					title = upload.Filename
 					if title == "" {
@@ -1556,7 +1534,7 @@ You can pass either an item ID or a Basecamp URL:
 					if err != nil {
 						return convertSDKError(err)
 					}
-					result = doc
+					result, bucket = doc, doc.Bucket
 					detectedType = "document"
 					title = doc.Title
 				case "cloud_file", "cloud":
@@ -1564,7 +1542,7 @@ You can pass either an item ID or a Basecamp URL:
 					if err != nil {
 						return convertSDKError(err)
 					}
-					result = cloud
+					result, bucket = cloud, cloud.Bucket
 					detectedType = "cloud_file"
 					title = cloud.Title
 				case "google_document", "google_doc", "gdoc":
@@ -1572,7 +1550,7 @@ You can pass either an item ID or a Basecamp URL:
 					if err != nil {
 						return convertSDKError(err)
 					}
-					result = google
+					result, bucket = google, google.Bucket
 					detectedType = "google_document"
 					title = google.Title
 				default:
@@ -1593,7 +1571,7 @@ You can pass either an item ID or a Basecamp URL:
 			if detectedType != "cloud_file" && detectedType != "google_document" {
 				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 					Action:      "update",
-					Cmd:         fmt.Sprintf("basecamp files update %s --in %s", itemIDStr, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp files update %s --in %s", itemIDStr, recordProject(bucket)),
 					Description: "Update item",
 				})
 			}
@@ -1601,7 +1579,7 @@ You can pass either an item ID or a Basecamp URL:
 			if detectedType == "vault" {
 				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 					Action:      "contents",
-					Cmd:         fmt.Sprintf("basecamp files --vault %s --in %s", itemIDStr, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp files --vault %s --in %s", itemIDStr, recordProject(bucket)),
 					Description: "List contents",
 				})
 			}
