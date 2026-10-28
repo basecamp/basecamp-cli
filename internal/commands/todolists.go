@@ -1020,13 +1020,13 @@ func sourceListValue(sourceList *string) string {
 // Copy… do. Which it is decides where it may go: a list into a todoset, a
 // group into a list. With no destination, a copy goes next to the original.
 func fileTodolist(cmd *cobra.Command, kind basecamp.FilingType, arg, flagProject, sourceList string, dest todolistDestination, includeComments bool) error {
-	destinationSet := destinationFlagChanged(cmd)
-	if sourceList != "" && destinationSet {
+	if sourceList != "" {
 		return output.ErrUsageHint(
 			"--list names the group's own list, not where it goes",
 			"Use --to-list for the destination list",
 		)
 	}
+	destinationSet := destinationFlagChanged(cmd)
 	if destinationSet {
 		if err := validateTodolistDestination(dest); err != nil {
 			return err
