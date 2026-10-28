@@ -34,7 +34,7 @@ Use 'basecamp schedule entries' to list schedule entries.
 Use 'basecamp schedule create' to create new entries.
 
 For a cross-project view of your upcoming schedule, use 'basecamp reports schedule'.`,
-		Annotations: map[string]string{"agent_notes": "Each project has one schedule\nRecurring events: use --date on show to get a specific occurrence\nschedule settings --include-due makes todo/card due dates appear on the schedule\nNatural dates work for --starts-at: tomorrow, next monday"},
+		Annotations: map[string]string{"agent_notes": "A project usually has one schedule but can have several: with one, commands find it; with several, they refuse and list the schedule IDs, so pass --schedule <id> (move and copy take --to-schedule <id>)\nRecurring events: use --date on show to get a specific occurrence\nschedule settings --include-due makes todo/card due dates appear on the schedule\nNatural dates work for --starts-at: tomorrow, next monday"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
