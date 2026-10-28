@@ -678,13 +678,13 @@ Chat or Email Forwards:
   basecamp tools move 1069479999 --to-project "Marketing"
   basecamp tools move https://3.basecamp.com/123/buckets/456/message_boards/1069479999 --to-project "Marketing"
 
-Find a tool's ID in its project's dock (basecamp projects show <project>). A
-tool cannot be copied, and Basecamp does not move a door (an external link)
-to another project.`,
+Find a tool's ID in its project's dock with basecamp projects show <id>, which
+takes the project's ID (basecamp projects list gives it). A tool cannot be
+copied, and Basecamp does not move a door (an external link) to another project.`,
 		Args: cobra.ExactArgs(1),
 		Annotations: map[string]string{"agent_notes": "--position reorders the tool in its own dock (same as tools reposition). " +
 			"--to-project <project> (ID or name) moves the whole tool and everything in it to that project's dock under a NEW id: output data.id is the new tool id and data.source_id the old one; the old id stops taking changes. " +
-			"--position cannot be combined with --to-project. The tool ID comes from the project's dock (basecamp projects show <project>), or pass the tool's URL. " +
+			"--position cannot be combined with --to-project. The tool ID comes from the project's dock (basecamp projects show <id>, which takes the project's numeric ID from basecamp projects list), or pass the tool's URL. " +
 			"Tools cannot be copied; doors (external links) cannot move to another project. To move one message, file or card instead, use that family's move command. " +
 			"The old id does not follow the move (tools show <old id> reads it as deleted). An in_progress error names its filing: do not move it again; basecamp filings show <filing id> gives its new id once it lands."},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -736,7 +736,7 @@ func moveToolToProject(cmd *cobra.Command, flagProject, arg, toProject string) e
 	if tool.Status == "deleted" {
 		return output.ErrUsageHint(
 			fmt.Sprintf("Tool %d (%s) is deleted, or was moved to another project under a new ID", tool.ID, tool.Title),
-			"Find it on the project's dock: basecamp projects show <project>",
+			"If it moved, find its new ID on the destination project's dock: basecamp projects show <id>, with the project's ID from basecamp projects list",
 		)
 	}
 	if tool.Type == "Door" {
@@ -745,7 +745,7 @@ func moveToolToProject(cmd *cobra.Command, flagProject, arg, toProject string) e
 	if !slices.Contains(movableToolTypes, tool.Type) || tool.Parent != nil {
 		return output.ErrUsageHint(
 			fmt.Sprintf("%d is a %s, not a tool on a project's dock", ref.id, tool.Type),
-			"Pass the ID of a dock tool from: basecamp projects show <project>",
+			fmt.Sprintf("Pass the ID of a dock tool from: basecamp projects show %d", tool.Bucket.ID),
 		)
 	}
 	if err := rejectProjectConflict(cmd, app, "tool", flagProject, ref.project, tool.Bucket.ID); err != nil {

@@ -57,7 +57,19 @@ func TestToolsMoveRefusesAFolderThatIsNotOnTheDock(t *testing.T) {
 	e := run.failure(t)
 	assert.Equal(t, output.CodeUsage, e.Code)
 	assert.Contains(t, e.Message, "not a tool on a project's dock")
+	assert.Equal(t, "Pass the ID of a dock tool from: basecamp projects show 123", e.Hint)
 	assert.Empty(t, transport.posts)
+}
+
+// projects show takes a numeric project ID, never a name, so the help that
+// sends an agent there says so and names where the ID comes from.
+func TestToolsMoveHelpAsksProjectsShowForAnID(t *testing.T) {
+	cmd := newToolsMoveCmd(new(string))
+	for _, text := range []string{cmd.Long, cmd.Annotations["agent_notes"]} {
+		assert.NotContains(t, text, "projects show <project>")
+		assert.Contains(t, text, "basecamp projects show <id>")
+		assert.Contains(t, text, "basecamp projects list")
+	}
 }
 
 func TestToolsMoveToItsOwnProjectPointsAtPosition(t *testing.T) {
@@ -102,5 +114,6 @@ func TestToolsMoveRefusesADeletedOrMovedTool(t *testing.T) {
 	run := runFamilyCommand(t, transport, NewToolsCmd(), "move", "456", "--to-project", "Dest")
 	e := run.failure(t)
 	assert.Contains(t, e.Message, "was moved to another project under a new ID")
+	assert.Equal(t, "If it moved, find its new ID on the destination project's dock: basecamp projects show <id>, with the project's ID from basecamp projects list", e.Hint)
 	assert.Empty(t, transport.posts)
 }
