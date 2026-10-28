@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -115,6 +116,32 @@ func TestFilingCommandsRefuseContainerFlagsTheyDoNotRead(t *testing.T) {
 		}
 	}
 	assert.Positive(t, rows)
+}
+
+// Help is how people and agents pick flags, so it must not offer one the
+// command refuses: messages copy --help said --message-board was "required if
+// project has multiple", and every copy that followed it failed.
+func TestFilingCommandHelpOffersOnlyTheContainerFlagsItReads(t *testing.T) {
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	hidden := 0
+	for path, reads := range filingReads {
+		var buf bytes.Buffer
+		root := buildRootWithAllCommands()
+		root.SetOut(&buf)
+		root.SetArgs(append(strings.Fields(path)[1:], "--help"))
+		require.NoError(t, root.Execute())
+		help := buf.String()
+		for _, flag := range inheritedContainerFlags(t, path) {
+			offered := regexp.MustCompile(`(?m)^\s+(-\w, )?--` + regexp.QuoteMeta(flag) + `\s`).MatchString(help)
+			if slices.Contains(reads, flag) {
+				assert.True(t, offered, "%s --help leaves out --%s, which it reads", path, flag)
+				continue
+			}
+			hidden++
+			assert.False(t, offered, "%s --help offers --%s, which it refuses", path, flag)
+		}
+	}
+	assert.Positive(t, hidden)
 }
 
 func TestTodosCopyRefusesTheTodolistFlagItWouldIgnore(t *testing.T) {

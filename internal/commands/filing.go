@@ -652,7 +652,7 @@ func guardFilingFlags(cmd *cobra.Command, reads ...string) *cobra.Command {
 	cmd.Annotations[AnnotationFilingReads] = strings.Join(reads, " ")
 	run := cmd.RunE
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		if err := refuseUnreadContainerFlags(cmd, reads); err != nil {
+		if err := refuseUnreadContainerFlags(cmd); err != nil {
 			return err
 		}
 		return run(cmd, args)
@@ -660,10 +660,10 @@ func guardFilingFlags(cmd *cobra.Command, reads ...string) *cobra.Command {
 	return cmd
 }
 
-func refuseUnreadContainerFlags(cmd *cobra.Command, reads []string) error {
+func refuseUnreadContainerFlags(cmd *cobra.Command) error {
 	var unread *pflag.Flag
 	cmd.InheritedFlags().VisitAll(func(f *pflag.Flag) {
-		if unread == nil && f.Changed && isContainerFlag(cmd, f) && !slices.Contains(reads, f.Name) {
+		if unread == nil && f.Changed && FilingIgnores(cmd, f) {
 			unread = f
 		}
 	})
@@ -672,9 +672,17 @@ func refuseUnreadContainerFlags(cmd *cobra.Command, reads []string) error {
 	}
 	hint := fmt.Sprintf("%s takes no destination; drop --%s", cmd.CommandPath(), unread.Name)
 	if dests := destinationFlags(cmd); len(dests) > 0 {
-		hint = fmt.Sprintf("Name where it goes with %s (see %s --help)", strings.Join(dests, " or "), cmd.CommandPath())
+		hint = fmt.Sprintf("Drop --%s; to send it somewhere else, name where it goes with %s (see %s --help)", unread.Name, strings.Join(dests, " or "), cmd.CommandPath())
 	}
 	return output.ErrUsageHint(fmt.Sprintf("%s does not read --%s, so it would ignore it", cmd.CommandPath(), unread.Name), hint)
+}
+
+// FilingIgnores reports whether cmd moves or copies recordings and refuses the
+// inherited flag f as a container flag it never reads. Help leaves such flags
+// out, so it never offers one the command would refuse.
+func FilingIgnores(cmd *cobra.Command, f *pflag.Flag) bool {
+	reads, guarded := cmd.Annotations[AnnotationFilingReads]
+	return guarded && isContainerFlag(cmd, f) && !slices.Contains(strings.Fields(reads), f.Name)
 }
 
 func isContainerFlag(cmd *cobra.Command, f *pflag.Flag) bool {
