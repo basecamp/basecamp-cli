@@ -411,6 +411,9 @@ func parentScopedFlags(cmd *cobra.Command) *pflag.FlagSet {
 		if rootFlag != nil && rootFlag == f {
 			return // root-level — stays in INHERITED FLAGS
 		}
+		if commands.FilingIgnores(cmd, f) {
+			return
+		}
 		ps.AddFlag(f)
 	})
 	return ps
