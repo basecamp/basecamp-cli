@@ -2712,6 +2712,7 @@ and On hold. The command waits for Basecamp to make the copy and shows it.`,
 var cardTableContainer = filingContainer{
 	dockName: "kanban_board",
 	noun:     "card table",
+	plural:   "card tables",
 	flag:     "--to-card-table",
 	urlKind:  "card_tables",
 	urlShape: "…/card_tables/<id>",

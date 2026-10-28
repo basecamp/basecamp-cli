@@ -1183,6 +1183,7 @@ func readFiledTodolist(app *appctx.App, sourceID int64) func(context.Context, in
 var todosetContainer = filingContainer{
 	dockName: "todoset",
 	noun:     "To-dos",
+	plural:   "To-dos tools",
 	flag:     "--to-todoset",
 	urlKind:  "todosets",
 	urlShape: "…/todosets/<id>",

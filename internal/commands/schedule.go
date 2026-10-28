@@ -987,6 +987,7 @@ func scheduleEntryFamily() filingFamily {
 		into: filingContainer{
 			dockName: "schedule",
 			noun:     "schedule",
+			plural:   "schedules",
 			flag:     "--to-schedule",
 			urlKind:  "schedules",
 			urlShape: "…/schedules/<id>",

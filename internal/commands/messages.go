@@ -1121,6 +1121,7 @@ func messageFamily() filingFamily {
 		into: filingContainer{
 			dockName: "message_board",
 			noun:     "message board",
+			plural:   "message boards",
 			flag:     "--to-board",
 			urlKind:  "message_boards",
 			urlShape: "…/message_boards/<id>",

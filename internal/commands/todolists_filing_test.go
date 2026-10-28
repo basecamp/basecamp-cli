@@ -32,6 +32,7 @@ func TestTodolistsMoveToAProjectWithSeveralTodosetsIsAmbiguous(t *testing.T) {
 	e := requireUsageRefusal(t, run, transport)
 
 	assert.Equal(t, output.CodeAmbiguous, e.Code)
+	assert.Equal(t, "Dest has 2 To-dos tools that match", e.Message)
 	assert.Contains(t, e.Hint, "--to-todoset")
 	assert.Contains(t, e.Hint, "900  To-dos")
 	assert.Contains(t, e.Hint, "950  To-dos")

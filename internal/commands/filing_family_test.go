@@ -4,8 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -142,6 +147,7 @@ func boardsContainer() filingContainer {
 	return filingContainer{
 		dockName: "message_board",
 		noun:     "message board",
+		plural:   "message boards",
 		flag:     "--to-board",
 		urlKind:  "message_boards",
 		urlShape: "…/message_boards/<id>",
@@ -162,6 +168,44 @@ func resolveTestTarget(t *testing.T, transport *familyTransport, toProject, toCo
 	app, _ := newTestAppWithTransport(t, transport)
 	err := executeCommand(cmd, app)
 	return target, err
+}
+
+// Appending "s" to a container's noun once named a project's To-dos tools
+// "To-doss", so every filingContainer literal spells its plural out. The test
+// reads the package's source, so it covers containers no test resolves.
+func TestEveryFilingContainerNamesItsPlural(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	require.NoError(t, err)
+	fset := token.NewFileSet()
+	var containers int
+	for _, name := range files {
+		src, err := os.ReadFile(name)
+		require.NoError(t, err)
+		file, err := parser.ParseFile(fset, name, src, 0)
+		require.NoError(t, err)
+		ast.Inspect(file, func(n ast.Node) bool {
+			lit, ok := n.(*ast.CompositeLit)
+			if !ok {
+				return true
+			}
+			if typ, ok := lit.Type.(*ast.Ident); !ok || typ.Name != "filingContainer" {
+				return true
+			}
+			containers++
+			named := slices.ContainsFunc(lit.Elts, func(e ast.Expr) bool {
+				kv, ok := e.(*ast.KeyValueExpr)
+				if !ok {
+					return false
+				}
+				key, ok := kv.Key.(*ast.Ident)
+				value, isString := kv.Value.(*ast.BasicLit)
+				return ok && key.Name == "plural" && isString && value.Value != `""`
+			})
+			assert.True(t, named, "%s: a filingContainer sets plural", fset.Position(lit.Pos()))
+			return true
+		})
+	}
+	assert.GreaterOrEqual(t, containers, 7, "the scan finds every family's container")
 }
 
 func dockTransport(dock string) *familyTransport {
