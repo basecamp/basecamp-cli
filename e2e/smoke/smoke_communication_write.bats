@@ -84,3 +84,33 @@ setup_file() {
   assert_success
   assert_json_value '.ok' 'true'
 }
+
+# --- Email forwards ---
+
+@test "forwards copy copies a forward into its own inbox" {
+  ensure_inbox || return 0
+  run basecamp forwards list --inbox "$QA_INBOX" -p "$QA_PROJECT" --jq '.data[0].id // empty'
+  local fwd_id="$output"
+  [[ -n "$fwd_id" ]] || mark_unverifiable "No forwards in project inbox"
+
+  run_smoke basecamp forwards copy "$fwd_id" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.source_id' "$fwd_id"
+
+  run_smoke basecamp recordings trash "$(echo "$output" | jq -r '.data.id')" -p "$QA_PROJECT" --json
+  assert_success
+}
+
+@test "forwards move refuses the inbox the forward is in" {
+  ensure_inbox || return 0
+  run basecamp forwards list --inbox "$QA_INBOX" -p "$QA_PROJECT" --jq '.data[0].id // empty'
+  local fwd_id="$output"
+  [[ -n "$fwd_id" ]] || mark_unverifiable "No forwards in project inbox"
+
+  # A cross-project move would take the QA forward away; the move itself is
+  # covered against local bc3.
+  run_smoke basecamp forwards move "$fwd_id" --to-inbox "$QA_INBOX" --json
+  assert_failure
+  assert_json_value '.ok' 'false'
+}

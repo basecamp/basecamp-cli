@@ -283,7 +283,7 @@ func (a *App) Err(err error) error {
 	}
 
 	// Print the error response
-	if outputErr := a.Output.Err(a.withAuthRemedy(err), opts...); outputErr != nil {
+	if outputErr := a.Output.Err(a.WithAuthRemedy(err), opts...); outputErr != nil {
 		return outputErr
 	}
 
@@ -295,7 +295,7 @@ func (a *App) Err(err error) error {
 	return nil
 }
 
-// withAuthRemedy replaces the generic login hint on an API 401 with one that
+// WithAuthRemedy replaces the generic login hint on an API 401 with one that
 // fits the credential the request actually sent. The SDK classifies a 401
 // far from the profile and the environment, so its conversion can only say
 // "basecamp auth login": under an active profile that command would store
@@ -305,7 +305,7 @@ func (a *App) Err(err error) error {
 // the credential manager's own failures name the profile themselves, and
 // come from stored-credential operations (auth refresh, auth token
 // --stored) that ignore the environment token by design.
-func (a *App) withAuthRemedy(err error) error {
+func (a *App) WithAuthRemedy(err error) error {
 	var sdkErr *basecamp.Error
 	e := output.AsError(err)
 	if e.Code != output.CodeAuth || !errors.As(err, &sdkErr) || (e.Hint != "" && !strings.HasPrefix(e.Hint, output.DefaultAuthHint)) {

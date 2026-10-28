@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -257,17 +258,19 @@ func newCheckinsQuestionCmd(project *string) *cobra.Command {
 		if len(args) == 0 {
 			return missingArg(cmd, "<id|url>")
 		}
-		return runCheckinsQuestionShow(cmd, *project, args[0], cf)
+		return runCheckinsQuestionShow(cmd, args[0], cf)
 	}
 
 	cmd.AddCommand(
-		newCheckinsQuestionShowCmd(project),
+		newCheckinsQuestionShowCmd(),
 		newCheckinsQuestionCreateCmd(project),
 		newCheckinsQuestionUpdateCmd(project),
 		newCheckinsQuestionPauseCmd(),
 		newCheckinsQuestionResumeCmd(),
 		newCheckinsQuestionNotifyCmd(),
 		newCheckinsQuestionAnswerersCmd(),
+		newFilingCmd(questionFamily(), basecamp.FilingMove, checkinsQuestionMoveHelp, false),
+		newFilingCmd(questionFamily(), basecamp.FilingCopy, checkinsQuestionCopyHelp, false),
 	)
 
 	return cmd
@@ -523,14 +526,14 @@ func checkinsQuestionID(arg string) (int64, error) {
 	return id, nil
 }
 
-func newCheckinsQuestionShowCmd(project *string) *cobra.Command {
+func newCheckinsQuestionShowCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id|url>",
 		Short: "Show question details",
 		Long: `Display details of a check-in question.
 
 You can pass either a question ID or a Basecamp URL:
-  basecamp checkins question show 789 --in my-project
+  basecamp checkins question show 789
   basecamp checkins question show https://3.basecamp.com/123/buckets/456/questionnaires/questions/789`,
 		Args: cobra.ExactArgs(1),
 	}
@@ -538,44 +541,21 @@ You can pass either a question ID or a Basecamp URL:
 	cf := addCommentFlags(cmd, false)
 
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		return runCheckinsQuestionShow(cmd, *project, args[0], cf)
+		return runCheckinsQuestionShow(cmd, args[0], cf)
 	}
 
 	return cmd
 }
 
-func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string, cf *commentFlags) error {
+func runCheckinsQuestionShow(cmd *cobra.Command, questionIDStr string, cf *commentFlags) error {
 	app := appctx.FromContext(cmd.Context())
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
 
-	// Extract ID and project from URL if provided
-	questionIDStr, urlProjectID, err := extractWithProject(questionIDStr)
-	if err != nil {
-		return err
-	}
-
-	// Resolve project - use URL > flag > config, with interactive fallback
-	projectID := project
-	if projectID == "" && urlProjectID != "" {
-		projectID = urlProjectID
-	}
-	if projectID == "" {
-		projectID = app.Flags.Project
-	}
-	if projectID == "" {
-		projectID = app.Config.ProjectID
-	}
-	if projectID == "" {
-		if err := ensureProject(cmd, app); err != nil {
-			return err
-		}
-		projectID = app.Config.ProjectID
-	}
-
-	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	// The question is read by its account-wide ID, so no project is needed.
+	questionIDStr, _, err := extractWithProject(questionIDStr)
 	if err != nil {
 		return err
 	}
@@ -589,6 +569,9 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string, 
 	if err != nil {
 		return convertSDKError(err)
 	}
+	// A moved question's old id redirects to the question at its new id, and
+	// only the new id reaches its answers and comments.
+	questionIDStr = strconv.FormatInt(question.ID, 10)
 
 	enrichment := fetchCommentsForRecording(cmd.Context(), app, questionIDStr, cf)
 	data, commentOpts := enrichment.apply(question, "")
@@ -600,12 +583,12 @@ func runCheckinsQuestionShow(cmd *cobra.Command, project, questionIDStr string, 
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "answers",
-				Cmd:         fmt.Sprintf("basecamp checkins answers %s --in %s", questionIDStr, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp checkins answers %s --in %s", questionIDStr, recordProject(question.Bucket)),
 				Description: "View answers",
 			},
 			output.Breadcrumb{
 				Action:      "questions",
-				Cmd:         fmt.Sprintf("basecamp checkins questions --in %s", resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp checkins questions --in %s", recordProject(question.Bucket)),
 				Description: "View all questions",
 			},
 		),
@@ -1645,4 +1628,81 @@ func parseTimeOfDay(t string) (int, int, error) {
 	}
 
 	return hour, minute, nil
+}
+
+var checkinsQuestionMoveHelp = filingHelp{
+	use:   "move <id|url>",
+	short: "Move a check-in question to another project's Automatic Check-ins",
+	long: `Move a check-in question, with its answers, to the Automatic Check-ins of
+another project, as the web's Move… does.
+
+  basecamp checkins question move 789 --to-project "Marketing"
+  basecamp checkins question move https://3.basecamp.com/123/buckets/456/questions/789 --to-questionnaire 1069479999
+
+--to-project alone needs a project with one Automatic Check-ins. The command
+waits for Basecamp to finish the move and shows the question where it landed,
+under a new ID.`,
+	notes: "--to-project <project> (ID or name) moves the question and its answers to that project's Automatic Check-ins; --to-questionnaire <id|url> names one directly. " +
+		"Output is the moved question: data.id is its NEW id and data.source_id the old one. Write to the new id; the old id stops taking changes, and reading it follows the move. " +
+		"--questionnaire names the question's own Automatic Check-ins and is refused; moving onto the one it is in is refused. Basecamp refuses moving an answer on its own. " +
+		"An in_progress error names its filing: do not move it again; basecamp filings show <filing id> gives its new id once it lands.",
+}
+
+var checkinsQuestionCopyHelp = filingHelp{
+	use:   "copy <id|url>",
+	short: "Copy a check-in question to Automatic Check-ins in this or another project",
+	long: `Copy a check-in question into a project's Automatic Check-ins, as the web's
+Copy… does. The original stays where it is.
+
+With no destination, the copy goes into the question's own Automatic Check-ins:
+  basecamp checkins question copy 789
+  basecamp checkins question copy 789 --to-project "Marketing"
+  basecamp checkins question copy 789 --to-questionnaire 1069479999 --include-comments
+
+Basecamp makes the copy in the background; the command waits for it and shows
+the new question.`,
+	notes: "Without --to-project/--to-questionnaire the copy goes into the question's own Automatic Check-ins. " +
+		"Output is the new question; its id is data.id and the original's is data.source_id. " +
+		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy; check an in_progress one with basecamp filings show <filing id>.",
+}
+
+// questionFamily is how check-in questions move and copy between projects'
+// Automatic Check-ins.
+func questionFamily() filingFamily {
+	return filingFamily{
+		noun:     "question",
+		group:    "basecamp checkins question",
+		types:    []string{"Question"},
+		urlKinds: []string{"questions"},
+		urlShape: "…/questions/<id>",
+		into: filingContainer{
+			dockName: "questionnaire",
+			noun:     "Automatic Check-ins",
+			plural:   "Automatic Check-ins tools",
+			flag:     "--to-questionnaire",
+			urlKind:  "questionnaires",
+			urlShape: "…/questionnaires/<id>",
+			get: func(ctx context.Context, app *appctx.App, id int64) (filingTarget, error) {
+				q, err := app.Account().Checkins().GetQuestionnaire(ctx, id)
+				if err != nil {
+					return filingTarget{}, err
+				}
+				return bucketTarget(q.ID, q.Title, q.AppURL, q.Bucket), nil
+			},
+		},
+		get: func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
+			q, err := app.Account().Checkins().GetQuestion(ctx, id)
+			if err != nil {
+				return nil, filingSource{}, err
+			}
+			return q, filingSource{id: q.ID, typ: q.Type, status: q.Status, title: q.Title, bucket: q.Bucket, parent: q.Parent}, nil
+		},
+		crumbs: func(id, projectID int64) []output.Breadcrumb {
+			return []output.Breadcrumb{{
+				Action:      "show",
+				Cmd:         fmt.Sprintf("basecamp checkins question show %d --in %d", id, projectID),
+				Description: "View the question",
+			}}
+		},
+	}
 }

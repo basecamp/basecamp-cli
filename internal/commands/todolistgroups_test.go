@@ -15,7 +15,8 @@ func TestTodolistgroupsPositionAcceptsPosAlias(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.ProjectID = "123"
 
-	cmd := newTodolistgroupsPositionCmd()
+	var project string
+	cmd := newTodolistgroupsPositionCmd(&project)
 
 	// --pos should reach the RunE and proceed past the position guard
 	err := executeCommand(cmd, app, "456", "--pos", "2")
@@ -34,7 +35,8 @@ func TestTodolistgroupsPositionRequiresPosition(t *testing.T) {
 	app, _ := setupTestApp(t)
 	app.Config.ProjectID = "123"
 
-	cmd := newTodolistgroupsPositionCmd()
+	var project string
+	cmd := newTodolistgroupsPositionCmd(&project)
 
 	err := executeCommand(cmd, app, "456")
 	require.NotNil(t, err)

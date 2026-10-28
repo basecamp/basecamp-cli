@@ -335,7 +335,7 @@ load test_helper
 
   run basecamp todos position --to 1
   assert_failure
-  assert_json_value '.error' '<id|url> required'
+  assert_json_value '.error' '<id|url>... required'
   assert_json_value '.code' 'usage'
 }
 

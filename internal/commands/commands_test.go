@@ -77,6 +77,7 @@ func buildRootWithAllCommands() *cobra.Command {
 	root.AddCommand(commands.NewURLCmd())
 	root.AddCommand(commands.NewSearchCmd())
 	root.AddCommand(commands.NewRecordingsCmd())
+	root.AddCommand(commands.NewFilingsCmd())
 	root.AddCommand(commands.NewChatCmd())
 	root.AddCommand(commands.NewPingsCmd())
 	root.AddCommand(commands.NewScheduleCmd())

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -60,6 +61,7 @@ func NewTodosCmd() *cobra.Command {
 		newTodosUncompleteCmd(),
 		newTodosSweepCmd(),
 		newTodosPositionCmd(),
+		newTodosCopyCmd(),
 		newRecordableTrashCmd("todo"),
 		newRecordableArchiveCmd("todo"),
 		newRecordableRestoreCmd("todo"),
@@ -2287,28 +2289,57 @@ func reopenTodos(cmd *cobra.Command, todoIDs []string) error {
 
 func newTodosPositionCmd() *cobra.Command {
 	var (
-		position int
-		list     string
+		position  int
+		list      string
+		toProject string
+		toList    string
 	)
 
 	cmd := &cobra.Command{
-		Use:     "position <id|url>",
+		Use:     "position <id|url>...",
 		Aliases: []string{"move", "reorder"},
-		Short:   "Change todo position or move between lists",
-		Long: `Reorder a todo within its todolist, or move it to a different list in the
-same project. Position is 1-based (1 = top).
+		Short:   "Move to-dos to a list in this or another project, or reorder one",
+		Long: `Move to-dos into a to-do list in any project, as the web's Move… does, or
+reorder a to-do within its project. Both are "todos move".
 
-You can pass either a todo ID or a Basecamp URL:
-  basecamp todos position 789 --to 1
-  basecamp todos position https://3.basecamp.com/123/buckets/456/todos/789 --to 1
+Move to another project with --to-project and --to-list. Each to-do gets a
+new ID there; the command waits for Basecamp and prints the moved to-dos:
+  basecamp todos move 789 --to-project "Marketing" --to-list "Launch"
+  basecamp todos move 789 790 791 --to-project "Marketing" --to-list "Launch"
+  basecamp todos move 789 --to-list https://3.basecamp.com/123/buckets/456/todolists/321
 
-Move to a different todolist in the same project:
-  basecamp todos position 789 --to 1 --list "Sprint 1" --in myproject
-  basecamp todos position 789 --to 1 --list 321
-  basecamp todos position <todo-url> --to 1 --list <todolist-url>`,
+Reorder within its list, or move to another list in the same project and keep
+its ID, with --to (1 = top) and --list:
+  basecamp todos move 789 --to 1
+  basecamp todos move 789 --to 1 --list "Sprint 1" --in myproject
+  basecamp todos move <todo-url> --to 1 --list <todolist-url>`,
+		Annotations: map[string]string{
+			"agent_notes": "--to-project/--to-list file the to-dos into a to-do list in any project (the web's Move…): --to-list takes a list ID, URL, or a name looked up in --to-project; --to-project alone needs a project with one to-do list. " +
+				"Several IDs move one by one; each is reported, and the command fails if any failed, naming which moved. " +
+				"A filed to-do gets a NEW id (data.id; the old one is data.source_id); the old id stops accepting changes, and reading it follows the move. " +
+				"Basecamp refuses a group as the destination (use its list), an archived list, and the list the to-do is already in. " +
+				"--to/--list reorder one to-do or move it to another list in its own project, keeping its id; a --list in another project fails with the --to-project command to run. " +
+				"--to-project/--to-list cannot be combined with --to, --position or --list.",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				return missingArg(cmd, "<id|url>")
+				return missingArg(cmd, "<id|url>...")
+			}
+
+			if cmd.Flags().Changed("to-project") || cmd.Flags().Changed("to-list") {
+				if cmd.Flags().Changed("to") || cmd.Flags().Changed("position") || list != "" {
+					return output.ErrUsageHint(
+						"--to-project and --to-list cannot be combined with --to, --position or --list",
+						"--list and --to reorder within the to-do's own project; for the destination list with --to-project, use --to-list",
+					)
+				}
+				return fileTodos(cmd, basecamp.FilingMove, args, toProject, toList, false)
+			}
+			if len(args) > 1 {
+				return output.ErrUsageHint(
+					"--to reorders one to-do at a time",
+					"To move several to-dos into a list, use --to-list <list> (with --to-project <project> for a list name)",
+				)
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -2374,15 +2405,11 @@ Move to a different todolist in the same project:
 					resolvedProject = rp
 				}
 
-				// Cross-project moves are not supported by the reposition endpoint.
-				// Only enforce when the todo's project comes from its URL (high
-				// confidence). Config/flag project is a default context — it may
-				// not match where a bare-ID todo actually lives.
+				// The reposition only moves a to-do between lists of its own
+				// project. Both URLs name their projects, so a mismatch is
+				// refused here; requireListInTodosProject reads both otherwise.
 				if todoProjectID != "" && listProjectID != "" && resolvedProject != listProjectID {
-					return output.ErrUsageHint(
-						"Cannot move a todo to a list in a different project.",
-						"Pass a todolist from the same project; cross-project moves are not supported.",
-					)
+					return foreignListError(todoID, todoProjectID, listIDStr, listProjectID)
 				}
 
 				// Resolve todolist name to ID when not already numeric
@@ -2400,6 +2427,9 @@ Move to a different todolist in the same project:
 				listID, parseErr := strconv.ParseInt(listIDStr, 10, 64)
 				if parseErr != nil {
 					return output.ErrUsage("Invalid todolist ID")
+				}
+				if err := requireListInTodosProject(cmd, app, todoID, listID); err != nil {
+					return err
 				}
 				parentID = &listID
 			}
@@ -2434,7 +2464,247 @@ Move to a different todolist in the same project:
 
 	cmd.Flags().IntVar(&position, "to", 0, "Target position, 1-based (1 = top)")
 	cmd.Flags().IntVar(&position, "position", 0, "Target position (alias for --to)")
-	cmd.Flags().StringVarP(&list, "list", "l", "", "Destination todolist ID, name, or URL (move to a different list)")
+	cmd.Flags().StringVarP(&list, "list", "l", "", "With --to: a list in the to-do's own project to move it into, keeping its id (ID, name, or URL); for another project use --to-list")
+	addToListFlags(cmd, &toProject, &toList, "Move the to-dos")
 
-	return cmd
+	return guardFilingFlags(cmd)
+}
+
+func newTodosCopyCmd() *cobra.Command {
+	var toProject, toList string
+	var includeComments bool
+
+	cmd := &cobra.Command{
+		Use:   "copy <id|url>...",
+		Short: "Copy to-dos to a list in this or another project",
+		Long: `Copy to-dos into a to-do list, as the web's Copy… does. The originals stay
+where they are.
+
+With no destination, each copy goes into the list its to-do is in:
+  basecamp todos copy 789
+  basecamp todos copy 789 --to-project "Marketing" --to-list "Launch"
+  basecamp todos copy 789 790 791 --to-list 1069479999 --include-comments
+  basecamp todos copy 789 --to-list https://3.basecamp.com/123/buckets/456/todolists/321
+
+Basecamp makes each copy in the background; the command waits for it and
+shows the new to-dos.`,
+		Annotations: map[string]string{
+			"agent_notes": "Without --to-project/--to-list each copy goes into the list its to-do is in. " +
+				"--to-list takes a list ID, URL, or a name looked up in --to-project; --to-project alone needs a project with one to-do list. " +
+				"Several IDs copy one by one; each is reported, and the command fails if any failed, naming which were copied. " +
+				"Output is the new to-do; its id is data.id and the original's is data.source_id. " +
+				"Basecamp refuses a group as the destination (use its list) and an archived list. " +
+				"Never re-run a copy that failed with in_progress or a may-have-started hint: each run makes another copy; check an in_progress one with basecamp filings show <filing id>.",
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<id|url>...")
+			}
+			return fileTodos(cmd, basecamp.FilingCopy, args, toProject, toList, includeComments)
+		},
+	}
+
+	addToListFlags(cmd, &toProject, &toList, "Copy the to-dos")
+	cmd.Flags().BoolVar(&includeComments, "include-comments", false, "Copy the to-dos' comments too")
+
+	return guardFilingFlags(cmd)
+}
+
+// fileTodos moves or copies to-dos into a to-do list, one filing each, as the
+// web's Move… and Copy… do. Every to-do is read before any is filed, so a bad
+// ID, a to-do named twice or a to-do already in the destination stops the
+// command before anything moves. A moved to-do's old id reads as its new one,
+// so a to-do is named twice when two arguments read as the same to-do. With no
+// destination, a copy goes into its to-do's own list.
+func fileTodos(cmd *cobra.Command, kind basecamp.FilingType, args []string, toProject, toList string, includeComments bool) error {
+	destinationSet := cmd.Flags().Changed("to-project") || cmd.Flags().Changed("to-list")
+	if destinationSet {
+		if err := validateToListFlags(toProject, toList); err != nil {
+			return err
+		}
+	}
+
+	app := appctx.FromContext(cmd.Context())
+	scope := newFollowUpScope(app)
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	var (
+		refs   []filesMoveRef
+		tokens []string
+	)
+	for _, arg := range args {
+		for token := range strings.SplitSeq(arg, ",") {
+			if token = strings.TrimSpace(token); token == "" {
+				continue
+			}
+			ref, err := parseFilingRef(app, token, "to-do", "todos", "…/todos/<id>")
+			if err != nil {
+				return err
+			}
+			refs = append(refs, ref)
+			tokens = append(tokens, token)
+		}
+	}
+	if len(refs) == 0 {
+		return missingArg(cmd, "<id|url>...")
+	}
+
+	var destination *basecamp.Todolist
+	if destinationSet {
+		var err error
+		if destination, err = resolveFilingTodolist(cmd, app, toProject, toList); err != nil {
+			return err
+		}
+	}
+
+	filings := make([]recordingFiling, 0, len(refs))
+	named := filingNames{}
+	for i, ref := range refs {
+		todo, err := app.Account().Todos().Get(cmd.Context(), ref.id)
+		if err != nil {
+			return convertSDKError(err)
+		}
+		if err := requireFilableTodo(todo, ref.id); err != nil {
+			return err
+		}
+		if err := named.add("to-do", tokens[i], todo.ID); err != nil {
+			return err
+		}
+		if err := rejectProjectConflict(cmd, app, "to-do", "", ref.project, todo.Bucket.ID); err != nil {
+			return err
+		}
+		home, lists, err := todoLists(cmd, app, todo)
+		if err != nil {
+			return err
+		}
+		into := destination
+		if into == nil {
+			into = home
+		}
+		if into == nil {
+			return output.ErrUsageHint(
+				fmt.Sprintf("To-do #%d is loose in its project's To-dos, not in a list, so a copy needs a destination list", todo.ID),
+				fmt.Sprintf("Name the list (an ID or name) to copy it into: basecamp todos copy %d --to-project %d --to-list <list>", todo.ID, todo.Bucket.ID),
+			)
+		}
+		if kind == basecamp.FilingMove && slices.Contains(lists, into.ID) {
+			return output.ErrUsageHint(
+				fmt.Sprintf("To-do #%d is already in to-do list %d (%s)", todo.ID, into.ID, into.Name),
+				fmt.Sprintf("Reorder it there with: basecamp todos move %d --to <position>", todo.ID),
+			)
+		}
+		filings = append(filings, todoFiling(app, kind, todo, into, includeComments))
+	}
+	return runFilings(cmd, app, scope, filings)
+}
+
+// requireFilableTodo refuses what the to-do read returned when it is not a
+// to-do, as a moved recording's old id can redirect to another kind.
+func requireFilableTodo(todo *basecamp.Todo, requestedID int64) error {
+	if todo.Bucket == nil || todo.Parent == nil {
+		return output.ErrNotFound("to-do", strconv.FormatInt(requestedID, 10))
+	}
+	if todo.Type != "" && todo.Type != "Todo" {
+		return output.ErrUsage(fmt.Sprintf("%d is a %s, not a to-do", requestedID, todo.Type))
+	}
+	return nil
+}
+
+// todoLists reads the list a to-do is in. home is the top-level list, which a
+// copy with no destination goes into, since Basecamp files to-dos into lists,
+// never groups. lists holds the to-do's group, if any, and its list: Basecamp
+// refuses to move a to-do into either. A loose to-do sits on its To-dos, in
+// no list, so it has neither and may be filed into any list.
+func todoLists(cmd *cobra.Command, app *appctx.App, todo *basecamp.Todo) (home *basecamp.Todolist, lists []int64, err error) {
+	if todo.Parent.Type == "Todoset" {
+		return nil, nil, nil
+	}
+	parent, err := app.Account().Todolists().Get(cmd.Context(), todo.Parent.ID)
+	if err != nil {
+		return nil, nil, convertSDKError(err)
+	}
+	if isTodolistGroup(parent) {
+		home, err = app.Account().Todolists().Get(cmd.Context(), parent.Parent.ID)
+		if err != nil {
+			return nil, nil, convertSDKError(err)
+		}
+		return home, []int64{parent.ID, home.ID}, nil
+	}
+	return parent, []int64{parent.ID}, nil
+}
+
+// todoFiling is a Move… or Copy… of a to-do into a to-do list.
+func todoFiling(app *appctx.App, kind basecamp.FilingType, todo *basecamp.Todo, list *basecamp.Todolist, includeComments bool) recordingFiling {
+	return recordingFiling{
+		kind:            kind,
+		sourceID:        todo.ID,
+		noun:            "to-do",
+		destinationID:   list.ID,
+		includeComments: includeComments,
+		destination:     fmt.Sprintf("to-do list %d (%s)", list.ID, list.Name),
+		showCmd:         "basecamp todos show",
+		lookFor:         copyLookFor(filingSource{id: todo.ID, typ: "Todo", status: todo.Status, title: todo.Title}, filingTarget{id: list.ID, title: list.Name, appURL: list.AppURL, projectID: todolistProjectID(list)}),
+		read: func(ctx context.Context, id int64) (filedRecording, error) {
+			filed, err := app.Account().Todos().Get(ctx, id)
+			if err != nil {
+				return filedRecording{}, err
+			}
+			return filedTodo(filed, todo.ID), nil
+		},
+	}
+}
+
+// filedTodoResult is a to-do that a move or copy made, with the id of the
+// to-do it came from.
+type filedTodoResult struct {
+	*basecamp.Todo
+	SourceID int64 `json:"source_id"`
+}
+
+func filedTodo(todo *basecamp.Todo, sourceID int64) filedRecording {
+	breadcrumbs := []output.Breadcrumb{{
+		Action:      "show",
+		Cmd:         fmt.Sprintf("basecamp todos show %d", todo.ID),
+		Description: "View the to-do",
+	}}
+	if todo.Bucket != nil && todo.Parent != nil {
+		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+			Action:      "list",
+			Cmd:         fmt.Sprintf("basecamp todos list --in %d --list %d", todo.Bucket.ID, todo.Parent.ID),
+			Description: "List the to-dos in its list",
+		})
+	}
+	return filedRecording{
+		result:      filedTodoResult{Todo: todo, SourceID: sourceID},
+		id:          todo.ID,
+		bucket:      todo.Bucket,
+		parent:      todo.Parent,
+		breadcrumbs: breadcrumbs,
+	}
+}
+
+// requireListInTodosProject refuses a --list in another project before the
+// reposition, which only moves a to-do between the lists of its own project.
+func requireListInTodosProject(cmd *cobra.Command, app *appctx.App, todoID, listID int64) error {
+	todo, err := app.Account().Todos().Get(cmd.Context(), todoID)
+	if err != nil {
+		return convertSDKError(err)
+	}
+	list, err := app.Account().Todolists().Get(cmd.Context(), listID)
+	if err != nil {
+		return convertSDKError(err)
+	}
+	if todo.Bucket == nil || list.Bucket == nil || todo.Bucket.ID == list.Bucket.ID {
+		return nil
+	}
+	return foreignListError(todo.ID, strconv.FormatInt(todo.Bucket.ID, 10), strconv.FormatInt(list.ID, 10), strconv.FormatInt(list.Bucket.ID, 10))
+}
+
+func foreignListError(todoID int64, todoProjectID, listID, listProjectID string) error {
+	return output.ErrUsageHint(
+		fmt.Sprintf("To-do list %s is in project %s, not in the to-do's project %s", listID, listProjectID, todoProjectID),
+		fmt.Sprintf("--list only moves a to-do within its project. To move it to that list, run: basecamp todos move %d --to-project %s --to-list %s", todoID, listProjectID, listID),
+	)
 }

@@ -1,0 +1,12 @@
+task: Move message 789 over to the Marketing project's message board
+tags: [move-copy, workflow]
+mocks:
+  - match: '^messages move(?!.*--help)'
+    output: '{"ok":true,"data":{"id":7890,"source_id":789,"bucket":{"id":222,"name":"Marketing"}},"summary":"Moved message #789 to Marketing › Message Board as message #7890"}'
+accept:
+  - '^messages move (?=.*\b789\b)(?=.*--to-project \W?Marketing)(?!.*--help)'
+reject:
+  - '^messages (create|trash|update)'
+  - '^recordings\b'
+  - '^cards move'
+max_commands: 4
