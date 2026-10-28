@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Basecamp",
-    "version": "2026-10-19",
+    "version": "2026-10-27",
     "description": "Basecamp API",
     "contact": {
       "name": "Basecamp",
@@ -1137,7 +1137,7 @@
     },
     "/{accountId}/buckets/{bucketId}/card_tables/{cardTableId}/wormholes.json": {
       "post": {
-        "description": "Add a wormhole to a card table: a standing shortcut that sends cards to a column on another card table, usually in another project.\n\nA wormhole is the only mechanism for moving a card to a different project: its\nid is a valid `column_id` for MoveCard, teleporting the card there. It is not\nneeded for a one-off move within a project; MoveCard goes to any column there\ndirectly. A card table holds at most four wormholes.\n`destinationRecordingId` is the id of a column on another accessible card table.",
+        "description": "Add a wormhole to a card table: a standing shortcut that sends cards to a column on another card table, usually in another project.\n\nA wormhole's id is a valid `column_id` for MoveCard, teleporting the card to\nits destination column. It is not needed for a one-off move: MoveCard goes to\nany column in the card's project directly, and MoveRecording moves a card to\nanother project's card table. Create one only when the card table should keep\nthat shortcut. A card table holds at most four wormholes.\n`destinationRecordingId` is the id of a column on another accessible card table.",
         "operationId": "CreateWormhole",
         "requestBody": {
           "content": {
@@ -4211,7 +4211,7 @@
     },
     "/{accountId}/card_tables/cards/{cardId}/moves.json": {
       "post": {
-        "description": "Move a card to any column in its project, including on another card table there, or through a linked wormhole to another project (queued: the card gets a new id, and position, if sent, must still be positive but doesn't set placement).\n\n`column_id` may be any column in the card's project, including a column on\nanother card table in the same project; the card moves there directly, with\nno wormhole needed. To send the card to another project, pass the id of a\nlinked wormhole (`linked: true`) the card table already has, listed in\nGetCardTable's `wormholes`; an unlinked or unreachable one returns not found.\nA move through a wormhole is queued: the card arrives under a new id and its\nold id then returns not found. `position` does not control where it lands,\nbut if supplied it must still be a positive integer.",
+        "description": "Move a card to any column in its project, including on another card table there, or through a linked wormhole to another project (queued: the card gets a new id, and position, if sent, must still be positive but doesn't set placement).\n\n`column_id` may be any column in the card's project, including a column on\nanother card table in the same project; the card moves there directly, with\nno wormhole needed. To send the card to another project, pass the id of a\nlinked wormhole (`linked: true`) the card table already has, listed in\nGetCardTable's `wormholes`; an unlinked or unreachable one returns not found.\nA move through a wormhole is queued: the card arrives under a new id and its\nold id then returns not found. `position` does not control where it lands,\nbut if supplied it must still be a positive integer.\n\nNo wormhole is needed to move a card to another project's card table either:\nMoveRecording with that card table as `filing_destination_id` moves it, and\nthe card lands in Triage, or in Done if it is completed. Create a wormhole\nonly when the card table should keep that shortcut.",
         "operationId": "MoveCard",
         "requestBody": {
           "content": {
@@ -8517,7 +8517,7 @@
     },
     "/{accountId}/dock/tools/{toolId}": {
       "delete": {
-        "description": "Remove a tool from the dock: deletes an external link or an empty extra tool, and disables any other tool (returns 204 No Content either way).\nDeleted: an external link, or a tool that is empty while the project has another\ntool of the same type, enabled or disabled. Empty means nothing inside it is still\nin place: items already in the trash don't count, archived and draft items do, and\nfor a Card Table only cards count, not columns. A deleted tool does not go to the\ntrash: Basecamp permanently destroys it, with everything inside it, about five days\nlater. Until then, a deleted external link can be restored in the Basecamp web app.\nDisabled: every other tool, such as the only tool of its type or a tool with\ncontent, exactly as DisableTool does. It keeps its content, and EnableTool restores it.\nTo tell which happened, get the tool afterwards: a deleted tool has status \"deleted\",\nwhile a disabled one keeps its status and has no position.",
+        "description": "Remove a tool from the dock: deletes an external link or an empty extra tool, and disables any other tool (returns 204 No Content either way).\nDeleted: an external link, or a tool that is empty while the project has another\ntool of the same type, enabled or disabled. Empty means nothing inside it at all,\nnot even in the trash; for a Card Table only cards count, not columns. A deleted\ntool does not go to the trash: Basecamp permanently destroys it, with everything\ninside it, about five days later. Until then, a deleted external link can be\nrestored in the Basecamp web app.\nDisabled: every other tool, such as the only tool of its type or a tool with\nanything inside it, archived, draft and trashed items included, exactly as\nDisableTool does. It keeps its content, and EnableTool restores it. Items already\nin the trash stay there and can still be restored for the rest of their 25 days.\nTo tell which happened, get the tool afterwards: a deleted tool has status \"deleted\",\nwhile a disabled one keeps its status and has no position.",
         "operationId": "DeleteTool",
         "parameters": [
           {
@@ -19486,7 +19486,7 @@
     },
     "/{accountId}/recordings/{recordingId}/copies.json": {
       "post": {
-        "description": "Start copying a recording into another project; poll GetFiling for the result.\n\nWorks like MoveRecording, except the original stays where it is. Name the\ndestination with `filing_destination_id`, a container of the kind the\nrecording sits in now, from the destination project's `dock` (GetProject): a\ncard copies into a card table (`kanban_board`) and lands in Triage, or in\nDone if it is completed. A dock tool is copied by `destination_project_id`\ninstead. Poll GetFiling with the returned filing's id until `status` leaves\n`pending` and `processing`; a completed filing's `destination_recording.id`\nis the copy.\n\nNot safe to retry blindly: each request makes another copy. Check the first\nfiling's status before trying again.\n\n400 when neither destination is given. 403 when the recording only copies\nalong with its parent. 404 when the destination is not one the caller can\ncopy it into. 422 when the copy cannot start, such as when the recording is\nbeing moved or the destination cannot take it.",
+        "description": "Start copying a recording into another project; poll GetFiling for the result.\n\nWorks like MoveRecording, and takes the same destinations, except the\noriginal stays where it is. Name the destination with\n`filing_destination_id`, a container of the kind the recording sits in now,\nchosen as for MoveRecording. A copied card lands in Triage, or in Done if it\nis completed, as a moved one does. A to-do or to-do list group copies into a\nto-do list in its own project or another one. A dock tool is copied by\n`destination_project_id`, or by naming the destination project's dock as\n`filing_destination_id`. Poll GetFiling with the returned filing's id until\n`status` leaves `pending` and `processing`; a completed filing's\n`destination_recording.id` is the copy.\n\nThe same recordings copy on their own as move on their own, except the\nEmail Forwards tool, which can't be copied. Everything else copies only\nalong with its parent and answers 403, as for MoveRecording: comments,\nattachments, card steps, check-in answers, hill chart updates, external\nlinks, the card table columns every card table has, and anything outside a\ntool, such as client correspondence and approvals.\n\nNot safe to retry blindly: each request makes another copy. Check the first\nfiling's status before trying again.\n\n400 when neither destination is given. 403 when the recording can't be\ncopied on its own. 404 when the destination is not one the caller can copy\nit into. 422 when the copy cannot start, such as when the recording is being\nmoved or the destination cannot take it.",
         "operationId": "CopyRecording",
         "requestBody": {
           "content": {
@@ -20063,7 +20063,7 @@
     },
     "/{accountId}/recordings/{recordingId}/moves.json": {
       "post": {
-        "description": "Start moving a recording into another project; poll GetFiling for the result.\n\nThe move runs in the background and this answers 201 with a filing. Poll\nGetFiling with its id until `status` leaves `pending` and `processing`. Once\nthe move completes, the recording lives in the destination project under a\nnew id, the completed filing's `destination_recording.id`; its old id no\nlonger reaches it.\n\nName the destination with `filing_destination_id`: the container the\nrecording moves into, of the same kind it sits in now, found in the\ndestination project's `dock` (GetProject). A card moves into a card table\n(`kanban_board`) and lands in Triage, or in Done if it is completed; a card\ntable column moves into a card table too. A message moves into a\n`message_board`; a document, upload or folder into a `vault`; a schedule\nentry into a `schedule`. A dock tool itself (a message board, card table,\nDocs & Files, schedule) is moved by `destination_project_id` instead.\n\n400 when neither destination is given. 403 when the recording only moves\nalong with its parent, or the caller may not move it. 404 when the\ndestination is not one the caller can move it into. 422 when the move\ncannot start, such as when the recording is already being moved or the\ndestination cannot take it. A repeated move is harmless: while the first is\npending it is 422, and once it is done, 404, because the recording has moved.",
+        "description": "Start moving a recording into another project; poll GetFiling for the result.\n\nThe move runs in the background and this answers 201 with a filing. Poll\nGetFiling with its id until `status` leaves `pending` and `processing`. Once\nthe move completes, the recording lives in the destination project under a\nnew id, the completed filing's `destination_recording.id`; its old id no\nlonger reaches it. A move always gives the recording a new id, even within\nits project. To move a to-do into another list in its own project and keep\nits id, use RepositionTodo with `parent_id` instead.\n\nName the destination with `filing_destination_id`: the container the\nrecording moves into, of the same kind it sits in now. Find tools in the\ndestination project's `dock` (GetProject). A message moves into a\n`message_board`. A card moves into a card table (`kanban_board`) and lands\nin Triage, or in Done if it is completed; a card table column moves into a\ncard table too. A document, upload, cloud file, Google document or folder\nmoves into a `vault` (Docs & Files). A schedule entry moves into a\n`schedule`, a check-in question into a `questionnaire` (Automatic\nCheck-ins), an email forward into an `inbox` (Email Forwards), and a to-do\nlist into a `todoset` (To-dos). A to-do, or a to-do list group, moves into a\nto-do list, found with ListTodolists. The list may be in the to-do's own\nproject or another one, but it can't be a group, an archived or trashed\nlist, or the list the to-do is already in. A group moved into a list\nbecomes a group in that list.\n\nA dock tool itself (a message board, card table, Docs & Files, schedule, and\nso on) has no container to name. Move it by `destination_project_id`, or\nname the destination project's dock as `filing_destination_id`.\n\nOnly the recordings above, and the dock tools, move on their own. Everything\nelse moves only along with its parent and answers 403: comments,\nattachments, card steps, check-in answers, hill chart updates, external\nlinks, the card table columns every card table has (Triage, Not now, Done\nand On hold), and anything outside a tool, such as client correspondence and\napprovals. To move one, move the recording or tool it belongs to.\n\n400 when neither destination is given. 403 when the recording can't be\nmoved on its own, or the caller may not move it. 404 when the destination\nis not one the caller can move it into. 422 when the move cannot start,\nsuch as when the recording is already being moved or the destination\ncannot take it. A repeated move is harmless: while the first is pending it\nis 422, and once it is done, 404, because the recording has moved.",
         "operationId": "MoveRecording",
         "requestBody": {
           "content": {
@@ -28343,7 +28343,7 @@
     },
     "/{accountId}/todos/{todoId}/position.json": {
       "put": {
-        "description": "Reposition a todo within its todolist",
+        "description": "Reposition a todo within its todolist, or move it into another list or the to-do set in the same project.\n\n`parent_id` names a to-do list, or the project's to-do set, to move the todo\ninto; the todo keeps its id. It must be in the same project: anything else\nanswers 422. To move a todo into a list in another project, use\nMoveRecording.",
         "operationId": "RepositionTodo",
         "requestBody": {
           "content": {
@@ -32340,7 +32340,7 @@
         "properties": {
           "filing_destination_id": {
             "type": "integer",
-            "description": "The container to copy into, from the destination project's dock: a card\ntable for a card, a message board for a message, a vault for a document,\nupload or folder, a schedule for a schedule entry. Give this or\ndestination_project_id.",
+            "description": "The container to copy into, chosen as for MoveRecording's\nfiling_destination_id: a container of the kind the recording sits in now,\nsuch as a to-do list, in this project or another, for a to-do. For a dock\ntool, the destination project's dock. Give this or destination_project_id.",
             "format": "int64"
           },
           "destination_project_id": {
@@ -36246,7 +36246,7 @@
         "properties": {
           "filing_destination_id": {
             "type": "integer",
-            "description": "The container to move into, from the destination project's dock: a card\ntable for a card, a message board for a message, a vault for a document,\nupload or folder, a schedule for a schedule entry. Give this or\ndestination_project_id.",
+            "description": "The container to move into, of the kind the recording sits in now: a card\ntable for a card, a message board for a message, a vault for a document,\nupload, cloud file, Google document or folder, a schedule for a schedule\nentry, a questionnaire for a check-in question, an inbox for an email\nforward, a to-do set for a to-do list, and a to-do list, in this project\nor another, for a to-do or to-do list group. For a dock tool, the\ndestination project's dock. Give this or destination_project_id.",
             "format": "int64"
           },
           "destination_project_id": {
@@ -38174,7 +38174,7 @@
           },
           "parent_id": {
             "type": "integer",
-            "description": "Optional todolist ID to move the todo to a different parent",
+            "description": "A to-do list, or the project's to-do set, in the same project, to move the\ntodo into instead of its current parent. 422 when it is neither.",
             "format": "int64"
           }
         },

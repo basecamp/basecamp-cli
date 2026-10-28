@@ -43,7 +43,7 @@ ACTIONS (RO = read-only):
 - list_todos (RO, paginated): List todos in a todolist
 - replace_todo: Replace a todo with a new complete representation
 - reposition_subtask: Move a subtask to a new position among its siblings
-- reposition_todo: Reposition a todo within its todolist
+- reposition_todo: Reposition a todo within its todolist, or move it into another list or the to-do set in the same project
 - reposition_todolist: Reposition a to-do list within its to-do set
 - reposition_todolist_group: Reposition a todolist group
 - uncomplete_subtask: Mark a subtask as not completed
