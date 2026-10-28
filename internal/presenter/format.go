@@ -30,6 +30,8 @@ func FormatField(spec FieldSpec, key string, val any, locale Locale) string {
 		return formatDock(val)
 	case "steps":
 		return formatSteps(val)
+	case "logo":
+		return formatLogo(val)
 	case "wallpaper":
 		return formatWallpaper(val)
 	default:
@@ -44,6 +46,15 @@ func formatWallpaper(val any) string {
 		if mode, ok := m["mode"].(string); ok {
 			return richtext.SanitizeSingleLine(mode)
 		}
+	}
+	return ""
+}
+
+// formatLogo says a project has a logo. The logo has nothing to show in a
+// terminal but its URL, which is a signed-in redirect.
+func formatLogo(val any) string {
+	if m, ok := val.(map[string]any); ok && m["url"] != nil {
+		return "set"
 	}
 	return ""
 }

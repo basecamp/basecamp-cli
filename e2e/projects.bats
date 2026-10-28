@@ -91,3 +91,57 @@ load test_helper
   run basecamp projects wallpaper remove skyline.png
   assert_failure
 }
+
+
+@test "projects logo without subcommand shows help" {
+  run basecamp projects logo
+  assert_success
+  assert_output_contains "COMMANDS"
+  assert_output_contains "set"
+  assert_output_contains "remove"
+}
+
+@test "projects logo set help names the formats and the size cap" {
+  run basecamp projects logo set --help
+  assert_success
+  assert_output_contains "PNG, JPEG, GIF, WebP, AVIF, HEIF, or HEIC files up to 5 MB"
+}
+
+@test "projects logo set without a file shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp projects logo set
+  assert_failure
+  assert_json_value '.error' '<file> required'
+  assert_json_value '.code' 'usage'
+}
+
+@test "projects logo set refuses an SVG" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+  printf '<svg></svg>' > brand.svg
+
+  run basecamp projects logo set brand.svg
+  assert_failure
+  assert_json_value '.error' 'brand.svg: unsupported image type image/svg+xml (use PNG, JPEG, GIF, WebP, AVIF, HEIF, or HEIC)'
+  assert_json_value '.code' 'usage'
+}
+
+@test "projects logo set refuses a file over 5 MB" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+  dd if=/dev/zero of=big.png bs=1 count=1 seek=5242880 2>/dev/null
+
+  run basecamp projects logo set big.png
+  assert_failure
+  assert_json_value '.error' 'big.png exceeds maximum logo size of 5 MB'
+}
+
+@test "projects logo remove takes no arguments" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp projects logo remove brand.png
+  assert_failure
+}

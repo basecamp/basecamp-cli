@@ -705,6 +705,20 @@ func TestProjectDetailNamesTheWallpaperMode(t *testing.T) {
 	assert.NotContains(t, with.String(), "/wallpaper")
 }
 
+func TestProjectDetailSaysWhetherThereIsALogo(t *testing.T) {
+	project := map[string]any{"id": float64(123), "name": "Launch", "status": "active"}
+
+	var without strings.Builder
+	require.True(t, PresentWithTheme(&without, project, "project", ModeMarkdown, tui.NoColorTheme(), enUS))
+	assert.NotContains(t, without.String(), "Logo")
+
+	project["logo"] = map[string]any{"url": "https://3.basecampapi.com/1/projects/123/logo?v=1"}
+	var with strings.Builder
+	require.True(t, PresentWithTheme(&with, project, "project", ModeMarkdown, tui.NoColorTheme(), enUS))
+	assert.Contains(t, with.String(), "**Logo:** set")
+	assert.NotContains(t, with.String(), "/logo")
+}
+
 // =============================================================================
 // Collapse Tests
 // =============================================================================

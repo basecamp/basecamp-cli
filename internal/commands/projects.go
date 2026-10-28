@@ -41,6 +41,7 @@ func NewProjectsCmd() *cobra.Command {
 		newProjectsUpdateCmd(),
 		newProjectsDeleteCmd(),
 		newProjectsWallpaperCmd(),
+		newProjectsLogoCmd(),
 	)
 
 	return cmd
@@ -431,8 +432,8 @@ func newProjectsDeleteCmd() *cobra.Command {
 	}
 }
 
-// wallpaperFormats match the server's shared image validation, not the narrower web picker.
-var wallpaperFormats = []struct{ mime, name string }{
+// projectImageFormats match the server's shared image validation, not the narrower web picker.
+var projectImageFormats = []struct{ mime, name string }{
 	{"image/png", "PNG"},
 	{"image/jpeg", "JPEG"},
 	{"image/gif", "GIF"},
@@ -485,7 +486,7 @@ func newProjectsWallpaperSetCmd() *cobra.Command {
 
 Accepts %s files up to %d MB.
 --mode lays the image out (%s); without it the project keeps
-its current mode.`, wallpaperFormatNames(), maxWallpaperMB, strings.Join(wallpaperModes, " or ")),
+its current mode.`, projectImageFormatNames(), maxWallpaperMB, strings.Join(wallpaperModes, " or ")),
 		Example: "  $ basecamp projects wallpaper set skyline.jpg --mode fill --project 12345",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -497,14 +498,14 @@ its current mode.`, wallpaperFormatNames(), maxWallpaperMB, strings.Join(wallpap
 					return err
 				}
 			}
-			path, contentType, err := wallpaperFile(args[0])
+			path, contentType, err := projectImageFile(args[0], "wallpaper", maxWallpaperMB)
 			if err != nil {
 				return err
 			}
 
 			app := appctx.FromContext(cmd.Context())
 			scope := newFollowUpScope(app)
-			projectID, err := wallpaperProjectID(cmd, app)
+			projectID, err := projectImageProjectID(cmd, app)
 			if err != nil {
 				return err
 			}
@@ -525,7 +526,7 @@ its current mode.`, wallpaperFormatNames(), maxWallpaperMB, strings.Join(wallpap
 			if mode != "" {
 				summary += " (" + mode + ")"
 			}
-			return respondWithWallpaperProject(cmd, app, projectID, scope, map[string]any{"id": projectID}, summary,
+			return respondWithProjectImage(cmd, app, projectID, scope, map[string]any{"id": projectID}, summary,
 				output.Breadcrumb{
 					Action:      "mode",
 					Cmd:         fmt.Sprintf("basecamp projects wallpaper mode <fill|tile> --project %d", projectID),
@@ -569,7 +570,7 @@ A project with no wallpaper keeps the mode for the next one uploaded.`,
 
 			app := appctx.FromContext(cmd.Context())
 			scope := newFollowUpScope(app)
-			projectID, err := wallpaperProjectID(cmd, app)
+			projectID, err := projectImageProjectID(cmd, app)
 			if err != nil {
 				return err
 			}
@@ -585,7 +586,7 @@ A project with no wallpaper keeps the mode for the next one uploaded.`,
 				return convertSDKError(err)
 			}
 
-			return respondWithWallpaperProject(cmd, app, projectID, scope, project, "Wallpaper mode set to "+mode,
+			return respondWithProjectImage(cmd, app, projectID, scope, project, "Wallpaper mode set to "+mode,
 				output.Breadcrumb{
 					Action:      "set",
 					Cmd:         fmt.Sprintf("basecamp projects wallpaper set <file> --project %d", projectID),
@@ -607,7 +608,7 @@ func newProjectsWallpaperRemoveCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 			scope := newFollowUpScope(app)
-			projectID, err := wallpaperProjectID(cmd, app)
+			projectID, err := projectImageProjectID(cmd, app)
 			if err != nil {
 				return err
 			}
@@ -616,7 +617,7 @@ func newProjectsWallpaperRemoveCmd() *cobra.Command {
 				return convertSDKError(err)
 			}
 
-			return respondWithWallpaperProject(cmd, app, projectID, scope, map[string]any{"id": projectID}, "Wallpaper removed",
+			return respondWithProjectImage(cmd, app, projectID, scope, map[string]any{"id": projectID}, "Wallpaper removed",
 				output.Breadcrumb{
 					Action:      "set",
 					Cmd:         fmt.Sprintf("basecamp projects wallpaper set <file> --project %d", projectID),
@@ -627,9 +628,115 @@ func newProjectsWallpaperRemoveCmd() *cobra.Command {
 	}
 }
 
-// wallpaperFile checks the size and MIME hint before uploading. The server's
+const maxLogoMB = 5
+
+func logoAgentNotes() map[string]string {
+	return map[string]string{"agent_notes": "People and agents who can edit the project can change its logo; others get 403, and a project the caller cannot see gets 404\n.data.logo is {url}, absent when there is none; url requires authentication and redirects to the image"}
+}
+
+func newProjectsLogoCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:         "logo",
+		Short:       "Manage a project's logo",
+		Annotations: logoAgentNotes(),
+		Long: `Set or remove a project's logo, the image shown beside its name.
+
+The project comes from --project (or --in), then the configured default.
+People and agents who can edit the project can change its logo.`,
+		Example: `  $ basecamp projects logo set brand.png --project 12345
+  $ basecamp projects logo remove --project 12345`,
+	}
+
+	cmd.AddCommand(
+		newProjectsLogoSetCmd(),
+		newProjectsLogoRemoveCmd(),
+	)
+
+	return cmd
+}
+
+func newProjectsLogoSetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:         "set <file>",
+		Annotations: logoAgentNotes(),
+		Short:       "Upload or replace a project's logo",
+		Long: fmt.Sprintf(`Upload or replace the project's logo.
+
+Accepts %s files up to %d MB.`, projectImageFormatNames(), maxLogoMB),
+		Example: "  $ basecamp projects logo set brand.png --project 12345",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return missingArg(cmd, "<file>")
+			}
+			path, contentType, err := projectImageFile(args[0], "logo", maxLogoMB)
+			if err != nil {
+				return err
+			}
+
+			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
+			projectID, err := projectImageProjectID(cmd, app)
+			if err != nil {
+				return err
+			}
+
+			f, err := os.Open(path)
+			if err != nil {
+				return fmt.Errorf("%s: %w", args[0], err)
+			}
+			defer f.Close()
+
+			filename := filepath.Base(path)
+			if err := app.Account().Projects().UpdateLogo(cmd.Context(), projectID, f, filename, contentType); err != nil {
+				return convertSDKError(err)
+			}
+
+			return respondWithProjectImage(cmd, app, projectID, scope, map[string]any{"id": projectID}, "Logo set: "+filename,
+				output.Breadcrumb{
+					Action:      "remove",
+					Cmd:         fmt.Sprintf("basecamp projects logo remove --project %d", projectID),
+					Description: "Remove the logo",
+				},
+			)
+		},
+	}
+}
+
+func newProjectsLogoRemoveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:         "remove",
+		Annotations: logoAgentNotes(),
+		Short:       "Remove a project's logo",
+		Long:        "Remove the project's logo. Removing it from a project that has none succeeds.",
+		Example:     "  $ basecamp projects logo remove --project 12345",
+		Args:        cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
+			projectID, err := projectImageProjectID(cmd, app)
+			if err != nil {
+				return err
+			}
+
+			if err := app.Account().Projects().RemoveLogo(cmd.Context(), projectID); err != nil {
+				return convertSDKError(err)
+			}
+
+			return respondWithProjectImage(cmd, app, projectID, scope, map[string]any{"id": projectID}, "Logo removed",
+				output.Breadcrumb{
+					Action:      "set",
+					Cmd:         fmt.Sprintf("basecamp projects logo set <file> --project %d", projectID),
+					Description: "Upload a new logo",
+				},
+			)
+		},
+	}
+}
+
+// projectImageFile checks the size and MIME hint before uploading. The server's
 // shared image validations remain authoritative.
-func wallpaperFile(arg string) (path, contentType string, err error) {
+func projectImageFile(arg, kind string, maxMB int) (path, contentType string, err error) {
 	path = richtext.NormalizeDragPath(arg)
 	if err := richtext.ValidateFile(path); err != nil {
 		return "", "", fmt.Errorf("%s: %w", arg, err)
@@ -639,22 +746,22 @@ func wallpaperFile(arg string) (path, contentType string, err error) {
 		return "", "", fmt.Errorf("%s: %w", arg, err)
 	}
 	name := filepath.Base(path)
-	if info.Size() > maxWallpaperMB<<20 {
-		return "", "", output.ErrUsage(fmt.Sprintf("%s exceeds maximum wallpaper size of %d MB", name, maxWallpaperMB))
+	if info.Size() > int64(maxMB)<<20 {
+		return "", "", output.ErrUsage(fmt.Sprintf("%s exceeds maximum %s size of %d MB", name, kind, maxMB))
 	}
 	contentType = richtext.DetectMIME(path)
-	for _, f := range wallpaperFormats {
+	for _, f := range projectImageFormats {
 		if f.mime == contentType {
 			return path, contentType, nil
 		}
 	}
-	return "", "", output.ErrUsage(fmt.Sprintf("%s: unsupported image type %s (use %s)", name, contentType, wallpaperFormatNames()))
+	return "", "", output.ErrUsage(fmt.Sprintf("%s: unsupported image type %s (use %s)", name, contentType, projectImageFormatNames()))
 }
 
-// wallpaperFormatNames lists the accepted formats for help and validation errors.
-func wallpaperFormatNames() string {
-	names := make([]string, len(wallpaperFormats))
-	for i, f := range wallpaperFormats {
+// projectImageFormatNames lists the accepted formats for help and validation errors.
+func projectImageFormatNames() string {
+	names := make([]string, len(projectImageFormats))
+	for i, f := range projectImageFormats {
 		names[i] = f.name
 	}
 	return strings.Join(names[:len(names)-1], ", ") + ", or " + names[len(names)-1]
@@ -667,7 +774,7 @@ func validateWallpaperMode(mode string) error {
 	return output.ErrUsageHint(fmt.Sprintf("unknown wallpaper mode %q", mode), "Use "+strings.Join(wallpaperModes, " or "))
 }
 
-func wallpaperProjectID(cmd *cobra.Command, app *appctx.App) (int64, error) {
+func projectImageProjectID(cmd *cobra.Command, app *appctx.App) (int64, error) {
 	if err := ensureAccount(cmd, app); err != nil {
 		return 0, err
 	}
@@ -682,11 +789,11 @@ func wallpaperProjectID(cmd *cobra.Command, app *appctx.App) (int64, error) {
 	return projectID, nil
 }
 
-// respondWithWallpaperProject answers with the project as it now stands, so
-// the output carries its wallpaper. The change has already happened, so a
+// respondWithProjectImage answers with the project as it now stands, so the
+// output carries its wallpaper and logo. The change has already happened, so a
 // failed read falls back to what the caller has, with a diagnostic, rather
 // than failing the command.
-func respondWithWallpaperProject(cmd *cobra.Command, app *appctx.App, projectID int64, scope followUpScope, fallback any, summary string, crumbs ...output.Breadcrumb) error {
+func respondWithProjectImage(cmd *cobra.Command, app *appctx.App, projectID int64, scope followUpScope, fallback any, summary string, crumbs ...output.Breadcrumb) error {
 	crumbs = append([]output.Breadcrumb{{
 		Action:      "show",
 		Cmd:         fmt.Sprintf("basecamp projects show %d", projectID),
