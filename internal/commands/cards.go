@@ -1952,12 +1952,13 @@ func moveCardToCardTable(cmd *cobra.Command, app *appctx.App, scope followUpScop
 // to parseFilingRef's host and account checks, and its project must agree
 // with --to-project.
 func resolveFilingTable(cmd *cobra.Command, app *appctx.App, toProject, toCardTable string) (*basecamp.CardTable, error) {
-	var urlProjectID string
+	var urlProjectID, url string
 	if urlarg.IsURL(toCardTable) {
 		ref, err := parseFilingRef(app, toCardTable, "card table", "card_tables", "…/card_tables/<id>")
 		if err != nil {
 			return nil, err
 		}
+		url = toCardTable
 		toCardTable, urlProjectID = strconv.FormatInt(ref.id, 10), ref.project
 	}
 
@@ -2024,9 +2025,13 @@ func resolveFilingTable(cmd *cobra.Command, app *appctx.App, toProject, toCardTa
 		if strconv.FormatInt(ct.ID, 10) == toCardTable {
 			return getCardTable(cmd, app, ct.ID)
 		}
-		if strings.EqualFold(ct.Title, toCardTable) {
+		if url == "" && strings.EqualFold(ct.Title, toCardTable) {
 			named = append(named, ct)
 		}
+	}
+	if url != "" {
+		return nil, filingURLNotFound("--to-card-table", "card table", url, projectLabel(cmd, app, projectID, projectName),
+			fmt.Sprintf("Available card tables: %s", formatCardTableIDs(tables)))
 	}
 	switch len(named) {
 	case 1:

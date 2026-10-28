@@ -155,3 +155,16 @@ func TestMessagesCopyOfADraftWithNoFilingIsLookedForAmongDrafts(t *testing.T) {
 	assert.Contains(t, e.Hint, "basecamp drafts list --all")
 	assert.NotContains(t, e.Hint, "--status drafted")
 }
+
+// A flat API URL names no project, and its id can be a board's title too. A
+// URL that names no board of the project is refused, never read as that title.
+func TestMessagesBoardURLThatNamesNoBoardIsNeverATitle(t *testing.T) {
+	transport := messagesTransport()
+	transport.gets["/projects/999"] = `{"id":999,"name":"Dest","dock":[{"name":"message_board","id":900,"title":"Announcements","enabled":true},{"name":"message_board","id":901,"title":"2026","enabled":true}]}`
+	url := "https://3.basecampapi.com/99999/message_boards/2026.json"
+	e := runFamilyCommand(t, transport, NewMessagesCmd(), "copy", "456", "--to-project", "Dest", "--to-board", url).failure(t)
+	assert.Equal(t, output.CodeNotFound, e.Code)
+	assert.Contains(t, e.Message, url)
+	assert.Contains(t, e.Hint, "901 (2026)")
+	assert.Empty(t, transport.posts)
+}

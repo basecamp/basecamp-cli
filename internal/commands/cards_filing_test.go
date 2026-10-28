@@ -79,6 +79,7 @@ func TestPollUntilHonoursCancellation(t *testing.T) {
 type mockFilingTransport struct {
 	twoTables      bool
 	duplicateTitle bool
+	numericTitle   bool
 	postStatus     int
 	postErr        error
 	postBody       string
@@ -144,11 +145,16 @@ func (m *mockFilingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 		if m.duplicateTitle {
 			dock += `,{"name":"kanban_board","id":970,"title":"roadmap","enabled":true}`
 		}
+		if m.numericTitle {
+			dock += `,{"name":"kanban_board","id":980,"title":"2026","enabled":true}`
+		}
 		return respond(200, `{"id":999,"dock":[`+dock+`]}`)
 	case strings.HasSuffix(path, "/card_tables/555"):
 		return respond(200, `{"id":555,"title":"Board","bucket":{"id":123,"name":"Source"},"lists":[{"id":777,"title":"Developing"}]}`)
 	case strings.HasSuffix(path, "/card_tables/900"):
 		return respond(200, `{"id":900,"title":"Ideas","bucket":{"id":999,"name":"Dest"},"lists":[{"id":901,"title":"Triage","type":"Kanban::Triage"}]}`)
+	case m.numericTitle && strings.HasSuffix(path, "/card_tables/980"):
+		return respond(200, `{"id":980,"title":"2026","bucket":{"id":999,"name":"Dest"},"lists":[{"id":981,"title":"Triage","type":"Kanban::Triage"}]}`)
 	case strings.HasSuffix(path, "/card_tables/950"):
 		return respond(200, `{"id":950,"title":"Roadmap","bucket":{"id":999,"name":"Dest"},"lists":[{"id":951,"title":"Triage","type":"Kanban::Triage"}]}`)
 	case strings.HasSuffix(path, "/card_tables/columns/777"):
@@ -359,6 +365,18 @@ func TestCardsMoveToExplicitCardTable(t *testing.T) {
 			assert.Equal(t, float64(4560), run.envelope.Data["id"])
 		})
 	}
+}
+
+// A flat API URL names no project, and its id can be a card table's title
+// too. A URL that names no card table of the project is refused, never read as
+// that title.
+func TestCardsCardTableURLThatNamesNoTableIsNeverATitle(t *testing.T) {
+	transport := &mockFilingTransport{numericTitle: true, statuses: []string{"completed"}}
+	url := "https://3.basecampapi.com/99999/card_tables/2026.json"
+	e := requireFilingError(t, runFilingCommand(t, transport, "copy", "456", "--to-project", "Dest", "--to-card-table", url))
+	assert.Equal(t, output.CodeNotFound, e.Code)
+	assert.Contains(t, e.Message, url)
+	assert.Empty(t, transport.posts)
 }
 
 func TestCardsMoveRefusesItsOwnCardTable(t *testing.T) {

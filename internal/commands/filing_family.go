@@ -82,12 +82,13 @@ func (t filingTarget) describe(noun string) string {
 // parseFilingRef's host and account checks, and its project must agree with
 // --to-project.
 func resolveFilingTarget(cmd *cobra.Command, app *appctx.App, c filingContainer, toProject, toContainer string) (filingTarget, error) {
-	var urlProjectID string
+	var urlProjectID, url string
 	if urlarg.IsURL(toContainer) {
 		ref, err := parseFilingRef(app, toContainer, c.noun, c.urlKind, c.urlShape)
 		if err != nil {
 			return filingTarget{}, err
 		}
+		url = toContainer
 		toContainer, urlProjectID = strconv.FormatInt(ref.id, 10), ref.project
 	}
 
@@ -141,9 +142,13 @@ func resolveFilingTarget(cmd *cobra.Command, app *appctx.App, c filingContainer,
 		if strconv.FormatInt(tool.ID, 10) == toContainer {
 			return pick(tool), nil
 		}
-		if strings.EqualFold(tool.Title, toContainer) {
+		if url == "" && strings.EqualFold(tool.Title, toContainer) {
 			named = append(named, tool)
 		}
+	}
+	if url != "" {
+		return filingTarget{}, filingURLNotFound(c.flag, c.noun, url, projectName,
+			fmt.Sprintf("Its %s: %s", c.plurals(), formatDockTools(enabled)))
 	}
 	switch len(named) {
 	case 0:
@@ -169,6 +174,18 @@ func bucketTarget(id int64, title, appURL string, bucket *basecamp.Bucket) filin
 		target.calendar = bucket.Type == "Calendar"
 	}
 	return target
+}
+
+// filingURLNotFound refuses a destination URL that names no container, in
+// project when it is set. A URL carries an id, never a title, so it is not
+// looked up as one: a flat URL names no project, and its id ("2026") can be a
+// folder's or board's title.
+func filingURLNotFound(flag, noun, url, project, hint string) error {
+	message := fmt.Sprintf("%s %s names no %s", flag, url, noun)
+	if project != "" {
+		message += " in " + project
+	}
+	return &output.Error{Code: output.CodeNotFound, Message: message, Hint: hint}
 }
 
 // noFilingContainerError says the project has no enabled tool of the kind,

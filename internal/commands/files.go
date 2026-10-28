@@ -2998,22 +2998,29 @@ func resolveFilesTarget(cmd *cobra.Command, app *appctx.App, toProject, toFolder
 		return resolveFilingTarget(cmd, app, docsAndFiles(), toProject, "")
 	}
 
-	var urlProjectID string
+	var urlProjectID, url string
 	if urlarg.IsURL(toFolder) {
 		ref, err := parseFilingRef(app, toFolder, "folder", "vaults", "…/vaults/<id>")
 		if err != nil {
 			return filingTarget{}, err
 		}
+		url = toFolder
 		toFolder, urlProjectID = strconv.FormatInt(ref.id, 10), ref.project
 	}
 
 	// A folder title can be all digits ("2026"), so with --to-project a number
-	// that names no folder is looked up as a title.
+	// that names no folder is looked up as a title. A URL names only an id.
 	if isNumericID(toFolder) {
 		id, _ := strconv.ParseInt(toFolder, 10, 64)
 		target, err := filesFolderTarget(cmd.Context(), app, id)
-		if err != nil && toProject != "" && urlProjectID == "" && output.AsError(err).Code == output.CodeNotFound {
-			return filesFolderByTitle(cmd, app, toProject, toFolder)
+		if err != nil && output.AsError(err).Code == output.CodeNotFound {
+			switch {
+			case url != "":
+				return filingTarget{}, filingURLNotFound("--to-folder", "folder", url, "",
+					"Pass the folder's current URL or ID, or its title with --to-project")
+			case toProject != "":
+				return filesFolderByTitle(cmd, app, toProject, toFolder)
+			}
 		}
 		if err != nil {
 			return filingTarget{}, err

@@ -312,3 +312,21 @@ func TestFilesCopyOfADraftDocumentWithNoFilingIsLookedForAmongDrafts(t *testing.
 	assert.Contains(t, e.Hint, "basecamp drafts list --all")
 	assert.NotContains(t, e.Hint, "--status drafted")
 }
+
+// A flat API URL names no project, and its id can be a folder's title too.
+// A URL that names no folder is refused, never looked up as that title.
+func TestFilesFolderURLThatNamesNoFolderIsNeverATitle(t *testing.T) {
+	for _, url := range []string{
+		"https://3.basecampapi.com/99999/vaults/2026.json",
+		"https://3.basecamp.com/99999/buckets/999/vaults/2026",
+	} {
+		t.Run(url, func(t *testing.T) {
+			transport := filesFilingTransport()
+			transport.gets["/vaults/900/vaults"] = `[{"id":950,"type":"Vault","title":"Contracts"},{"id":970,"type":"Vault","title":"2026"}]`
+			e := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "456", "--to-project", "Dest", "--to-folder", url).failure(t)
+			assert.Equal(t, output.CodeNotFound, e.Code)
+			assert.Contains(t, e.Message, url)
+			assert.Empty(t, transport.posts)
+		})
+	}
+}
