@@ -239,6 +239,9 @@ func newSubtasksCreateCmd() *cobra.Command {
 			if err != nil {
 				return convertSDKError(err)
 			}
+			if err := checkAssigneesSaved(assigneeSubtask, subtask.ID, req.AssigneeIDs, subtask.Assignees); err != nil {
+				return err
+			}
 
 			return app.OK(subtask,
 				output.WithSummary(fmt.Sprintf("Created subtask #%d: %s", subtask.ID, subtask.Title)),
@@ -335,6 +338,9 @@ left as it is.
 			subtask, err := app.Account().Subtasks().Update(cmd.Context(), subtaskID, req)
 			if err != nil {
 				return convertSDKError(err)
+			}
+			if err := checkAssigneesSaved(assigneeSubtask, subtask.ID, req.AssigneeIDs, subtask.Assignees); err != nil {
+				return err
 			}
 
 			return app.OK(subtask,

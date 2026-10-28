@@ -1453,6 +1453,9 @@ Use - as the content argument to read the todo title from stdin:
 			if err != nil {
 				return convertSDKError(err)
 			}
+			if err := checkAssigneesSaved(assigneeTodo, todo.ID, req.AssigneeIDs, todo.Assignees); err != nil {
+				return err
+			}
 
 			return app.OK(todo,
 				output.WithEntity("todo"),
@@ -1707,6 +1710,9 @@ Set or clear the people notified when the todo is completed:
 			})
 			if err != nil {
 				return convertSDKError(err)
+			}
+			if err := checkAssigneesSaved(assigneeTodo, todo.ID, assigneeIDs, todo.Assignees); err != nil {
+				return err
 			}
 
 			return app.OK(todo,

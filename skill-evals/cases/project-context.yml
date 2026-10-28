@@ -1,0 +1,13 @@
+task: List the todos in this project
+tags: [workflow]
+mocks:
+  - match: 'config show(?!.*--help)'
+    output: '{"ok":true,"data":{"account_id":{"source":"global","value":"99999"},"project_id":{"source":"repo","value":"12345"}},"summary":"Effective configuration"}'
+  - match: 'todos list(?!.*--help)'
+    output: '{"ok":true,"data":[{"id":1,"content":"Ship it"}],"summary":"1 todo"}'
+expect_sequence:
+  - match: 'config show(?!.*--help)'
+  - match: 'todos list(?!.*--help)'
+reject:
+  - 'projects list'
+max_commands: 4

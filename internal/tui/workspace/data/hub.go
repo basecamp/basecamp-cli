@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -964,13 +965,93 @@ func (h *Hub) UncompleteTodo(ctx context.Context, accountID string, projectID, t
 	return client.Todos().Uncomplete(ctx, todoID)
 }
 
-// TrashRecording moves a recording to the trash.
+// TrashRecording moves a recording to the trash. It is for views whose items
+// are of a known type that is never a Campfire line; a view that can hold any
+// recording uses RemoveRecording.
 func (h *Hub) TrashRecording(ctx context.Context, accountID string, projectID, recordingID int64) error {
 	client := h.multi.ClientFor(accountID)
 	if client == nil {
 		return fmt.Errorf("no client for account %s", accountID)
 	}
 	return client.Recordings().Trash(ctx, recordingID)
+}
+
+// IsCampfireLine reports whether a recording type, as the API gives it, is a
+// line in a Campfire, in a project or a Ping: one of bc3's Chat::Lines::*.
+func IsCampfireLine(recordingType string) bool {
+	return strings.HasPrefix(recordingType, "Chat::Lines::")
+}
+
+// RemoveRecording takes a recording away the way its type allows, and says
+// whether it deleted it rather than trashing it. A Campfire line is deleted
+// through its Campfire, which is how Basecamp removes one: bc3 refuses the
+// generic trash route for anything in a Ping (bc3#14171), and on a line in a
+// project it would skip the line endpoint's checks on who may delete a line
+// and until when. Anything else is trashed.
+//
+// recordingType is the API's type for the recording, never a view's label
+// ("Todo", "Campfire::Line"): a caller with only a label reads the type with
+// RecordingKind first. Without one nothing is written, since the confirmation
+// the caller showed can't have said which of the two would happen. campfireID
+// is a line's Campfire, read from the line in projectID, its bucket, when the
+// caller passes 0.
+func (h *Hub) RemoveRecording(ctx context.Context, accountID string, projectID, recordingID int64, recordingType string, campfireID int64) (deleted bool, err error) {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return false, fmt.Errorf("no client for account %s", accountID)
+	}
+	if recordingType == "" {
+		return false, fmt.Errorf("can't tell what recording %d is, so it was left alone", recordingID)
+	}
+	if !IsCampfireLine(recordingType) {
+		return false, client.Recordings().Trash(ctx, recordingID)
+	}
+	if campfireID == 0 {
+		if _, campfireID, err = readRecordingKind(ctx, client, projectID, recordingID); err != nil {
+			return false, err
+		}
+	}
+	if campfireID == 0 {
+		return false, fmt.Errorf("line %d names no Campfire to delete it from", recordingID)
+	}
+	return true, client.Campfires().DeleteLine(ctx, campfireID, recordingID)
+}
+
+// RecordingKind reads a recording's API type and its parent's ID, which for a
+// Campfire line is its Campfire, for a caller that knows the recording only by
+// a view's label.
+func (h *Hub) RecordingKind(ctx context.Context, accountID string, projectID, recordingID int64) (recordingType string, parentID int64, err error) {
+	client := h.multi.ClientFor(accountID)
+	if client == nil {
+		return "", 0, fmt.Errorf("no client for account %s", accountID)
+	}
+	return readRecordingKind(ctx, client, projectID, recordingID)
+}
+
+// readRecordingKind reads a recording's API type and its parent's ID, through
+// its bucket: bc3 answers the bucket-less /recordings/<id>.json with a 404 for
+// some types, such as Kanban::Card.
+func readRecordingKind(ctx context.Context, client *basecamp.AccountClient, projectID, recordingID int64) (recordingType string, parentID int64, err error) {
+	resp, err := client.Get(ctx, fmt.Sprintf("/buckets/%d/recordings/%d.json", projectID, recordingID))
+	if err != nil {
+		return "", 0, err
+	}
+	var recording struct {
+		Type   string `json:"type"`
+		Parent *struct {
+			ID int64 `json:"id"`
+		} `json:"parent"`
+	}
+	if err := resp.UnmarshalData(&recording); err != nil {
+		return "", 0, fmt.Errorf("reading recording %d: %w", recordingID, err)
+	}
+	if recording.Type == "" {
+		return "", 0, fmt.Errorf("recording %d has no type", recordingID)
+	}
+	if recording.Parent != nil {
+		parentID = recording.Parent.ID
+	}
+	return recording.Type, parentID, nil
 }
 
 // CreateDocument creates a new document in a vault.

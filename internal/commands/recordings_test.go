@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -305,5 +306,152 @@ func TestRecordingsStatusProjectURLIsRefused(t *testing.T) {
 			assert.Equal(t, output.CodeUsage, e.Code)
 			assert.Empty(t, transport.recorded(), "a project URL must not reach the API")
 		})
+	}
+}
+
+// pingGatedWrite is a command that sends a write to a generic recording route
+// bc3 closes to a Ping (bc3#14171), and the request it sends.
+type pingGatedWrite struct {
+	name   string
+	cmd    func() *cobra.Command
+	args   []string
+	method string
+	path   string
+}
+
+// pingGatedWrites are those commands, for recording 111. bc3 answers each of
+// their writes to a Ping with an empty 403.
+var pingGatedWrites = []pingGatedWrite{
+	{"recordings trash", NewRecordingsCmd, []string{"trash", "111"}, http.MethodPut, "/99999/recordings/111/status/trashed.json"},
+	{"recordings archive", NewRecordingsCmd, []string{"archive", "111"}, http.MethodPut, "/99999/recordings/111/status/archived.json"},
+	{"recordings restore", NewRecordingsCmd, []string{"restore", "111"}, http.MethodPut, "/99999/recordings/111/status/active.json"},
+	{"todos trash", NewTodosCmd, []string{"trash", "111"}, http.MethodPut, "/99999/recordings/111/status/trashed.json"},
+	{"recordings visibility", NewRecordingsCmd, []string{"visibility", "111", "--hidden"}, http.MethodPut, "/99999/recordings/111/client_visibility.json"},
+	{"subscriptions add", NewSubscriptionsCmd, []string{"add", "111", "--people", "5"}, http.MethodPut, "/99999/recordings/111/subscription.json"},
+	{"subscriptions remove", NewSubscriptionsCmd, []string{"remove", "111", "--people", "5"}, http.MethodPut, "/99999/recordings/111/subscription.json"},
+	{"spotlight", NewSpotlightCmd, []string{"111"}, http.MethodPost, "/99999/recordings/111/spotlight.json"},
+	{"unspotlight", NewUnspotlightCmd, []string{"111"}, http.MethodDelete, "/99999/recordings/111/spotlight.json"},
+}
+
+// runPingGatedWrite runs one gated write against a 403 and the given read of
+// recording 111, and returns the error it ends in.
+func runPingGatedWrite(t *testing.T, w pingGatedWrite, readStatus int, readBody string) *output.Error {
+	t.Helper()
+	e, _ := runPingGatedWriteIn(t, output.FormatJSON, w, readStatus, readBody)
+	return e
+}
+
+// runPingGatedWriteIn is runPingGatedWrite with the output in format, and
+// returns the app it ran in too. setup, when given, adjusts the app first.
+func runPingGatedWriteIn(t *testing.T, format output.Format, w pingGatedWrite, readStatus int, readBody string, setup ...func(*appctx.App)) (*output.Error, *appctx.App) {
+	t.Helper()
+	app, transport := setupRecordingTestApp(t,
+		stubRoute{method: w.method, path: w.path, status: http.StatusForbidden},
+		stubRoute{method: http.MethodGet, path: "/99999/recordings/111.json", status: readStatus, body: readBody},
+	)
+	app.Output = output.New(output.Options{Format: format, Writer: &bytes.Buffer{}})
+	for _, adjust := range setup {
+		adjust(app)
+	}
+
+	err := executeRecordingCommand(w.cmd(), app, w.args...)
+
+	require.Error(t, err)
+	var e *output.Error
+	require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+	assert.Equal(t, output.CodeForbidden, e.Code)
+	assert.Equal(t, http.StatusForbidden, e.HTTPStatus)
+	writes := 0
+	for _, call := range transport.recorded() {
+		if call.Method != http.MethodGet {
+			writes++
+		}
+	}
+	assert.Equal(t, 1, writes, "the refused write is sent once and not retried another way")
+	return e, app
+}
+
+const pingLine = `{"id":111,"type":"Chat::Lines::Text","parent":{"id":222,"type":"Chat::Transcript"},"bucket":{"id":333,"type":"Circle"}}`
+
+// A 403 on a line in a Ping says why and names the command that does delete
+// the line, with its Campfire and its Ping: bc3's 403 is empty, the same one a
+// person without permission gets, so the line is read back to tell them apart.
+// Read as JSON, the command carries --force, without which chat delete refuses
+// to run where no confirmation can be shown.
+func TestRecordingWritesExplainAPingLine(t *testing.T) {
+	for _, w := range pingGatedWrites {
+		t.Run(w.name, func(t *testing.T) {
+			e, app := runPingGatedWriteIn(t, output.FormatJSON, w, http.StatusOK, pingLine)
+
+			assert.Equal(t, "Basecamp doesn't change a line in a Ping through this command", e.Message)
+			assert.Equal(t, "A Ping's lines change only through its Campfire. To delete this one: basecamp chat delete 111 --room 222 --in 333 --force", e.Hint)
+			require.NoError(t, ensureDeleteConfirmable(deleteGuard(app), strings.Contains(e.Hint, "--force")),
+				"the hint %q is refused by the guard it would hit", e.Hint)
+		})
+	}
+}
+
+// Read by a person, the command leaves --force off: chat delete will ask them.
+func TestRecordingWritesExplainAPingLineToAPerson(t *testing.T) {
+	e, _ := runPingGatedWriteIn(t, output.FormatStyled, pingGatedWrites[0], http.StatusOK, pingLine)
+
+	assert.Equal(t, "A Ping's lines change only through its Campfire. To delete this one: basecamp chat delete 111 --room 222 --in 333", e.Hint)
+}
+
+// The commands a refusal names carry the profile and the account it ran under,
+// so pasting one into a fresh shell acts on the same account.
+func TestRecordingWritesNameTheirScopeInAPingRefusal(t *testing.T) {
+	const campfire = `{"id":111,"type":"Chat::Transcript","bucket":{"id":333,"type":"Circle"}}`
+	scoped := func(app *appctx.App) {
+		app.Config.ActiveProfile = "work"
+		app.Config.Sources = map[string]string{"account_id": string(config.SourceFlag)}
+	}
+	for _, w := range pingGatedWrites {
+		t.Run(w.name, func(t *testing.T) {
+			line, _ := runPingGatedWriteIn(t, output.FormatJSON, w, http.StatusOK, pingLine, scoped)
+			assert.Equal(t, "A Ping's lines change only through its Campfire. To delete this one: "+
+				"basecamp chat delete 111 --room 222 --in 333 --force --profile work --account 99999", line.Hint)
+
+			ping, _ := runPingGatedWriteIn(t, output.FormatJSON, w, http.StatusOK, campfire, scoped)
+			assert.Equal(t, "In a Ping you change only your own subscription: "+
+				"basecamp subscriptions subscribe 111 --profile work --account 99999 or "+
+				"basecamp subscriptions unsubscribe 111 --profile work --account 99999", ping.Hint)
+		})
+	}
+}
+
+// A 403 on a Ping's Campfire says that only your own subscription changes there.
+func TestRecordingWritesExplainAPingCampfire(t *testing.T) {
+	const campfire = `{"id":111,"type":"Chat::Transcript","bucket":{"id":333,"type":"Circle"}}`
+	for _, w := range pingGatedWrites {
+		t.Run(w.name, func(t *testing.T) {
+			e := runPingGatedWrite(t, w, http.StatusOK, campfire)
+
+			assert.Equal(t, "Basecamp doesn't change a Ping's Campfire through this command", e.Message)
+			assert.Equal(t, "In a Ping you change only your own subscription: basecamp subscriptions subscribe 111 or basecamp subscriptions unsubscribe 111", e.Hint)
+		})
+	}
+}
+
+// A 403 on anything outside a Ping, or on a recording that can't be read back,
+// is the plain refusal it was.
+func TestRecordingWritesLeaveOtherRefusalsAlone(t *testing.T) {
+	cases := []struct {
+		name, body string
+		status     int
+	}{
+		{"project recording", `{"id":111,"type":"Todo","bucket":{"id":333,"type":"Project"}}`, http.StatusOK},
+		{"project line", `{"id":111,"type":"Chat::Lines::Text","parent":{"id":222},"bucket":{"id":333,"type":"Project"}}`, http.StatusOK},
+		{"unreadable", `{"error":"Not Found"}`, http.StatusNotFound},
+	}
+	for _, c := range cases {
+		for _, w := range pingGatedWrites {
+			t.Run(c.name+" "+w.name, func(t *testing.T) {
+				e := runPingGatedWrite(t, w, c.status, c.body)
+
+				assert.NotContains(t, e.Message, "Ping")
+				assert.NotContains(t, e.Hint, "Ping")
+			})
+		}
 	}
 }

@@ -1265,6 +1265,23 @@ func TestTodosListStatusIncomplete_CrossList_SendsNoStatusParam(t *testing.T) {
 	assert.False(t, resp.Data[0].Completed)
 }
 
+func TestTodosListEmptyEmitsEmptyDataArray(t *testing.T) {
+	for _, args := range [][]string{
+		{"list", "--status", "archived"},
+		{"list", "--list", "500", "--status", "archived"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			app, buf := setupStatusTestApp(t, &statusCapturingTransport{})
+
+			require.NoError(t, executeTodosCommand(NewTodosCmd(), app, args...))
+
+			var resp map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &resp))
+			assert.JSONEq(t, "[]", string(resp["data"]))
+		})
+	}
+}
+
 func TestTodosListCompleted_SingleList_SendsCompletedTrue(t *testing.T) {
 	transport := &statusCapturingTransport{}
 	app, _ := setupStatusTestApp(t, transport)

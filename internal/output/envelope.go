@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -150,7 +151,7 @@ func (w *Writer) EffectiveFormat() Format {
 
 // OK outputs a success response.
 func (w *Writer) OK(data any, opts ...ResponseOption) error {
-	resp := &Response{OK: true, Data: data}
+	resp := &Response{OK: true, Data: emptyIfNilSlice(data)}
 	for _, opt := range opts {
 		opt(resp)
 	}
@@ -160,6 +161,19 @@ func (w *Writer) OK(data any, opts ...ResponseOption) error {
 		}
 	}
 	return w.write(resp)
+}
+
+// emptyIfNilSlice replaces a nil slice with an empty one of the same type.
+// A list that matched nothing is often a nil slice, which encodes as null and
+// then drops out of the envelope entirely, so `.data[]` fails where `[]` would
+// iterate nothing. Byte slices are left alone: json.RawMessage(nil) means no
+// body, and an empty RawMessage is invalid JSON.
+func emptyIfNilSlice(data any) any {
+	v := reflect.ValueOf(data)
+	if v.Kind() != reflect.Slice || !v.IsNil() || v.Type().Elem().Kind() == reflect.Uint8 {
+		return data
+	}
+	return reflect.MakeSlice(v.Type(), 0, 0).Interface()
 }
 
 // Err outputs an error response.

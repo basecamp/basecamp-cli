@@ -144,8 +144,10 @@ func TestSubtasksShowAcceptsTheSubtaskURL(t *testing.T) {
 }
 
 func TestSubtasksCreatePostsTitleDueAndAssignees(t *testing.T) {
+	assigned := strings.Replace(subtaskFixture, `"assignees": []`,
+		`"assignees": [{"id": 7, "name": "Ann"}, {"id": 8, "name": "Bo"}]`, 1)
 	app, transport, out := setupPersonalFeedApp(t,
-		subtaskRoute(http.MethodPost, subtasksListPath(123), http.StatusCreated, subtaskFixture))
+		subtaskRoute(http.MethodPost, subtasksListPath(123), http.StatusCreated, assigned))
 
 	require.NoError(t, executeRecordingCommand(NewSubtasksCmd(), app, "create", "123", "Book the venue",
 		"--due", "2026-10-02", "--assignees", "7,8"))

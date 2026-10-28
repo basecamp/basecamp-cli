@@ -127,8 +127,11 @@ apply where supported.
 - Comments are flat. A reply is posted to the parent recording, never to a
   comment ID. For a comment URL, use `comments show` or `comments thread` to get
   `reply_target` when context matters.
-- Respect project context. Check `.basecamp/config.json` before assuming a
-  project; otherwise pass `--in <project>` or the scope shown by leaf help.
+- Respect project context. Before assuming a project, run
+  `basecamp config show --json`: its `project_id` is the effective value across
+  flags, env and every config layer, with its source. Do not read
+  `.basecamp/config.json` directly; it is only one layer. With no `project_id`,
+  pass `--in <project>` or the scope shown by leaf help.
 - Use non-interactive output for agent work. Do not allow an ambiguous picker to
   block execution.
 - When a result reports content or description attachments, download and inspect
@@ -218,6 +221,10 @@ basecamp pings messages "Jane Smith" --agent
 - A message URL (`/circles/<id>@<line>`) works with `basecamp show` and
   `chat line`; edit or delete such a message with `chat update` or `chat delete`
   on that URL.
+- Nothing in a ping changes through the generic recording commands: `recordings
+  trash`, `archive`, `restore` and `visibility`, `subscriptions add` and
+  `remove`, and `spotlight` are refused (exit 4). Only your own subscription
+  changes there, with `subscriptions subscribe` or `subscriptions unsubscribe`.
 
 ## Spotlights
 
