@@ -55,7 +55,7 @@ func TestTimesheetEntryShowGetsTheEntry(t *testing.T) {
 	call := transport.last(t)
 	assert.Equal(t, http.MethodGet, call.Method)
 	assert.Equal(t, timesheetEntryPath(1069480283), call.Path)
-	assert.Equal(t, "Timesheet entry #1069480283: 1.5h on 2026-10-26 for Plan the offsite", summary)
+	assert.Equal(t, "Timesheet entry #1069480283: 1.5h on 2026-10-26 by Victor Cooper (#7) for Plan the offsite", summary)
 
 	var entry map[string]any
 	require.NoError(t, json.Unmarshal(data, &entry))
@@ -89,7 +89,7 @@ func TestTimesheetEntryCreatePostsDateHoursDescriptionAndPerson(t *testing.T) {
 	assert.Equal(t, map[string]any{
 		"date": "2026-10-26", "hours": "1:30", "description": "Review", "person_id": float64(7),
 	}, decodeSubtaskBody(t, call))
-	assert.Equal(t, "Logged timesheet entry #1069480283: 1.5h on 2026-10-26 for Plan the offsite", summary)
+	assert.Equal(t, "Logged timesheet entry #1069480283: 1.5h on 2026-10-26 by Victor Cooper (#7) for Plan the offsite", summary)
 }
 
 // --date defaults to today, and unset optional fields are not sent.
@@ -155,7 +155,7 @@ func TestTimesheetEntryUpdateSendsOnlyWhatChanged(t *testing.T) {
 	assert.Equal(t, http.MethodPut, call.Method)
 	assert.Equal(t, timesheetEntryPath(1069480283), call.Path)
 	assert.Equal(t, map[string]any{"hours": "2.5"}, decodeSubtaskBody(t, call))
-	assert.Equal(t, "Updated timesheet entry #1069480283: 1.5h on 2026-10-26 for Plan the offsite", summary)
+	assert.Equal(t, "Updated timesheet entry #1069480283: 1.5h on 2026-10-26 by Victor Cooper (#7) for Plan the offsite", summary)
 }
 
 func TestTimesheetEntryUpdateSendsEveryField(t *testing.T) {

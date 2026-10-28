@@ -508,6 +508,11 @@ func timesheetPersonID(cmd *cobra.Command, app *appctx.App, person string) (int6
 
 func timesheetEntrySummary(prefix string, entry *basecamp.TimesheetEntry) string {
 	summary := fmt.Sprintf("%s #%d: %sh on %s", prefix, entry.ID, entry.Hours, entry.Date)
+	// The generic renderers skip nested objects, so whose time it is would be
+	// missing from styled and Markdown output without this.
+	if entry.Person != nil && entry.Person.ID != 0 {
+		summary += fmt.Sprintf(" by %s (#%d)", entry.Person.Name, entry.Person.ID)
+	}
 	if entry.Parent != nil && entry.Parent.Title != "" {
 		summary += " for " + entry.Parent.Title
 	}
