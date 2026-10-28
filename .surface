@@ -243,6 +243,7 @@ ARG basecamp files uploads create 00 <file>
 ARG basecamp files vault create 00 <name>
 ARG basecamp files vaults create 00 <name>
 ARG basecamp files versions 00 <upload_id|url>
+ARG basecamp filings show 00 <filing_id>
 ARG basecamp folders archive 00 <id|url>
 ARG basecamp folders copy 00 <id|url>...
 ARG basecamp folders doc create 00 <title>
@@ -920,6 +921,8 @@ CMD basecamp files vaults
 CMD basecamp files vaults create
 CMD basecamp files vaults list
 CMD basecamp files versions
+CMD basecamp filings
+CMD basecamp filings show
 CMD basecamp folders
 CMD basecamp folders archive
 CMD basecamp folders copy
@@ -10026,6 +10029,48 @@ FLAG basecamp files versions --styled type=bool
 FLAG basecamp files versions --todolist type=string
 FLAG basecamp files versions --vault type=string
 FLAG basecamp files versions --verbose type=count
+FLAG basecamp filings --account type=string
+FLAG basecamp filings --agent type=bool
+FLAG basecamp filings --cache-dir type=string
+FLAG basecamp filings --count type=bool
+FLAG basecamp filings --help type=bool
+FLAG basecamp filings --hints type=bool
+FLAG basecamp filings --ids-only type=bool
+FLAG basecamp filings --in type=string
+FLAG basecamp filings --jq type=string
+FLAG basecamp filings --json type=bool
+FLAG basecamp filings --markdown type=bool
+FLAG basecamp filings --md type=bool
+FLAG basecamp filings --no-hints type=bool
+FLAG basecamp filings --no-stats type=bool
+FLAG basecamp filings --profile type=string
+FLAG basecamp filings --project type=string
+FLAG basecamp filings --quiet type=bool
+FLAG basecamp filings --stats type=bool
+FLAG basecamp filings --styled type=bool
+FLAG basecamp filings --todolist type=string
+FLAG basecamp filings --verbose type=count
+FLAG basecamp filings show --account type=string
+FLAG basecamp filings show --agent type=bool
+FLAG basecamp filings show --cache-dir type=string
+FLAG basecamp filings show --count type=bool
+FLAG basecamp filings show --help type=bool
+FLAG basecamp filings show --hints type=bool
+FLAG basecamp filings show --ids-only type=bool
+FLAG basecamp filings show --in type=string
+FLAG basecamp filings show --jq type=string
+FLAG basecamp filings show --json type=bool
+FLAG basecamp filings show --markdown type=bool
+FLAG basecamp filings show --md type=bool
+FLAG basecamp filings show --no-hints type=bool
+FLAG basecamp filings show --no-stats type=bool
+FLAG basecamp filings show --profile type=string
+FLAG basecamp filings show --project type=string
+FLAG basecamp filings show --quiet type=bool
+FLAG basecamp filings show --stats type=bool
+FLAG basecamp filings show --styled type=bool
+FLAG basecamp filings show --todolist type=string
+FLAG basecamp filings show --verbose type=count
 FLAG basecamp folders --account type=string
 FLAG basecamp folders --agent type=bool
 FLAG basecamp folders --cache-dir type=string
@@ -20799,6 +20844,8 @@ SUB basecamp files vaults
 SUB basecamp files vaults create
 SUB basecamp files vaults list
 SUB basecamp files versions
+SUB basecamp filings
+SUB basecamp filings show
 SUB basecamp folders
 SUB basecamp folders archive
 SUB basecamp folders copy

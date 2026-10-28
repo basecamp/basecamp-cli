@@ -119,6 +119,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "search", Category: "search", Description: "Search across projects"},
 				{Name: "recordings", Category: "search", Description: "Browse content by type across projects", Actions: []string{"list", "trash", "archive", "restore", "visibility"}},
 				{Name: "show", Category: "search", Description: "Show any item by ID"},
+				{Name: "filings", Category: "search", Description: "Check a move or copy that is still running", Actions: []string{"show"}},
 				{Name: "events", Category: "search", Description: "View change history and poll the account event feed", Actions: []string{"poll", "ticket"}},
 				{Name: "url", Category: "search", Description: "Parse Basecamp URLs"},
 			},
