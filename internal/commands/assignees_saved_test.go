@@ -1,11 +1,13 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -19,12 +21,25 @@ import (
 )
 
 // assigneeEchoTransport plays Basecamp for every command that sets assignees.
-// Each record is #999. A write answers with the assignee_ids it was sent, or,
-// when drop is set, with none of them: what Basecamp does with an ID it
-// cannot assign, such as a card column's.
+// A record takes its ID from the request path, #999 when the path has none. A
+// write answers with the assignee_ids it was sent, or, when drop matches the
+// path, with none of them: what Basecamp does with an ID it cannot assign,
+// such as a card column's.
 type assigneeEchoTransport struct {
-	drop bool
+	drop func(path string) bool
 }
+
+var trailingRecordID = regexp.MustCompile(`/(\d+)(\.json)?$`)
+
+func recordJSON(path, assignees string) string {
+	id := "999"
+	if m := trailingRecordID.FindStringSubmatch(path); m != nil {
+		id = m[1]
+	}
+	return `{"id": ` + id + `, "title": "Thing", "content": "Thing", "assignees": [` + assignees + `]}`
+}
+
+func dropAll(string) bool { return true }
 
 func (m *assigneeEchoTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	header := http.Header{"Content-Type": []string{"application/json"}}
@@ -43,7 +58,7 @@ func (m *assigneeEchoTransport) RoundTrip(req *http.Request) (*http.Response, er
 		case strings.HasSuffix(path, "/people.json"):
 			return respond(200, `[{"id": 42, "name": "Annie Bryan"}]`)
 		}
-		return respond(200, `{"id": 999, "title": "Thing", "content": "Thing", "assignees": []}`)
+		return respond(200, recordJSON(path, ""))
 	case http.MethodPost, http.MethodPut:
 		var body struct {
 			AssigneeIDs []int64 `json:"assignee_ids"`
@@ -52,7 +67,7 @@ func (m *assigneeEchoTransport) RoundTrip(req *http.Request) (*http.Response, er
 			return nil, err
 		}
 		assignees := []string{}
-		if !m.drop {
+		if m.drop == nil || !m.drop(path) {
 			for _, id := range body.AssigneeIDs {
 				assignees = append(assignees, fmt.Sprintf(`{"id": %d, "name": "Person %d"}`, id, id))
 			}
@@ -61,7 +76,7 @@ func (m *assigneeEchoTransport) RoundTrip(req *http.Request) (*http.Response, er
 		if req.Method == http.MethodPost {
 			status = http.StatusCreated
 		}
-		return respond(status, `{"id": 999, "title": "Thing", "content": "Thing", "assignees": [`+strings.Join(assignees, ",")+`]}`)
+		return respond(status, recordJSON(path, strings.Join(assignees, ",")))
 	}
 	return nil, fmt.Errorf("unexpected %s %s", req.Method, path)
 }
@@ -90,7 +105,7 @@ var assigneeWrites = []assigneeWrite{
 func TestAssigneeWritesFailWhenBasecampDropsTheAssignee(t *testing.T) {
 	for _, w := range assigneeWrites {
 		t.Run(w.name, func(t *testing.T) {
-			app := setupCardsMockApp(t, &assigneeEchoTransport{drop: true})
+			app := setupCardsMockApp(t, &assigneeEchoTransport{drop: dropAll})
 
 			err := executeCommand(w.cmd(), app, w.args...)
 
@@ -111,6 +126,21 @@ func TestAssigneeWritesSucceedWhenBasecampKeepsTheAssignee(t *testing.T) {
 			require.NoError(t, executeCommand(w.cmd(), app, w.args...))
 		})
 	}
+}
+
+// A batch that assigns some items still exits 0, so under --agent, which
+// prints only the data, the item Basecamp dropped the person from has to be
+// named on stderr.
+func TestAssignBatchNamesTheItemThatDroppedTheAssignee(t *testing.T) {
+	transport := &assigneeEchoTransport{drop: func(path string) bool { return strings.Contains(path, "/222") }}
+	app := setupCardsMockApp(t, transport)
+	var stdout, stderr bytes.Buffer
+	app.Output = output.New(output.Options{Format: output.FormatQuiet, Writer: &stdout, ErrWriter: &stderr})
+
+	require.NoError(t, executeCommand(NewAssignCmd(), app, "111", "222", "--to", "822400739"))
+
+	assert.Contains(t, stdout.String(), "111")
+	assert.Contains(t, stderr.String(), "notice: Not assigned: 222: to-do #222 was saved, but Basecamp did not assign 822400739")
 }
 
 func TestCheckAssigneesSavedNamesWhatTheRecordKept(t *testing.T) {

@@ -152,7 +152,7 @@ func assignItems(cmd *cobra.Command, args []string, assignee *string, project st
 	}
 
 	var results []*assignResult
-	var failed []string
+	var failed, failures []string
 	var firstErr error
 	var assigneeResolved bool
 	var assigneeID string
@@ -167,6 +167,7 @@ func assignItems(cmd *cobra.Command, args []string, assignee *string, project st
 				return fatal.err
 			}
 			failed = append(failed, itemID)
+			failures = append(failures, fmt.Sprintf("%s: %s", itemID, err))
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -206,11 +207,18 @@ func assignItems(cmd *cobra.Command, args []string, assignee *string, project st
 		Description: "Remove assignee",
 	}}
 
+	respOpts := []output.ResponseOption{
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(batchBreadcrumbs...),
+	}
+	// --agent and --quiet print only the data, so the failures would
+	// otherwise be invisible there: a dropped assignee among them.
+	if len(failures) > 0 {
+		respOpts = append(respOpts, output.WithDiagnostic("Not assigned: "+strings.Join(failures, "; ")))
+	}
+
 	if len(results) == 1 {
-		return app.OK(results[0].item,
-			output.WithSummary(summary),
-			output.WithBreadcrumbs(batchBreadcrumbs...),
-		)
+		return app.OK(results[0].item, respOpts...)
 	}
 
 	items := make([]any, len(results))
@@ -218,10 +226,7 @@ func assignItems(cmd *cobra.Command, args []string, assignee *string, project st
 		items[i] = r.item
 	}
 
-	return app.OK(items,
-		output.WithSummary(summary),
-		output.WithBreadcrumbs(batchBreadcrumbs...),
-	)
+	return app.OK(items, respOpts...)
 }
 
 func unassignItems(cmd *cobra.Command, args []string, assignee *string, project string, isCard, isStep bool) error {
