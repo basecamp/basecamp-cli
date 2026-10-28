@@ -120,6 +120,23 @@ func TestScheduleFilesARecurringCalendarEventFromItsCalendarsSchedule(t *testing
 	assert.Empty(t, transport.posts)
 }
 
+func TestScheduleShowListsACalendarEventsEntriesByItsSchedule(t *testing.T) {
+	for name, args := range map[string][]string{
+		"a recurring event":             {"show", "458"},
+		"one occurrence of a recurring": {"show", "458", "--date", "20261101"},
+		"a single event":                {"show", "459"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			transport := calendarTransport()
+			transport.gets["/schedule_entries/459"] = `{"id":459,"type":"Schedule::Entry","summary":"Review","bucket":{"id":777,"name":"Jason's calendar","type":"Calendar"},"parent":{"id":770,"title":"Jason's calendar","type":"Schedule"}}`
+			transport.gets["/schedule_entries/458/occurrences/20261101"] = `{"id":7005,"type":"Schedule::Entry::Occurrence","summary":"1:1","bucket":{"id":777,"name":"Jason's calendar","type":"Calendar"},"parent":{"id":458,"title":"1:1","type":"Schedule::Entry"}}`
+			run := runFamilyCommand(t, transport, NewScheduleCmd(), args...)
+			require.NoError(t, run.err)
+			assert.Equal(t, "basecamp schedule entries --project 777 --schedule 770", run.envelope.Breadcrumbs[1].Cmd)
+		})
+	}
+}
+
 func TestScheduleFilesARecurringEventIntoACalendarAndReadsItBack(t *testing.T) {
 	transport := calendarTransport()
 	run := runFamilyCommand(t, transport, NewScheduleCmd(), "move", "457", "--to-schedule", "770")
