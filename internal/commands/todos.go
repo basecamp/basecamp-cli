@@ -2645,8 +2645,7 @@ func todoFiling(app *appctx.App, kind basecamp.FilingType, todo *basecamp.Todo, 
 		includeComments: includeComments,
 		destination:     fmt.Sprintf("to-do list %d (%s)", list.ID, list.Name),
 		showCmd:         "basecamp todos show",
-		lookFor:         copyLookFor("Todo", todo.Status, filingTarget{id: list.ID, appURL: list.AppURL, projectID: todolistProjectID(list)}),
-		match:           copyMatch(todo.ID, todo.Title, list.Name, list.ID),
+		lookFor:         copyLookFor(filingSource{id: todo.ID, typ: "Todo", status: todo.Status, title: todo.Title}, filingTarget{id: list.ID, title: list.Name, appURL: list.AppURL, projectID: todolistProjectID(list)}),
 		read: func(ctx context.Context, id int64) (filedRecording, error) {
 			filed, err := app.Account().Todos().Get(ctx, id)
 			if err != nil {

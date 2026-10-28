@@ -1111,8 +1111,7 @@ func listFiling(cmd *cobra.Command, app *appctx.App, kind basecamp.FilingType, l
 		destinationID: todoset.ID,
 		destination:   fmt.Sprintf("To-dos %d in project %d", todoset.ID, projectID),
 		showCmd:       "basecamp todolists show",
-		lookFor:       copyLookFor("Todolist", list.Status, filingTarget{id: todoset.ID, appURL: todoset.AppURL, projectID: projectID}),
-		match:         copyMatch(list.ID, list.Name, todoset.Title, todoset.ID),
+		lookFor:       copyLookFor(filingSource{id: list.ID, typ: "Todolist", status: list.Status, title: list.Name}, filingTarget{id: todoset.ID, title: todoset.Title, appURL: todoset.AppURL, projectID: projectID}),
 		read:          readFiledTodolist(app, list.ID),
 	}, nil
 }
@@ -1145,8 +1144,7 @@ func groupFiling(cmd *cobra.Command, app *appctx.App, kind basecamp.FilingType, 
 		destinationID: into.ID,
 		destination:   fmt.Sprintf("to-do list %d (%s)", into.ID, into.Name),
 		showCmd:       "basecamp todolists show",
-		lookFor:       copyLookFor("Todolist", group.Status, filingTarget{id: into.ID, appURL: into.AppURL, projectID: todolistProjectID(into)}),
-		match:         copyMatch(group.ID, group.Name, into.Name, into.ID),
+		lookFor:       copyLookFor(filingSource{id: group.ID, typ: "Todolist", status: group.Status, title: group.Name}, filingTarget{id: into.ID, title: into.Name, appURL: into.AppURL, projectID: todolistProjectID(into)}),
 		read:          readFiledTodolist(app, group.ID),
 	}, nil
 }

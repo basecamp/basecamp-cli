@@ -499,18 +499,8 @@ func TestTodosCopySeveralToAnotherProjectNeverRetriesAFailedCopy(t *testing.T) {
 	assert.Contains(t, e.Message, "Copied 0 of 2 to-dos")
 	assert.Contains(t, e.Hint, "may have started the copy")
 	assert.Contains(t, e.Hint, "basecamp recordings list Todo --in 999 --status active --all")
-}
-
-// A copy keeps its original's created_at, so no sort brings it to the top of
-// the listing: the hint says to find it by its title in the destination list.
-func TestTodosCopyRecoveryFindsTheCopyByItsTitle(t *testing.T) {
-	transport := &mockTodoFilingTransport{postStatus: 502}
-	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "copy", "456", "--to-project", "Dest", "--to-list", "Later")
-	e := output.AsError(run.err)
-	require.NotNil(t, run.err)
-
-	assert.NotContains(t, e.Hint, "--sort")
-	assert.Contains(t, e.Hint, `basecamp recordings list Todo --in 999 --status active --all, then look for "Task 456" in Later (#902); a copy has its original's title and dates`)
+	assert.Contains(t, e.Hint, `look for "Task 456" in Later (#902)`, "a copy keeps its original's created_at, so its title tells it apart")
+	assert.Contains(t, e.Hint, `look for "Task 457" in Later (#902)`)
 }
 
 func TestTodosCopyIntoTheListItIsInIsAllowed(t *testing.T) {

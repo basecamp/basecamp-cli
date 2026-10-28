@@ -233,7 +233,7 @@ func TestFilesCopyRecoveryListsArchivedItemsWhereTheyShow(t *testing.T) {
 	transport.gets["/documents/456"] = strings.Replace(transport.gets["/documents/456"], `"type":"Document"`, `"type":"Document","status":"archived"`, 1)
 	transport.refuse = map[int64]int{456: 502}
 	e := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "456", "--to-project", "Dest").failure(t)
-	assert.Contains(t, e.Hint, "basecamp recordings list Document --in 999 --status archived --sort created_at --direction desc --all")
+	assert.Contains(t, e.Hint, "basecamp recordings list Document --in 999 --status archived --all")
 }
 
 func TestFilesCopyOfAGoogleDocumentPointsAtItsFolderInBasecamp(t *testing.T) {
@@ -260,7 +260,7 @@ func TestFilesCopyOfACloudFileIsLookedForWhereItsStatusShows(t *testing.T) {
 			transport.refuse = map[int64]int{458: 502}
 			e := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "458", "--to-project", "Dest").failure(t)
 			assert.Contains(t, e.Hint, "may have started the copy")
-			assert.True(t, strings.HasSuffix(e.Hint, "Check first: "+want), e.Hint)
+			assert.Contains(t, e.Hint, "Check first: "+want+`, then look for "Board deck" in Docs & Files (#900)`)
 		})
 	}
 }

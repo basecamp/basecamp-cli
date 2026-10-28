@@ -41,11 +41,9 @@ type recordingFiling struct {
 	destination string
 	// showCmd shows a recording of this kind given its id: "basecamp cards show".
 	showCmd string
-	// lookFor lists where a copy lands, for a copy that may have started
-	// without Basecamp naming its filing, so it is checked for before copying
-	// again; match says what tells the copy apart there.
-	lookFor string
-	match   string
+	// lookFor finds a copy that may have started without Basecamp naming its
+	// filing, so it is checked for before copying again.
+	lookFor copyCheck
 	// read reads back the recording the filing made, by its new id.
 	read func(ctx context.Context, id int64) (filedRecording, error)
 
@@ -157,9 +155,9 @@ func (f recordingFiling) show(id int64) string {
 	return fmt.Sprintf("%s %d%s", f.showCmd, id, f.scope)
 }
 
-// check lists where a copy lands and says how to tell the copy apart there.
+// check says how to find a copy that may have started.
 func (f recordingFiling) check() string {
-	return f.lookFor + f.scope + ", then " + f.match
+	return f.lookFor.text(f.scope)
 }
 
 func (f recordingFiling) start(ctx context.Context, app *appctx.App) (*basecamp.Filing, error) {
@@ -404,8 +402,7 @@ type copyPlace struct {
 	calendar bool
 }
 
-// copyListing lists where a copy in place lands in t, newest first and every
-// page.
+// copyListing lists, every page, where a copy in place lands in t.
 type copyListing func(place copyPlace, t filingTarget) string
 
 // copyListings is how to find a copy whose start got no answer, so it is
@@ -463,7 +460,7 @@ func copyTable(rows []copyRow) map[copyPlace]copyListing {
 }
 
 func listRecordings(place copyPlace, t filingTarget) string {
-	return fmt.Sprintf("basecamp recordings list %s --in %d --status %s --sort created_at --direction desc --all", place.typ, t.projectID, place.status)
+	return fmt.Sprintf("basecamp recordings list %s --in %d --status %s --all", place.typ, t.projectID, place.status)
 }
 
 func listDrafts(copyPlace, filingTarget) string { return "basecamp drafts list --all" }
@@ -488,26 +485,50 @@ func listColumns(_ copyPlace, t filingTarget) string {
 	return fmt.Sprintf("basecamp cards columns --in %d --card-table %d", t.projectID, t.id)
 }
 
-// copyLookFor says where to find a copy of a typ recording in status that
-// lands in t: its listing in copyListings, or else the destination's page in
-// Basecamp.
-func copyLookFor(typ, status string, t filingTarget) string {
-	place := copyPlace{typ: typ, status: cmp.Or(status, "active"), calendar: t.calendar}
-	if listing, ok := copyListings[place]; ok {
-		return listing(place, t)
-	}
-	return "open the destination in Basecamp: " + cmp.Or(t.appURL, t.describe("destination"))
+// copyCheck is how to find a copy whose start got no answer: a listing that
+// shows it, or else the destination's page in Basecamp, then what tells it
+// apart there.
+type copyCheck struct {
+	listing string
+	page    string
+	match   string
 }
 
-// copyMatch says what tells a copy of a recording apart in the container it
-// lands in. A copy keeps its original's title, created_at and updated_at, so
-// no sort puts it first; its title in that container finds it.
-func copyMatch(sourceID int64, title, container string, containerID int64) string {
-	name := fmt.Sprintf("the copy of #%d", sourceID)
-	if title != "" {
-		name = fmt.Sprintf("%q", title)
+// copyLookFor says where to find a copy of src that lands in t: its listing
+// in copyListings, or else the destination's page in Basecamp. A copy keeps
+// its original's title, created_at and updated_at, so no sort puts it first;
+// it is told apart by its title in the destination.
+func copyLookFor(src filingSource, t filingTarget) copyCheck {
+	place := copyPlace{typ: src.typ, status: cmp.Or(src.status, "active"), calendar: t.calendar}
+	check := copyCheck{page: cmp.Or(t.appURL, t.describe("destination")), match: copyMatch(src, t)}
+	if listing, ok := copyListings[place]; ok {
+		check.listing = listing(place, t)
 	}
-	return fmt.Sprintf("look for %s in %s (#%d); a copy has its original's title and dates", name, cmp.Or(container, "the destination"), containerID)
+	return check
+}
+
+// text says how to check, with scope on the listing so it reaches this
+// account from a fresh shell.
+func (c copyCheck) text(scope string) string {
+	where := "open the destination in Basecamp: " + c.page
+	if c.listing != "" {
+		where = c.listing + scope
+	}
+	return where + ", then " + c.match
+}
+
+// copyMatch says what tells a copy of src apart in t: its title, in the
+// container it lands in.
+func copyMatch(src filingSource, t filingTarget) string {
+	name := fmt.Sprintf("the copy of #%d", src.id)
+	if src.title != "" {
+		name = fmt.Sprintf("%q", src.title)
+	}
+	container, id := t.title, t.id
+	if t.parentID != 0 {
+		container, id = t.parentTitle, t.parentID
+	}
+	return fmt.Sprintf("look for %s in %s (#%d); a copy has its original's title and dates", name, cmp.Or(container, "the destination"), id)
 }
 
 // pollUntil runs check, backing off between runs, until it reports done or

@@ -2073,8 +2073,7 @@ func cardFiling(app *appctx.App, kind basecamp.FilingType, card *basecamp.Card, 
 		includeComments: includeComments,
 		destination:     fmt.Sprintf("card table %d (%s)", table.ID, table.Title),
 		showCmd:         "basecamp cards show",
-		lookFor:         copyLookFor("Kanban::Card", card.Status, filingTarget{id: table.ID, appURL: table.AppURL, projectID: cardTableProjectID(table)}),
-		match:           copyMatch(card.ID, card.Title, table.Title, table.ID),
+		lookFor:         copyLookFor(filingSource{id: card.ID, typ: "Kanban::Card", status: card.Status, title: card.Title}, filingTarget{id: table.ID, title: table.Title, appURL: table.AppURL, projectID: cardTableProjectID(table)}),
 		read: func(ctx context.Context, id int64) (filedRecording, error) {
 			filed, err := app.Account().Cards().Get(ctx, id)
 			if err != nil {

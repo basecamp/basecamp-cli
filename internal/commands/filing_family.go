@@ -477,8 +477,7 @@ func (fam filingFamily) filing(app *appctx.App, kind basecamp.FilingType, src fi
 		includeComments: includeComments,
 		destination:     target.describe(fam.into.noun),
 		showCmd:         fam.showCmd(),
-		lookFor:         copyLookFor(src.typ, src.status, target),
-		match:           copyMatch(src.id, src.title, target.title, target.id),
+		lookFor:         copyLookFor(src, target),
 		read: func(ctx context.Context, id int64) (filedRecording, error) {
 			record, filed, err := fam.get(ctx, app, id)
 			if err != nil {

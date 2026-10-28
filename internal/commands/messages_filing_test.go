@@ -139,7 +139,7 @@ func TestMessagesCopyThatMayHaveStartedSaysWhereToLook(t *testing.T) {
 	run := runFamilyCommand(t, transport, NewMessagesCmd(), "copy", "456", "--to-project", "Dest")
 	e := run.failure(t)
 	assert.False(t, e.Retryable)
-	assert.Contains(t, e.Hint, "basecamp recordings list Message --in 999 --status active --sort created_at --direction desc --all")
+	assert.Contains(t, e.Hint, "basecamp recordings list Message --in 999 --status active --all")
 	assert.Len(t, transport.posts, 1)
 }
 

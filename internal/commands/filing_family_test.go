@@ -264,7 +264,7 @@ func testFiling(app *appctx.App, kind basecamp.FilingType, sourceID int64) recor
 		parentID:      950,
 		destination:   "Docs & Files 900 in Dest",
 		showCmd:       "basecamp files show",
-		lookFor:       "basecamp files list --in 999",
+		lookFor:       copyCheck{listing: "basecamp files list --in 999", match: "look for the copy"},
 		read: func(_ context.Context, id int64) (filedRecording, error) {
 			return filedRecording{
 				result: map[string]any{"id": id, "source_id": sourceID},
@@ -331,10 +331,10 @@ func TestCopyRecoveryListsWhereTheCopyShows(t *testing.T) {
 		status    string
 		want      string
 	}{
-		"a message":                     {messagesTransport, NewMessagesCmd, "/messages/456", "", "basecamp recordings list Message --in 999 --status active --sort created_at --direction desc --all"},
-		"an archived message":           {messagesTransport, NewMessagesCmd, "/messages/456", "archived", "basecamp recordings list Message --in 999 --status archived --sort created_at --direction desc --all"},
-		"an event":                      {scheduleFilingTransport, NewScheduleCmd, "/schedule_entries/456", "", "basecamp recordings list Schedule::Entry --in 999 --status active --sort created_at --direction desc --all"},
-		"an archived event":             {scheduleFilingTransport, NewScheduleCmd, "/schedule_entries/456", "archived", "basecamp recordings list Schedule::Entry --in 999 --status archived --sort created_at --direction desc --all"},
+		"a message":                     {messagesTransport, NewMessagesCmd, "/messages/456", "", "basecamp recordings list Message --in 999 --status active --all"},
+		"an archived message":           {messagesTransport, NewMessagesCmd, "/messages/456", "archived", "basecamp recordings list Message --in 999 --status archived --all"},
+		"an event":                      {scheduleFilingTransport, NewScheduleCmd, "/schedule_entries/456", "", "basecamp recordings list Schedule::Entry --in 999 --status active --all"},
+		"an archived event":             {scheduleFilingTransport, NewScheduleCmd, "/schedule_entries/456", "archived", "basecamp recordings list Schedule::Entry --in 999 --status archived --all"},
 		"a check-in question":           {checkinsFilingTransport, NewCheckinsCmd, "/questions/456", "", "basecamp checkins questions --in 999 --questionnaire 900 --all"},
 		"an archived check-in question": {checkinsFilingTransport, NewCheckinsCmd, "/questions/456", "archived", "basecamp timeline --in 999 --all"},
 		"a trashed check-in question":   {checkinsFilingTransport, NewCheckinsCmd, "/questions/456", "trashed", "open the destination in Basecamp: https://3.basecamp.com/99999/buckets/999/questionnaires/900"},
@@ -368,7 +368,10 @@ func TestCopyRecoveryListsWhereTheCopyShows(t *testing.T) {
 // looked for in a listing known to show it there, or at the destination's page
 // in Basecamp. Each listing below carries the places it is known to show; a
 // recovery naming anything else, or a listing for a place it hides, fails.
+// Each listing carries the run's --profile and --account, so it searches the
+// account the copy went to; the destination's page needs neither.
 func TestEveryCopyRecoveryCanShowTheCopy(t *testing.T) {
+	const scope = " --profile work --account 99999"
 	dest := filingTarget{id: 7, title: "Dest tool", appURL: "https://3.basecamp.com/99999/buckets/42/vaults/7", projectID: 42}
 	listedStatuses := []string{"active", "archived", "trashed"}
 	// bc3 doc/api/sections/recordings.md: the types GET /projects/recordings.json takes.
@@ -378,7 +381,7 @@ func TestEveryCopyRecoveryCanShowTheCopy(t *testing.T) {
 		shows   func(place copyPlace, match []string) bool
 	}
 	knownGood := []knownListing{
-		{regexp.MustCompile(`^basecamp recordings list (\S+) --in 42 --status (\S+) --sort created_at --direction desc --all$`),
+		{regexp.MustCompile(`^basecamp recordings list (\S+) --in 42 --status (\S+) --all$`),
 			func(p copyPlace, m []string) bool {
 				return !p.calendar && m[1] == p.typ && m[2] == p.status && slices.Contains(recordingsTypes, p.typ) && slices.Contains(listedStatuses, p.status)
 			}},
@@ -403,9 +406,13 @@ func TestEveryCopyRecoveryCanShowTheCopy(t *testing.T) {
 		{regexp.MustCompile(`^basecamp checkins questions --in 42 --questionnaire 7 --all$`),
 			func(p copyPlace, _ []string) bool { return !p.calendar && p.typ == "Question" && p.status == "active" }},
 		{regexp.MustCompile(`^basecamp forwards list --in 42 --inbox 7 --all$`),
-			func(p copyPlace, _ []string) bool { return !p.calendar && p.typ == "Inbox::Forward" && p.status == "active" }},
+			func(p copyPlace, _ []string) bool {
+				return !p.calendar && p.typ == "Inbox::Forward" && p.status == "active"
+			}},
 		{regexp.MustCompile(`^basecamp cards columns --in 42 --card-table 7$`),
-			func(p copyPlace, _ []string) bool { return !p.calendar && p.typ == "Kanban::Column" && p.status == "active" }},
+			func(p copyPlace, _ []string) bool {
+				return !p.calendar && p.typ == "Kanban::Column" && p.status == "active"
+			}},
 	}
 
 	types := []string{"Todo", "Todolist", "Kanban::Card"}
@@ -424,10 +431,14 @@ func TestEveryCopyRecoveryCanShowTheCopy(t *testing.T) {
 				place := copyPlace{typ: typ, status: status, calendar: calendar}
 				target := dest
 				target.calendar = calendar
-				hint := copyLookFor(typ, status, target)
+				hint, matched := strings.CutSuffix(copyLookFor(filingSource{id: 456, typ: typ, status: status, title: "Plan"}, target).text(scope),
+					`, then look for "Plan" in Dest tool (#7); a copy has its original's title and dates`)
+				require.True(t, matched, "%+v: %q names the copy by its title in the destination", place, hint)
 				if hint == "open the destination in Basecamp: "+dest.appURL {
 					continue
 				}
+				hint, matched = strings.CutSuffix(hint, scope)
+				require.True(t, matched, "%+v: %q carries the profile and account to reach this account", place, hint)
 				listed[place] = true
 				shown := slices.ContainsFunc(knownGood, func(good knownListing) bool {
 					match := good.listing.FindStringSubmatch(hint)
