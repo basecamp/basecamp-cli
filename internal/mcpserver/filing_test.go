@@ -45,6 +45,9 @@ type fakeBasecamp struct {
 	// recurring answers each read with an occurrence of the event read, as
 	// Basecamp does for a recurring event.
 	recurring bool
+	// movedTo answers a read of the source with the recording at this id,
+	// as Basecamp's redirect from a moved recording's old id does.
+	movedTo int
 	// unreadable answers reads of these paths with these statuses.
 	unreadable map[string]int
 	// listsIn overrides lists for the To-dos tool with that id.
@@ -101,6 +104,9 @@ func (f *fakeBasecamp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			f.t.Errorf("unexpected read: %s", path)
 			w.WriteHeader(http.StatusNotFound)
 			return
+		}
+		if id == fakeSourceID && f.movedTo != 0 {
+			id = f.movedTo
 		}
 		if f.recurring {
 			f.json(w, http.StatusOK, map[string]any{
@@ -520,4 +526,16 @@ func TestFilingTypesAFailedReadBeforeFiling(t *testing.T) {
 		assert.Equal(t, true, failure["retry_safe"])
 		assert.Zero(t, fake.starts)
 	})
+}
+
+func TestFilingRefusesAnIDThatNowRedirects(t *testing.T) {
+	fake := newFake(t, "Document", "Vault")
+	fake.movedTo = fakeNewID
+	failure := failureOf(t, mustFail(t, filingSession(t, fake, Config{}), moveAction, map[string]any{
+		"recording_id": fakeSourceID, "recording_type": "Document", "container_id": 5,
+	}))
+	assert.Equal(t, "recording_moved", failure["type"])
+	assert.Equal(t, float64(fakeNewID), failure["recording_id"])
+	assert.Equal(t, true, failure["retry_safe"])
+	assert.Zero(t, fake.starts, "a retried move never files the recording again")
 }

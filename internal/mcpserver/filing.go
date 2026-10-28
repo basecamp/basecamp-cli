@@ -165,7 +165,7 @@ func filingOperation(kind basecamp.FilingType) *catalog.Operation {
 		"Composed in basecamp-sdk (RecordingsService." + verb + "AndWait): it reads the recording, resolves the destination, starts the " + lower + " once, waits up to a minute for Basecamp to finish it, and reads back the new recording. Not backed by any single Basecamp endpoint, so this action carries no method and no path.\n\n" +
 		"Returns the new recording, as its type's own get action returns it, with source_id naming the recording it came from. A " + lower + " always gives the recording a new id. A card lands in the card table's Triage, or Done if it is completed.\n\n" +
 		"Comments, card steps, check-in answers and other recordings that go with their parent are not filed on their own, and neither is a whole tool (a project's Docs & Files or card table itself).\n\n" +
-		"A failure says how far it got in error.type, and error.retry_safe says whether calling this action again is safe (a malformed call is refused as plain text instead). recording_unreadable and destination_unreadable are a read before the filing that failed, carrying the read's own error. destination_missing, destination_disabled and destination_ambiguous filed nothing and name what to pass instead (destination_disabled carries the tool_id that basecamp_automation enable_tool turns on; destination_ambiguous lists candidates for container_id). filing_refused filed nothing. filing_unsettled was still running when the wait ended: do not " + lower + " again; check it with get_filing and the filing_id it carries. filing_failed was started and reported failed by Basecamp. filed_unread was filed under recording_id but could not be read back."
+		"A failure says how far it got in error.type, and error.retry_safe says whether calling this action again is safe (a malformed call is refused as plain text instead). recording_unreadable and destination_unreadable are a read before the filing that failed, carrying the read's own error. recording_moved is an id that now redirects to recording_id, because the recording was moved: nothing was filed, which is how a retried move is refused once the first one landed. destination_missing, destination_disabled and destination_ambiguous filed nothing and name what to pass instead (destination_disabled carries the tool_id that basecamp_automation enable_tool turns on; destination_ambiguous lists candidates for container_id). filing_refused filed nothing. filing_unsettled was still running when the wait ended: do not " + lower + " again; check it with get_filing and the filing_id it carries. filing_failed was started and reported failed by Basecamp. filed_unread was filed under recording_id but could not be read back."
 	if kind == basecamp.FilingCopy {
 		properties["include_comments"] = map[string]any{
 			"type":        "boolean",
@@ -293,6 +293,17 @@ func fileRecording(ctx context.Context, api API, req filingRequest) (json.RawMes
 	src, err := filingReads[req.recordingType](ctx, api, req.recordingID)
 	if err != nil {
 		return nil, unreadable("recording_unreadable", fmt.Sprintf("Could not read %s %d", req.recordingType, req.recordingID), err)
+	}
+	if src.id != req.recordingID {
+		// A moved recording's old id redirects to its new one. Filing what
+		// the redirect found would move a recording again when a lost answer
+		// to a move is retried, so the caller names it by its new id.
+		return nil, &filingError{
+			Type:        "recording_moved",
+			Message:     fmt.Sprintf("Recording %d has been moved and is now %d; nothing was filed. Pass recording_id %d to file it from where it is now", req.recordingID, src.id, src.id),
+			RetrySafe:   true,
+			RecordingID: src.id,
+		}
 	}
 	if src.typ != req.recordingType {
 		return nil, fmt.Errorf("recording %d is a %s, not a %s", req.recordingID, src.typ, req.recordingType)
