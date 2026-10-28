@@ -1461,52 +1461,16 @@ You can pass either an item ID or a Basecamp URL:
 			var title string
 
 			if itemType == "" {
-				// Auto-detect type by trying each in order
-				// Track first error to return if all fail (may be auth error, not 404)
-				var firstErr error
-
-				// Try vault first
-				vault, err := app.Account().Vaults().Get(cmd.Context(), itemID)
-				if err == nil {
-					result, bucket = vault, vault.Bucket
-					detectedType = "vault"
-					title = vault.Title
+				// Each kind's read of a moved item's old id is redirected to
+				// the item, so the kind is taken from what comes back.
+				record, src, err := getFileItem(cmd.Context(), app, itemID)
+				if err != nil {
+					if sdkErr := basecamp.AsError(err); sdkErr == nil || sdkErr.Code != basecamp.CodeNotFound {
+						return convertSDKError(err)
+					}
 				} else {
-					firstErr = err
-					// Try upload
-					upload, err := app.Account().Uploads().Get(cmd.Context(), itemID)
-					if err == nil {
-						result, bucket = upload, upload.Bucket
-						detectedType = "upload"
-						title = upload.Filename
-						if title == "" {
-							title = upload.Title
-						}
-					} else {
-						// Try document
-						doc, err := app.Account().Documents().Get(cmd.Context(), itemID)
-						if err == nil {
-							result, bucket = doc, doc.Bucket
-							detectedType = "document"
-							title = doc.Title
-						} else if cloud, err := app.Account().CloudFiles().Get(cmd.Context(), itemID); err == nil {
-							result, bucket = cloud, cloud.Bucket
-							detectedType = "cloud_file"
-							title = cloud.Title
-						} else if google, err := app.Account().GoogleDocuments().Get(cmd.Context(), itemID); err == nil {
-							result, bucket = google, google.Bucket
-							detectedType = "google_document"
-							title = google.Title
-						}
-					}
-				}
-
-				// If all probes failed, check if first error was 404 or something else
-				if result == nil && firstErr != nil {
-					if sdkErr := basecamp.AsError(firstErr); sdkErr == nil || sdkErr.Code != basecamp.CodeNotFound {
-						// Return actual error (auth, permission, network, etc.)
-						return convertSDKError(firstErr)
-					}
+					result, bucket, title = record, src.bucket, src.title
+					detectedType = cmp.Or(fileShowTypes[src.typ], "item")
 				}
 			} else {
 				switch itemType {
@@ -2903,6 +2867,15 @@ var fileKinds = []struct {
 		}
 		return g, filingSource{id: g.ID, typ: g.Type, status: g.Status, title: g.Title, bucket: g.Bucket, parent: g.Parent}, nil
 	}},
+}
+
+// fileShowTypes names each Docs & Files type as files show reports it.
+var fileShowTypes = map[string]string{
+	"Document":       "document",
+	"Upload":         "upload",
+	"Vault":          "vault",
+	"CloudFile":      "cloud_file",
+	"GoogleDocument": "google_document",
 }
 
 // getFileItem reads a Docs & Files item of any kind by ID, trying each kind's

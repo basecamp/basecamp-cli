@@ -61,3 +61,22 @@ func TestShowingAMovedRecordByItsOldIDFollowsUpOnTheNewID(t *testing.T) {
 		})
 	}
 }
+
+// Basecamp redirects every kind's read of a moved item's old id to the item,
+// so the folder read that files show tries first answers with a moved
+// document. The show must take it for the document it is.
+func TestFilesShowOfAMovedDocumentByItsOldIDIsNotAFolder(t *testing.T) {
+	moved := `{"id":4560,"type":"Document","title":"Plan","content":"<div>Body</div>","bucket":{"id":999,"name":"Dest"}}`
+	gets := map[string]string{}
+	for _, kind := range []string{"vaults", "uploads", "documents", "cloud_files", "google_documents"} {
+		gets["/"+kind+"/456"] = moved
+	}
+	run := runFamilyCommand(t, &familyTransport{gets: gets}, NewFilesCmd(), "show", "456")
+	require.NoError(t, run.err)
+
+	assert.Equal(t, "document: Plan", run.envelope.Summary)
+	assert.Equal(t, "<div>Body</div>", run.data(t)["content"])
+	for _, crumb := range run.envelope.Breadcrumbs {
+		assert.NotContains(t, crumb.Cmd, "--vault", "a document has no folder contents to list")
+	}
+}
