@@ -756,7 +756,18 @@ func (m *mockStepAssignTransport) RoundTrip(req *http.Request) (*http.Response, 
 		if err := req.Body.Close(); err != nil {
 			return nil, err
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(stepJSON)), Header: header}, nil
+		var put struct {
+			AssigneeIDs []int64 `json:"assignee_ids"`
+		}
+		if err := json.Unmarshal(body, &put); err != nil {
+			return nil, err
+		}
+		assignees := make([]string, len(put.AssigneeIDs))
+		for i, id := range put.AssigneeIDs {
+			assignees[i] = fmt.Sprintf(`{"id": %d, "name": "Person %d"}`, id, id)
+		}
+		saved := fmt.Sprintf(`{"id": 456, "title": "Existing step", "assignees": [%s]}`, strings.Join(assignees, ","))
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(saved)), Header: header}, nil
 	default:
 		return nil, fmt.Errorf("unexpected request method: %s", req.Method)
 	}

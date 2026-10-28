@@ -564,6 +564,9 @@ func doAssignTodo(cmd *cobra.Command, app *appctx.App, todoIDStr, assigneeID str
 	if err != nil {
 		return nil, convertSDKError(err)
 	}
+	if err := checkAssigneesSaved(assigneeTodo, updated.ID, assigneeIDs, updated.Assignees); err != nil {
+		return nil, err
+	}
 
 	assigneeName := findAssigneeName(updated.Assignees, assigneeIDInt)
 
@@ -610,6 +613,9 @@ func doAssignCard(cmd *cobra.Command, app *appctx.App, cardIDStr, assigneeID str
 	if err != nil {
 		return nil, convertSDKError(err)
 	}
+	if err := checkAssigneesSaved(assigneeCard, updated.ID, assigneeIDs, updated.Assignees); err != nil {
+		return nil, err
+	}
 
 	assigneeName := findAssigneeName(updated.Assignees, assigneeIDInt)
 
@@ -655,6 +661,9 @@ func doAssignStep(cmd *cobra.Command, app *appctx.App, stepIDStr, assigneeID str
 	})
 	if err != nil {
 		return nil, convertSDKError(err)
+	}
+	if err := checkAssigneesSaved(assigneeCardStep, updated.ID, assigneeIDs, updated.Assignees); err != nil {
+		return nil, err
 	}
 
 	assigneeName := findAssigneeName(updated.Assignees, assigneeIDInt)
@@ -780,6 +789,52 @@ func existingAssigneeIDs(people []basecamp.Person) []int64 {
 		ids = append(ids, p.ID)
 	}
 	return ids
+}
+
+// assigneeRecord is a kind of record that takes assignees, with the command
+// that assigns someone to one that already exists.
+type assigneeRecord struct {
+	noun       string
+	assignHint string // formatted with the record's ID
+}
+
+var (
+	assigneeTodo     = assigneeRecord{noun: "to-do", assignHint: "basecamp assign %d --to <person>"}
+	assigneeCard     = assigneeRecord{noun: "card", assignHint: "basecamp assign %d --card --to <person>"}
+	assigneeCardStep = assigneeRecord{noun: "card step", assignHint: "basecamp assign %d --step --to <person>"}
+	assigneeSubtask  = assigneeRecord{noun: "subtask", assignHint: "basecamp subtasks update %d --assignees <person>"}
+)
+
+// checkAssigneesSaved fails when the saved record lacks a requested assignee.
+// Basecamp does not reject an assignee ID it cannot assign there (a column ID,
+// a person outside the project): it drops it and saves the rest. The record
+// exists by then, so the error names it and what it was saved with, and the
+// hint fixes that record rather than inviting a second create.
+func checkAssigneesSaved(kind assigneeRecord, id int64, requested []int64, saved []basecamp.Person) error {
+	savedIDs := existingAssigneeIDs(saved)
+	var dropped []string
+	for _, want := range requested {
+		if !containsID(savedIDs, want) {
+			dropped = append(dropped, strconv.FormatInt(want, 10))
+		}
+	}
+	if len(dropped) == 0 {
+		return nil
+	}
+
+	state := "it has no assignees"
+	if len(saved) > 0 {
+		names := make([]string, len(saved))
+		for i, p := range saved {
+			names[i] = p.Name
+		}
+		state = "its assignees are " + strings.Join(names, ", ")
+	}
+	return output.ErrUsageHint(
+		fmt.Sprintf("%s #%d was saved, but Basecamp did not assign %s: not a person who can be assigned there; %s",
+			kind.noun, id, strings.Join(dropped, ", "), state),
+		fmt.Sprintf("Assign it with "+kind.assignHint+", naming someone from basecamp people list --project <project>", id),
+	)
 }
 
 // containsID checks if a slice contains a given ID.

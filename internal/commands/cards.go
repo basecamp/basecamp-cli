@@ -1095,6 +1095,9 @@ Use - as the body argument to read the body from stdin:
 					}
 					return fmt.Errorf("card %d created but assignment failed: %w", createdCardID, sdkErr)
 				}
+				if err := checkAssigneesSaved(assigneeCard, card.ID, []int64{assigneeID}, card.Assignees); err != nil {
+					return err
+				}
 			}
 
 			// Build breadcrumbs - only include --card-table when known
@@ -1137,8 +1140,8 @@ Use - as the body argument to read the body from stdin:
 	}
 
 	cmd.Flags().StringVarP(&column, "column", "c", "", "Column ID or name (defaults to first column)")
-	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee ID or name")
-	cmd.Flags().StringVar(&assignee, "to", "", "Assignee (alias for --assignee)")
+	cmd.Flags().StringVar(&assignee, "assignee", "", "Person to assign: ID, name, or email")
+	cmd.Flags().StringVar(&assignee, "to", "", "Person to assign (alias for --assignee); the column is --column")
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date (natural language or YYYY-MM-DD)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
@@ -1262,6 +1265,9 @@ You can pass either a card ID or a Basecamp URL:
 			card, err := app.Account().Cards().Update(cmd.Context(), cardID, req)
 			if err != nil {
 				return convertSDKError(err)
+			}
+			if err := checkAssigneesSaved(assigneeCard, card.ID, req.AssigneeIDs, card.Assignees); err != nil {
+				return err
 			}
 
 			respOpts := []output.ResponseOption{
@@ -3077,6 +3083,9 @@ func newCardsStepCreateCmd(project *string) *cobra.Command {
 			if err != nil {
 				return convertSDKError(err)
 			}
+			if err := checkAssigneesSaved(assigneeCardStep, step.ID, req.AssigneeIDs, step.Assignees); err != nil {
+				return err
+			}
 
 			return app.OK(step,
 				output.WithSummary(fmt.Sprintf("Created step: %s", step.Title)),
@@ -3164,6 +3173,9 @@ You can pass either a step ID or a Basecamp URL:
 			step, err := app.Account().CardSteps().Update(cmd.Context(), stepID, req)
 			if err != nil {
 				return convertSDKError(err)
+			}
+			if err := checkAssigneesSaved(assigneeCardStep, step.ID, req.AssigneeIDs, step.Assignees); err != nil {
+				return err
 			}
 
 			return app.OK(step,
