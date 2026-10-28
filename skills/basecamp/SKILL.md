@@ -30,6 +30,8 @@ triggers:
   - basecamp checkin
   - basecamp check-in
   - basecamp timeline
+  - basecamp timesheet
+  - log time
   - basecamp template
   - basecamp webhook
   - basecamp gauge
@@ -283,6 +285,26 @@ basecamp projects logo remove --in "<project>" --json
   the project has none; `projects show` carries the same field. The URL
   requires authentication and redirects to the image; it is not a public image
   link.
+
+## Timesheet entries
+
+Time is logged against one item (to-do, message, card, document, upload,
+schedule entry). `timesheet report`, `timesheet project` and `timesheet item`
+read entries; `timesheet entry` writes them, addressed by account alone with
+no `--in`:
+
+```bash
+basecamp timesheet entry create <item-id|url> --hours 1.5 --date yesterday --json
+basecamp timesheet entry show <entry-id|url> --json
+basecamp timesheet entry update <entry-id|url> --hours 2:15 --json
+basecamp timesheet entry delete <entry-id|url> --force --json
+```
+
+- `--hours` is a decimal or `h:mm`; `--date` defaults to today on create;
+  `--person` (ID, name, email or `me`) logs time for someone else.
+- `delete` is permanent: entries are never trashed. Machine output needs
+  `--force`.
+- Accounts without timesheets enabled answer 403.
 
 ## Content and stdin
 

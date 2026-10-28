@@ -274,7 +274,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | **Templates** |
 | templates | 10 | `templates` | ✅ | BC4 | - | list, show, create, update, delete, construct, construction, library, copy, copy-status |
 | **Time Tracking** |
-| timesheets | 6 | `timesheet` | ✅ | BC4 | - | list, show, create, update, delete |
+| timesheets | 7 | `timesheet` | ✅ | BC4 | - | Reports: account-wide (`timesheet report`), project (`timesheet project`), item (`timesheet item`). Entries: `timesheet entry show`, `create` (on an item), `update`, `delete` (permanent: bc3 refuses to trash or archive an entry) |
 | **Subscriptions** |
 | subscriptions | 4 | `subscriptions` | ✅ | BC4 | - | show, subscribe, unsubscribe, add/remove |
 | **Check-ins (Automatic)** |
