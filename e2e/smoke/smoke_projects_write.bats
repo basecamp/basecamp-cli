@@ -46,6 +46,34 @@ setup_file() {
   touch "$BATS_FILE_TMPDIR/wallpaper_set"
 }
 
+@test "projects logo set uploads a logo without changing wallpaper" {
+  [[ -f "$BATS_FILE_TMPDIR/wallpaper_set" ]] || mark_unverifiable "No wallpaper set in prior test"
+  local id_file="$BATS_FILE_TMPDIR/created_project_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No project created in prior test"
+  local proj_id
+  proj_id=$(<"$id_file")
+  local png="$BATS_FILE_TMPDIR/logo.png"
+  printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==' |
+    base64 -d > "$png"
+
+  run_smoke basecamp projects logo set "$png" --project "$proj_id" --json
+  assert_success
+  assert_json_not_null '.data.logo.url'
+  assert_json_value '.data.wallpaper.mode' 'tile'
+  touch "$BATS_FILE_TMPDIR/logo_set"
+}
+
+@test "projects logo remove clears only the logo" {
+  [[ -f "$BATS_FILE_TMPDIR/logo_set" ]] || mark_unverifiable "No logo set in prior test"
+  local proj_id
+  proj_id=$(<"$BATS_FILE_TMPDIR/created_project_id")
+
+  run_smoke basecamp projects logo remove --project "$proj_id" --json
+  assert_success
+  assert_json_value '.data.logo' 'null'
+  assert_json_value '.data.wallpaper.mode' 'tile'
+}
+
 @test "projects wallpaper mode changes the layout" {
   [[ -f "$BATS_FILE_TMPDIR/wallpaper_set" ]] || mark_unverifiable "No wallpaper set in prior test"
   local proj_id

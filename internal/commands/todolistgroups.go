@@ -35,7 +35,8 @@ Todolist groups allow you to organize todolists into collapsible sections.`,
 		newTodolistgroupsShowCmd(&project),
 		newTodolistgroupsCreateCmd(&project, &todolist),
 		newTodolistgroupsUpdateCmd(),
-		newTodolistgroupsPositionCmd(),
+		newTodolistgroupsPositionCmd(&project),
+		newTodolistsCopyCmd(&project),
 	)
 
 	return cmd
@@ -339,15 +340,36 @@ func newTodolistgroupsUpdateCmd() *cobra.Command {
 	return cmd
 }
 
-func newTodolistgroupsPositionCmd() *cobra.Command {
+func newTodolistgroupsPositionCmd(project *string) *cobra.Command {
 	var position int
+	var dest todolistDestination
 
 	cmd := &cobra.Command{
 		Use:     "position <id>",
 		Aliases: []string{"move"},
-		Short:   "Change group position",
-		Args:    cobra.ExactArgs(1),
+		Short:   "Move a group to a list in another project, or reorder it",
+		Long: `Move a group (a list inside a to-do list), with its to-dos, into a to-do list
+in any project as the web's Move… does; it stays a group there. Or reorder it
+within its list (1 = top).
+
+  basecamp todolistgroups move 456 --to-project "Marketing" --to-list "Launch"
+  basecamp todolistgroups move 456 --to-list https://3.basecamp.com/1/buckets/2/todolists/321
+  basecamp todolistgroups position 456 --position 1
+
+Given a top-level to-do list instead, it moves the list into a project's
+To-dos (--to-project, --to-todoset), as todolists move does.`,
+		Args: cobra.ExactArgs(1),
+		Annotations: map[string]string{
+			"agent_notes": "--to-project/--to-list move the group to another project (the web's Move…); --position reorders it within its list and cannot be combined with them. " +
+				todolistFilingNotes + " The old id stops accepting changes, and reading it follows the move. --list, the group's own list, is refused here: name the destination with --to-list.",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if destinationFlagChanged(cmd) {
+				if err := rejectRepositionWithFiling(cmd, "--position"); err != nil {
+					return err
+				}
+				return fileTodolist(cmd, basecamp.FilingMove, args[0], *project, dest, false)
+			}
 			if position == 0 {
 				return output.ErrUsage("--position is required (1-based)")
 			}
@@ -382,6 +404,7 @@ func newTodolistgroupsPositionCmd() *cobra.Command {
 
 	cmd.Flags().IntVar(&position, "position", 0, "New position, 1-based (required)")
 	cmd.Flags().IntVar(&position, "pos", 0, "New position (alias)")
+	dest.addFlags(cmd, "Move")
 
-	return cmd
+	return guardFilingFlags(cmd)
 }

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -48,11 +49,12 @@ Each project has a root folder containing documents, uploads, and subfolders.`,
 		newFoldersCmd(&project, &vaultID),
 		newUploadsCmd(&project, &vaultID),
 		newDocsCmd(&project, &vaultID),
-		newFilesShowCmd(&project),
+		newFilesShowCmd(),
 		newFilesVersionsCmd(&project),
 		newFilesReplaceCmd(&project),
 		newFilesUpdateCmd(&project),
 		newFilesMoveCmd(),
+		newFilesCopyCmd(),
 		newFilesDownloadCmd(&project),
 		newRecordableTrashCmd("file"),
 		newRecordableArchiveCmd("file"),
@@ -88,7 +90,7 @@ func NewUploadsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "uploads",
 		Short: "Manage uploaded files",
-		Long:  "List, show, and upload files in a project's Docs & Files area.",
+		Long:  "List, show, upload, move and copy files in a project's Docs & Files area.",
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
@@ -99,7 +101,9 @@ func NewUploadsCmd() *cobra.Command {
 	cmd.AddCommand(
 		newUploadsListCmd(&project, &vaultID),
 		newUploadsCreateCmd(&project, &vaultID),
-		newFilesShowCmd(&project),
+		newFilesShowCmd(),
+		newFilesMoveCmd(),
+		newFilesCopyCmd(),
 	)
 
 	return cmd
@@ -1417,7 +1421,7 @@ Use - as the content argument to read the document body from stdin:
 	return cmd
 }
 
-func newFilesShowCmd(project *string) *cobra.Command {
+func newFilesShowCmd() *cobra.Command {
 	var itemType string
 	var dlDir *string
 	var cf *commentFlags
@@ -1425,10 +1429,11 @@ func newFilesShowCmd(project *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <id|url>",
 		Short: "Show item details",
-		Long: `Show details for a vault, document, or upload.
+		Long: `Show details for a folder (vault), document, upload, cloud file or Google
+document.
 
 You can pass either an item ID or a Basecamp URL:
-  basecamp files show 789 --in my-project
+  basecamp files show 789
   basecamp files show https://3.basecamp.com/123/buckets/456/documents/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1438,8 +1443,8 @@ You can pass either an item ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			itemIDStr, urlProjectID, err := extractWithProject(args[0])
+			// The item is read by its account-wide ID, so no project is needed.
+			itemIDStr, _, err := extractWithProject(args[0])
 			if err != nil {
 				return err
 			}
@@ -1449,73 +1454,23 @@ You can pass either an item ID or a Basecamp URL:
 				return output.ErrUsage("Invalid item ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
 			// Try to detect type if not specified
 			var result any
+			var bucket *basecamp.Bucket
 			var detectedType string
 			var title string
 
 			if itemType == "" {
-				// Auto-detect type by trying each in order
-				// Track first error to return if all fail (may be auth error, not 404)
-				var firstErr error
-
-				// Try vault first
-				vault, err := app.Account().Vaults().Get(cmd.Context(), itemID)
-				if err == nil {
-					result = vault
-					detectedType = "vault"
-					title = vault.Title
+				// Each kind's read of a moved item's old id is redirected to
+				// the item, so the kind is taken from what comes back.
+				record, src, err := getFileItem(cmd.Context(), app, itemID)
+				if err != nil {
+					if sdkErr := basecamp.AsError(err); sdkErr == nil || sdkErr.Code != basecamp.CodeNotFound {
+						return convertSDKError(err)
+					}
 				} else {
-					firstErr = err
-					// Try upload
-					upload, err := app.Account().Uploads().Get(cmd.Context(), itemID)
-					if err == nil {
-						result = upload
-						detectedType = "upload"
-						title = upload.Filename
-						if title == "" {
-							title = upload.Title
-						}
-					} else {
-						// Try document
-						doc, err := app.Account().Documents().Get(cmd.Context(), itemID)
-						if err == nil {
-							result = doc
-							detectedType = "document"
-							title = doc.Title
-						}
-					}
-				}
-
-				// If all probes failed, check if first error was 404 or something else
-				if result == nil && firstErr != nil {
-					if sdkErr := basecamp.AsError(firstErr); sdkErr == nil || sdkErr.Code != basecamp.CodeNotFound {
-						// Return actual error (auth, permission, network, etc.)
-						return convertSDKError(firstErr)
-					}
+					result, bucket, title = record, src.bucket, src.title
+					detectedType = cmp.Or(fileShowTypes[src.typ], "item")
 				}
 			} else {
 				switch itemType {
@@ -1524,7 +1479,7 @@ You can pass either an item ID or a Basecamp URL:
 					if err != nil {
 						return convertSDKError(err)
 					}
-					result = vault
+					result, bucket = vault, vault.Bucket
 					detectedType = "vault"
 					title = vault.Title
 				case "upload", "file":
@@ -1532,7 +1487,7 @@ You can pass either an item ID or a Basecamp URL:
 					if err != nil {
 						return convertSDKError(err)
 					}
-					result = upload
+					result, bucket = upload, upload.Bucket
 					detectedType = "upload"
 					title = upload.Filename
 					if title == "" {
@@ -1543,13 +1498,29 @@ You can pass either an item ID or a Basecamp URL:
 					if err != nil {
 						return convertSDKError(err)
 					}
-					result = doc
+					result, bucket = doc, doc.Bucket
 					detectedType = "document"
 					title = doc.Title
+				case "cloud_file", "cloud":
+					cloud, err := app.Account().CloudFiles().Get(cmd.Context(), itemID)
+					if err != nil {
+						return convertSDKError(err)
+					}
+					result, bucket = cloud, cloud.Bucket
+					detectedType = "cloud_file"
+					title = cloud.Title
+				case "google_document", "google_doc", "gdoc":
+					google, err := app.Account().GoogleDocuments().Get(cmd.Context(), itemID)
+					if err != nil {
+						return convertSDKError(err)
+					}
+					result, bucket = google, google.Bucket
+					detectedType = "google_document"
+					title = google.Title
 				default:
 					return output.ErrUsageHint(
 						fmt.Sprintf("Invalid type: %s", itemType),
-						"Use: vault, upload, or document",
+						"Use: vault, upload, document, cloud_file, or google_document",
 					)
 				}
 			}
@@ -1557,21 +1528,36 @@ You can pass either an item ID or a Basecamp URL:
 			if result == nil {
 				return output.ErrNotFound("item", itemIDStr)
 			}
+			// A moved item's old id redirects to the item at its new id, and
+			// only the new id takes writes.
+			switch item := result.(type) {
+			case *basecamp.Vault:
+				itemIDStr = strconv.FormatInt(item.ID, 10)
+			case *basecamp.Upload:
+				itemIDStr = strconv.FormatInt(item.ID, 10)
+			case *basecamp.Document:
+				itemIDStr = strconv.FormatInt(item.ID, 10)
+			case *basecamp.CloudFile:
+				itemIDStr = strconv.FormatInt(item.ID, 10)
+			case *basecamp.GoogleDocument:
+				itemIDStr = strconv.FormatInt(item.ID, 10)
+			}
 
 			summary := fmt.Sprintf("%s: %s", detectedType, title)
 
-			breadcrumbs := []output.Breadcrumb{
-				{
+			var breadcrumbs []output.Breadcrumb
+			if detectedType != "cloud_file" && detectedType != "google_document" {
+				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 					Action:      "update",
-					Cmd:         fmt.Sprintf("basecamp files update %s --in %s", itemIDStr, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp files update %s --in %s", itemIDStr, recordProject(bucket)),
 					Description: "Update item",
-				},
+				})
 			}
 
 			if detectedType == "vault" {
 				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 					Action:      "contents",
-					Cmd:         fmt.Sprintf("basecamp files --vault %s --in %s", itemIDStr, resolvedProjectID),
+					Cmd:         fmt.Sprintf("basecamp files --vault %s --in %s", itemIDStr, recordProject(bucket)),
 					Description: "List contents",
 				})
 			}
@@ -1615,7 +1601,7 @@ You can pass either an item ID or a Basecamp URL:
 		},
 	}
 
-	cmd.Flags().StringVarP(&itemType, "type", "t", "", "Item type (vault, upload, document)")
+	cmd.Flags().StringVarP(&itemType, "type", "t", "", "Item type (vault, upload, document, cloud_file, google_document)")
 	dlDir = addDownloadAttachmentsFlag(cmd)
 	cf = addCommentFlags(cmd, false)
 
@@ -2277,31 +2263,54 @@ func updateDocument(cmd *cobra.Command, app *appctx.App, itemID int64, existingD
 func newFilesMoveCmd() *cobra.Command {
 	var to string
 	var position int
+	var toProject, toFolder string
 
 	cmd := &cobra.Command{
-		Use:   "move <id|url>",
-		Short: "Move a document, upload, or folder into another folder",
-		Long: `Move a document, upload, or folder into another folder in the same project.
+		Use:   "move <id|url>...",
+		Short: "Move documents, files or folders to another folder or project",
+		Long: `Move a document, upload, or folder into another folder in the same project,
+or move items into another project's Docs & Files.
 
-The item keeps its ID, comments, and history, and a folder takes everything
-inside it along. Moving into the folder an item is already in changes only its
-position. To move something to another project, use the Move menu in Basecamp.
-
-You can pass IDs or Basecamp URLs for both the item and the folder:
+--to moves within the project: the item keeps its ID, comments, and history,
+and a folder takes everything inside it along. Moving into the folder an item
+is already in changes only its position. You can pass IDs or Basecamp URLs for
+both the item and the folder:
   basecamp files move 789 --to 456
-  basecamp files move https://3.basecamp.com/123/buckets/1/documents/789 --to https://3.basecamp.com/123/buckets/1/vaults/456`,
+  basecamp files move 789 --to 456 --position 1
+  basecamp files move https://3.basecamp.com/123/buckets/1/documents/789 --to https://3.basecamp.com/123/buckets/1/vaults/456
+
+--to-project and --to-folder move documents, uploads, cloud files, Google
+documents and folders into another project, as the web's Move… does. Each one
+lands under a new ID; several IDs move one by one, as the web's bulk Move… does:
+  basecamp files move 789 --to-project "Marketing"
+  basecamp files move 789 --to-project "Marketing" --to-folder "Contracts"
+  basecamp files move 789 790 --to-folder https://3.basecamp.com/123/buckets/999/vaults/555
+--to-folder takes a folder ID or URL anywhere, or with --to-project the title of
+a folder at the top of that project's Docs & Files. The command waits for
+Basecamp to finish and shows each item where it landed.`,
 		Example: `  basecamp files move 789 --to 456
-  basecamp files move 789 --to 456 --position 1`,
-		Annotations: map[string]string{"agent_notes": "Moves in place within one project: the ID, URL, and comments stay the same. --position is 1-indexed (default: first). A folder in another project is refused."},
-		Args:        cobra.ExactArgs(1),
+  basecamp files move 789 --to-project "Marketing" --to-folder "Contracts"`,
+		Annotations: map[string]string{"agent_notes": "--to moves within one project in place: the ID, URL, and comments stay the same; --position is 1-indexed (default: first). " +
+			"--to-project/--to-folder move into another project's Docs & Files under a NEW id: output data.id is the new id and data.source_id the old (several IDs: a list). Write to the new id; the old id stops taking changes, and reading it follows the move. " +
+			"--to-project alone lands at the top of that project's Docs & Files; --to-folder <id|url> picks any folder, nested ones included, and --to-folder <title> with --to-project a top-level folder. " +
+			"--to/--position cannot be combined with --to-project/--to-folder. A --to folder in another project, or a --to-folder in the item's own project, is refused with the command that fits. " +
+			"Several IDs move one by one, and naming one item twice (even by its old and new id) is refused before any moves. If any is not moved the command exits non-zero and reports each: run it again only for the ones it says Basecamp refused, never for one it reports moved or not settled. " +
+			"An in_progress error names its filing: do not move it again; basecamp filings show <filing id> gives its new id once it lands."},
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// --vault/--folder filter the files group's listings; here they would be
-			// silently ignored, and reading them as the destination is a guess.
-			if cmd.Flags().Changed("vault") || cmd.Flags().Changed("folder") {
-				return output.ErrUsageHint("files move takes its destination from --to", "basecamp files move <id|url> --to <folder-id|url>")
+			if familyFilingSet(cmd, filesFamily()) {
+				if to != "" || cmd.Flags().Changed("position") {
+					return output.ErrUsageHint("--to and --position move within the project, and cannot be combined with --to-project or --to-folder",
+						"Use --to <folder> to move within the project, or --to-project/--to-folder to move to another project")
+				}
+				return runFamilyFiling(cmd, filesFamily(), basecamp.FilingMove, args, toProject, toFolder, false)
 			}
 			if to == "" {
 				return missingArg(cmd, "--to")
+			}
+			if len(args) > 1 {
+				return output.ErrUsageHint("--to moves one item at a time",
+					"Move each with its own files move --to, or move several to another project with --to-project/--to-folder")
 			}
 			positionSet := cmd.Flags().Changed("position")
 			if positionSet && (position < 1 || position > math.MaxInt32) {
@@ -2321,8 +2330,8 @@ You can pass IDs or Basecamp URLs for both the item and the folder:
 			itemID, itemProjectID, itemKind := item.id, item.project, item.kind
 			folderID, folderProjectID := folder.id, folder.project
 			if itemProjectID != "" && folderProjectID != "" && !sameNumericID(itemProjectID, folderProjectID) {
-				return output.ErrUsageHint("The folder is in a different project",
-					"files move only moves within a project; use the Move menu in Basecamp to move to another project")
+				return output.ErrUsageHint("The folder is in a different project, and --to moves only within a project",
+					fmt.Sprintf("Move it to that project with: basecamp files move %d --to-folder %d", itemID, folderID))
 			}
 
 			if err := ensureAccount(cmd, app); err != nil {
@@ -2341,9 +2350,8 @@ You can pass IDs or Basecamp URLs for both the item and the folder:
 				opts = &basecamp.MoveToVaultOptions{Position: int32(position)} // #nosec G115 -- bounds checked above
 			}
 			if err := app.Account().Recordings().MoveToVault(cmd.Context(), itemID, folderID, opts); err != nil {
-				return filesMoveError(err)
+				return filesMoveError(err, itemID, folderID)
 			}
-
 			itemName := fmt.Sprintf("#%d", itemID)
 			if title := fileItemTitle(cmd, app, itemID, itemKind); title != "" {
 				itemName = title
@@ -2383,10 +2391,11 @@ You can pass IDs or Basecamp URLs for both the item and the folder:
 		},
 	}
 
-	cmd.Flags().StringVar(&to, "to", "", "Destination folder ID or URL")
+	cmd.Flags().StringVar(&to, "to", "", "Destination folder ID or URL in the same project")
 	cmd.Flags().IntVar(&position, "position", 0, "Position in the folder (1-indexed, default: first; past the end means last)")
+	addFilesFilingFlags(cmd, "Move", &toProject, &toFolder)
 
-	return cmd
+	return guardFilingFlags(cmd)
 }
 
 // filesMoveRef is an ID or URL given to files move, reduced to what the move
@@ -2464,7 +2473,7 @@ func inFlag(project string) string {
 
 // filesMoveError turns the filing endpoint's refusals into messages that say
 // what to change. Only some of its 422s carry a reason, so the hint lists them.
-func filesMoveError(err error) error {
+func filesMoveError(err error, itemID, folderID int64) error {
 	var sdkErr *basecamp.Error
 	if !errors.As(err, &sdkErr) {
 		return convertSDKError(err)
@@ -2494,7 +2503,7 @@ func filesMoveError(err error) error {
 		return &output.Error{
 			Code:       output.CodeNotFound,
 			Message:    "Item or folder not found",
-			Hint:       "Check both IDs; the folder must be in the same project as the item (use the Move menu in Basecamp to move to another project)",
+			Hint:       fmt.Sprintf("Check both IDs. --to takes a folder in the item's own project; for a folder in another project use: basecamp files move %d --to-folder %d", itemID, folderID),
 			HTTPStatus: sdkErr.HTTPStatus,
 			Cause:      sdkErr,
 		}
@@ -2775,4 +2784,332 @@ func humanSize(bytes int64) string {
 // getVaultID retrieves the root vault ID from a project's dock, handling multi-dock projects.
 func getVaultID(cmd *cobra.Command, app *appctx.App, projectID string) (string, error) {
 	return getDockToolID(cmd.Context(), app, projectID, "vault", "", "vault", "vault")
+}
+
+var filesCopyHelp = filingHelp{
+	use:   "copy <id|url>...",
+	short: "Copy documents, files or folders to Docs & Files in this or another project",
+	long: `Copy documents, uploads, cloud files, Google documents or folders into a
+project's Docs & Files, as the web's Copy… does. The originals stay where they
+are; a folder is copied with everything in it.
+
+With no destination, each copy goes into the folder its original is in:
+  basecamp files copy 789
+  basecamp files copy 789 --to-project "Marketing"
+  basecamp files copy 789 --to-project "Marketing" --to-folder "Contracts"
+  basecamp files copy 789 --to-folder https://3.basecamp.com/123/buckets/456/vaults/999
+  basecamp files copy 789 790 791 --to-project "Marketing" --include-comments
+
+--to-folder takes a folder ID or URL anywhere, or with --to-project the title of
+a folder at the top of that project's Docs & Files. Several IDs are copied one
+by one, as the web's bulk Copy… does. Basecamp makes each copy in the
+background; the command waits and shows the new items.`,
+	notes: "Without --to-project/--to-folder each copy goes into its original's own folder. " +
+		"--to-project <project> (ID or name) copies into the top of that project's Docs & Files; --to-folder <id|url> picks any folder, nested ones included, and --to-folder <title> with --to-project a top-level folder. " +
+		"Output is the new item (several: a list); data.id is the copy and data.source_id the original. " +
+		"Several IDs are copied one by one, and naming one item twice (even by its old and new id) is refused before any is copied. If any is not copied the command exits non-zero and reports each: copy again only the ones it says Basecamp refused, never one it reports copied, not read back or not settled, since that makes another copy. " +
+		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy; check an in_progress one with basecamp filings show <filing id>. " +
+		"--vault/--folder name a folder to list and are refused here; use --to-folder.",
+}
+
+// newFilesCopyCmd copies Docs & Files items, one filing each.
+func newFilesCopyCmd() *cobra.Command {
+	cmd := newFilingCmd(filesFamily(), basecamp.FilingCopy, filesCopyHelp, true)
+	cmd.Flags().Lookup("to-folder").Usage = "Copy into this folder (ID or URL, or with --to-project a top-level folder's title)"
+	return cmd
+}
+
+// addFilesFilingFlags adds --to-project and --to-folder, which name the Docs &
+// Files and folder items go into.
+func addFilesFilingFlags(cmd *cobra.Command, verb string, toProject, toFolder *string) {
+	addFamilyFilingFlags(cmd, filesFamily(), verb, toProject, toFolder)
+	cmd.Flags().Lookup("to-folder").Usage = verb + " into this folder in another project (ID or URL, or with --to-project a top-level folder's title)"
+}
+
+// fileKinds are the Docs & Files items the web moves and copies, with the URL
+// kind that names each and its own read.
+var fileKinds = []struct {
+	typ, urlKind string
+	get          func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error)
+}{
+	{"Document", "documents", func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
+		d, err := app.Account().Documents().Get(ctx, id)
+		if err != nil {
+			return nil, filingSource{}, err
+		}
+		return d, filingSource{id: d.ID, typ: d.Type, status: d.Status, title: d.Title, bucket: d.Bucket, parent: d.Parent}, nil
+	}},
+	{"Upload", "uploads", func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
+		u, err := app.Account().Uploads().Get(ctx, id)
+		if err != nil {
+			return nil, filingSource{}, err
+		}
+		return u, filingSource{id: u.ID, typ: u.Type, status: u.Status, title: cmp.Or(u.Filename, u.Title), bucket: u.Bucket, parent: u.Parent}, nil
+	}},
+	{"Vault", "vaults", func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
+		v, err := app.Account().Vaults().Get(ctx, id)
+		if err != nil {
+			return nil, filingSource{}, err
+		}
+		return v, filingSource{id: v.ID, typ: v.Type, status: v.Status, title: v.Title, bucket: v.Bucket, parent: v.Parent}, nil
+	}},
+	{"CloudFile", "cloud_files", func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
+		c, err := app.Account().CloudFiles().Get(ctx, id)
+		if err != nil {
+			return nil, filingSource{}, err
+		}
+		return c, filingSource{id: c.ID, typ: c.Type, status: c.Status, title: c.Title, bucket: c.Bucket, parent: c.Parent}, nil
+	}},
+	{"GoogleDocument", "google_documents", func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
+		g, err := app.Account().GoogleDocuments().Get(ctx, id)
+		if err != nil {
+			return nil, filingSource{}, err
+		}
+		return g, filingSource{id: g.ID, typ: g.Type, status: g.Status, title: g.Title, bucket: g.Bucket, parent: g.Parent}, nil
+	}},
+}
+
+// fileShowTypes names each Docs & Files type as files show reports it.
+var fileShowTypes = map[string]string{
+	"Document":       "document",
+	"Upload":         "upload",
+	"Vault":          "vault",
+	"CloudFile":      "cloud_file",
+	"GoogleDocument": "google_document",
+}
+
+// getFileItem reads a Docs & Files item of any kind by ID, trying each kind's
+// read until one returns a record of its own kind. Only a not-found moves on:
+// any other failure is the answer.
+func getFileItem(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
+	var other filingSource
+	var otherRecord any
+	var lastErr error
+	for _, kind := range fileKinds {
+		record, src, err := kind.get(ctx, app, id)
+		if err != nil {
+			var sdkErr *basecamp.Error
+			if errors.As(err, &sdkErr) && sdkErr.Code == basecamp.CodeNotFound {
+				lastErr = err
+				continue
+			}
+			return nil, filingSource{}, err
+		}
+		if src.typ == kind.typ {
+			return record, src, nil
+		}
+		other, otherRecord = src, record
+	}
+	if otherRecord != nil {
+		return otherRecord, other, nil
+	}
+	return nil, filingSource{}, lastErr
+}
+
+// docsAndFiles is a project's Docs & Files, which items are filed into.
+func docsAndFiles() filingContainer {
+	return filingContainer{
+		dockName: "vault",
+		noun:     "Docs & Files",
+		plural:   "Docs & Files tools",
+		flag:     "--to-folder",
+		urlKind:  "vaults",
+		urlShape: "…/vaults/<id>",
+		get: func(ctx context.Context, app *appctx.App, id int64) (filingTarget, error) {
+			return filesFolderTarget(ctx, app, id)
+		},
+	}
+}
+
+// filesFamily is how documents, uploads, cloud files, Google documents and
+// folders move and copy between projects' Docs & Files.
+func filesFamily() filingFamily {
+	return filingFamily{
+		noun:     "file",
+		group:    "basecamp files",
+		types:    []string{"Document", "Upload", "Vault", "CloudFile", "GoogleDocument"},
+		urlKinds: []string{"documents", "uploads", "vaults", "cloud_files", "google_documents"},
+		urlShape: "…/documents/<id>, …/uploads/<id>, …/vaults/<id>, …/cloud_files/<id> or …/google_documents/<id>",
+		into:     docsAndFiles(),
+		get:      getFileItem,
+		resolve:  resolveFilesTarget,
+		own: func(ctx context.Context, app *appctx.App, src filingSource) (filingTarget, error) {
+			if src.parent == nil {
+				return filingTarget{}, output.ErrUsageHint(
+					fmt.Sprintf("Could not tell which folder file #%d is in", src.id),
+					"Name the destination with --to-project <project> or --to-folder <id|url>",
+				)
+			}
+			return filesFolderTarget(ctx, app, src.parent.ID)
+		},
+		alreadyThere: func(src filingSource, target filingTarget) error {
+			if src.bucket == nil || src.bucket.ID != target.projectID {
+				return nil
+			}
+			folder := cmp.Or(target.parentID, target.id)
+			return output.ErrUsageHint(
+				fmt.Sprintf("File #%d is already in %s, where --to-project or --to-folder would give it a new ID", src.id, target.projectName),
+				fmt.Sprintf("Move it to that folder and keep its ID with: basecamp files move %d --to %d", src.id, folder),
+			)
+		},
+		crumbs: func(id, projectID int64) []output.Breadcrumb {
+			return []output.Breadcrumb{{
+				Action:      "show",
+				Cmd:         fmt.Sprintf("basecamp files show %d --in %d", id, projectID),
+				Description: "View the item",
+			}}
+		},
+	}
+}
+
+// resolveFilesTarget finds the Docs & Files destination: a project's Docs &
+// Files, any folder by ID or URL (sent as parent_id inside its project's Docs
+// & Files), or a folder at the top of the project's Docs & Files by title.
+func resolveFilesTarget(cmd *cobra.Command, app *appctx.App, toProject, toFolder string) (filingTarget, error) {
+	if toFolder == "" {
+		return resolveFilingTarget(cmd, app, docsAndFiles(), toProject, "")
+	}
+
+	var urlProjectID, url string
+	if urlarg.IsURL(toFolder) {
+		ref, err := parseFilingRef(app, toFolder, "folder", "vaults", "…/vaults/<id>")
+		if err != nil {
+			return filingTarget{}, err
+		}
+		url = toFolder
+		toFolder, urlProjectID = strconv.FormatInt(ref.id, 10), ref.project
+	}
+
+	// A folder title can be all digits ("2026"), so with --to-project a number
+	// that names no folder is looked up as a title. A URL names only an id.
+	if isNumericID(toFolder) {
+		id, _ := strconv.ParseInt(toFolder, 10, 64)
+		target, err := filesFolderTarget(cmd.Context(), app, id)
+		if err != nil && output.AsError(err).Code == output.CodeNotFound {
+			switch {
+			case url != "":
+				return filingTarget{}, filingURLNotFound("--to-folder", "folder", url, "",
+					"Pass the folder's current URL or ID, or its title with --to-project")
+			case toProject != "":
+				return filesFolderByTitle(cmd, app, toProject, toFolder)
+			}
+		}
+		if err != nil {
+			return filingTarget{}, err
+		}
+		if urlProjectID != "" && !sameNumericID(urlProjectID, strconv.FormatInt(target.projectID, 10)) {
+			return filingTarget{}, output.ErrUsage(fmt.Sprintf("The --to-folder URL names project %s, but folder %d is in project %d", urlProjectID, id, target.projectID))
+		}
+		if toProject != "" {
+			projectID, _, err := app.Names.ResolveProject(cmd.Context(), toProject)
+			if err != nil {
+				return filingTarget{}, err
+			}
+			if !sameNumericID(projectID, strconv.FormatInt(target.projectID, 10)) {
+				return filingTarget{}, output.ErrUsageHint(
+					fmt.Sprintf("Folder %d is in project %d, but --to-project points at project %s", id, target.projectID, projectID),
+					"Drop --to-project, since the folder names its own project",
+				)
+			}
+		}
+		return target, nil
+	}
+
+	return filesFolderByTitle(cmd, app, toProject, toFolder)
+}
+
+// filesFolderByTitle finds a folder at the top of a project's Docs & Files by
+// title, or the Docs & Files itself. A folder can share the Docs & Files'
+// title, so the Docs & Files is one of the candidates, not a match that wins.
+func filesFolderByTitle(cmd *cobra.Command, app *appctx.App, toProject, toFolder string) (filingTarget, error) {
+	root, err := resolveFilingTarget(cmd, app, docsAndFiles(), toProject, "")
+	if err != nil {
+		return filingTarget{}, err
+	}
+	folders, err := app.Account().Vaults().List(cmd.Context(), root.id, nil)
+	if err != nil {
+		return filingTarget{}, convertSDKError(err)
+	}
+	var named []basecamp.Vault
+	if strings.EqualFold(toFolder, root.title) {
+		named = append(named, basecamp.Vault{ID: root.id, Title: root.title})
+	}
+	for _, folder := range folders.Vaults {
+		if strings.EqualFold(folder.Title, toFolder) {
+			named = append(named, folder)
+		}
+	}
+	switch len(named) {
+	case 1:
+		if named[0].ID != root.id {
+			root.parentID, root.parentTitle, root.appURL = named[0].ID, named[0].Title, named[0].AppURL
+		}
+		return root, nil
+	case 0:
+		titles := make([]string, len(folders.Vaults))
+		for i, folder := range folders.Vaults {
+			titles[i] = fmt.Sprintf("%d (%s)", folder.ID, folder.Title)
+		}
+		hint := "Pass a nested folder's ID or URL"
+		if len(titles) > 0 {
+			hint = fmt.Sprintf("Folders at the top: %s. Pass a nested folder's ID or URL", strings.Join(titles, ", "))
+		}
+		return filingTarget{}, output.ErrUsageHint(
+			fmt.Sprintf("No folder %q at the top of %s's Docs & Files", toFolder, root.projectName), hint)
+	default:
+		lines := make([]string, len(named))
+		for i, folder := range named {
+			lines[i] = fmt.Sprintf("  %d  %s", folder.ID, folder.Title)
+			if folder.ID == root.id {
+				lines[i] += " (the top of Docs & Files)"
+			}
+		}
+		return filingTarget{}, &output.Error{
+			Code:    output.CodeAmbiguous,
+			Message: fmt.Sprintf("%s's Docs & Files has %d places called %q", root.projectName, len(named), toFolder),
+			Hint:    "Specify one with --to-folder <id>:\n" + strings.Join(lines, "\n"),
+		}
+	}
+}
+
+// filesFolderTarget is a folder as a filing destination: the Docs & Files on
+// its project's dock it is in, with the folder as parent_id unless it is that
+// Docs & Files itself.
+func filesFolderTarget(ctx context.Context, app *appctx.App, folderID int64) (filingTarget, error) {
+	folder, err := app.Account().Vaults().Get(ctx, folderID)
+	if err != nil {
+		return filingTarget{}, convertSDKError(err)
+	}
+	if folder.Bucket == nil {
+		return filingTarget{}, output.ErrNotFound("folder", strconv.FormatInt(folderID, 10))
+	}
+	projectID := strconv.FormatInt(folder.Bucket.ID, 10)
+	enabled, all, err := getDockTools(ctx, app, projectID, "vault")
+	if err != nil {
+		return filingTarget{}, err
+	}
+	docked := func(id int64) bool {
+		return slices.ContainsFunc(enabled, func(tool DockTool) bool { return tool.ID == id })
+	}
+
+	if docked(folder.ID) {
+		return bucketTarget(folder.ID, folder.Title, folder.AppURL, folder.Bucket), nil
+	}
+	parent := folder.Parent
+	for range 32 {
+		if parent == nil || parent.Type != "Vault" {
+			break
+		}
+		if docked(parent.ID) {
+			target := bucketTarget(parent.ID, parent.Title, parent.AppURL, folder.Bucket)
+			target.parentID, target.parentTitle, target.appURL = folder.ID, folder.Title, folder.AppURL
+			return target, nil
+		}
+		above, err := app.Account().Vaults().Get(ctx, parent.ID)
+		if err != nil {
+			return filingTarget{}, convertSDKError(err)
+		}
+		parent = above.Parent
+	}
+	return filingTarget{}, noFilingContainerError(docsAndFiles(), all, projectID, folder.Bucket.Name)
 }

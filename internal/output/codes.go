@@ -64,6 +64,12 @@ const (
 	CodeLockUnavailable = "lock_unavailable"
 )
 
+// CodeInProgress marks work Basecamp accepted and is still doing in the
+// background when the command stopped waiting for it, such as a card being
+// moved or copied to another project. It is not a failure to retry: the hint
+// says how to see the result once the work is done.
+const CodeInProgress = "in_progress"
+
 // ExitCodeFor returns the exit code for a given error code.
 func ExitCodeFor(code string) int {
 	switch code {

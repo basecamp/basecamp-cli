@@ -1,0 +1,8 @@
+task: Move to-do 4567 to the Launch list in the Marketing project
+tags: [domain, move]
+accept:
+  - '^(?=.*\btodos (move|position) )(?=.*\b4567\b)(?=.*--to-project[ =]["'']?Marketing)(?=.*--to-list[ =]["'']?Launch)'
+reject:
+  - '(^|\s)--list[ =]'
+  - '(^|\s)--to[ =]\d'
+  - 'basecamp api'

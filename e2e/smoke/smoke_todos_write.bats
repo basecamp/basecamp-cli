@@ -52,6 +52,23 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "todos copy copies a todo into its own list" {
+  local id_file="$BATS_FILE_TMPDIR/direct_todo_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No direct todo created in prior test"
+  local todo_id
+  todo_id=$(<"$id_file")
+
+  run_smoke basecamp todos copy "$todo_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.source_id' "$todo_id"
+  assert_json_not_null '.data.id'
+
+  local copy_id
+  copy_id=$(echo "$output" | jq -r '.data.id')
+  basecamp todos trash "$copy_id" -p "$QA_PROJECT" --json >/dev/null 2>&1 || true
+}
+
 @test "todos update updates a todo" {
   local id_file="$BATS_FILE_TMPDIR/direct_todo_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No direct todo created in prior test"
@@ -247,6 +264,23 @@ setup_file() {
   run_smoke basecamp todolists position "$tl_id" --to 1 -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
+}
+
+@test "todolists copy copies a todolist into its own To-dos" {
+  local id_file="$BATS_FILE_TMPDIR/todolist_target_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No todolist created in prior test"
+  local tl_id
+  tl_id=$(<"$id_file")
+
+  run_smoke basecamp todolists copy "$tl_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.source_id' "$tl_id"
+  assert_json_not_null '.data.id'
+
+  local copy_id
+  copy_id=$(echo "$output" | jq -r '.data.id')
+  basecamp todolists trash "$copy_id" -p "$QA_PROJECT" --json >/dev/null 2>&1 || true
 }
 
 @test "todolists archive archives a todolist" {

@@ -57,3 +57,29 @@ setup_file() {
   assert_success
   assert_json_value '.ok' 'true'
 }
+
+@test "checkins question copy copies a question into its own check-ins" {
+  local id_file="$BATS_FILE_TMPDIR/question_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No question created in prior test"
+  local qid
+  qid=$(<"$id_file")
+
+  run_smoke basecamp checkins question copy "$qid" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.source_id' "$qid"
+  assert_json_not_null '.data.id'
+}
+
+@test "checkins question move refuses the check-ins the question is in" {
+  local id_file="$BATS_FILE_TMPDIR/question_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No question created in prior test"
+  local qid
+  qid=$(<"$id_file")
+
+  # A cross-project move would take the QA question away; the move itself
+  # is covered against local bc3.
+  run_smoke basecamp checkins question move "$qid" --to-project "$QA_PROJECT" --json
+  assert_failure
+  assert_json_value '.ok' 'false'
+}

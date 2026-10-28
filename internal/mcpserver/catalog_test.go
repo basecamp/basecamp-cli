@@ -59,6 +59,7 @@ func TestCatalogExcludesUnservedOperations(t *testing.T) {
 		"CreateCampfireUpload":   true,
 		"UpdateAccountLogo":      true,
 		"UpdateProjectWallpaper": true,
+		"UpdateProjectLogo":      true,
 		"CreateStreamTicket":     true,
 	}
 	model, composite := 0, 0
@@ -72,7 +73,7 @@ func TestCatalogExcludesUnservedOperations(t *testing.T) {
 			assert.False(t, excluded[op.ID], "operation %q should be excluded from the vendored model", op.ID)
 		}
 	}
-	assert.Equal(t, 282, model, "served model operation count")
+	assert.Equal(t, 286, model, "served model operation count")
 	assert.Equal(t, 1, composite, "served composite operation count")
 }
 

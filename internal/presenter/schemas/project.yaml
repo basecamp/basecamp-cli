@@ -29,6 +29,10 @@ fields:
     role: detail
     format: text
 
+  logo:
+    role: detail
+    format: logo
+
   wallpaper:
     role: detail
     format: wallpaper
@@ -56,7 +60,7 @@ views:
     sections:
       - fields: [name, description]
       - heading: Info
-        fields: [status, bookmarked, wallpaper]
+        fields: [status, bookmarked, logo, wallpaper]
       - heading: Dock
         fields: [dock]
       - heading: Metadata

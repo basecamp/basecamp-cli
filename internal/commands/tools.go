@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -47,6 +49,7 @@ Disabling a tool hides it from the dock but preserves its content.`,
 		newToolsEnableCmd(&project),
 		newToolsDisableCmd(&project),
 		newToolsRepositionCmd(&project),
+		newToolsMoveCmd(&project),
 	)
 
 	return cmd
@@ -600,53 +603,196 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 	var position int
 
 	cmd := &cobra.Command{
-		Use:     "reposition <id>",
-		Aliases: []string{"move"},
-		Short:   "Change a tool's position in the dock",
-		Long:    "Move a tool to a different position in the project dock.",
-		Args:    cobra.ExactArgs(1),
+		Use:   "reposition <id>",
+		Short: "Change a tool's position in the dock",
+		Long:  "Move a tool to a different position in the project dock.",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if position == 0 {
-				return output.ErrUsage("--position is required (1-based)")
-			}
-
-			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
-
-			toolID, err := strconv.ParseInt(args[0], 10, 64)
-			if err != nil {
-				return output.ErrUsage("Invalid tool ID")
-			}
-
-			resolvedProjectID, err := resolveToolsProject(cmd, app, *project)
-			if err != nil {
-				return err
-			}
-			inFlag := toolBreadcrumbFlag(resolvedProjectID)
-
-			err = app.Account().Tools().Reposition(cmd.Context(), toolID, position)
-			if err != nil {
-				return convertSDKError(err)
-			}
-
-			return app.OK(map[string]any{"repositioned": true, "position": position},
-				output.WithSummary(fmt.Sprintf("Tool %d moved to position %d", toolID, position)),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "tool",
-						Cmd:         fmt.Sprintf("basecamp tools show %d%s", toolID, inFlag),
-						Description: "View tool",
-					},
-				),
-			)
+			return runToolsReposition(cmd, *project, args[0], position)
 		},
 	}
 
 	cmd.Flags().IntVar(&position, "position", 0, "New position, 1-based (required)")
 	cmd.Flags().IntVar(&position, "pos", 0, "New position (alias)")
 
-	return cmd
+	return guardFilingFlags(cmd)
+}
+
+func runToolsReposition(cmd *cobra.Command, project, arg string, position int) error {
+	if position == 0 {
+		return output.ErrUsage("--position is required (1-based)")
+	}
+
+	app := appctx.FromContext(cmd.Context())
+
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	toolID, err := strconv.ParseInt(arg, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid tool ID")
+	}
+
+	resolvedProjectID, err := resolveToolsProject(cmd, app, project)
+	if err != nil {
+		return err
+	}
+	inFlag := toolBreadcrumbFlag(resolvedProjectID)
+
+	err = app.Account().Tools().Reposition(cmd.Context(), toolID, position)
+	if err != nil {
+		return convertSDKError(err)
+	}
+
+	return app.OK(map[string]any{"repositioned": true, "position": position},
+		output.WithSummary(fmt.Sprintf("Tool %d moved to position %d", toolID, position)),
+		output.WithBreadcrumbs(
+			output.Breadcrumb{
+				Action:      "tool",
+				Cmd:         fmt.Sprintf("basecamp tools show %d%s", toolID, inFlag),
+				Description: "View tool",
+			},
+		),
+	)
+}
+
+// newToolsMoveCmd repositions a tool in its dock, as tools reposition does,
+// or with --to-project moves it with everything in it to another project.
+func newToolsMoveCmd(project *string) *cobra.Command {
+	var position int
+	var toProject string
+
+	cmd := &cobra.Command{
+		Use:   "move <id|url>",
+		Short: "Move a tool to another position in the dock, or to another project",
+		Long: `Move a dock tool to another position in its project's dock, or move the whole
+tool, with everything in it, to another project.
+
+--position reorders the dock, as tools reposition does:
+  basecamp tools move 1069479999 --position 1 --in my-project
+
+--to-project moves the tool to another project, as the web's Move… does for a
+Message Board, Card Table, To-dos, Docs & Files, Schedule, Automatic Check-ins,
+Chat or Email Forwards:
+  basecamp tools move 1069479999 --to-project "Marketing"
+  basecamp tools move https://3.basecamp.com/123/buckets/456/message_boards/1069479999 --to-project "Marketing"
+
+Find a tool's ID in its project's dock with basecamp projects show <id>, which
+takes the project's ID (basecamp projects list gives it). A tool cannot be
+copied, and Basecamp does not move a door (an external link) to another project.`,
+		Args: cobra.ExactArgs(1),
+		Annotations: map[string]string{"agent_notes": "--position reorders the tool in its own dock (same as tools reposition). " +
+			"--to-project <project> (ID or name) moves the whole tool and everything in it to that project's dock under a NEW id: output data.id is the new tool id and data.source_id the old one; the old id stops taking changes. " +
+			"--position cannot be combined with --to-project. The tool ID comes from the project's dock (basecamp projects show <id>, which takes the project's numeric ID from basecamp projects list), or pass the tool's URL. " +
+			"Tools cannot be copied; doors (external links) cannot move to another project. To move one message, file or card instead, use that family's move command. " +
+			"The old id does not follow the move (tools show <old id> reads it as deleted). An in_progress error names its filing: do not move it again; basecamp filings show <filing id> gives its new id once it lands."},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			positionSet := cmd.Flags().Changed("position") || cmd.Flags().Changed("pos")
+			if !cmd.Flags().Changed("to-project") {
+				return runToolsReposition(cmd, *project, args[0], position)
+			}
+			if positionSet {
+				return output.ErrUsageHint("--position reorders the tool in its own dock, and cannot be combined with --to-project",
+					"Move it to the other project first, then reorder it there with --position")
+			}
+			if toProject == "" {
+				return output.ErrUsage("--to-project needs a project ID or name")
+			}
+			return moveToolToProject(cmd, *project, args[0], toProject)
+		},
+	}
+
+	cmd.Flags().IntVar(&position, "position", 0, "New position in the dock, 1-based")
+	cmd.Flags().IntVar(&position, "pos", 0, "New position (alias)")
+	cmd.Flags().StringVar(&toProject, "to-project", "", "Move the tool, with everything in it, to this project (ID or name)")
+
+	return guardFilingFlags(cmd)
+}
+
+// movableToolTypes are the dock tools the web moves to another project.
+var movableToolTypes = []string{"Message::Board", "Kanban::Board", "Todoset", "Vault", "Schedule", "Questionnaire", "Chat::Transcript", "Inbox"}
+
+// toolURLKinds are the URL kinds that name a dock tool.
+var toolURLKinds = []string{"tools", "message_boards", "card_tables", "todosets", "vaults", "schedules", "questionnaires", "chats", "inboxes"}
+
+func moveToolToProject(cmd *cobra.Command, flagProject, arg, toProject string) error {
+	app := appctx.FromContext(cmd.Context())
+	scope := newFollowUpScope(app)
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+	ref, err := parseFilingRefOf(app, arg, "tool", "…/message_boards/<id>, …/card_tables/<id>, …/vaults/<id> and so on, or …/dock/tools/<id>", toolURLKinds)
+	if err != nil {
+		return err
+	}
+	tool, err := app.Account().Tools().Get(cmd.Context(), ref.id)
+	if err != nil {
+		return convertSDKError(err)
+	}
+	if tool.Bucket == nil {
+		return output.ErrNotFound("tool", strconv.FormatInt(ref.id, 10))
+	}
+	if tool.Status == "deleted" {
+		return output.ErrUsageHint(
+			fmt.Sprintf("Tool %d (%s) is deleted, or was moved to another project under a new ID", tool.ID, tool.Title),
+			"If it moved, find its new ID on the destination project's dock: basecamp projects show <id>, with the project's ID from basecamp projects list",
+		)
+	}
+	if tool.Type == "Door" {
+		return output.ErrUsage(fmt.Sprintf("Tool %d (%s) is a door, an external link, which Basecamp does not move to another project", tool.ID, tool.Title))
+	}
+	if !slices.Contains(movableToolTypes, tool.Type) || tool.Parent != nil {
+		return output.ErrUsageHint(
+			fmt.Sprintf("%d is a %s, not a tool on a project's dock", ref.id, tool.Type),
+			fmt.Sprintf("Pass the ID of a dock tool from: basecamp projects show %d", tool.Bucket.ID),
+		)
+	}
+	if err := rejectProjectConflict(cmd, app, "tool", flagProject, ref.project, tool.Bucket.ID); err != nil {
+		return err
+	}
+
+	projectID, projectName, err := app.Names.ResolveProject(cmd.Context(), toProject)
+	if err != nil {
+		return err
+	}
+	destID, err := strconv.ParseInt(projectID, 10, 64)
+	if err != nil {
+		return output.ErrUsage("Project ID must be numeric")
+	}
+	projectName = projectLabel(cmd, app, projectID, projectName)
+	if destID == tool.Bucket.ID {
+		return output.ErrUsageHint(
+			fmt.Sprintf("Tool %d (%s) is already in %s", tool.ID, tool.Title, projectName),
+			fmt.Sprintf("Reorder it in that dock with: basecamp tools move %d --position <n> --in %d", tool.ID, destID),
+		)
+	}
+
+	return runFiling(cmd, app, scope, recordingFiling{
+		kind:        basecamp.FilingMove,
+		sourceID:    tool.ID,
+		noun:        "tool",
+		toProjectID: destID,
+		destination: "project " + projectName,
+		showCmd:     "basecamp tools show",
+		read: func(ctx context.Context, id int64) (filedRecording, error) {
+			moved, err := app.Account().Tools().Get(ctx, id)
+			if err != nil {
+				return filedRecording{}, err
+			}
+			var crumbs []output.Breadcrumb
+			if moved.Bucket != nil {
+				crumbs = []output.Breadcrumb{
+					{Action: "show", Cmd: fmt.Sprintf("basecamp tools show %d --in %d", moved.ID, moved.Bucket.ID), Description: "View the tool"},
+					{Action: "project", Cmd: fmt.Sprintf("basecamp projects show %d", moved.Bucket.ID), Description: "View the project's dock"},
+				}
+			}
+			return filedRecording{
+				result:      withSourceID(moved, tool.ID),
+				id:          moved.ID,
+				bucket:      moved.Bucket,
+				breadcrumbs: crumbs,
+			}, nil
+		},
+	})
 }

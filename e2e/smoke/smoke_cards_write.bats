@@ -45,6 +45,19 @@ setup_file() {
   assert_json_not_null '.data.id'
 }
 
+@test "cards copy copies a card onto its own card table" {
+  local id_file="$BATS_FILE_TMPDIR/card_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No card created in prior test"
+  local card_id
+  card_id=$(<"$id_file")
+
+  run_smoke basecamp cards copy "$card_id" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.source_id' "$card_id"
+  assert_json_not_null '.data.id'
+}
+
 @test "cards columns lists columns" {
   run_smoke basecamp cards columns --card-table "$QA_CARDTABLE" -p "$QA_PROJECT" --json
   assert_success

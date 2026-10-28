@@ -11,6 +11,7 @@ triggers:
   - basecamp subtasks
   - basecamp project
   - project wallpaper
+  - project logo
   - basecamp cards
   - basecamp chat
   - basecamp campfire
@@ -260,6 +261,28 @@ basecamp projects wallpaper remove --in "<project>" --json
   absent when the project has none; `projects show` carries the same field.
   The URL requires authentication and redirects to the image; it is not a
   public image link.
+
+## Project logo
+
+The logo is the image beside a project's name, separate from its wallpaper. The
+`projects logo` group sets and removes it, for the project in `--in`/`--project`
+or the configured default:
+
+```bash
+basecamp projects logo set brand.png --in "<project>" --json
+basecamp projects logo remove --in "<project>" --json
+```
+
+- People and agents who can edit the project can change its logo. Others get
+  403, and a project the caller cannot see gets 404; do not retry or route
+  around either refusal.
+- The CLI checks the file's size and MIME hint before uploading; leaf help
+  names the limits. Server image validations still apply. Removing a logo from
+  a project that has none succeeds.
+- Each command returns the project. `.data.logo` is `{url}`, and is absent when
+  the project has none; `projects show` carries the same field. The URL
+  requires authentication and redirects to the image; it is not a public image
+  link.
 
 ## Content and stdin
 

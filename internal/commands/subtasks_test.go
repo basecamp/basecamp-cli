@@ -517,3 +517,53 @@ func TestShowTrustsACompleteEmbed(t *testing.T) {
 
 	assert.Empty(t, transport.queriesFor(subtasksListPath(777)))
 }
+
+// A moved card or to-do's old id reads back the record at its new id, and only
+// the new id reaches its steps.
+func TestShowingAMovedRecordByItsOldIDReadsEveryStepAtTheNewID(t *testing.T) {
+	t.Run("cards show", func(t *testing.T) {
+		app, _, out := setupPersonalFeedApp(t,
+			cardGetRoute(777, parentJSON(778, "Kanban::Card", 100, 135)),
+			subtaskRoute(http.MethodGet, subtasksListPath(778), http.StatusOK, stepsJSON(135)))
+
+		require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "show", "777"))
+
+		data, summary := subtaskEnvelope(t, out)
+		var card struct {
+			Steps json.RawMessage `json:"steps"`
+		}
+		require.NoError(t, json.Unmarshal(data, &card))
+		assert.Equal(t, 135, len(decodeSteps(t, card.Steps)))
+		assert.Contains(t, summary, "#778")
+		assert.NotContains(t, out.String(), "cards done 777")
+	})
+
+	t.Run("cards steps", func(t *testing.T) {
+		app, _, out := setupPersonalFeedApp(t,
+			projectsRoute(),
+			cardGetRoute(777, parentJSON(778, "Kanban::Card", 100, 135)),
+			subtaskRoute(http.MethodGet, subtasksListPath(778), http.StatusOK, stepsJSON(135)))
+
+		require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "steps", "777", "--in", "123"))
+
+		data, summary := subtaskEnvelope(t, out)
+		assert.Equal(t, 135, len(decodeSteps(t, data)))
+		assert.Equal(t, "135 steps on card #778", summary)
+	})
+
+	t.Run("todos show", func(t *testing.T) {
+		app, _, out := setupPersonalFeedApp(t,
+			todoGetRoute(888, parentJSON(889, "Todo", 100, 135)),
+			subtaskRoute(http.MethodGet, subtasksListPath(889), http.StatusOK, stepsJSON(135)))
+
+		require.NoError(t, executeRecordingCommand(NewTodosCmd(), app, "show", "888"))
+
+		data, _ := subtaskEnvelope(t, out)
+		var todo struct {
+			Steps json.RawMessage `json:"steps"`
+		}
+		require.NoError(t, json.Unmarshal(data, &todo))
+		assert.Equal(t, 135, len(decodeSteps(t, todo.Steps)))
+		assert.NotContains(t, out.String(), "todos complete 888")
+	})
+}

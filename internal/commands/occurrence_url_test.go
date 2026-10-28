@@ -80,6 +80,8 @@ func occurrenceAPIResponse(method, path string) (int, string) {
 		return http.StatusOK, occurrenceEntryJSON
 	case "GET /schedule_entries/789/occurrences/20261022":
 		return http.StatusOK, occurrenceJSON
+	case "GET /projects/123":
+		return http.StatusOK, `{"id": 123, "name": "Source", "dock": [{"name": "schedule", "id": 456, "title": "Schedule", "enabled": true}]}`
 	case "PUT /recordings/789/status/trashed", "PUT /recordings/789/status/archived":
 		return http.StatusNoContent, ""
 	case "POST /recordings/789/comments", "POST /recordings/1001/comments":
@@ -316,11 +318,12 @@ func TestScheduleShowOccurrenceURLReadsItsComments(t *testing.T) {
 			assert.Equal(t, []string{
 				"GET /99999/schedule_entries/789/occurrences/20261022",
 				"GET /99999/recordings/1001/comments.json",
+				"GET /99999/projects/123.json",
 			}, requests)
 			env := decodeOccurrenceEnvelope(t, out)
 			assert.Equal(t, []string{
 				"basecamp comments create 1001 <text>",
-				"basecamp schedule entries --project 123",
+				"basecamp schedule entries --project 123 --schedule 456",
 				"basecamp comments list --all 1001",
 			}, env.cmds())
 		})

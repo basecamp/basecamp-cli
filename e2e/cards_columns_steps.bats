@@ -67,15 +67,6 @@ load test_helper
   assert_output_contains "ID required"
 }
 
-@test "cards column show without project shows error" {
-  create_credentials
-  create_global_config '{"account_id": 99999}'
-
-  run basecamp cards column show 456
-  assert_failure
-  assert_output_contains "project"
-}
-
 
 # Column create errors
 

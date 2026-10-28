@@ -1,7 +1,10 @@
 package commands
 
 import (
+	"context"
 	"fmt"
+	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -31,7 +34,7 @@ Use 'basecamp schedule entries' to list schedule entries.
 Use 'basecamp schedule create' to create new entries.
 
 For a cross-project view of your upcoming schedule, use 'basecamp reports schedule'.`,
-		Annotations: map[string]string{"agent_notes": "Each project has one schedule\nRecurring events: use --date on show to get a specific occurrence\nschedule settings --include-due makes todo/card due dates appear on the schedule\nNatural dates work for --starts-at: tomorrow, next monday"},
+		Annotations: map[string]string{"agent_notes": "A project usually has one schedule but can have several: with one, commands find it; with several, they refuse and list the schedule IDs, so pass --schedule <id> (move and copy take --to-schedule <id>)\nRecurring events: use --date on show to get a specific occurrence\nschedule settings --include-due makes todo/card due dates appear on the schedule\nNatural dates work for --starts-at: tomorrow, next monday"},
 	}
 
 	cmd.PersistentFlags().StringVarP(&project, "project", "p", "", "Project ID or name")
@@ -41,10 +44,12 @@ For a cross-project view of your upcoming schedule, use 'basecamp reports schedu
 	cmd.AddCommand(
 		newScheduleShowCmd(&project, &scheduleID),
 		newScheduleEntriesCmd(&project, &scheduleID),
-		newScheduleEntryShowCmd(&project),
+		newScheduleEntryShowCmd(),
 		newScheduleCreateCmd(&project, &scheduleID),
 		newScheduleUpdateCmd(&project),
 		newScheduleSettingsCmd(&project, &scheduleID),
+		newFilingCmd(scheduleEntryFamily(), basecamp.FilingMove, scheduleMoveHelp, false),
+		newFilingCmd(scheduleEntryFamily(), basecamp.FilingCopy, scheduleCopyHelp, false),
 	)
 
 	return cmd
@@ -247,7 +252,7 @@ func runScheduleEntries(cmd *cobra.Command, app *appctx.App, project, scheduleID
 	)
 }
 
-func newScheduleEntryShowCmd(project *string) *cobra.Command {
+func newScheduleEntryShowCmd() *cobra.Command {
 	var occurrenceDate string
 
 	cmd := &cobra.Command{
@@ -256,7 +261,7 @@ func newScheduleEntryShowCmd(project *string) *cobra.Command {
 		Long: `Display details of a schedule entry.
 
 You can pass either an entry ID or a Basecamp URL:
-  basecamp schedule show 789 --in my-project
+  basecamp schedule show 789
   basecamp schedule show https://3.basecamp.com/123/buckets/456/schedule_entries/789`,
 		Args: cobra.ExactArgs(1),
 	}
@@ -268,7 +273,7 @@ You can pass either an entry ID or a Basecamp URL:
 		if err := ensureAccount(cmd, app); err != nil {
 			return err
 		}
-		return runScheduleEntryShow(cmd, app, args[0], *project, occurrenceDate, cf)
+		return runScheduleEntryShow(cmd, app, args[0], occurrenceDate, cf)
 	}
 
 	cmd.Flags().StringVar(&occurrenceDate, "date", "", "Access specific occurrence of recurring entry (YYYYMMDD)")
@@ -277,11 +282,9 @@ You can pass either an entry ID or a Basecamp URL:
 	return cmd
 }
 
-func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project, occurrenceDate string, cf *commentFlags) error {
-	// Extract ID, project, and occurrence date from URL if provided.
-	// Uses Parse directly (instead of extractWithProject) to access the
-	// occurrence date that the URL encodes.
-	var urlProjectID string
+func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, occurrenceDate string, cf *commentFlags) error {
+	// Extract ID and occurrence date from URL if provided. The entry is read
+	// by its account-wide ID, so no project is needed.
 	if parsed := urlarg.Parse(entryID); parsed != nil {
 		if parsed.RecordingID == "" {
 			return output.ErrUsageHint(
@@ -290,33 +293,9 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 			)
 		}
 		entryID = parsed.RecordingID
-		urlProjectID = parsed.ProjectID
 		if occurrenceDate == "" {
 			occurrenceDate = parsed.OccurrenceDate
 		}
-	}
-
-	// Resolve project - use URL > flag > config, with interactive fallback
-	projectID := project
-	if projectID == "" && urlProjectID != "" {
-		projectID = urlProjectID
-	}
-	if projectID == "" {
-		projectID = app.Flags.Project
-	}
-	if projectID == "" {
-		projectID = app.Config.ProjectID
-	}
-	if projectID == "" {
-		if err := ensureProject(cmd, app); err != nil {
-			return err
-		}
-		projectID = app.Config.ProjectID
-	}
-
-	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-	if err != nil {
-		return err
 	}
 
 	entryIDInt, _ := strconv.ParseInt(entryID, 10, 64)
@@ -354,7 +333,7 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 				},
 				output.Breadcrumb{
 					Action:      "entries",
-					Cmd:         fmt.Sprintf("basecamp schedule entries --project %s", resolvedProjectID),
+					Cmd:         scheduleEntriesCmd(cmd.Context(), app, entry),
 					Description: "View all entries",
 				},
 			),
@@ -367,6 +346,13 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 	entry, err := app.Account().Schedules().GetEntry(cmd.Context(), entryIDInt)
 	if err != nil {
 		return convertSDKError(err)
+	}
+	// A moved event's old id redirects to the event at its new id, and only
+	// the new id takes writes. A recurring event reads as an occurrence whose
+	// parent is the event.
+	entryID = strconv.FormatInt(entry.ID, 10)
+	if entry.Type == occurrenceType && entry.Parent != nil {
+		entryID = strconv.FormatInt(entry.Parent.ID, 10)
 	}
 
 	title := entry.Summary
@@ -387,12 +373,12 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "update",
-				Cmd:         fmt.Sprintf("basecamp schedule update %s --summary \"...\" --project %s", entryID, resolvedProjectID),
+				Cmd:         fmt.Sprintf("basecamp schedule update %s --summary \"...\" --project %s", entryID, recordProject(entry.Bucket)),
 				Description: "Update entry",
 			},
 			output.Breadcrumb{
 				Action:      "entries",
-				Cmd:         fmt.Sprintf("basecamp schedule entries --project %s", resolvedProjectID),
+				Cmd:         scheduleEntriesCmd(cmd.Context(), app, entry),
 				Description: "View all entries",
 			},
 		),
@@ -400,6 +386,28 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, project,
 	opts = append(opts, commentOpts...)
 
 	return app.OK(data, opts...)
+}
+
+// scheduleEntriesCmd lists the entries of the schedule an event is on,
+// naming the schedule, since a project can have several and a calendar has
+// no dock to find one on. A recurring event's parent is its series, not its
+// schedule, so for one it looks the schedule up.
+func scheduleEntriesCmd(ctx context.Context, app *appctx.App, entry *basecamp.ScheduleEntry) string {
+	list := "basecamp schedule entries --project " + recordProject(entry.Bucket)
+	if entry.Parent == nil {
+		return list
+	}
+	schedule := entry.Parent
+	if schedule.Type != "Schedule" {
+		if entry.Bucket == nil {
+			return list
+		}
+		var err error
+		if schedule, err = seriesSchedule(ctx, app, entry.Bucket, entry.Parent.ID, entry.Status); err != nil || schedule == nil {
+			return list
+		}
+	}
+	return fmt.Sprintf("%s --schedule %d", list, schedule.ID)
 }
 
 func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
@@ -930,4 +938,163 @@ func validateScheduleTimestamp(flag, value string) error {
 		return nil
 	}
 	return output.ErrUsage(fmt.Sprintf("Invalid --%s: %q is neither an RFC 3339 timestamp (2026-06-01T09:00:00Z) nor a date (2026-06-01)", flag, value))
+}
+
+var scheduleMoveHelp = filingHelp{
+	use:   "move <id|url>",
+	short: "Move a schedule entry (event) to another project's schedule",
+	long: `Move a schedule entry, an event, to a schedule in another project, as the
+web's Move… does. A recurring event moves as a whole, every occurrence with it.
+
+  basecamp schedule move 789 --to-project "Marketing"
+  basecamp schedule move https://3.basecamp.com/123/buckets/456/schedule_entries/789 --to-project "Marketing"
+  basecamp schedule move 789 --to-schedule 1069479999
+
+--to-project alone needs a project with one schedule; add --to-schedule when it
+has several, or pass a schedule's ID or URL alone. The command waits for
+Basecamp to finish the move and shows the event where it landed, under a new ID.`,
+	notes: "--to-project <project> (ID or name) moves the event to that project's schedule; --to-schedule <id|url> names a schedule directly, which is how to name an employee calendar's schedule (a calendar is not a project). " +
+		"A recurring event moves as a whole; an occurrence URL moves the whole series. " +
+		"Output is the moved event: data.id is its NEW id and data.source_id the old one. Write to the new id; the old id stops taking changes, and reading it follows the move. " +
+		"--schedule names the event's own schedule and is refused; moving onto the schedule it is already on is refused. " +
+		"An in_progress error names its filing: do not move it again; basecamp filings show <filing id> gives its new id once it lands.",
+}
+
+var scheduleCopyHelp = filingHelp{
+	use:   "copy <id|url>",
+	short: "Copy a schedule entry (event) to a schedule in this or another project",
+	long: `Copy a schedule entry, an event, onto a schedule, as the web's Copy… does. The
+original stays where it is; a recurring event is copied as a whole series.
+
+With no destination, the copy goes onto the event's own schedule:
+  basecamp schedule copy 789
+  basecamp schedule copy 789 --to-project "Marketing"
+  basecamp schedule copy 789 --to-schedule 1069479999 --include-comments
+
+Basecamp makes the copy in the background; the command waits for it and shows
+the new event.`,
+	notes: "Without --to-project/--to-schedule the copy goes onto the event's own schedule; --to-schedule <id|url> also names an employee calendar's schedule. " +
+		"Output is the new event; its id is data.id and the original's is data.source_id. --include-comments copies the comments too. " +
+		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy; check an in_progress one with basecamp filings show <filing id>.",
+}
+
+// scheduleEntryFamily is how schedule entries move and copy between
+// schedules.
+func scheduleEntryFamily() filingFamily {
+	return filingFamily{
+		noun:     "schedule entry",
+		group:    "basecamp schedule",
+		types:    []string{"Schedule::Entry"},
+		urlKinds: []string{"schedule_entries"},
+		urlShape: "…/schedule_entries/<id>",
+		into: filingContainer{
+			dockName: "schedule",
+			noun:     "schedule",
+			plural:   "schedules",
+			flag:     "--to-schedule",
+			urlKind:  "schedules",
+			urlShape: "…/schedules/<id>",
+			get: func(ctx context.Context, app *appctx.App, id int64) (filingTarget, error) {
+				schedule, err := app.Account().Schedules().Get(ctx, id)
+				if err != nil {
+					return filingTarget{}, err
+				}
+				return bucketTarget(schedule.ID, schedule.Title, schedule.AppURL, schedule.Bucket), nil
+			},
+		},
+		get: getScheduleEntryForFiling,
+		crumbs: func(id, projectID int64) []output.Breadcrumb {
+			return []output.Breadcrumb{{
+				Action:      "show",
+				Cmd:         fmt.Sprintf("basecamp schedule show %d --in %d", id, projectID),
+				Description: "View the event",
+			}}
+		},
+	}
+}
+
+// occurrenceType is what Basecamp answers a recurring event's read with: it
+// redirects to an occurrence, whose parent is the event.
+const occurrenceType = "Schedule::Entry::Occurrence"
+
+// getScheduleEntryForFiling reads an event to move or copy. A recurring
+// event's read answers with one occurrence, so the event is its parent and
+// files as a whole series; the output names the event, with the occurrence
+// read as occurrence_id, and seriesSchedule finds the schedule it is on.
+func getScheduleEntryForFiling(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
+	e, err := app.Account().Schedules().GetEntry(ctx, id)
+	if err != nil {
+		return nil, filingSource{}, err
+	}
+	src := filingSource{id: e.ID, typ: e.Type, status: e.Status, title: e.Summary, bucket: e.Bucket, parent: e.Parent}
+	if e.Type != occurrenceType || e.Parent == nil {
+		return e, src, nil
+	}
+
+	src.id, src.typ, src.parent = e.Parent.ID, "Schedule::Entry", nil
+	if e.Bucket != nil {
+		if src.parent, err = seriesSchedule(ctx, app, e.Bucket, src.id, e.Status); err != nil {
+			return nil, filingSource{}, err
+		}
+	}
+	record, ok := withSourceID(e, 0).(map[string]any)
+	if !ok {
+		return e, src, nil
+	}
+	delete(record, "source_id")
+	record["occurrence_id"] = record["id"]
+	record["id"] = src.id
+	record["type"] = src.typ
+	record["parent"] = src.parent
+	return record, src, nil
+}
+
+// seriesSchedule finds the schedule a recurring event is on, which its
+// occurrence's read does not name. A calendar, such as an employee's, has one
+// schedule, which the calendar's read links to; a project's schedules are on
+// its dock, and of several, the one whose entries list the event, in its
+// status (an entries listing shows one status), is it. It returns nil when
+// none does.
+func seriesSchedule(ctx context.Context, app *appctx.App, bucket *basecamp.Bucket, eventID int64, status string) (*basecamp.Parent, error) {
+	scheduleOf := func(id int64) (*basecamp.Parent, error) {
+		schedule, err := app.Account().Schedules().Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		return &basecamp.Parent{ID: schedule.ID, Title: schedule.Title, Type: "Schedule"}, nil
+	}
+
+	if bucket.Type == "Calendar" {
+		calendar, err := app.Account().Calendars().Get(ctx, bucket.ID)
+		if err != nil {
+			return nil, err
+		}
+		id, err := strconv.ParseInt(strings.TrimSuffix(path.Base(calendar.ScheduleURL), ".json"), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("calendar %d links to no schedule (%q)", bucket.ID, calendar.ScheduleURL)
+		}
+		return scheduleOf(id)
+	}
+
+	_, schedules, err := getDockTools(ctx, app, strconv.FormatInt(bucket.ID, 10), "schedule")
+	if err != nil {
+		return nil, err
+	}
+	if len(schedules) == 1 {
+		return &basecamp.Parent{ID: schedules[0].ID, Title: schedules[0].Title, Type: "Schedule"}, nil
+	}
+	var opts *basecamp.ScheduleEntryListOptions
+	if status == "archived" || status == "trashed" {
+		opts = &basecamp.ScheduleEntryListOptions{Status: status}
+	}
+	for _, schedule := range schedules {
+		entries, err := app.Account().Schedules().ListEntries(ctx, schedule.ID, opts)
+		if err != nil {
+			return nil, err
+		}
+		if slices.ContainsFunc(entries.Entries, func(e basecamp.ScheduleEntry) bool { return e.ID == eventID }) {
+			return &basecamp.Parent{ID: schedule.ID, Title: schedule.Title, Type: "Schedule"}, nil
+		}
+	}
+	return nil, nil
 }
