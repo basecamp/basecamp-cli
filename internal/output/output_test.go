@@ -429,6 +429,35 @@ func TestWriterOK(t *testing.T) {
 	assert.Equal(t, "test summary", resp.Summary)
 }
 
+func okEnvelope(t *testing.T, data any) map[string]json.RawMessage {
+	t.Helper()
+	var buf bytes.Buffer
+	require.NoError(t, New(Options{Format: FormatJSON, Writer: &buf}).OK(data))
+	var env map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &env))
+	return env
+}
+
+func TestWriterOKNilSliceIsEmptyArray(t *testing.T) {
+	var todos []basecamp.Todo
+	var rows []map[string]any
+	assert.JSONEq(t, "[]", string(okEnvelope(t, todos)["data"]))
+	assert.JSONEq(t, "[]", string(okEnvelope(t, rows)["data"]))
+
+	var buf bytes.Buffer
+	require.NoError(t, New(Options{Format: FormatQuiet, Writer: &buf}).OK(todos))
+	assert.JSONEq(t, "[]", buf.String())
+}
+
+func TestWriterOKNilNonSliceUnchanged(t *testing.T) {
+	var todo *basecamp.Todo
+	var fields map[string]any
+	assert.NotContains(t, okEnvelope(t, nil), "data")
+	assert.NotContains(t, okEnvelope(t, todo), "data")
+	assert.JSONEq(t, "null", string(okEnvelope(t, fields)["data"]))
+	assert.JSONEq(t, "null", string(okEnvelope(t, json.RawMessage(nil))["data"]))
+}
+
 func TestWriterErr(t *testing.T) {
 	var buf bytes.Buffer
 	w := New(Options{
