@@ -461,7 +461,7 @@ Sixteen domain tools (`basecamp_projects`, `basecamp_todos`, `basecamp_cards`,
 account. Each tool takes `{"action": "...", "params": {...}}` and serves
 per-action schemas through its `describe` action.
 
-Two composite helpers ride on that surface, shared with basecamp-mcp-server
+Composite helpers ride on that surface, shared with basecamp-mcp-server
 through basecamp-sdk so both servers answer the same way.
 `basecamp_recordings summarize` resolves the pointer an account event feed
 row carries — bucket id, recording id, and the event or recording type —
@@ -471,7 +471,10 @@ it carries no method and no path, where every model operation carries both,
 and its summary opens with "Synthetic:". `basecamp_messages create_comment`
 is an ordinary endpoint with a synthetic parameter: `mentions`, a list of
 person ids expanded client-side into the attachment markup Basecamp reads as
-a mention.
+a mention. `basecamp_recordings move` and `copy` file a recording into
+another container, in its project or another one, as the web's Move… and
+Copy… dialogs do: they wait for Basecamp to finish and return the new
+recording, and a failure says whether trying again is safe.
 
 ```bash
 basecamp mcp --read-only                 # serve only read-only actions

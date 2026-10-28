@@ -51,7 +51,9 @@ func TestCatalogClaimsEveryTag(t *testing.T) {
 // upload). The stream-ticket mint could ride it and is dropped anyway: its
 // result is a replayable bearer and a URL embedding it, the dispatcher
 // returns a result verbatim into a model transcript with no reveal opt-in,
-// and nothing on this surface could open the WebSocket it is for.
+// and nothing on this surface could open the WebSocket it is for. The
+// start-only move and copy are dropped at load instead, where the waiting
+// composites take their place.
 func TestCatalogExcludesUnservedOperations(t *testing.T) {
 	cat := loadForTest(t)
 	excluded := map[string]bool{
@@ -61,6 +63,9 @@ func TestCatalogExcludesUnservedOperations(t *testing.T) {
 		"UpdateProjectWallpaper": true,
 		"UpdateProjectLogo":      true,
 		"CreateStreamTicket":     true,
+		// Replaced by the waiting recordings.move and recordings.copy.
+		"MoveRecording": true,
+		"CopyRecording": true,
 	}
 	model, composite := 0, 0
 	for _, d := range cat.Domains {
@@ -73,8 +78,8 @@ func TestCatalogExcludesUnservedOperations(t *testing.T) {
 			assert.False(t, excluded[op.ID], "operation %q should be excluded from the vendored model", op.ID)
 		}
 	}
-	assert.Equal(t, 286, model, "served model operation count")
-	assert.Equal(t, 1, composite, "served composite operation count")
+	assert.Equal(t, 284, model, "served model operation count")
+	assert.Equal(t, 3, composite, "served composite operation count")
 }
 
 // isComposite reports the SDK compositions this package serves itself: no
@@ -105,7 +110,7 @@ func TestCatalogMarksCompositesSynthetic(t *testing.T) {
 			assert.NotEmpty(t, op.Doc, "composite %q must document what it composes", op.ID)
 		}
 	}
-	assert.Equal(t, map[string]bool{"recordings.summarize": true}, seen)
+	assert.Equal(t, map[string]bool{"recordings.summarize": true, "recordings.move": true, "recordings.copy": true}, seen)
 }
 
 // TestCatalogDeclaresMentionsOnCreateComment pins the other half of the
