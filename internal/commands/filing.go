@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -465,4 +466,73 @@ func rejectProjectConflict(cmd *cobra.Command, app *appctx.App, noun, flagProjec
 		return err
 	}
 	return check(urlProjectID, "the "+noun+" URL")
+}
+
+// AnnotationFilingReads lists, space-separated, the container flags that a
+// command moving or copying recordings inherits and reads. guardFilingFlags
+// sets it.
+const AnnotationFilingReads = "filing_reads"
+
+// guardFilingFlags makes a command that moves or copies recordings refuse,
+// before it reads or sends anything, a container flag it inherits but never
+// reads. Such a flag would be ignored: todos copy --todolist 901 copied the
+// to-do into its own list and reported success. reads names the inherited
+// container flags the command does read, in some mode.
+//
+// A container flag is the root's --todolist or a flag that a command group
+// adds for its commands (--card-table, --vault, --list, …). --project and
+// --in are left to each command, which holds a filed recording to them; the
+// root's account, profile and output flags are not containers.
+func guardFilingFlags(cmd *cobra.Command, reads ...string) *cobra.Command {
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations[AnnotationFilingReads] = strings.Join(reads, " ")
+	run := cmd.RunE
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if err := refuseUnreadContainerFlags(cmd, reads); err != nil {
+			return err
+		}
+		return run(cmd, args)
+	}
+	return cmd
+}
+
+func refuseUnreadContainerFlags(cmd *cobra.Command, reads []string) error {
+	var unread *pflag.Flag
+	cmd.InheritedFlags().VisitAll(func(f *pflag.Flag) {
+		if unread == nil && f.Changed && isContainerFlag(cmd, f) && !slices.Contains(reads, f.Name) {
+			unread = f
+		}
+	})
+	if unread == nil {
+		return nil
+	}
+	hint := fmt.Sprintf("%s takes no destination; drop --%s", cmd.CommandPath(), unread.Name)
+	if dests := destinationFlags(cmd); len(dests) > 0 {
+		hint = fmt.Sprintf("Name where it goes with %s (see %s --help)", strings.Join(dests, " or "), cmd.CommandPath())
+	}
+	return output.ErrUsageHint(fmt.Sprintf("%s does not read --%s, so it would ignore it", cmd.CommandPath(), unread.Name), hint)
+}
+
+func isContainerFlag(cmd *cobra.Command, f *pflag.Flag) bool {
+	switch f.Name {
+	case "project", "in":
+		return false
+	case "todolist":
+		return true
+	}
+	return cmd.Root().PersistentFlags().Lookup(f.Name) != f
+}
+
+// destinationFlags lists a command's own flags that name where it files a
+// recording: --to (a folder or column) and the --to-<container> flags.
+func destinationFlags(cmd *cobra.Command) []string {
+	var dests []string
+	cmd.LocalNonPersistentFlags().VisitAll(func(f *pflag.Flag) {
+		if strings.HasPrefix(f.Name, "to-") || (f.Name == "to" && f.Value.Type() == "string") {
+			dests = append(dests, "--"+f.Name)
+		}
+	})
+	return dests
 }

@@ -648,5 +648,5 @@ func newToolsRepositionCmd(project *string) *cobra.Command {
 	cmd.Flags().IntVar(&position, "position", 0, "New position, 1-based (required)")
 	cmd.Flags().IntVar(&position, "pos", 0, "New position (alias)")
 
-	return cmd
+	return guardFilingFlags(cmd)
 }

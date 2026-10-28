@@ -1748,8 +1748,6 @@ func TestFilesMoveWithoutDestinationShowsHelp(t *testing.T) {
 
 func TestFilesMoveRefusesBadArgumentsBeforeTheWire(t *testing.T) {
 	cases := map[string][]string{
-		"--folder for --to":         {"123", "--folder", "456"},
-		"--vault beside --to":       {"123", "--to", "456", "--vault", "789"},
 		"zero position":             {"123", "--to", "456", "--position", "0"},
 		"negative position":         {"123", "--to", "456", "--position", "-1"},
 		"non-numeric destination":   {"123", "--to", "Designs"},

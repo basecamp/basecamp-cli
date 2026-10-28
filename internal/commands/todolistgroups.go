@@ -35,8 +35,8 @@ Todolist groups allow you to organize todolists into collapsible sections.`,
 		newTodolistgroupsShowCmd(&project),
 		newTodolistgroupsCreateCmd(&project, &todolist),
 		newTodolistgroupsUpdateCmd(),
-		newTodolistgroupsPositionCmd(&project, &todolist),
-		newTodolistsCopyCmd(&project, &todolist),
+		newTodolistgroupsPositionCmd(&project),
+		newTodolistsCopyCmd(&project),
 	)
 
 	return cmd
@@ -340,7 +340,7 @@ func newTodolistgroupsUpdateCmd() *cobra.Command {
 	return cmd
 }
 
-func newTodolistgroupsPositionCmd(project, todolist *string) *cobra.Command {
+func newTodolistgroupsPositionCmd(project *string) *cobra.Command {
 	var position int
 	var dest todolistDestination
 
@@ -361,14 +361,14 @@ To-dos (--to-project, --to-todoset), as todolists move does.`,
 		Args: cobra.ExactArgs(1),
 		Annotations: map[string]string{
 			"agent_notes": "--to-project/--to-list move the group to another project (the web's Move…); --position reorders it within its list and cannot be combined with them. " +
-				todolistFilingNotes + " The old id stops accepting changes, and reading it follows the move. --list here names the group's own list, never the destination.",
+				todolistFilingNotes + " The old id stops accepting changes, and reading it follows the move. --list, the group's own list, is refused here: name the destination with --to-list.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if destinationFlagChanged(cmd) {
 				if err := rejectRepositionWithFiling(cmd, "--position"); err != nil {
 					return err
 				}
-				return fileTodolist(cmd, basecamp.FilingMove, args[0], *project, *todolist, dest, false)
+				return fileTodolist(cmd, basecamp.FilingMove, args[0], *project, dest, false)
 			}
 			if position == 0 {
 				return output.ErrUsage("--position is required (1-based)")
@@ -406,5 +406,5 @@ To-dos (--to-project, --to-todoset), as todolists move does.`,
 	cmd.Flags().IntVar(&position, "pos", 0, "New position (alias)")
 	dest.addFlags(cmd, "Move")
 
-	return cmd
+	return guardFilingFlags(cmd)
 }

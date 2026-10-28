@@ -41,7 +41,7 @@ to disambiguate when needed.`,
 		newTodolistsCreateCmd(&project, &todosetID),
 		newTodolistsUpdateCmd(&project),
 		newTodolistsPositionCmd(&project),
-		newTodolistsCopyCmd(&project, nil),
+		newTodolistsCopyCmd(&project),
 		newRecordableTrashCmd("todolist"),
 		newRecordableArchiveCmd("todolist"),
 		newRecordableRestoreCmd("todolist"),
@@ -523,7 +523,7 @@ Confirm with ` + "`basecamp todolists list`" + `.`,
 				if len(args) > 1 {
 					return output.ErrUsage("Move one to-do list or group at a time to another project")
 				}
-				return fileTodolist(cmd, basecamp.FilingMove, args[0], *project, "", dest, false)
+				return fileTodolist(cmd, basecamp.FilingMove, args[0], *project, dest, false)
 			}
 
 			app := appctx.FromContext(cmd.Context())
@@ -738,7 +738,7 @@ Confirm with ` + "`basecamp todolists list`" + `.`,
 	cmd.Flags().IntVar(&position, "position", 0, "Target position (alias for --to)")
 	dest.addFlags(cmd, "Move")
 
-	return cmd
+	return guardFilingFlags(cmd)
 }
 
 // rejectRepositionWithFiling refuses the reorder flags next to the flags that
@@ -971,7 +971,7 @@ const todolistFilingNotes = "A top-level to-do list goes into a project's To-dos
 	"The new list or group comes with its to-dos and has a NEW id (data.id; the original's is data.source_id). " +
 	"Basecamp refuses a group as the destination and an archived list."
 
-func newTodolistsCopyCmd(project, sourceList *string) *cobra.Command {
+func newTodolistsCopyCmd(project *string) *cobra.Command {
 	var dest todolistDestination
 	var includeComments bool
 
@@ -999,33 +999,20 @@ the new list or group.`,
 				" Never re-run a copy that failed with in_progress or a may-have-started hint: each run makes another copy.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fileTodolist(cmd, basecamp.FilingCopy, args[0], *project, sourceListValue(sourceList), dest, includeComments)
+			return fileTodolist(cmd, basecamp.FilingCopy, args[0], *project, dest, includeComments)
 		},
 	}
 
 	dest.addFlags(cmd, "Copy")
 	cmd.Flags().BoolVar(&includeComments, "include-comments", false, "Copy the comments too")
 
-	return cmd
-}
-
-func sourceListValue(sourceList *string) string {
-	if sourceList == nil {
-		return ""
-	}
-	return *sourceList
+	return guardFilingFlags(cmd)
 }
 
 // fileTodolist moves or copies a to-do list or a group, as the web's Move… and
 // Copy… do. Which it is decides where it may go: a list into a todoset, a
 // group into a list. With no destination, a copy goes next to the original.
-func fileTodolist(cmd *cobra.Command, kind basecamp.FilingType, arg, flagProject, sourceList string, dest todolistDestination, includeComments bool) error {
-	if sourceList != "" {
-		return output.ErrUsageHint(
-			"--list names the group's own list, not where it goes",
-			"Use --to-list for the destination list",
-		)
-	}
+func fileTodolist(cmd *cobra.Command, kind basecamp.FilingType, arg, flagProject string, dest todolistDestination, includeComments bool) error {
 	destinationSet := destinationFlagChanged(cmd)
 	if destinationSet {
 		if err := validateTodolistDestination(dest); err != nil {

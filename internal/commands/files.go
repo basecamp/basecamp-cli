@@ -2295,11 +2295,6 @@ You can pass IDs or Basecamp URLs for both the item and the folder:
 		Annotations: map[string]string{"agent_notes": "Moves in place within one project: the ID, URL, and comments stay the same. --position is 1-indexed (default: first). A folder in another project is refused."},
 		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// --vault/--folder filter the files group's listings; here they would be
-			// silently ignored, and reading them as the destination is a guess.
-			if cmd.Flags().Changed("vault") || cmd.Flags().Changed("folder") {
-				return output.ErrUsageHint("files move takes its destination from --to", "basecamp files move <id|url> --to <folder-id|url>")
-			}
 			if to == "" {
 				return missingArg(cmd, "--to")
 			}
@@ -2386,7 +2381,7 @@ You can pass IDs or Basecamp URLs for both the item and the folder:
 	cmd.Flags().StringVar(&to, "to", "", "Destination folder ID or URL")
 	cmd.Flags().IntVar(&position, "position", 0, "Position in the folder (1-indexed, default: first; past the end means last)")
 
-	return cmd
+	return guardFilingFlags(cmd)
 }
 
 // filesMoveRef is an ID or URL given to files move, reduced to what the move

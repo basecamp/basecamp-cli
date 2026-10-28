@@ -444,16 +444,6 @@ func TestCardsCopyStillRunningSaysNotToCopyAgain(t *testing.T) {
 	assert.Len(t, transport.posts, 1)
 }
 
-func TestCardsCopyRefusesTheSourceCardTableFlag(t *testing.T) {
-	transport := &mockFilingTransport{}
-	run := runFilingCommand(t, transport, "copy", "456", "--card-table", "555")
-	e := requireFilingError(t, run)
-
-	assert.Equal(t, output.CodeUsage, e.Code)
-	assert.Contains(t, e.Hint, "--to-card-table")
-	assert.Empty(t, transport.posts)
-}
-
 func TestCardsMoveToAForeignColumnPointsAtCrossProjectMoves(t *testing.T) {
 	transport := &mockFilingTransport{}
 	run := runFilingCommand(t, transport, "move", "456", "--to", "8888", "--in", "123")

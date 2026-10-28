@@ -133,22 +133,6 @@ func TestEveryTodolistGroupAliasMovesAndCopiesTheSameWay(t *testing.T) {
 	}
 }
 
-func TestTodolistgroupsRefusesItsOwnListFlagAsTheDestination(t *testing.T) {
-	for name, args := range map[string][]string{
-		"a move":                     {"move", "311", "--list", "901", "--to-project", "Dest"},
-		"a copy with a destination":  {"copy", "311", "--list", "901", "--to-list", "902"},
-		"a copy with no destination": {"copy", "311", "--list", "901"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			transport := &mockTodoFilingTransport{}
-			run := runTodoFilingCommand(t, transport, NewTodolistgroupsCmd(), args...)
-			e := requireUsageRefusal(t, run, transport)
-
-			assert.Equal(t, "Use --to-list for the destination list", e.Hint)
-		})
-	}
-}
-
 func TestTodolistsCopyWithoutDestinationGoesNextToTheOriginal(t *testing.T) {
 	for name, tc := range map[string]struct {
 		id   string

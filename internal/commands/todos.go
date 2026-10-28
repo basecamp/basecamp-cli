@@ -2467,7 +2467,7 @@ its ID, with --to (1 = top) and --list:
 	cmd.Flags().StringVarP(&list, "list", "l", "", "With --to: a list in the to-do's own project to move it into, keeping its id (ID, name, or URL); for another project use --to-list")
 	addToListFlags(cmd, &toProject, &toList, "Move the to-dos")
 
-	return cmd
+	return guardFilingFlags(cmd)
 }
 
 func newTodosCopyCmd() *cobra.Command {
@@ -2507,7 +2507,7 @@ shows the new to-dos.`,
 	addToListFlags(cmd, &toProject, &toList, "Copy the to-dos")
 	cmd.Flags().BoolVar(&includeComments, "include-comments", false, "Copy the to-dos' comments too")
 
-	return cmd
+	return guardFilingFlags(cmd)
 }
 
 // fileTodos moves or copies to-dos into a to-do list, one filing each, as the

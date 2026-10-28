@@ -43,7 +43,7 @@ func NewCardsCmd() *cobra.Command {
 		newCardsCreateCmd(&project, &cardTable),
 		newCardsUpdateCmd(),
 		newCardsMoveCmd(&project, &cardTable),
-		newCardsCopyCmd(&project, &cardTable),
+		newCardsCopyCmd(&project),
 		newCardsDoneCmd(&project, &cardTable),
 		newCardsColumnsCmd(&project, &cardTable),
 		newCardsColumnCmd(&project, &cardTable),
@@ -1374,7 +1374,13 @@ Basecamp to finish the move and shows the card where it landed.`,
 				if targetColumn != "" || onHold || positionSet || wormholeSet {
 					return output.ErrUsage("--to-project and --to-card-table cannot be combined with --to, --on-hold, --position, or --to-wormhole")
 				}
-				if err := validateFilingFlags(*cardTable, toProject, toCardTable); err != nil {
+				if *cardTable != "" {
+					return output.ErrUsageHint(
+						"--card-table names the card's own card table, not where it goes",
+						"Use --to-card-table for the destination card table",
+					)
+				}
+				if err := validateFilingFlags(toProject, toCardTable); err != nil {
 					return err
 				}
 			} else if wormholeSet {
@@ -1563,7 +1569,7 @@ Basecamp to finish the move and shows the card where it landed.`,
 	cmd.Flags().StringVar(&toWormhole, "to-wormhole", "", "Send the card to another project's card table through an existing wormhole (wormhole ID or destination-column URL)")
 	addFilingDestinationFlags(cmd, &toProject, &toCardTable, "Move")
 
-	return cmd
+	return guardFilingFlags(cmd, "card-table")
 }
 
 // moveCardThroughWormhole teleports a card across projects through a wormhole to
@@ -1797,7 +1803,7 @@ func parseColumnID(ref string) (int64, error) {
 	return id, nil
 }
 
-func newCardsCopyCmd(project, cardTable *string) *cobra.Command {
+func newCardsCopyCmd(project *string) *cobra.Command {
 	var toProject, toCardTable string
 	var includeComments bool
 
@@ -1826,8 +1832,8 @@ the new card.`,
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filingSet := cmd.Flags().Changed("to-project") || cmd.Flags().Changed("to-card-table")
-			if filingSet || *cardTable != "" {
-				if err := validateFilingFlags(*cardTable, toProject, toCardTable); err != nil {
+			if filingSet {
+				if err := validateFilingFlags(toProject, toCardTable); err != nil {
 					return err
 				}
 			}
@@ -1874,7 +1880,7 @@ the new card.`,
 	addFilingDestinationFlags(cmd, &toProject, &toCardTable, "Copy")
 	cmd.Flags().BoolVar(&includeComments, "include-comments", false, "Copy the card's comments too")
 
-	return cmd
+	return guardFilingFlags(cmd)
 }
 
 // addFilingDestinationFlags adds --to-project and --to-card-table, which name
@@ -1885,15 +1891,8 @@ func addFilingDestinationFlags(cmd *cobra.Command, toProject, toCardTable *strin
 }
 
 // validateFilingFlags checks --to-project and --to-card-table before any
-// request. The group's --card-table names the card's own table, so it is
-// refused here rather than mistaken for the destination.
-func validateFilingFlags(sourceCardTable, toProject, toCardTable string) error {
-	if sourceCardTable != "" {
-		return output.ErrUsageHint(
-			"--card-table names the card's own card table, not where it goes",
-			"Use --to-card-table for the destination card table",
-		)
-	}
+// request.
+func validateFilingFlags(toProject, toCardTable string) error {
 	if toProject == "" && toCardTable == "" {
 		return output.ErrUsage("--to-project or --to-card-table needs a value")
 	}
@@ -2748,7 +2747,7 @@ You can pass either a column ID or a Basecamp URL:
 	cmd.Flags().IntVar(&position, "position", 0, "Target position (1-indexed)")
 	cmd.Flags().IntVar(&position, "pos", 0, "Target position (alias for --position)")
 
-	return cmd
+	return guardFilingFlags(cmd, "card-table")
 }
 
 func newCardsColumnWatchCmd() *cobra.Command {
