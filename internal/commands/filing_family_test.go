@@ -265,7 +265,6 @@ func testFiling(app *appctx.App, kind basecamp.FilingType, sourceID int64) recor
 		destination:   "Docs & Files 900 in Dest",
 		showCmd:       "basecamp files show",
 		lookFor:       "basecamp files list --in 999",
-		landing:       "It lands in the folder",
 		read: func(_ context.Context, id int64) (filedRecording, error) {
 			return filedRecording{
 				result: map[string]any{"id": id, "source_id": sourceID},
@@ -319,34 +318,38 @@ func TestWithSourceIDKeepsLargeIDsExact(t *testing.T) {
 	assert.JSONEq(t, `{"id":9007199254740993,"source_id":7}`, string(raw))
 }
 
-// A copy keeps its source's status, so a copy that may have landed is looked
-// for among recordings in that status, every page; a type the recordings
-// listing does not serve is looked for in its own listing, every page, or in
-// the timeline when that listing leaves its status out.
+// A copy whose start went unanswered has no filing to read, and keeps its
+// source's status, so it is looked for among recordings in that status, every
+// page; a type the recordings listing does not serve is looked for in its own
+// listing, every page, or in the timeline when that listing leaves its status
+// out, and where no listing shows that status, in the destination in Basecamp.
 func TestCopyRecoveryListsWhereTheCopyShows(t *testing.T) {
 	for name, tc := range map[string]struct {
 		transport func() *familyTransport
 		cmd       func() *cobra.Command
 		source    string
-		archived  bool
+		status    string
 		want      string
 	}{
-		"a message":                     {messagesTransport, NewMessagesCmd, "/messages/456", false, "basecamp recordings list Message --in 999 --status active --sort created_at --direction desc --all"},
-		"an archived message":           {messagesTransport, NewMessagesCmd, "/messages/456", true, "basecamp recordings list Message --in 999 --status archived --sort created_at --direction desc --all"},
-		"an event":                      {scheduleFilingTransport, NewScheduleCmd, "/schedule_entries/456", false, "basecamp recordings list Schedule::Entry --in 999 --status active --sort created_at --direction desc --all"},
-		"an archived event":             {scheduleFilingTransport, NewScheduleCmd, "/schedule_entries/456", true, "basecamp recordings list Schedule::Entry --in 999 --status archived --sort created_at --direction desc --all"},
-		"a check-in question":           {checkinsFilingTransport, NewCheckinsCmd, "/questions/456", false, "basecamp checkins questions --in 999 --questionnaire 900 --all"},
-		"an archived check-in question": {checkinsFilingTransport, NewCheckinsCmd, "/questions/456", true, "basecamp timeline --in 999 --all"},
-		"an email forward":              {forwardsFilingTransport, NewForwardsCmd, "/inbox_forwards/456", false, "basecamp forwards list --in 999 --inbox 900 --all"},
-		"an archived email forward":     {forwardsFilingTransport, NewForwardsCmd, "/inbox_forwards/456", true, "basecamp timeline --in 999 --all"},
-		"a card table column":           {columnsTransport, NewCardsCmd, "/card_tables/columns/456", false, "basecamp cards columns --in 999 --card-table 900"},
+		"a message":                     {messagesTransport, NewMessagesCmd, "/messages/456", "", "basecamp recordings list Message --in 999 --status active --sort created_at --direction desc --all"},
+		"an archived message":           {messagesTransport, NewMessagesCmd, "/messages/456", "archived", "basecamp recordings list Message --in 999 --status archived --sort created_at --direction desc --all"},
+		"an event":                      {scheduleFilingTransport, NewScheduleCmd, "/schedule_entries/456", "", "basecamp recordings list Schedule::Entry --in 999 --status active --sort created_at --direction desc --all"},
+		"an archived event":             {scheduleFilingTransport, NewScheduleCmd, "/schedule_entries/456", "archived", "basecamp recordings list Schedule::Entry --in 999 --status archived --sort created_at --direction desc --all"},
+		"a check-in question":           {checkinsFilingTransport, NewCheckinsCmd, "/questions/456", "", "basecamp checkins questions --in 999 --questionnaire 900 --all"},
+		"an archived check-in question": {checkinsFilingTransport, NewCheckinsCmd, "/questions/456", "archived", "basecamp timeline --in 999 --all"},
+		"a trashed check-in question":   {checkinsFilingTransport, NewCheckinsCmd, "/questions/456", "trashed", "open https://3.basecamp.com/99999/buckets/999/questionnaires/900 in Basecamp, since Basecamp's API lists no trashed check-in questions"},
+		"an email forward":              {forwardsFilingTransport, NewForwardsCmd, "/inbox_forwards/456", "", "basecamp forwards list --in 999 --inbox 900 --all"},
+		"an archived email forward":     {forwardsFilingTransport, NewForwardsCmd, "/inbox_forwards/456", "archived", "basecamp timeline --in 999 --all"},
+		"a trashed email forward":       {forwardsFilingTransport, NewForwardsCmd, "/inbox_forwards/456", "trashed", "open https://3.basecamp.com/99999/buckets/999/inboxes/900 in Basecamp, since Basecamp's API lists no trashed email forwards"},
+		"a card table column":           {columnsTransport, NewCardsCmd, "/card_tables/columns/456", "", "basecamp cards columns --in 999 --card-table 900"},
+		"an archived card table column": {columnsTransport, NewCardsCmd, "/card_tables/columns/456", "archived", "open https://3.basecamp.com/99999/buckets/999/card_tables/900 in Basecamp, since Basecamp's API lists no archived columns"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			transport := tc.transport()
-			if tc.archived {
-				transport.gets[tc.source] = strings.Replace(transport.gets[tc.source], `"id":456,`, `"id":456,"status":"archived",`, 1)
+			if tc.status != "" {
+				transport.gets[tc.source] = strings.Replace(transport.gets[tc.source], `"id":456,`, `"id":456,"status":"`+tc.status+`",`, 1)
 			}
-			transport.stuck = map[int64]bool{456: true}
+			transport.refuse = map[int64]int{456: 502}
 			args := []string{"copy", "456", "--to-project", "Dest"}
 			switch {
 			case strings.Contains(name, "check-in"):
@@ -355,15 +358,15 @@ func TestCopyRecoveryListsWhereTheCopyShows(t *testing.T) {
 				args = append([]string{"column"}, args...)
 			}
 			e := runFamilyCommand(t, transport, tc.cmd(), args...).failure(t)
-			assert.Equal(t, output.CodeInProgress, e.Code)
+			assert.Contains(t, e.Hint, "may have started the copy")
 			assert.Contains(t, e.Hint, tc.want)
 		})
 	}
 }
 
-// A filing's breadcrumbs and its "once it lands" hint name a show command for
-// the record, which reads it by its account-wide ID, so each runs with no
-// project configured and names the record's own project in its breadcrumbs.
+// A filing's breadcrumbs name a show command for the record, which reads it by
+// its account-wide ID, so each runs with no project configured and names the
+// record's own project in its breadcrumbs.
 func TestFilingAdvertisedShowCommandsNeedNoProject(t *testing.T) {
 	families := []struct {
 		group     string
@@ -386,22 +389,64 @@ func TestFilingAdvertisedShowCommandsNeedNoProject(t *testing.T) {
 			run := runFamilyCommand(t, transport, f.root(), args...)
 			require.NoError(t, run.err)
 
-			transport.stuck = map[int64]bool{456: true}
-			e := runFamilyCommand(t, transport, f.root(), args...).failure(t)
-			advertised := []string{run.envelope.Breadcrumbs[0].Cmd, showCmd.FindString(e.Hint)}
+			line := run.envelope.Breadcrumbs[0].Cmd
+			require.Regexp(t, showCmd, line)
+			app, buf := newTestAppWithTransport(t, transport)
+			app.Config.ProjectID = ""
+			require.NoError(t, executeCommand(f.root(), app, strings.Fields(line)[2:]...), line)
 
-			for _, line := range advertised {
-				require.Regexp(t, showCmd, line)
-				app, buf := newTestAppWithTransport(t, transport)
-				app.Config.ProjectID = ""
-				require.NoError(t, executeCommand(f.root(), app, strings.Fields(line)[2:]...), line)
-
-				var shown familyRun
-				require.NoError(t, json.Unmarshal(buf.Bytes(), &shown.envelope), line)
-				for _, crumb := range shown.envelope.Breadcrumbs {
-					assert.NotContains(t, crumb.Cmd, "<project>", line)
-				}
+			var shown familyRun
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &shown.envelope), line)
+			for _, crumb := range shown.envelope.Breadcrumbs {
+				assert.NotContains(t, crumb.Cmd, "<project>", line)
 			}
 		})
+	}
+}
+
+// A move or copy still running when the wait ends is checked by its filing,
+// which says where it got to whatever the recording's type and status, rather
+// than by a listing that may not show it.
+func TestStillFilingNamesTheFilingForEveryFamily(t *testing.T) {
+	type family struct {
+		run    func(t *testing.T, verb string) error
+		filing string
+	}
+	familyRun := func(transport func() *familyTransport, root func() *cobra.Command, prefix ...string) func(*testing.T, string) error {
+		return func(t *testing.T, verb string) error {
+			tr := transport()
+			tr.stuck = map[int64]bool{456: true}
+			args := append(slices.Clone(prefix), verb, "456", "--to-project", "Dest")
+			return runFamilyCommand(t, tr, root(), args...).err
+		}
+	}
+	families := map[string]family{
+		"cards": {func(t *testing.T, verb string) error {
+			return runFilingCommand(t, &mockFilingTransport{statuses: []string{"processing"}}, verb, "456", "--to-project", "Dest").err
+		}, "70"},
+		"to-dos": {func(t *testing.T, verb string) error {
+			transport := &mockTodoFilingTransport{stuck: map[string]bool{"456": true}}
+			return runTodoFilingCommand(t, transport, NewTodosCmd(), verb, "456", "--to-list", "901").err
+		}, "456"},
+		"messages":           {familyRun(messagesTransport, NewMessagesCmd), "456"},
+		"files":              {familyRun(filesFilingTransport, NewFilesCmd), "456"},
+		"columns":            {familyRun(columnsTransport, NewCardsCmd, "column"), "456"},
+		"schedule entries":   {familyRun(scheduleFilingTransport, NewScheduleCmd), "456"},
+		"check-in questions": {familyRun(checkinsFilingTransport, NewCheckinsCmd, "question"), "456"},
+		"email forwards":     {familyRun(forwardsFilingTransport, NewForwardsCmd), "456"},
+	}
+	for name, f := range families {
+		for _, verb := range []string{"move", "copy"} {
+			t.Run(name+" "+verb, func(t *testing.T) {
+				err := f.run(t, verb)
+				require.Error(t, err)
+				e := output.AsError(err)
+				assert.Equal(t, output.CodeInProgress, e.Code)
+				assert.Contains(t, e.Hint, "Do not "+verb+" it again")
+				assert.Contains(t, e.Hint, "Check it with: basecamp filings show "+f.filing+",")
+				assert.NotContains(t, e.Hint, " list")
+				assert.NotContains(t, e.Hint, "timeline")
+			})
+		}
 	}
 }

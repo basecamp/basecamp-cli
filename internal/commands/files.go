@@ -2331,7 +2331,7 @@ Basecamp to finish and shows each item where it landed.`,
 			"--to-project alone lands at the top of that project's Docs & Files; --to-folder <id|url> picks any folder, nested ones included, and --to-folder <title> with --to-project a top-level folder. " +
 			"--to/--position cannot be combined with --to-project/--to-folder. A --to folder in another project, or a --to-folder in the item's own project, is refused with the command that fits. " +
 			"Several IDs move one by one, and naming one item twice (even by its old and new id) is refused before any moves. If any is not moved the command exits non-zero and reports each: run it again only for the ones it says Basecamp refused, never for one it reports moved or not settled. " +
-			"An in_progress error means Basecamp is still moving it: basecamp files show <old id> returns it once it lands."},
+			"An in_progress error names its filing: do not move it again; basecamp filings show <filing id> gives its new id once it lands."},
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if familyFilingSet(cmd, filesFamily()) {
@@ -2844,7 +2844,7 @@ background; the command waits and shows the new items.`,
 		"--to-project <project> (ID or name) copies into the top of that project's Docs & Files; --to-folder <id|url> picks any folder, nested ones included, and --to-folder <title> with --to-project a top-level folder. " +
 		"Output is the new item (several: a list); data.id is the copy and data.source_id the original. " +
 		"Several IDs are copied one by one, and naming one item twice (even by its old and new id) is refused before any is copied. If any is not copied the command exits non-zero and reports each: copy again only the ones it says Basecamp refused, never one it reports copied, not read back or not settled, since that makes another copy. " +
-		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy. " +
+		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy; check an in_progress one with basecamp filings show <filing id>. " +
 		"--vault/--folder name a folder to list and are refused here; use --to-folder.",
 }
 
@@ -2980,7 +2980,6 @@ func filesFamily() filingFamily {
 				fmt.Sprintf("Move it to that folder and keep its ID with: basecamp files move %d --to %d", src.id, folder),
 			)
 		},
-		landing: "Look for the copy with",
 		lookFor: func(src filingSource, t filingTarget) string {
 			switch src.typ {
 			case "CloudFile":
@@ -3126,7 +3125,7 @@ func filesFolderTarget(ctx context.Context, app *appctx.App, folderID int64) (fi
 	}
 
 	if docked(folder.ID) {
-		return bucketTarget(folder.ID, folder.Title, folder.Bucket), nil
+		return bucketTarget(folder.ID, folder.Title, folder.AppURL, folder.Bucket), nil
 	}
 	parent := folder.Parent
 	for range 32 {
@@ -3134,7 +3133,7 @@ func filesFolderTarget(ctx context.Context, app *appctx.App, folderID int64) (fi
 			break
 		}
 		if docked(parent.ID) {
-			target := bucketTarget(parent.ID, parent.Title, folder.Bucket)
+			target := bucketTarget(parent.ID, parent.Title, parent.AppURL, folder.Bucket)
 			target.parentID, target.parentTitle = folder.ID, folder.Title
 			return target, nil
 		}

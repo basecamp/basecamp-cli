@@ -85,14 +85,15 @@ func TestToolsMoveWithPositionStillRepositionsInTheDock(t *testing.T) {
 	assert.Equal(t, "Tool 456 moved to position 2", run.envelope.Summary)
 }
 
-func TestToolsMoveStillRunningPointsAtTheDestinationDock(t *testing.T) {
+// A moved tool's old id reads as deleted rather than leading to the new one,
+// so a move still running is checked by its filing.
+func TestToolsMoveStillRunningPointsAtItsFiling(t *testing.T) {
 	transport := toolsFilingTransport()
 	transport.stuck = map[int64]bool{456: true}
 	run := runFamilyCommand(t, transport, NewToolsCmd(), "move", "456", "--to-project", "Dest")
 	e := run.failure(t)
 	assert.Equal(t, output.CodeInProgress, e.Code)
-	assert.Equal(t, "Do not move it again. Once it lands it is on Dest's dock: basecamp projects show 999", e.Hint,
-		"a moved tool's old id reads as deleted, so tools show <old id> would not find it")
+	assert.Equal(t, "Do not move it again. Check it with: basecamp filings show 456, which names the tool's new id once it lands", e.Hint)
 }
 
 func TestToolsMoveRefusesADeletedOrMovedTool(t *testing.T) {

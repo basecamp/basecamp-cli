@@ -146,12 +146,12 @@ func TestMessagesCopyThatMayHaveStartedSaysWhereToLook(t *testing.T) {
 // A copy keeps its source's status, and the recordings listing serves no
 // drafted status (Basecamp answers it with 400), so a drafted message's copy
 // is looked for among the person's drafts.
-func TestMessagesCopyOfADraftThatTimesOutIsLookedForAmongDrafts(t *testing.T) {
+func TestMessagesCopyOfADraftWithNoFilingIsLookedForAmongDrafts(t *testing.T) {
 	transport := messagesTransport()
 	transport.gets["/messages/456"] = strings.Replace(transport.gets["/messages/456"], `"type":"Message"`, `"type":"Message","status":"drafted"`, 1)
-	transport.stuck = map[int64]bool{456: true}
+	transport.refuse = map[int64]int{456: 502}
 	e := runFamilyCommand(t, transport, NewMessagesCmd(), "copy", "456", "--to-project", "Dest").failure(t)
-	assert.Equal(t, output.CodeInProgress, e.Code)
+	assert.Contains(t, e.Hint, "may have started the copy")
 	assert.Contains(t, e.Hint, "basecamp drafts list --all")
 	assert.NotContains(t, e.Hint, "--status drafted")
 }

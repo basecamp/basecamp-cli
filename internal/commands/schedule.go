@@ -936,7 +936,7 @@ Basecamp to finish the move and shows the event where it landed, under a new ID.
 		"A recurring event moves as a whole; an occurrence URL moves the whole series. " +
 		"Output is the moved event: data.id is its NEW id and data.source_id the old one. Write to the new id; the old id stops taking changes, and reading it follows the move. " +
 		"--schedule names the event's own schedule and is refused; moving onto the schedule it is already on is refused. " +
-		"An in_progress error means Basecamp is still moving it: basecamp schedule show <old id> returns it once it lands.",
+		"An in_progress error names its filing: do not move it again; basecamp filings show <filing id> gives its new id once it lands.",
 }
 
 var scheduleCopyHelp = filingHelp{
@@ -954,7 +954,7 @@ Basecamp makes the copy in the background; the command waits for it and shows
 the new event.`,
 	notes: "Without --to-project/--to-schedule the copy goes onto the event's own schedule; --to-schedule <id|url> also names an employee calendar's schedule. " +
 		"Output is the new event; its id is data.id and the original's is data.source_id. --include-comments copies the comments too. " +
-		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy.",
+		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy; check an in_progress one with basecamp filings show <filing id>.",
 }
 
 // scheduleEntryFamily is how schedule entries move and copy between
@@ -977,12 +977,11 @@ func scheduleEntryFamily() filingFamily {
 				if err != nil {
 					return filingTarget{}, err
 				}
-				return bucketTarget(schedule.ID, schedule.Title, schedule.Bucket), nil
+				return bucketTarget(schedule.ID, schedule.Title, schedule.AppURL, schedule.Bucket), nil
 			},
 		},
 		ownFlags: []string{"schedule"},
 		get:      getScheduleEntryForFiling,
-		landing:  "The copy lands on that schedule",
 		lookFor: func(src filingSource, t filingTarget) string {
 			if t.calendar && src.status != "drafted" {
 				// The recordings listing serves projects, not calendars.

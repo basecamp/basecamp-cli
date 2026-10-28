@@ -1363,7 +1363,7 @@ Basecamp to finish the move and shows the card where it landed.`,
 				"Do not create a wormhole just to move a card, and do not delete one afterward. " +
 				"--to-project/--to-card-table move the card into another card table (usually another project) with no wormhole, landing in Triage (Done if completed) under a new id; " +
 				"--to-project alone needs a project with one card table, otherwise add --to-card-table. They are mutually exclusive with --to/--on-hold/--position/--to-wormhole, and --card-table there is refused because it names the card's own table. " +
-				"An in_progress error means Basecamp is still moving it: basecamp cards show <old id> returns the new card once it lands.",
+				"An in_progress error names its filing: do not move it again; basecamp filings show <filing id> gives its new id once it lands.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			positionSet := cmd.Flags().Changed("position") || cmd.Flags().Changed("pos")
@@ -1828,7 +1828,7 @@ the new card.`,
 				"--to-project alone uses that project's only card table and fails as ambiguous when it has several; add --to-card-table. " +
 				"The copy lands in Triage, or Done if the card is completed; move it on with cards move --to. " +
 				"Output is the new card; its id is data.id and the original's is data.source_id. " +
-				"Never re-run a copy that reported in_progress: each run makes another copy.",
+				"Never re-run a copy that reported in_progress: each run makes another copy; check an in_progress one with basecamp filings show <filing id>.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filingSet := cmd.Flags().Changed("to-project") || cmd.Flags().Changed("to-card-table")
@@ -2069,7 +2069,6 @@ func cardFiling(app *appctx.App, kind basecamp.FilingType, card *basecamp.Card, 
 		destination:     fmt.Sprintf("card table %d (%s)", table.ID, table.Title),
 		showCmd:         "basecamp cards show",
 		lookFor:         recordingCopyLookFor("Kanban::Card", cardTableProjectID(table), card.Status),
-		landing:         "The copy lands in that table's Triage, or Done if completed",
 		match:           copyMatch(card.ID, card.Title, table.Title, table.ID),
 		read: func(ctx context.Context, id int64) (filedRecording, error) {
 			filed, err := app.Account().Cards().Get(ctx, id)
@@ -2666,7 +2665,7 @@ and On hold, which every card table has.`,
 			"--to-project/--to-card-table move the column with its cards onto another card table (usually in another project) under a NEW id: output data.id is the new id and data.source_id the old. " +
 			"--to-project alone needs a project with one card table, otherwise add --to-card-table. --position and --card-table (the column's own table) cannot be combined with them; the column's own table is refused. " +
 			"Triage, Not now, Done and On hold columns cannot be moved or copied. " +
-			"An in_progress error means Basecamp is still moving it: basecamp cards column show <old id> returns it once it lands."},
+			"An in_progress error names its filing: do not move it again; basecamp filings show <filing id> gives its new id once it lands."},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if familyFilingSet(cmd, columnFamily()) {
 				if cmd.Flags().Changed("position") || cmd.Flags().Changed("pos") {
@@ -2777,7 +2776,7 @@ and On hold. The command waits for Basecamp to make the copy and shows it.`,
 	notes: "Without --to-project/--to-card-table the copy goes onto the column's own card table. " +
 		"--to-project alone uses that project's only card table and fails as ambiguous when it has several; add --to-card-table. " +
 		"Output is the new column; its id is data.id and the original's is data.source_id. Triage, Not now, Done and On hold columns cannot be copied. " +
-		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy.",
+		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy; check an in_progress one with basecamp filings show <filing id>.",
 }
 
 // columnTypes are the columns a card table has: Kanban::Column is one a
@@ -2804,7 +2803,7 @@ func columnFamily() filingFamily {
 				if err != nil {
 					return filingTarget{}, err
 				}
-				return bucketTarget(table.ID, table.Title, table.Bucket), nil
+				return bucketTarget(table.ID, table.Title, table.AppURL, table.Bucket), nil
 			},
 		},
 		ownFlags: []string{"card-table"},
@@ -2827,9 +2826,8 @@ func columnFamily() filingFamily {
 		sameHint: func(src filingSource, target filingTarget) string {
 			return fmt.Sprintf("Reposition it within that card table with: basecamp cards column move %d --position <n> --card-table %d --in %d", src.id, target.id, target.projectID)
 		},
-		landing: "The copy lands on that card table",
-		lookFor: func(_ filingSource, t filingTarget) string {
-			return fmt.Sprintf("basecamp cards columns --in %d --card-table %d", t.projectID, t.id)
+		lookFor: func(src filingSource, t filingTarget) string {
+			return copyInListing(src, t, "columns", fmt.Sprintf("basecamp cards columns --in %d --card-table %d", t.projectID, t.id), false)
 		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
 			return []output.Breadcrumb{{

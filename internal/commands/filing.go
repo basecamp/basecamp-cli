@@ -41,15 +41,11 @@ type recordingFiling struct {
 	destination string
 	// showCmd shows a recording of this kind given its id: "basecamp cards show".
 	showCmd string
-	// lookFor lists where a copy lands, so a copy that may have started is
-	// checked for before copying again; landing says where in it, before
-	// lookFor, and match what tells the copy apart there, after it.
+	// lookFor lists where a copy lands, for a copy that may have started
+	// without Basecamp naming its filing, so it is checked for before copying
+	// again; match says what tells the copy apart there.
 	lookFor string
-	landing string
 	match   string
-	// movedHint replaces the move-still-running hint for a kind whose old id
-	// does not lead to the new one once it lands.
-	movedHint string
 	// read reads back the recording the filing made, by its new id.
 	read func(ctx context.Context, id int64) (filedRecording, error)
 
@@ -137,7 +133,7 @@ func fileRecording(ctx context.Context, app *appctx.App, f recordingFiling) (fil
 			Hint:    fmt.Sprintf("Check the %s with: %s", f.noun, f.show(f.sourceID)),
 		}
 	case filing.Status != basecamp.FilingCompleted || filing.DestinationRecording == nil:
-		return filedRecording{}, filingUnsettled, stillFilingError(f, waitErr)
+		return filedRecording{}, filingUnsettled, stillFilingError(f, filing.ID, waitErr)
 	}
 
 	newID := filing.DestinationRecording.ID
@@ -215,15 +211,14 @@ func refusedBeforeFiling(e *output.Error) bool {
 }
 
 // stillFilingError reports a move or copy that Basecamp accepted but had not
-// finished when the wait ended.
-func stillFilingError(f recordingFiling, waitErr error) error {
+// finished when the wait ended. Its filing says where it got to, whatever the
+// recording's type and status, so the hint names the filing rather than a
+// listing the result may not show in.
+func stillFilingError(f recordingFiling, filingID int64, waitErr error) error {
 	_, progressive, _ := f.verbs()
-	hint := fmt.Sprintf("Once it lands, %s returns the %s at its new id", f.show(f.sourceID), f.noun)
-	if f.movedHint != "" {
-		hint = f.movedHint
-	}
+	hint := fmt.Sprintf("Do not move it again. Check it with: basecamp filings show %d%s, which names the %s's new id once it lands", filingID, f.scope, f.noun)
 	if f.kind == basecamp.FilingCopy {
-		hint = fmt.Sprintf("Do not copy it again, which makes another copy. %s: %s", f.landing, f.check())
+		hint = fmt.Sprintf("Do not copy it again, which makes another copy. Check it with: basecamp filings show %d%s, which names the copy once it lands", filingID, f.scope)
 	}
 	return &output.Error{
 		Code:    output.CodeInProgress,

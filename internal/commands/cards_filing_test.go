@@ -321,7 +321,7 @@ func TestAcceptedCopyStaysNotRetryableWhenTheWaitHitsTheRateLimitGate(t *testing
 		false)
 	gate := &resilience.GateError{Message: "rate limited by a recent 429", Hint: "Re-run in 30s"}
 
-	e := output.AsError(stillFilingError(f, gate))
+	e := output.AsError(stillFilingError(f, 70, gate))
 
 	assert.Equal(t, output.CodeInProgress, e.Code)
 	assert.False(t, e.Retryable, "the copy was accepted, so re-running makes a second one")
@@ -405,7 +405,7 @@ func TestCardsMoveStillRunningWhenTheWaitRunsOut(t *testing.T) {
 
 	assert.Equal(t, output.CodeInProgress, e.Code)
 	assert.Contains(t, e.Message, "still moving card #456")
-	assert.Contains(t, e.Hint, "basecamp cards show 456")
+	assert.Contains(t, e.Hint, "basecamp filings show 70")
 	assert.Len(t, transport.posts, 1, "the move is never sent twice")
 	assert.Greater(t, transport.filingGet, 1)
 }
@@ -440,7 +440,7 @@ func TestCardsCopyStillRunningSaysNotToCopyAgain(t *testing.T) {
 
 	assert.Equal(t, output.CodeInProgress, e.Code)
 	assert.Contains(t, e.Hint, "Do not copy it again")
-	assert.Contains(t, e.Hint, "basecamp recordings list Kanban::Card --in 999 --status active --all")
+	assert.Contains(t, e.Hint, "basecamp filings show 70")
 	assert.Len(t, transport.posts, 1)
 }
 

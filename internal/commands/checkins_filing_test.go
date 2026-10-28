@@ -16,7 +16,7 @@ func checkinsFilingTransport() *familyTransport {
 	return &familyTransport{gets: map[string]string{
 		"/projects":           filingProjects,
 		"/projects/123":       `{"id":123,"name":"Source","dock":[{"name":"questionnaire","id":555,"title":"Automatic Check-ins","enabled":true}]}`,
-		"/projects/999":       `{"id":999,"name":"Dest","dock":[{"name":"questionnaire","id":900,"title":"Automatic Check-ins","enabled":true}]}`,
+		"/projects/999":       `{"id":999,"name":"Dest","dock":[{"name":"questionnaire","id":900,"title":"Automatic Check-ins","enabled":true,"app_url":"https://3.basecamp.com/99999/buckets/999/questionnaires/900"}]}`,
 		"/questionnaires/555": `{"id":555,"title":"Automatic Check-ins","bucket":{"id":123,"name":"Source"}}`,
 		"/questionnaires/900": `{"id":900,"title":"Automatic Check-ins","bucket":{"id":999,"name":"Dest"}}`,
 		"/questions/456":      `{"id":456,"type":"Question","title":"What did you work on?","bucket":{"id":123,"name":"Source"},"parent":{"id":555,"title":"Automatic Check-ins","type":"Questionnaire"}}`,

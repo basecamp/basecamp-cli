@@ -16,7 +16,7 @@ func forwardsFilingTransport() *familyTransport {
 	return &familyTransport{gets: map[string]string{
 		"/projects":            filingProjects,
 		"/projects/123":        `{"id":123,"name":"Source","dock":[{"name":"inbox","id":555,"title":"Forwards","enabled":true}]}`,
-		"/projects/999":        `{"id":999,"name":"Dest","dock":[{"name":"inbox","id":900,"title":"Forwards","enabled":true}]}`,
+		"/projects/999":        `{"id":999,"name":"Dest","dock":[{"name":"inbox","id":900,"title":"Forwards","enabled":true,"app_url":"https://3.basecamp.com/99999/buckets/999/inboxes/900"}]}`,
 		"/projects/888":        `{"id":888,"name":"Bare","dock":[{"name":"inbox","id":880,"title":"Forwards","enabled":false}]}`,
 		"/inboxes/555":         `{"id":555,"title":"Forwards","bucket":{"id":123,"name":"Source"}}`,
 		"/inbox_forwards/456":  `{"id":456,"type":"Inbox::Forward","subject":"Invoice","bucket":{"id":123,"name":"Source"},"parent":{"id":555,"title":"Forwards","type":"Inbox"}}`,

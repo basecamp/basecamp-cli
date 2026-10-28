@@ -2494,7 +2494,7 @@ shows the new to-dos.`,
 				"Several IDs copy one by one; each is reported, and the command fails if any failed, naming which were copied. " +
 				"Output is the new to-do; its id is data.id and the original's is data.source_id. " +
 				"Basecamp refuses a group as the destination (use its list) and an archived list. " +
-				"Never re-run a copy that failed with in_progress or a may-have-started hint: each run makes another copy.",
+				"Never re-run a copy that failed with in_progress or a may-have-started hint: each run makes another copy; check an in_progress one with basecamp filings show <filing id>.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -2646,7 +2646,6 @@ func todoFiling(app *appctx.App, kind basecamp.FilingType, todo *basecamp.Todo, 
 		destination:     fmt.Sprintf("to-do list %d (%s)", list.ID, list.Name),
 		showCmd:         "basecamp todos show",
 		lookFor:         recordingCopyLookFor("Todo", todolistProjectID(list), todo.Status),
-		landing:         "The copy lands in that list",
 		match:           copyMatch(todo.ID, todo.Title, list.Name, list.ID),
 		read: func(ctx context.Context, id int64) (filedRecording, error) {
 			filed, err := app.Account().Todos().Get(ctx, id)

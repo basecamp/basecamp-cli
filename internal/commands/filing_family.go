@@ -2,6 +2,7 @@ package commands
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -46,6 +47,7 @@ func (c filingContainer) plurals() string {
 type filingTarget struct {
 	id          int64
 	title       string
+	appURL      string
 	projectID   int64
 	projectName string
 	// calendar is set when the container is in a calendar, such as an
@@ -120,7 +122,7 @@ func resolveFilingTarget(cmd *cobra.Command, app *appctx.App, c filingContainer,
 	projectName = projectLabel(cmd, app, projectID, projectName)
 	pick := func(tool DockTool) filingTarget {
 		id, _ := strconv.ParseInt(projectID, 10, 64)
-		return filingTarget{id: tool.ID, title: tool.Title, projectID: id, projectName: projectName}
+		return filingTarget{id: tool.ID, title: tool.Title, appURL: tool.AppURL, projectID: id, projectName: projectName}
 	}
 
 	if toContainer == "" {
@@ -159,8 +161,8 @@ func resolveFilingTarget(cmd *cobra.Command, app *appctx.App, c filingContainer,
 }
 
 // bucketTarget is a container read by ID, in the project its bucket names.
-func bucketTarget(id int64, title string, bucket *basecamp.Bucket) filingTarget {
-	target := filingTarget{id: id, title: title}
+func bucketTarget(id int64, title, appURL string, bucket *basecamp.Bucket) filingTarget {
+	target := filingTarget{id: id, title: title, appURL: appURL}
 	if bucket != nil {
 		target.projectID, target.projectName = bucket.ID, bucket.Name
 		target.calendar = bucket.Type == "Calendar"
@@ -248,11 +250,10 @@ type filingFamily struct {
 	// sameHint is the same-project command for a move onto the recording's
 	// own container, given its ID; empty when there is none.
 	sameHint func(src filingSource, target filingTarget) string
-	// landing says where in the container a copy lands.
-	landing string
-	// lookFor lists where a copy of src lands in target, so one that may have
-	// started is checked for before copying again. A copy keeps its source's
-	// status, so the listing shows recordings in that status, every page.
+	// lookFor lists where a copy of src lands in target, for a copy that may
+	// have started without Basecamp naming its filing. A copy keeps its
+	// source's status, so the listing shows recordings in that status, every
+	// page.
 	lookFor func(src filingSource, target filingTarget) string
 	// crumbs are the follow-ups for a filed recording.
 	crumbs func(id, projectID int64) []output.Breadcrumb
@@ -464,7 +465,6 @@ func (fam filingFamily) filing(app *appctx.App, kind basecamp.FilingType, src fi
 		destination:     target.describe(fam.into.noun),
 		showCmd:         fam.showCmd(),
 		lookFor:         fam.lookFor(src, target),
-		landing:         fam.landing,
 		match:           copyMatch(src.id, src.title, target.title, target.id),
 		read: func(ctx context.Context, id int64) (filedRecording, error) {
 			record, filed, err := fam.get(ctx, app, id)
@@ -487,10 +487,24 @@ func (fam filingFamily) filing(app *appctx.App, kind basecamp.FilingType, src fi
 }
 
 // copiesInTimeline finds a copy of a recording the recordings listing does
-// not serve, in any status: its project's timeline, every page, where the
-// copy shows as reposted. A Google document never shows there.
+// not serve: its project's timeline, every page, where the copy shows as
+// reposted. A Google document never shows there.
 func copiesInTimeline(projectID int64) string {
 	return fmt.Sprintf("basecamp timeline --in %d --all", projectID)
+}
+
+// copyInListing finds a copy of a recording the recordings listing does not
+// serve, by the source's status, which the copy keeps: listing for an active
+// one, the timeline for an archived one when timeline is set, and otherwise
+// the destination in Basecamp, since no listing shows it.
+func copyInListing(src filingSource, target filingTarget, plural, listing string, timeline bool) string {
+	switch {
+	case src.status == "" || src.status == "active":
+		return listing
+	case src.status == "archived" && timeline:
+		return copiesInTimeline(target.projectID)
+	}
+	return fmt.Sprintf("open %s in Basecamp, since Basecamp's API lists no %s %s", cmp.Or(target.appURL, target.describe("destination")), src.status, plural)
 }
 
 // withSourceID adds source_id, the recording a filing came from, to a filed

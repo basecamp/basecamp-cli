@@ -633,7 +633,7 @@ it landed, under a new ID.`,
 	notes: "--to-project <project> (ID or name) moves the forward to that project's Email Forwards, which must be turned on (the error names the tools enable command when it is off); --to-inbox <id|url> names one directly. " +
 		"Output is the moved forward: data.id is its NEW id and data.source_id the old one. Write to the new id; the old id stops taking changes, and reading it follows the move. " +
 		"--inbox names the forward's own Email Forwards and is refused; moving into the one it is in is refused. Basecamp refuses moving a reply on its own. " +
-		"An in_progress error means Basecamp is still moving it: basecamp forwards show <old id> returns it once it lands.",
+		"An in_progress error names its filing: do not move it again; basecamp filings show <filing id> gives its new id once it lands.",
 }
 
 var forwardsCopyHelp = filingHelp{
@@ -650,7 +650,7 @@ Basecamp makes the copy in the background; the command waits for it and shows
 the new forward.`,
 	notes: "Without --to-project/--to-inbox the copy goes into the forward's own Email Forwards. The destination's Email Forwards must be turned on. " +
 		"Output is the new forward; its id is data.id and the original's is data.source_id. " +
-		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy.",
+		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy; check an in_progress one with basecamp filings show <filing id>.",
 }
 
 // forwardFamily is how email forwards move and copy between projects' Email
@@ -674,7 +674,7 @@ func forwardFamily() filingFamily {
 				if err != nil {
 					return filingTarget{}, err
 				}
-				return bucketTarget(inbox.ID, inbox.Title, inbox.Bucket), nil
+				return bucketTarget(inbox.ID, inbox.Title, inbox.AppURL, inbox.Bucket), nil
 			},
 		},
 		ownFlags: []string{"inbox"},
@@ -685,12 +685,8 @@ func forwardFamily() filingFamily {
 			}
 			return f, filingSource{id: f.ID, typ: f.Type, status: f.Status, title: f.Subject, bucket: f.Bucket, parent: f.Parent}, nil
 		},
-		landing: "The copy lands in that Email Forwards",
 		lookFor: func(src filingSource, t filingTarget) string {
-			if src.status == "archived" {
-				return copiesInTimeline(t.projectID)
-			}
-			return fmt.Sprintf("basecamp forwards list --in %d --inbox %d --all", t.projectID, t.id)
+			return copyInListing(src, t, "email forwards", fmt.Sprintf("basecamp forwards list --in %d --inbox %d --all", t.projectID, t.id), true)
 		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
 			return []output.Breadcrumb{{

@@ -1087,7 +1087,7 @@ shows the message where it landed, under a new ID.`,
 	notes: "--to-project <project> (ID or name) moves the message to that project's message board; add --to-board <id|title> when it has several, or pass --to-board <id|url> alone. " +
 		"Output is the moved message: data.id is its NEW id and data.source_id the old one. Write to the new id; the old id stops taking changes, and reading it follows the move. " +
 		"--message-board names the message's own board and is refused; moving onto the board it is already on is refused. " +
-		"An in_progress error means Basecamp is still moving it: basecamp messages show <old id> returns it once it lands. " +
+		"An in_progress error names its filing: do not move it again; basecamp filings show <filing id> gives its new id once it lands. " +
 		"Comments move with their message; Basecamp refuses moving a comment on its own.",
 }
 
@@ -1107,7 +1107,7 @@ the new message.`,
 	notes: "Without --to-project/--to-board the copy goes onto the message's own board. " +
 		"--to-project alone uses that project's only message board and fails as ambiguous when it has several; add --to-board. " +
 		"Output is the new message; its id is data.id and the original's is data.source_id. --include-comments copies the comments too. " +
-		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy.",
+		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy; check an in_progress one with basecamp filings show <filing id>.",
 }
 
 // messageFamily is how messages move and copy between message boards.
@@ -1129,7 +1129,7 @@ func messageFamily() filingFamily {
 				if err != nil {
 					return filingTarget{}, err
 				}
-				return bucketTarget(board.ID, board.Title, board.Bucket), nil
+				return bucketTarget(board.ID, board.Title, board.AppURL, board.Bucket), nil
 			},
 		},
 		ownFlags: []string{"message-board"},
@@ -1140,7 +1140,6 @@ func messageFamily() filingFamily {
 			}
 			return m, filingSource{id: m.ID, typ: m.Type, status: m.Status, title: m.Subject, bucket: m.Bucket, parent: m.Parent}, nil
 		},
-		landing: "The copy lands on that message board",
 		lookFor: func(src filingSource, t filingTarget) string {
 			return recordingCopyLookFor("Message", t.projectID, src.status)
 		},

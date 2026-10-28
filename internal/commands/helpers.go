@@ -185,6 +185,7 @@ type DockTool struct {
 	Title   string `json:"title"`
 	ID      int64  `json:"id"`
 	Enabled bool   `json:"enabled"`
+	AppURL  string `json:"app_url"`
 }
 
 // getDockTools fetches a project's dock and partitions tools matching dockName

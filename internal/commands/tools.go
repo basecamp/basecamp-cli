@@ -686,7 +686,7 @@ to another project.`,
 			"--to-project <project> (ID or name) moves the whole tool and everything in it to that project's dock under a NEW id: output data.id is the new tool id and data.source_id the old one; the old id stops taking changes. " +
 			"--position cannot be combined with --to-project. The tool ID comes from the project's dock (basecamp projects show <project>), or pass the tool's URL. " +
 			"Tools cannot be copied; doors (external links) cannot move to another project. To move one message, file or card instead, use that family's move command. " +
-			"The old id does not follow the move (tools show <old id> reads it as deleted). An in_progress error means Basecamp is still moving it: do not move it again; basecamp projects show <project> lists it in the dock once it lands."},
+			"The old id does not follow the move (tools show <old id> reads it as deleted). An in_progress error names its filing: do not move it again; basecamp filings show <filing id> gives its new id once it lands."},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			positionSet := cmd.Flags().Changed("position") || cmd.Flags().Changed("pos")
 			if !cmd.Flags().Changed("to-project") {
@@ -775,9 +775,6 @@ func moveToolToProject(cmd *cobra.Command, flagProject, arg, toProject string) e
 		toProjectID: destID,
 		destination: "project " + projectName,
 		showCmd:     "basecamp tools show",
-		// A moved tool's old id still reads, as deleted, rather than leading
-		// to the new one.
-		movedHint: fmt.Sprintf("Do not move it again. Once it lands it is on %s's dock: basecamp projects show %d", projectName, destID),
 		read: func(ctx context.Context, id int64) (filedRecording, error) {
 			moved, err := app.Account().Tools().Get(ctx, id)
 			if err != nil {

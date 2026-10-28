@@ -999,7 +999,7 @@ the new list or group.`,
 		Args: cobra.ExactArgs(1),
 		Annotations: map[string]string{
 			"agent_notes": "Without a destination the copy goes next to the original. " + todolistFilingNotes +
-				" Never re-run a copy that failed with in_progress or a may-have-started hint: each run makes another copy.",
+				" Never re-run a copy that failed with in_progress or a may-have-started hint: each run makes another copy; check an in_progress one with basecamp filings show <filing id>.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return fileTodolist(cmd, basecamp.FilingCopy, args[0], *project, dest, includeComments)
@@ -1112,7 +1112,6 @@ func listFiling(cmd *cobra.Command, app *appctx.App, kind basecamp.FilingType, l
 		destination:   fmt.Sprintf("To-dos %d in project %d", todoset.ID, projectID),
 		showCmd:       "basecamp todolists show",
 		lookFor:       recordingCopyLookFor("Todolist", projectID, list.Status),
-		landing:       "The copy lands in that To-dos",
 		match:         copyMatch(list.ID, list.Name, todoset.Title, todoset.ID),
 		read:          readFiledTodolist(app, list.ID),
 	}, nil
@@ -1147,7 +1146,6 @@ func groupFiling(cmd *cobra.Command, app *appctx.App, kind basecamp.FilingType, 
 		destination:   fmt.Sprintf("to-do list %d (%s)", into.ID, into.Name),
 		showCmd:       "basecamp todolists show",
 		lookFor:       recordingCopyLookFor("Todolist", todolistProjectID(into), group.Status),
-		landing:       "The copy lands in that list",
 		match:         copyMatch(group.ID, group.Name, into.Name, into.ID),
 		read:          readFiledTodolist(app, group.ID),
 	}, nil

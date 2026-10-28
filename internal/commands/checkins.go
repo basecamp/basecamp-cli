@@ -1645,7 +1645,7 @@ under a new ID.`,
 	notes: "--to-project <project> (ID or name) moves the question and its answers to that project's Automatic Check-ins; --to-questionnaire <id|url> names one directly. " +
 		"Output is the moved question: data.id is its NEW id and data.source_id the old one. Write to the new id; the old id stops taking changes, and reading it follows the move. " +
 		"--questionnaire names the question's own Automatic Check-ins and is refused; moving onto the one it is in is refused. Basecamp refuses moving an answer on its own. " +
-		"An in_progress error means Basecamp is still moving it: basecamp checkins question show <old id> returns it once it lands.",
+		"An in_progress error names its filing: do not move it again; basecamp filings show <filing id> gives its new id once it lands.",
 }
 
 var checkinsQuestionCopyHelp = filingHelp{
@@ -1663,7 +1663,7 @@ Basecamp makes the copy in the background; the command waits for it and shows
 the new question.`,
 	notes: "Without --to-project/--to-questionnaire the copy goes into the question's own Automatic Check-ins. " +
 		"Output is the new question; its id is data.id and the original's is data.source_id. " +
-		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy.",
+		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy; check an in_progress one with basecamp filings show <filing id>.",
 }
 
 // questionFamily is how check-in questions move and copy between projects'
@@ -1687,7 +1687,7 @@ func questionFamily() filingFamily {
 				if err != nil {
 					return filingTarget{}, err
 				}
-				return bucketTarget(q.ID, q.Title, q.Bucket), nil
+				return bucketTarget(q.ID, q.Title, q.AppURL, q.Bucket), nil
 			},
 		},
 		ownFlags: []string{"questionnaire"},
@@ -1698,12 +1698,8 @@ func questionFamily() filingFamily {
 			}
 			return q, filingSource{id: q.ID, typ: q.Type, status: q.Status, title: q.Title, bucket: q.Bucket, parent: q.Parent}, nil
 		},
-		landing: "The copy lands in that Automatic Check-ins",
 		lookFor: func(src filingSource, t filingTarget) string {
-			if src.status == "archived" {
-				return copiesInTimeline(t.projectID)
-			}
-			return fmt.Sprintf("basecamp checkins questions --in %d --questionnaire %d --all", t.projectID, t.id)
+			return copyInListing(src, t, "check-in questions", fmt.Sprintf("basecamp checkins questions --in %d --questionnaire %d --all", t.projectID, t.id), true)
 		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
 			return []output.Breadcrumb{{

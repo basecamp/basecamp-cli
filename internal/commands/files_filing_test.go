@@ -221,9 +221,9 @@ func TestFilesCopyOfACloudFileFollowsUpWithCommandsThatFindIt(t *testing.T) {
 	require.NoError(t, shown.err, "the breadcrumb %v finds the copy", show)
 	assert.Equal(t, float64(4580), shown.data(t)["id"])
 
-	transport.stuck = map[int64]bool{458: true}
+	transport.refuse = map[int64]int{458: 502}
 	e := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "458", "--to-project", "Dest").failure(t)
-	assert.Equal(t, output.CodeInProgress, e.Code)
+	assert.Contains(t, e.Hint, "may have started the copy")
 	assert.Contains(t, e.Hint, "basecamp timeline --in 999 --all", "files list does not list cloud files, so the check is the timeline")
 	assert.NotContains(t, e.Hint, "files list")
 }
@@ -231,7 +231,7 @@ func TestFilesCopyOfACloudFileFollowsUpWithCommandsThatFindIt(t *testing.T) {
 func TestFilesCopyRecoveryListsArchivedItemsWhereTheyShow(t *testing.T) {
 	transport := filesFilingTransport()
 	transport.gets["/documents/456"] = strings.Replace(transport.gets["/documents/456"], `"type":"Document"`, `"type":"Document","status":"archived"`, 1)
-	transport.stuck = map[int64]bool{456: true}
+	transport.refuse = map[int64]int{456: 502}
 	e := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "456", "--to-project", "Dest").failure(t)
 	assert.Contains(t, e.Hint, "basecamp recordings list Document --in 999 --status archived --sort created_at --direction desc --all")
 }
@@ -239,9 +239,9 @@ func TestFilesCopyRecoveryListsArchivedItemsWhereTheyShow(t *testing.T) {
 func TestFilesCopyOfAGoogleDocumentPointsAtItsFolderInBasecamp(t *testing.T) {
 	transport := filesFilingTransport()
 	transport.gets["/google_documents/459"] = `{"id":459,"type":"GoogleDocument","title":"Roadmap","bucket":{"id":123,"name":"Source"},"parent":{"id":501,"title":"Specs","type":"Vault"}}`
-	transport.stuck = map[int64]bool{459: true}
+	transport.refuse = map[int64]int{459: 502}
 	e := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "459", "--to-project", "Dest", "--to-folder", "Contracts").failure(t)
-	assert.Equal(t, output.CodeInProgress, e.Code)
+	assert.Contains(t, e.Hint, "may have started the copy")
 	assert.Contains(t, e.Hint, "basecamp files show 950 --in 999, and open its app_url in Basecamp")
 	assert.NotContains(t, e.Hint, "timeline", "the timeline never shows a Google document")
 }
@@ -284,12 +284,12 @@ func TestFilesCopySeveralNamesWhereEachLanded(t *testing.T) {
 	assert.Contains(t, crumbs, "basecamp files show 4570 --in 123")
 }
 
-func TestFilesCopyOfADraftDocumentThatTimesOutIsLookedForAmongDrafts(t *testing.T) {
+func TestFilesCopyOfADraftDocumentWithNoFilingIsLookedForAmongDrafts(t *testing.T) {
 	transport := filesFilingTransport()
 	transport.gets["/documents/456"] = strings.Replace(transport.gets["/documents/456"], `"type":"Document"`, `"type":"Document","status":"drafted"`, 1)
-	transport.stuck = map[int64]bool{456: true}
+	transport.refuse = map[int64]int{456: 502}
 	e := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "456", "--to-project", "Dest").failure(t)
-	assert.Equal(t, output.CodeInProgress, e.Code)
+	assert.Contains(t, e.Hint, "may have started the copy")
 	assert.Contains(t, e.Hint, "basecamp drafts list --all")
 	assert.NotContains(t, e.Hint, "--status drafted")
 }

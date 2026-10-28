@@ -16,7 +16,7 @@ func columnsTransport() *familyTransport {
 	return &familyTransport{gets: map[string]string{
 		"/projects":                 filingProjects,
 		"/projects/123":             `{"id":123,"name":"Source","dock":[{"name":"kanban_board","id":555,"title":"Board","enabled":true}]}`,
-		"/projects/999":             `{"id":999,"name":"Dest","dock":[{"name":"kanban_board","id":900,"title":"Roadmap","enabled":true}]}`,
+		"/projects/999":             `{"id":999,"name":"Dest","dock":[{"name":"kanban_board","id":900,"title":"Roadmap","enabled":true,"app_url":"https://3.basecamp.com/99999/buckets/999/card_tables/900"}]}`,
 		"/card_tables/555":          `{"id":555,"title":"Board","bucket":{"id":123,"name":"Source"}}`,
 		"/card_tables/900":          `{"id":900,"title":"Roadmap","bucket":{"id":999,"name":"Dest"}}`,
 		"/card_tables/columns/456":  `{"id":456,"type":"Kanban::Column","title":"Doing","bucket":{"id":123,"name":"Source"},"parent":{"id":555,"title":"Board","type":"Kanban::Board"}}`,

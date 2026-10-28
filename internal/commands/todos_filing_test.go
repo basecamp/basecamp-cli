@@ -36,13 +36,15 @@ import (
 //     GET completes it as recording N*10+1, read back in the destination it
 //     was filed into. postStatus answers every POST with that status,
 //     refuse answers the POST for those recordings with 403 and drop with
-//     502, and a read of an unreadable new recording answers 404.
+//     502, a filing in stuck stays processing, and a read of an unreadable
+//     new recording answers 404.
 type mockTodoFilingTransport struct {
 	twoTodosets   bool
 	duplicateName bool
 	postStatus    int
 	refuse        map[string]bool
 	drop          map[string]bool
+	stuck         map[string]bool
 	unreadable    map[string]bool
 
 	mu       sync.Mutex
@@ -97,6 +99,9 @@ func (m *mockTodoFilingTransport) RoundTrip(req *http.Request) (*http.Response, 
 
 	if len(parts) == 2 && parts[0] == "filings" {
 		source, _ := strconv.ParseInt(parts[1], 10, 64)
+		if m.stuck[parts[1]] {
+			return respond(200, fmt.Sprintf(`{"id":%d,"status":"processing","type":"Move","source_recording_id":%d}`, source, source))
+		}
 		return respond(200, fmt.Sprintf(`{"id":%d,"status":"completed","type":"Move","source_recording_id":%d,"destination_recording":{"id":%d}}`, source, source, source*10+1))
 	}
 
