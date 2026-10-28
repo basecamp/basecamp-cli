@@ -31,7 +31,9 @@ type recordingFiling struct {
 	// destinationID is the container it goes into, from the destination
 	// project's dock. toProjectID is set instead for a dock tool, which goes
 	// to a project.
-	destinationID   int64
+	destinationID int64
+	// parentID is a folder inside the destination Docs & Files to put it in.
+	parentID        int64
 	toProjectID     int64
 	includeComments bool
 
@@ -39,12 +41,9 @@ type recordingFiling struct {
 	destination string
 	// showCmd shows a recording of this kind given its id: "basecamp cards show".
 	showCmd string
-	// lookFor lists where a copy lands, so a copy that may have started is
-	// checked for before copying again; landing says where in it, before
-	// lookFor, and match what tells the copy apart there, after it.
-	lookFor string
-	landing string
-	match   string
+	// lookFor finds a copy that may have started without Basecamp naming its
+	// filing, so it is checked for before copying again.
+	lookFor copyCheck
 	// read reads back the recording the filing made, by its new id.
 	read func(ctx context.Context, id int64) (filedRecording, error)
 
@@ -132,7 +131,7 @@ func fileRecording(ctx context.Context, app *appctx.App, f recordingFiling) (fil
 			Hint:    fmt.Sprintf("Check the %s with: %s", f.noun, f.show(f.sourceID)),
 		}
 	case filing.Status != basecamp.FilingCompleted || filing.DestinationRecording == nil:
-		return filedRecording{}, filingUnsettled, stillFilingError(f, waitErr)
+		return filedRecording{}, filingUnsettled, stillFilingError(f, filing.ID, waitErr)
 	}
 
 	newID := filing.DestinationRecording.ID
@@ -156,9 +155,9 @@ func (f recordingFiling) show(id int64) string {
 	return fmt.Sprintf("%s %d%s", f.showCmd, id, f.scope)
 }
 
-// check lists where a copy lands and says how to tell the copy apart there.
+// check says how to find a copy that may have started.
 func (f recordingFiling) check() string {
-	return f.lookFor + f.scope + ", then " + f.match
+	return f.lookFor.text(f.scope)
 }
 
 func (f recordingFiling) start(ctx context.Context, app *appctx.App) (*basecamp.Filing, error) {
@@ -167,12 +166,14 @@ func (f recordingFiling) start(ctx context.Context, app *appctx.App) (*basecamp.
 		return recordings.Copy(ctx, f.sourceID, &basecamp.CopyRecordingRequest{
 			FilingDestinationID:  f.destinationID,
 			DestinationProjectID: f.toProjectID,
+			ParentID:             f.parentID,
 			IncludeComments:      f.includeComments,
 		})
 	}
 	return recordings.Move(ctx, f.sourceID, &basecamp.MoveRecordingRequest{
 		FilingDestinationID:  f.destinationID,
 		DestinationProjectID: f.toProjectID,
+		ParentID:             f.parentID,
 	})
 }
 
@@ -208,12 +209,14 @@ func refusedBeforeFiling(e *output.Error) bool {
 }
 
 // stillFilingError reports a move or copy that Basecamp accepted but had not
-// finished when the wait ended.
-func stillFilingError(f recordingFiling, waitErr error) error {
+// finished when the wait ended. Its filing says where it got to, whatever the
+// recording's type and status, so the hint names the filing rather than a
+// listing the result may not show in.
+func stillFilingError(f recordingFiling, filingID int64, waitErr error) error {
 	_, progressive, _ := f.verbs()
-	hint := fmt.Sprintf("Once it lands, %s returns the %s at its new id", f.show(f.sourceID), f.noun)
+	hint := fmt.Sprintf("Do not move it again. Check it with: basecamp filings show %d%s, which names the %s's new id once it lands", filingID, f.scope, f.noun)
 	if f.kind == basecamp.FilingCopy {
-		hint = fmt.Sprintf("Do not copy it again, which makes another copy. %s: %s", f.landing, f.check())
+		hint = fmt.Sprintf("Do not copy it again, which makes another copy. Check it with: basecamp filings show %d%s, which names the copy once it lands", filingID, f.scope)
 	}
 	return &output.Error{
 		Code:    output.CodeInProgress,
@@ -276,8 +279,11 @@ func runFilings(cmd *cobra.Command, app *appctx.App, scope followUpScope, filing
 		unread      []string
 		unsettled   = map[string][]int64{}
 		checks      []string
-		worst       *output.Error
-		worstOf     filingOutcome
+		// warned holds the checks that already say not to file again: a
+		// still-running filing's.
+		warned  = map[string]bool{}
+		worst   *output.Error
+		worstOf filingOutcome
 	)
 	for _, f := range filings {
 		f.scope = scope.args(app.Config.AccountID)
@@ -296,8 +302,10 @@ func runFilings(cmd *cobra.Command, app *appctx.App, scope followUpScope, filing
 		case filingDone:
 			results = append(results, filed.result)
 			done = append(done, fmt.Sprintf("#%d as #%d in %s", f.sourceID, filed.id, filed.place()))
-			if breadcrumbs == nil {
-				breadcrumbs = filed.breadcrumbs
+			for _, crumb := range filed.breadcrumbs {
+				if !slices.ContainsFunc(breadcrumbs, func(b output.Breadcrumb) bool { return b.Cmd == crumb.Cmd }) {
+					breadcrumbs = append(breadcrumbs, crumb)
+				}
 			}
 		case filingRefused:
 			refused = append(refused, f.sourceID)
@@ -316,6 +324,7 @@ func runFilings(cmd *cobra.Command, app *appctx.App, scope followUpScope, filing
 			if _, seen := unsettled[check]; !seen {
 				checks = append(checks, check)
 			}
+			warned[check] = e.Code == output.CodeInProgress
 			unsettled[check] = append(unsettled[check], f.sourceID)
 			report = append(report, fmt.Sprintf("#%d not settled: %s", f.sourceID, e.Message))
 		}
@@ -335,6 +344,10 @@ func runFilings(cmd *cobra.Command, app *appctx.App, scope followUpScope, filing
 		hints = append(hints, fmt.Sprintf("Do not %s these again: %s.", verb, strings.Join(unread, ", ")))
 	}
 	for _, check := range checks {
+		if warned[check] {
+			hints = append(hints, fmt.Sprintf("%s: %s", sourceList(unsettled[check]), check))
+			continue
+		}
 		hints = append(hints, fmt.Sprintf("Do not %s %s again yet. %s", verb, sourceList(unsettled[check]), check))
 	}
 	if len(refused) > 0 {
@@ -349,6 +362,25 @@ func runFilings(cmd *cobra.Command, app *appctx.App, scope followUpScope, filing
 		HTTPStatus: worst.HTTPStatus,
 		Cause:      textCause(worst),
 	}
+}
+
+// filingNames holds the recordings a bulk move or copy names, each by the id
+// it read as and the argument that named it. A moved recording's old id reads
+// as its new one, so two arguments can name one recording, and filing it twice
+// moves it twice or makes two copies. Comparing what each argument read as,
+// before anything is filed, catches that where comparing the arguments cannot.
+type filingNames map[int64]string
+
+// add records that arg read as recording id, refusing a second name for it.
+func (named filingNames) add(noun, arg string, id int64) error {
+	if first, ok := named[id]; ok {
+		return output.ErrUsageHint(
+			fmt.Sprintf("%s and %s are both %s #%d", first, arg, noun, id),
+			fmt.Sprintf("A moved %s's old id reads as its new one. Name %s #%d once", noun, noun, id),
+		)
+	}
+	named[id] = arg
+	return nil
 }
 
 // sourceList names recordings by id: "#456, #457".
@@ -369,27 +401,151 @@ var filingWait = struct{ first, max, total time.Duration }{
 	total: time.Minute,
 }
 
-// recordingCopyLookFor lists the recordings of one type in a project in the
-// source's status, every page. A copy keeps the source's status, so this shows
-// a copy whatever state it was made in. Basecamp's recordings listing serves
-// Todo, Todolist (groups included), Message, Document, Upload, Vault,
-// Kanban::Card and Schedule::Entry.
-func recordingCopyLookFor(recordableType string, projectID int64, status string) string {
-	if status == "" {
-		status = "active"
-	}
-	return fmt.Sprintf("basecamp recordings list %s --in %d --status %s --all", recordableType, projectID, status)
+// copyPlace is a copy by what decides which listing can show it: the
+// recordable type, the status it keeps from its source, and whether its
+// container is in a calendar rather than a project.
+type copyPlace struct {
+	typ      string
+	status   string
+	calendar bool
 }
 
-// copyMatch says what tells a copy of a recording apart in the container it
-// lands in. A copy keeps its original's title, created_at and updated_at, so
-// no sort puts it first; its title in that container finds it.
-func copyMatch(sourceID int64, title, container string, containerID int64) string {
-	name := fmt.Sprintf("the copy of #%d", sourceID)
-	if title != "" {
-		name = fmt.Sprintf("%q", title)
+// copyListing lists, every page, where a copy in place lands in t.
+type copyListing func(place copyPlace, t filingTarget) string
+
+// copyListings is how to find a copy whose start got no answer, so it is
+// checked for before copying again. A place is here only when its listing is
+// known to show a copy in that status; any other, a type or status added
+// later included, is checked by opening the destination in Basecamp.
+//
+//   - recordings list serves these types in the active, archived and trashed
+//     statuses, in projects (bc3 doc/api/sections/recordings.md).
+//   - drafts list holds drafted messages, documents and uploads, and no
+//     other drafts (drafts.md). It holds only the 250 most recently updated,
+//     and a copy keeps its original's updated_at, so it is capped: a copy
+//     missing there is checked for on the destination's page too.
+//   - schedule entries --status lists a schedule's active, archived or
+//     trashed entries (schedule_entries.md), a calendar's included.
+//   - timeline shows a copied cloud file or question, active or archived, as
+//     reposted; it relays nothing drafted or trashed (Timeline::Relayer), and
+//     no copied forward, column or Google document (checked against bc3).
+//   - checkins questions, forwards list and cards columns list only
+//     recordings that inherit their status, which an archived, trashed or
+//     drafted copy does not.
+var copyListings = copyTable([]copyRow{
+	{[]string{"Document", "Kanban::Card", "Message", "Schedule::Entry", "Todo", "Todolist", "Upload", "Vault"}, []string{"active", "archived", "trashed"}, false, listRecordings, false},
+	{[]string{"Message", "Document", "Upload"}, []string{"drafted"}, false, listDrafts, true},
+	{[]string{"Schedule::Entry"}, []string{"active", "archived", "trashed"}, true, listCalendarEntries, false},
+	{[]string{"CloudFile"}, []string{"active", "archived"}, false, listTimeline, false},
+	{[]string{"Question"}, []string{"archived"}, false, listTimeline, false},
+	{[]string{"Question"}, []string{"active"}, false, listQuestions, false},
+	{[]string{"Inbox::Forward"}, []string{"active"}, false, listForwards, false},
+	{[]string{"Kanban::Column"}, []string{"active"}, false, listColumns, false},
+})
+
+// copyRow is one listing of copyListings with the places it shows.
+type copyRow struct {
+	types    []string
+	statuses []string
+	calendar bool
+	listing  copyListing
+	// capped is a listing that may stop before an old enough copy.
+	capped bool
+}
+
+// copyTable spreads rows into one listing per place, refusing a place two
+// rows claim.
+func copyTable(rows []copyRow) map[copyPlace]copyRow {
+	table := map[copyPlace]copyRow{}
+	for _, row := range rows {
+		for _, typ := range row.types {
+			for _, status := range row.statuses {
+				place := copyPlace{typ: typ, status: status, calendar: row.calendar}
+				if _, claimed := table[place]; claimed {
+					panic(fmt.Sprintf("copyListings names %+v twice", place))
+				}
+				table[place] = row
+			}
+		}
 	}
-	return fmt.Sprintf("look for %s in %s (#%d); a copy has its original's title and dates", name, cmp.Or(container, "the destination"), containerID)
+	return table
+}
+
+func listRecordings(place copyPlace, t filingTarget) string {
+	return fmt.Sprintf("basecamp recordings list %s --in %d --status %s --all", place.typ, t.projectID, place.status)
+}
+
+func listDrafts(copyPlace, filingTarget) string { return "basecamp drafts list --all" }
+
+func listCalendarEntries(place copyPlace, t filingTarget) string {
+	return fmt.Sprintf("basecamp schedule entries --in %d --schedule %d --status %s --all", t.projectID, t.id, place.status)
+}
+
+func listTimeline(_ copyPlace, t filingTarget) string {
+	return fmt.Sprintf("basecamp timeline --in %d --all", t.projectID)
+}
+
+func listQuestions(_ copyPlace, t filingTarget) string {
+	return fmt.Sprintf("basecamp checkins questions --in %d --questionnaire %d --all", t.projectID, t.id)
+}
+
+func listForwards(_ copyPlace, t filingTarget) string {
+	return fmt.Sprintf("basecamp forwards list --in %d --inbox %d --all", t.projectID, t.id)
+}
+
+func listColumns(_ copyPlace, t filingTarget) string {
+	return fmt.Sprintf("basecamp cards columns --in %d --card-table %d", t.projectID, t.id)
+}
+
+// copyCheck is how to find a copy whose start got no answer: a listing that
+// shows it, or else the destination's page in Basecamp, then what tells it
+// apart there.
+type copyCheck struct {
+	listing string
+	capped  bool
+	page    string
+	match   string
+}
+
+// copyLookFor says where to find a copy of src that lands in t: its listing
+// in copyListings, or else the destination's page in Basecamp. A copy keeps
+// its original's title, created_at and updated_at, so no sort puts it first;
+// it is told apart by its title in the destination.
+func copyLookFor(src filingSource, t filingTarget) copyCheck {
+	place := copyPlace{typ: src.typ, status: cmp.Or(src.status, "active"), calendar: t.calendar}
+	check := copyCheck{page: cmp.Or(t.appURL, t.describe("destination")), match: copyMatch(src, t)}
+	if row, ok := copyListings[place]; ok {
+		check.listing, check.capped = row.listing(place, t), row.capped
+	}
+	return check
+}
+
+// text says how to check, with scope on the listing so it reaches this
+// account from a fresh shell.
+func (c copyCheck) text(scope string) string {
+	where := "open the destination in Basecamp: " + c.page
+	if c.listing != "" {
+		where = c.listing + scope
+	}
+	text := where + ", then " + c.match
+	if c.capped {
+		text += ". That listing stops at the most recently updated, so if the copy is not there, open the destination in Basecamp before copying again: " + c.page
+	}
+	return text
+}
+
+// copyMatch says what tells a copy of src apart in t: its title, in the
+// container it lands in.
+func copyMatch(src filingSource, t filingTarget) string {
+	name := fmt.Sprintf("the copy of #%d", src.id)
+	if src.title != "" {
+		name = fmt.Sprintf("%q", src.title)
+	}
+	container, id := t.title, t.id
+	if t.parentID != 0 {
+		container, id = t.parentTitle, t.parentID
+	}
+	return fmt.Sprintf("look for %s in %s (#%d); a copy has its original's title and dates", name, cmp.Or(container, "the destination"), id)
 }
 
 // pollUntil runs check, backing off between runs, until it reports done or
@@ -421,7 +577,13 @@ func pollUntil(ctx context.Context, check func(context.Context) (bool, error)) (
 // a look-alike host, in another account or on another kind of recording names
 // something else in this account. It runs after ensureAccount.
 func parseFilingRef(app *appctx.App, arg, noun, kind, urlShape string) (filesMoveRef, error) {
-	ref, err := parseFilesMoveRef(app, arg, []string{kind})
+	return parseFilingRefOf(app, arg, noun, urlShape, []string{kind})
+}
+
+// parseFilingRefOf is parseFilingRef for a recording a URL may name under
+// several kinds, such as a Docs & Files item.
+func parseFilingRefOf(app *appctx.App, arg, noun, urlShape string, kinds []string) (filesMoveRef, error) {
+	ref, err := parseFilesMoveRef(app, arg, kinds)
 	if err != nil {
 		return ref, output.ErrUsageHint(fmt.Sprintf("Expected a %s ID or URL: %v", noun, err),
 			fmt.Sprintf("Pass a %s ID or a Basecamp %s URL (%s)", noun, noun, urlShape))

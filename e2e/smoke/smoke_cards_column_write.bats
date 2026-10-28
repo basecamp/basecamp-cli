@@ -69,6 +69,30 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "cards column copy copies a column onto its own card table" {
+  local id_file="$BATS_FILE_TMPDIR/column_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No column created in prior test"
+  local col_id
+  col_id=$(<"$id_file")
+
+  run_smoke basecamp cards column copy "$col_id" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.source_id' "$col_id"
+  assert_json_not_null '.data.id'
+}
+
+@test "cards column move refuses the card table the column is on" {
+  local id_file="$BATS_FILE_TMPDIR/column_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No column created in prior test"
+  local col_id
+  col_id=$(<"$id_file")
+
+  run_smoke basecamp cards column move "$col_id" --to-card-table "$QA_CARDTABLE" --json
+  assert_failure
+  assert_json_value '.ok' 'false'
+}
+
 @test "cards column watch watches a column" {
   local id_file="$BATS_FILE_TMPDIR/column_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No column created in prior test"

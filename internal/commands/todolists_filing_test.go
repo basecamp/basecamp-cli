@@ -32,6 +32,7 @@ func TestTodolistsMoveToAProjectWithSeveralTodosetsIsAmbiguous(t *testing.T) {
 	e := requireUsageRefusal(t, run, transport)
 
 	assert.Equal(t, output.CodeAmbiguous, e.Code)
+	assert.Equal(t, "Dest has 2 To-dos tools that match", e.Message)
 	assert.Contains(t, e.Hint, "--to-todoset")
 	assert.Contains(t, e.Hint, "900  To-dos")
 	assert.Contains(t, e.Hint, "950  To-dos")
@@ -51,7 +52,8 @@ func TestTodolistsMoveToAProjectWithoutTodosSaysHowToTurnItOn(t *testing.T) {
 	run := runTodoFilingCommand(t, transport, NewTodolistsCmd(), "move", "310", "--to-project", "Bare")
 	e := requireUsageRefusal(t, run, transport)
 
-	assert.Equal(t, "Project Bare has no To-dos", e.Message)
+	assert.Equal(t, output.CodeNotFound, e.Code)
+	assert.Contains(t, e.Message, "Bare")
 	assert.Contains(t, e.Hint, "basecamp tools enable 880 --in 888")
 }
 

@@ -665,23 +665,6 @@ func TestCardsColumnsRequiresProject(t *testing.T) {
 	}
 }
 
-// TestCardsColumnShowRequiresProject tests that Project ID required for column show.
-func TestCardsColumnShowRequiresProject(t *testing.T) {
-	app, _ := setupTestApp(t)
-	// No project in config
-
-	project := ""
-	cmd := newCardsColumnShowCmd(&project)
-
-	err := executeCommand(cmd, app, "456")
-	require.NotNil(t, err, "expected error, got nil")
-
-	var e *output.Error
-	if assert.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err) {
-		assert.Equal(t, "Project ID required", e.Message)
-	}
-}
-
 // =============================================================================
 // Numeric Column ID Shortcut Tests
 // =============================================================================

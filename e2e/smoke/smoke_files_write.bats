@@ -154,6 +154,56 @@ setup_file() {
   assert_json_value '.data.folder_id' "$folder_id"
 }
 
+@test "files copy copies a file into its own folder" {
+  local tmpfile="$BATS_FILE_TMPDIR/smoke_files_copy.txt"
+  echo "smoke files copy content $(date +%s)" > "$tmpfile"
+
+  run_smoke basecamp files uploads create "$tmpfile" -p "$QA_PROJECT" --json
+  assert_success
+  local file_id
+  file_id=$(echo "$output" | jq -r '.data.id')
+
+  run_smoke basecamp files copy "$file_id" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.source_id' "$file_id"
+  assert_json_not_null '.data.id'
+}
+
+@test "uploads copy copies an upload into its own folder" {
+  local tmpfile="$BATS_FILE_TMPDIR/smoke_uploads_copy.txt"
+  echo "smoke uploads copy content $(date +%s)" > "$tmpfile"
+
+  run_smoke basecamp uploads create "$tmpfile" -p "$QA_PROJECT" --json
+  assert_success
+  local file_id
+  file_id=$(echo "$output" | jq -r '.data.id')
+
+  run_smoke basecamp uploads copy "$file_id" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.source_id' "$file_id"
+}
+
+@test "uploads move moves an upload into a folder" {
+  local tmpfile="$BATS_FILE_TMPDIR/smoke_uploads_move.txt"
+  echo "smoke uploads move content $(date +%s)" > "$tmpfile"
+
+  run_smoke basecamp files folders create "Smoke uploads move target $(date +%s)" -p "$QA_PROJECT" --json
+  assert_success
+  local folder_id
+  folder_id=$(echo "$output" | jq -r '.data.id')
+
+  run_smoke basecamp uploads create "$tmpfile" -p "$QA_PROJECT" --json
+  assert_success
+  local file_id
+  file_id=$(echo "$output" | jq -r '.data.id')
+
+  run_smoke basecamp uploads move "$file_id" --to "$folder_id" --json
+  assert_success
+  assert_json_value '.data.id' "$file_id"
+}
+
 @test "files archive archives a file" {
   local id_file="$BATS_FILE_TMPDIR/upload_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No upload created in prior test"

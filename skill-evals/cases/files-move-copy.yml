@@ -1,0 +1,11 @@
+task: Copy files 111 and 222 into the Contracts folder in the Marketing project's Docs & Files
+tags: [move-copy, workflow]
+mocks:
+  - match: '^(files|docs|uploads|vaults) copy(?!.*--help)'
+    output: '{"ok":true,"data":[{"id":1110,"source_id":111},{"id":2220,"source_id":222}],"summary":"Copied 2 files to folder 950 (Contracts) in Docs & Files 900 in Marketing: #111 as #1110, #222 as #2220"}'
+accept:
+  - '^(files|docs|uploads|vaults) copy (?=.*\b111\b)(?=.*\b222\b)(?=.*--to-project \W?Marketing)(?=.*--to-folder \W?Contracts)(?!.*--help)'
+reject:
+  - '^(files|docs|uploads|vaults) (move|download|uploads create)'
+  - '^recordings\b'
+max_commands: 4

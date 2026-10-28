@@ -265,10 +265,6 @@ load smoke_helper
   mark_out_of_scope "Alias for tools trash — tested via canonical form"
 }
 
-@test "tools move is out of scope" {
-  mark_out_of_scope "Alias for tools reposition — tested via canonical form"
-}
-
 @test "tools rename is out of scope" {
   mark_out_of_scope "Alias for tools update — tested via canonical form"
 }

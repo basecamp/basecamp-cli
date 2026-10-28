@@ -1,0 +1,11 @@
+task: Move email forward 1357 into the Marketing project's email forwards
+tags: [move-copy, workflow]
+mocks:
+  - match: '^forwards move(?!.*--help)'
+    output: '{"ok":true,"data":{"id":13570,"source_id":1357,"type":"Inbox::Forward"},"summary":"Moved forward #1357 to Marketing › Forwards as forward #13570"}'
+accept:
+  - '^forwards move (?=.*\b1357\b)(?=.*--to-project \W?Marketing)(?!.*--help)'
+reject:
+  - '^forwards (reply|replies)'
+  - '^recordings\b'
+max_commands: 4

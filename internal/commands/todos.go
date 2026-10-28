@@ -2494,7 +2494,7 @@ shows the new to-dos.`,
 				"Several IDs copy one by one; each is reported, and the command fails if any failed, naming which were copied. " +
 				"Output is the new to-do; its id is data.id and the original's is data.source_id. " +
 				"Basecamp refuses a group as the destination (use its list) and an archived list. " +
-				"Never re-run a copy that failed with in_progress or a may-have-started hint: each run makes another copy.",
+				"Never re-run a copy that failed with in_progress or a may-have-started hint: each run makes another copy; check an in_progress one with basecamp filings show <filing id>.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -2560,7 +2560,7 @@ func fileTodos(cmd *cobra.Command, kind basecamp.FilingType, args []string, toPr
 	}
 
 	filings := make([]recordingFiling, 0, len(refs))
-	named := map[int64]string{}
+	named := filingNames{}
 	for i, ref := range refs {
 		todo, err := app.Account().Todos().Get(cmd.Context(), ref.id)
 		if err != nil {
@@ -2569,13 +2569,9 @@ func fileTodos(cmd *cobra.Command, kind basecamp.FilingType, args []string, toPr
 		if err := requireFilableTodo(todo, ref.id); err != nil {
 			return err
 		}
-		if first, ok := named[todo.ID]; ok {
-			return output.ErrUsageHint(
-				fmt.Sprintf("%s and %s are both to-do #%d", first, tokens[i], todo.ID),
-				fmt.Sprintf("A moved to-do's old id reads as its new one. Name to-do #%d once", todo.ID),
-			)
+		if err := named.add("to-do", tokens[i], todo.ID); err != nil {
+			return err
 		}
-		named[todo.ID] = tokens[i]
 		if err := rejectProjectConflict(cmd, app, "to-do", "", ref.project, todo.Bucket.ID); err != nil {
 			return err
 		}
@@ -2649,9 +2645,7 @@ func todoFiling(app *appctx.App, kind basecamp.FilingType, todo *basecamp.Todo, 
 		includeComments: includeComments,
 		destination:     fmt.Sprintf("to-do list %d (%s)", list.ID, list.Name),
 		showCmd:         "basecamp todos show",
-		lookFor:         recordingCopyLookFor("Todo", todolistProjectID(list), todo.Status),
-		landing:         "The copy lands in that list",
-		match:           copyMatch(todo.ID, todo.Title, list.Name, list.ID),
+		lookFor:         copyLookFor(filingSource{id: todo.ID, typ: "Todo", status: todo.Status, title: todo.Title}, filingTarget{id: list.ID, title: list.Name, appURL: list.AppURL, projectID: todolistProjectID(list)}),
 		read: func(ctx context.Context, id int64) (filedRecording, error) {
 			filed, err := app.Account().Todos().Get(ctx, id)
 			if err != nil {

@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -33,10 +34,12 @@ that can receive forwarded emails.`,
 
 	cmd.AddCommand(
 		newForwardsListCmd(&project, &inboxID),
-		newForwardsShowCmd(&project),
+		newForwardsShowCmd(),
 		newForwardsInboxCmd(&project, &inboxID),
 		newForwardsRepliesCmd(&project),
 		newForwardsReplyCmd(&project),
+		newFilingCmd(forwardFamily(), basecamp.FilingMove, forwardsMoveHelp, false),
+		newFilingCmd(forwardFamily(), basecamp.FilingCopy, forwardsCopyHelp, false),
 	)
 
 	return cmd
@@ -274,7 +277,7 @@ func runForwardsListEverywhere(cmd *cobra.Command, app *appctx.App, inboxID stri
 	return app.OK(forwards, respOpts...)
 }
 
-func newForwardsShowCmd(project *string) *cobra.Command {
+func newForwardsShowCmd() *cobra.Command {
 	var cf *commentFlags
 
 	cmd := &cobra.Command{
@@ -283,7 +286,7 @@ func newForwardsShowCmd(project *string) *cobra.Command {
 		Long: `Display detailed information about an email forward.
 
 You can pass either a forward ID or a Basecamp URL:
-  basecamp forwards show 789 --in my-project
+  basecamp forwards show 789
   basecamp forwards show https://3.basecamp.com/123/buckets/456/inbox_forwards/789`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -293,8 +296,8 @@ You can pass either a forward ID or a Basecamp URL:
 				return err
 			}
 
-			// Extract ID and project from URL if provided
-			forwardIDStr, urlProjectID, err := extractWithProject(args[0])
+			// The forward is read by its account-wide ID, so no project is needed.
+			forwardIDStr, _, err := extractWithProject(args[0])
 			if err != nil {
 				return err
 			}
@@ -304,33 +307,13 @@ You can pass either a forward ID or a Basecamp URL:
 				return output.ErrUsage("Invalid forward ID")
 			}
 
-			// Resolve project - use URL > flag > config, with interactive fallback
-			projectID := *project
-			if projectID == "" && urlProjectID != "" {
-				projectID = urlProjectID
-			}
-			if projectID == "" {
-				projectID = app.Flags.Project
-			}
-			if projectID == "" {
-				projectID = app.Config.ProjectID
-			}
-			if projectID == "" {
-				if err := ensureProject(cmd, app); err != nil {
-					return err
-				}
-				projectID = app.Config.ProjectID
-			}
-
-			resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
-			if err != nil {
-				return err
-			}
-
 			forward, err := app.Account().Forwards().Get(cmd.Context(), forwardID)
 			if err != nil {
 				return convertSDKError(err)
 			}
+			// A moved forward's old id redirects to the forward at its new
+			// id, and only the new id reaches its replies and comments.
+			forwardIDStr = strconv.FormatInt(forward.ID, 10)
 
 			subject := forward.Subject
 			if subject == "" {
@@ -346,12 +329,12 @@ You can pass either a forward ID or a Basecamp URL:
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "replies",
-						Cmd:         fmt.Sprintf("basecamp forwards replies %s --in %s", forwardIDStr, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp forwards replies %s --in %s", forwardIDStr, recordProject(forward.Bucket)),
 						Description: "View replies",
 					},
 					output.Breadcrumb{
 						Action:      "list",
-						Cmd:         fmt.Sprintf("basecamp forwards --in %s", resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp forwards --in %s", recordProject(forward.Bucket)),
 						Description: "List all forwards",
 					},
 				),
@@ -632,6 +615,81 @@ You can pass either IDs or Basecamp URLs:
 					},
 				),
 			)
+		},
+	}
+}
+
+var forwardsMoveHelp = filingHelp{
+	use:   "move <id|url>",
+	short: "Move an email forward to another project's Email Forwards",
+	long: `Move an email forward, with its replies, to the Email Forwards of another
+project, as the web's Move… does. Email Forwards must be turned on there.
+
+  basecamp forwards move 789 --to-project "Marketing"
+  basecamp forwards move https://3.basecamp.com/123/buckets/456/inbox_forwards/789 --to-inbox 1069479999
+
+The command waits for Basecamp to finish the move and shows the forward where
+it landed, under a new ID.`,
+	notes: "--to-project <project> (ID or name) moves the forward to that project's Email Forwards, which must be turned on (the error names the tools enable command when it is off); --to-inbox <id|url> names one directly. " +
+		"Output is the moved forward: data.id is its NEW id and data.source_id the old one. Write to the new id; the old id stops taking changes, and reading it follows the move. " +
+		"--inbox names the forward's own Email Forwards and is refused; moving into the one it is in is refused. Basecamp refuses moving a reply on its own. " +
+		"An in_progress error names its filing: do not move it again; basecamp filings show <filing id> gives its new id once it lands.",
+}
+
+var forwardsCopyHelp = filingHelp{
+	use:   "copy <id|url>",
+	short: "Copy an email forward to Email Forwards in this or another project",
+	long: `Copy an email forward into a project's Email Forwards, as the web's Copy…
+does. The original stays where it is. Email Forwards must be turned on there.
+
+With no destination, the copy goes into the forward's own Email Forwards:
+  basecamp forwards copy 789
+  basecamp forwards copy 789 --to-project "Marketing" --include-comments
+
+Basecamp makes the copy in the background; the command waits for it and shows
+the new forward.`,
+	notes: "Without --to-project/--to-inbox the copy goes into the forward's own Email Forwards. The destination's Email Forwards must be turned on. " +
+		"Output is the new forward; its id is data.id and the original's is data.source_id. " +
+		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy; check an in_progress one with basecamp filings show <filing id>.",
+}
+
+// forwardFamily is how email forwards move and copy between projects' Email
+// Forwards.
+func forwardFamily() filingFamily {
+	return filingFamily{
+		noun:     "forward",
+		group:    "basecamp forwards",
+		types:    []string{"Inbox::Forward"},
+		urlKinds: []string{"inbox_forwards"},
+		urlShape: "…/inbox_forwards/<id>",
+		into: filingContainer{
+			dockName: "inbox",
+			noun:     "Email Forwards",
+			plural:   "Email Forwards tools",
+			flag:     "--to-inbox",
+			urlKind:  "inboxes",
+			urlShape: "…/inboxes/<id>",
+			get: func(ctx context.Context, app *appctx.App, id int64) (filingTarget, error) {
+				inbox, err := app.Account().Forwards().GetInbox(ctx, id)
+				if err != nil {
+					return filingTarget{}, err
+				}
+				return bucketTarget(inbox.ID, inbox.Title, inbox.AppURL, inbox.Bucket), nil
+			},
+		},
+		get: func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
+			f, err := app.Account().Forwards().Get(ctx, id)
+			if err != nil {
+				return nil, filingSource{}, err
+			}
+			return f, filingSource{id: f.ID, typ: f.Type, status: f.Status, title: f.Subject, bucket: f.Bucket, parent: f.Parent}, nil
+		},
+		crumbs: func(id, projectID int64) []output.Breadcrumb {
+			return []output.Breadcrumb{{
+				Action:      "show",
+				Cmd:         fmt.Sprintf("basecamp forwards show %d --in %d", id, projectID),
+				Description: "View the forward",
+			}}
 		},
 	}
 }

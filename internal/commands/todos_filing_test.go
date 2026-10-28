@@ -36,13 +36,15 @@ import (
 //     GET completes it as recording N*10+1, read back in the destination it
 //     was filed into. postStatus answers every POST with that status,
 //     refuse answers the POST for those recordings with 403 and drop with
-//     502, and a read of an unreadable new recording answers 404.
+//     502, a filing in stuck stays processing, and a read of an unreadable
+//     new recording answers 404.
 type mockTodoFilingTransport struct {
 	twoTodosets   bool
 	duplicateName bool
 	postStatus    int
 	refuse        map[string]bool
 	drop          map[string]bool
+	stuck         map[string]bool
 	unreadable    map[string]bool
 
 	mu       sync.Mutex
@@ -97,6 +99,9 @@ func (m *mockTodoFilingTransport) RoundTrip(req *http.Request) (*http.Response, 
 
 	if len(parts) == 2 && parts[0] == "filings" {
 		source, _ := strconv.ParseInt(parts[1], 10, 64)
+		if m.stuck[parts[1]] {
+			return respond(200, fmt.Sprintf(`{"id":%d,"status":"processing","type":"Move","source_recording_id":%d}`, source, source))
+		}
 		return respond(200, fmt.Sprintf(`{"id":%d,"status":"completed","type":"Move","source_recording_id":%d,"destination_recording":{"id":%d}}`, source, source, source*10+1))
 	}
 
@@ -494,29 +499,8 @@ func TestTodosCopySeveralToAnotherProjectNeverRetriesAFailedCopy(t *testing.T) {
 	assert.Contains(t, e.Message, "Copied 0 of 2 to-dos")
 	assert.Contains(t, e.Hint, "may have started the copy")
 	assert.Contains(t, e.Hint, "basecamp recordings list Todo --in 999 --status active --all")
-}
-
-// A copy keeps its original's created_at, so no sort brings it to the top of
-// the listing: the hint says to find it by its title in the destination list.
-func TestTodosCopyRecoveryFindsTheCopyByItsTitle(t *testing.T) {
-	transport := &mockTodoFilingTransport{postStatus: 502}
-	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "copy", "456", "--to-project", "Dest", "--to-list", "Later")
-	e := output.AsError(run.err)
-	require.NotNil(t, run.err)
-
-	assert.NotContains(t, e.Hint, "--sort")
-	assert.Contains(t, e.Hint, `basecamp recordings list Todo --in 999 --status active --all, then look for "Task 456" in Later (#902); a copy has its original's title and dates`)
-}
-
-// A copy keeps the source's status, so the listing that looks for it must
-// show that status, every page.
-func TestCopyRecoveryListingShowsTheCopyInItsStatus(t *testing.T) {
-	assert.Equal(t, "basecamp recordings list Todo --in 999 --status active --all",
-		recordingCopyLookFor("Todo", 999, ""))
-	assert.Equal(t, "basecamp recordings list Todolist --in 999 --status archived --all",
-		recordingCopyLookFor("Todolist", 999, "archived"))
-	assert.Equal(t, "basecamp recordings list Kanban::Card --in 999 --status trashed --all",
-		recordingCopyLookFor("Kanban::Card", 999, "trashed"))
+	assert.Contains(t, e.Hint, `look for "Task 456" in Later (#902)`, "a copy keeps its original's created_at, so its title tells it apart")
+	assert.Contains(t, e.Hint, `look for "Task 457" in Later (#902)`)
 }
 
 func TestTodosCopyIntoTheListItIsInIsAllowed(t *testing.T) {
@@ -634,6 +618,27 @@ func TestFilingFollowUpsNameTheProfileAndAnAccountGivenThisRun(t *testing.T) {
 		"a card move's breadcrumb": {
 			&mockFilingTransport{statuses: []string{"completed"}}, NewCardsCmd,
 			[]string{"move", "456", "--to-project", "Dest"}, "basecamp cards show 4560 --in 999" + scope,
+		},
+		"a copy still running": {
+			&mockTodoFilingTransport{stuck: map[string]bool{"456": true}}, NewTodosCmd,
+			[]string{"copy", "456", "--to-list", "901"}, "basecamp filings show 456" + scope + ",",
+		},
+		"a message copy that may have started": {
+			func() *familyTransport {
+				transport := messagesTransport()
+				transport.refuse = map[int64]int{456: 502}
+				return transport
+			}(), NewMessagesCmd,
+			[]string{"copy", "456", "--to-project", "Dest"},
+			"basecamp recordings list Message --in 999 --status active --all" + scope + ", then",
+		},
+		"a message move still running": {
+			func() *familyTransport {
+				transport := messagesTransport()
+				transport.stuck = map[int64]bool{456: true}
+				return transport
+			}(), NewMessagesCmd,
+			[]string{"move", "456", "--to-project", "Dest"}, "basecamp filings show 456" + scope + ",",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
