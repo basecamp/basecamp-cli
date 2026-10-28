@@ -263,6 +263,11 @@ func TestTimesheetEntryVerbsHoldAURLToItsHostAndAccount(t *testing.T) {
 		{"create other account", []string{"entry", "create", "https://3.basecamp.com/11111/buckets/89/todos/789", "--hours", "1"}},
 		{"show scheme-less", []string{"entry", "show", "//evil.example/11111/timesheet_entries/1069480283"}},
 		{"delete scheme-less", []string{"entry", "delete", "3.basecamp.com/99999/timesheet_entries/1069480283", "--force"}},
+		// A path written after a fragment or query is not the URL's path.
+		{"update path in fragment", []string{"entry", "update", "https://3.basecamp.com#x/99999/timesheet_entries/1069480283", "--hours", "1"}},
+		{"delete path in query", []string{"entry", "delete", "https://3.basecamp.com/?x=/99999/timesheet_entries/1069480283", "--force"}},
+		{"create path in fragment", []string{"entry", "create", "https://3.basecamp.com#x/99999/buckets/89/todos/789", "--hours", "1"}},
+		{"create userinfo", []string{"entry", "create", "https://evil.example@3.basecamp.com/99999/buckets/89/todos/789", "--hours", "1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			transport, _, _, err := runTimesheet(t, nil, tc.args...)

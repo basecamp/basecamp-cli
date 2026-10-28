@@ -3,6 +3,7 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -321,10 +322,10 @@ who may not remove the entry are refused.
 	return cmd
 }
 
-// timesheetEntryURL matches an entry's own URL: its app URL
+// timesheetEntryRoute matches the path of an entry's own URL: its app URL
 // (projects/:p/timesheet/entries/:id) and its API URL in either form. The
 // first group is the account, the second the entry.
-var timesheetEntryURL = regexp.MustCompile(`^https?://[^/]+/(\d+)/(?:(?:projects|buckets)/\d+/timesheet/entries|timesheet_entries)/(\d+)(?:\.json)?/?(?:[?#].*)?$`)
+var timesheetEntryRoute = regexp.MustCompile(`^/(\d+)/(?:(?:projects|buckets)/\d+/timesheet/entries|timesheet_entries)/(\d+)(?:\.json)?/?$`)
 
 // timesheetEntryIDArg resolves the <id|url> positional the per-entry verbs
 // take: a bare id or the entry's own URL, returning the URL's account too. Any
@@ -333,8 +334,11 @@ var timesheetEntryURL = regexp.MustCompile(`^https?://[^/]+/(\d+)/(?:(?:projects
 // aim at one of those.
 func timesheetEntryIDArg(arg string) (id int64, urlAccountID string, err error) {
 	raw := strings.TrimSpace(arg)
-	if strings.Contains(raw, "://") {
-		m := timesheetEntryURL.FindStringSubmatch(raw)
+	if !isAllDigits(raw) {
+		var m []string
+		if u := pastedURL(raw); u != nil {
+			m = timesheetEntryRoute.FindStringSubmatch(u.Path)
+		}
 		if m == nil {
 			return 0, "", output.ErrUsageHint(
 				fmt.Sprintf("%q does not name a timesheet entry", arg),
@@ -367,9 +371,15 @@ var timesheetKinds = []string{
 func timesheetRecordingIDArg(arg string) (id int64, urlAccountID string, err error) {
 	raw := strings.TrimSpace(arg)
 	if !isAllDigits(raw) {
-		parsed := urlarg.Parse(raw)
+		// Route only the URL's own scheme, host and path, so nothing in a query
+		// or fragment can be read as the item. No timesheet kind is named by a
+		// fragment: a comment's #__recording_<id> cannot hold time.
+		var parsed *urlarg.Parsed
+		if u := pastedURL(raw); u != nil {
+			parsed = urlarg.Parse(u.Scheme + "://" + u.Host + u.Path)
+		}
 		switch {
-		case !hasHTTPScheme(raw) || parsed == nil || parsed.IsCollection || parsed.RecordingID == "" ||
+		case parsed == nil || parsed.IsCollection || parsed.RecordingID == "" ||
 			!slices.Contains(timesheetKinds, parsed.Type):
 			return 0, "", output.ErrUsageHint(
 				fmt.Sprintf("%q does not name an item to log time against", arg),
@@ -403,9 +413,19 @@ func isAllDigits(s string) bool {
 	return true
 }
 
-func hasHTTPScheme(s string) bool {
-	lower := strings.ToLower(s)
-	return strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://")
+// pastedURL parses an http(s) URL with a host, or returns nil. Callers match
+// its Path alone: a regexp over the raw string would read text after a ? or #
+// as path segments.
+func pastedURL(s string) *url.URL {
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" || u.User != nil {
+		return nil
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		return u
+	}
+	return nil
 }
 
 // timesheetURLAccount holds a pasted URL to the account it names, before any
