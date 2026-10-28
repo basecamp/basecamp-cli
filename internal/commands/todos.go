@@ -2651,6 +2651,7 @@ func todoFiling(app *appctx.App, kind basecamp.FilingType, todo *basecamp.Todo, 
 		showCmd:         "basecamp todos show",
 		lookFor:         recordingCopyLookFor("Todo", todolistProjectID(list), todo.Status),
 		landing:         "The copy lands in that list",
+		match:           copyMatch(todo.ID, todo.Title, list.Name, list.ID),
 		read: func(ctx context.Context, id int64) (filedRecording, error) {
 			filed, err := app.Account().Todos().Get(ctx, id)
 			if err != nil {

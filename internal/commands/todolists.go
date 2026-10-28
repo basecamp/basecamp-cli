@@ -1123,6 +1123,7 @@ func listFiling(cmd *cobra.Command, app *appctx.App, kind basecamp.FilingType, l
 		showCmd:       "basecamp todolists show",
 		lookFor:       recordingCopyLookFor("Todolist", projectID, list.Status),
 		landing:       "The copy lands in that To-dos",
+		match:         copyMatch(list.ID, list.Name, todoset.Title, todoset.ID),
 		read:          readFiledTodolist(app, list.ID),
 	}, nil
 }
@@ -1157,6 +1158,7 @@ func groupFiling(cmd *cobra.Command, app *appctx.App, kind basecamp.FilingType, 
 		showCmd:       "basecamp todolists show",
 		lookFor:       recordingCopyLookFor("Todolist", todolistProjectID(into), group.Status),
 		landing:       "The copy lands in that list",
+		match:         copyMatch(group.ID, group.Name, into.Name, into.ID),
 		read:          readFiledTodolist(app, group.ID),
 	}, nil
 }

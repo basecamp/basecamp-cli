@@ -177,7 +177,7 @@ func TestTodolistsCopyToAnotherProjectIsNotRetried(t *testing.T) {
 
 	assert.Len(t, transport.posts, 1)
 	assert.False(t, e.Retryable)
-	assert.Contains(t, e.Hint, "basecamp recordings list Todolist --in 999 --status active --sort created_at --direction desc --all")
+	assert.Contains(t, e.Hint, "basecamp recordings list Todolist --in 999 --status active --all")
 }
 
 // A filing's recovery points at `todolists show <id>`, which reads the list by

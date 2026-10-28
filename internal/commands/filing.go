@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -38,9 +39,11 @@ type recordingFiling struct {
 	// showCmd shows a recording of this kind given its id: "basecamp cards show".
 	showCmd string
 	// lookFor lists where a copy lands, so a copy that may have started is
-	// checked for before copying again; landing says where in it, before lookFor.
+	// checked for before copying again; landing says where in it, before
+	// lookFor, and match what tells the copy apart there, after it.
 	lookFor string
 	landing string
+	match   string
 	// read reads back the recording the filing made, by its new id.
 	read func(ctx context.Context, id int64) (filedRecording, error)
 
@@ -152,9 +155,9 @@ func (f recordingFiling) show(id int64) string {
 	return fmt.Sprintf("%s %d%s", f.showCmd, id, f.scope)
 }
 
-// check is the command that lists where a copy lands.
+// check lists where a copy lands and says how to tell the copy apart there.
 func (f recordingFiling) check() string {
-	return f.lookFor + f.scope
+	return f.lookFor + f.scope + ", then " + f.match
 }
 
 func (f recordingFiling) start(ctx context.Context, app *appctx.App) (*basecamp.Filing, error) {
@@ -366,15 +369,26 @@ var filingWait = struct{ first, max, total time.Duration }{
 }
 
 // recordingCopyLookFor lists the recordings of one type in a project in the
-// source's status, newest first and every page. A copy keeps the source's
-// status, so this shows a copy whatever state it was made in. Basecamp's
-// recordings listing serves Todo, Todolist (groups included), Message,
-// Document, Upload, Vault, Kanban::Card and Schedule::Entry.
+// source's status, every page. A copy keeps the source's status, so this shows
+// a copy whatever state it was made in. Basecamp's recordings listing serves
+// Todo, Todolist (groups included), Message, Document, Upload, Vault,
+// Kanban::Card and Schedule::Entry.
 func recordingCopyLookFor(recordableType string, projectID int64, status string) string {
 	if status == "" {
 		status = "active"
 	}
-	return fmt.Sprintf("basecamp recordings list %s --in %d --status %s --sort created_at --direction desc --all", recordableType, projectID, status)
+	return fmt.Sprintf("basecamp recordings list %s --in %d --status %s --all", recordableType, projectID, status)
+}
+
+// copyMatch says what tells a copy of a recording apart in the container it
+// lands in. A copy keeps its original's title, created_at and updated_at, so
+// no sort puts it first; its title in that container finds it.
+func copyMatch(sourceID int64, title, container string, containerID int64) string {
+	name := fmt.Sprintf("the copy of #%d", sourceID)
+	if title != "" {
+		name = fmt.Sprintf("%q", title)
+	}
+	return fmt.Sprintf("look for %s in %s (#%d); a copy has its original's title and dates", name, cmp.Or(container, "the destination"), containerID)
 }
 
 // pollUntil runs check, backing off between runs, until it reports done or

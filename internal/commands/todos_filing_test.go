@@ -493,17 +493,29 @@ func TestTodosCopySeveralToAnotherProjectNeverRetriesAFailedCopy(t *testing.T) {
 	assert.False(t, e.Retryable)
 	assert.Contains(t, e.Message, "Copied 0 of 2 to-dos")
 	assert.Contains(t, e.Hint, "may have started the copy")
-	assert.Contains(t, e.Hint, "basecamp recordings list Todo --in 999 --status active --sort created_at --direction desc --all")
+	assert.Contains(t, e.Hint, "basecamp recordings list Todo --in 999 --status active --all")
+}
+
+// A copy keeps its original's created_at, so no sort brings it to the top of
+// the listing: the hint says to find it by its title in the destination list.
+func TestTodosCopyRecoveryFindsTheCopyByItsTitle(t *testing.T) {
+	transport := &mockTodoFilingTransport{postStatus: 502}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "copy", "456", "--to-project", "Dest", "--to-list", "Later")
+	e := output.AsError(run.err)
+	require.NotNil(t, run.err)
+
+	assert.NotContains(t, e.Hint, "--sort")
+	assert.Contains(t, e.Hint, `basecamp recordings list Todo --in 999 --status active --all, then look for "Task 456" in Later (#902); a copy has its original's title and dates`)
 }
 
 // A copy keeps the source's status, so the listing that looks for it must
-// show that status, newest first and every page.
+// show that status, every page.
 func TestCopyRecoveryListingShowsTheCopyInItsStatus(t *testing.T) {
-	assert.Equal(t, "basecamp recordings list Todo --in 999 --status active --sort created_at --direction desc --all",
+	assert.Equal(t, "basecamp recordings list Todo --in 999 --status active --all",
 		recordingCopyLookFor("Todo", 999, ""))
-	assert.Equal(t, "basecamp recordings list Todolist --in 999 --status archived --sort created_at --direction desc --all",
+	assert.Equal(t, "basecamp recordings list Todolist --in 999 --status archived --all",
 		recordingCopyLookFor("Todolist", 999, "archived"))
-	assert.Equal(t, "basecamp recordings list Kanban::Card --in 999 --status trashed --sort created_at --direction desc --all",
+	assert.Equal(t, "basecamp recordings list Kanban::Card --in 999 --status trashed --all",
 		recordingCopyLookFor("Kanban::Card", 999, "trashed"))
 }
 
@@ -582,7 +594,7 @@ func TestTodosRefuseATodoNamedTwiceBeforeFilingAny(t *testing.T) {
 // would miss the copy and invite a second one.
 func TestFilingFollowUpsNameTheProfileAndAnAccountGivenThisRun(t *testing.T) {
 	const scope = " --profile work --account 99999"
-	todoListing := "basecamp recordings list Todo --in 999 --status active --sort created_at --direction desc --all" + scope
+	todoListing := "basecamp recordings list Todo --in 999 --status active --all" + scope
 	for name, tc := range map[string]struct {
 		transport http.RoundTripper
 		group     func() *cobra.Command
@@ -612,12 +624,12 @@ func TestFilingFollowUpsNameTheProfileAndAnAccountGivenThisRun(t *testing.T) {
 		"a list copy that may have started": {
 			&mockTodoFilingTransport{postStatus: 502}, NewTodolistsCmd,
 			[]string{"copy", "310", "--to-project", "Dest"},
-			"basecamp recordings list Todolist --in 999 --status active --sort created_at --direction desc --all" + scope,
+			"basecamp recordings list Todolist --in 999 --status active --all" + scope,
 		},
 		"a card copy that may have started": {
 			&mockFilingTransport{postStatus: 502}, NewCardsCmd,
 			[]string{"copy", "456", "--to-project", "Dest"},
-			"basecamp recordings list Kanban::Card --in 999 --status active --sort created_at --direction desc --all" + scope,
+			"basecamp recordings list Kanban::Card --in 999 --status active --all" + scope,
 		},
 		"a card move's breadcrumb": {
 			&mockFilingTransport{statuses: []string{"completed"}}, NewCardsCmd,

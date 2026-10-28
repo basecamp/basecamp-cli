@@ -2071,6 +2071,7 @@ func cardFiling(app *appctx.App, kind basecamp.FilingType, card *basecamp.Card, 
 		showCmd:         "basecamp cards show",
 		lookFor:         recordingCopyLookFor("Kanban::Card", cardTableProjectID(table), card.Status),
 		landing:         "The copy lands in that table's Triage, or Done if completed",
+		match:           copyMatch(card.ID, card.Title, table.Title, table.ID),
 		read: func(ctx context.Context, id int64) (filedRecording, error) {
 			filed, err := app.Account().Cards().Get(ctx, id)
 			if err != nil {
