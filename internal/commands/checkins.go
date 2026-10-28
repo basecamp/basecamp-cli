@@ -569,6 +569,9 @@ func runCheckinsQuestionShow(cmd *cobra.Command, questionIDStr string, cf *comme
 	if err != nil {
 		return convertSDKError(err)
 	}
+	// A moved question's old id redirects to the question at its new id, and
+	// only the new id reaches its answers and comments.
+	questionIDStr = strconv.FormatInt(question.ID, 10)
 
 	enrichment := fetchCommentsForRecording(cmd.Context(), app, questionIDStr, cf)
 	data, commentOpts := enrichment.apply(question, "")

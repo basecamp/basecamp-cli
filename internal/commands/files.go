@@ -1564,6 +1564,20 @@ You can pass either an item ID or a Basecamp URL:
 			if result == nil {
 				return output.ErrNotFound("item", itemIDStr)
 			}
+			// A moved item's old id redirects to the item at its new id, and
+			// only the new id takes writes.
+			switch item := result.(type) {
+			case *basecamp.Vault:
+				itemIDStr = strconv.FormatInt(item.ID, 10)
+			case *basecamp.Upload:
+				itemIDStr = strconv.FormatInt(item.ID, 10)
+			case *basecamp.Document:
+				itemIDStr = strconv.FormatInt(item.ID, 10)
+			case *basecamp.CloudFile:
+				itemIDStr = strconv.FormatInt(item.ID, 10)
+			case *basecamp.GoogleDocument:
+				itemIDStr = strconv.FormatInt(item.ID, 10)
+			}
 
 			summary := fmt.Sprintf("%s: %s", detectedType, title)
 

@@ -348,6 +348,13 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, occurren
 	if err != nil {
 		return convertSDKError(err)
 	}
+	// A moved event's old id redirects to the event at its new id, and only
+	// the new id takes writes. A recurring event reads as an occurrence whose
+	// parent is the event.
+	entryID = strconv.FormatInt(entry.ID, 10)
+	if entry.Type == occurrenceType && entry.Parent != nil {
+		entryID = strconv.FormatInt(entry.Parent.ID, 10)
+	}
 
 	title := entry.Summary
 	if title == "" {

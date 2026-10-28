@@ -311,6 +311,9 @@ You can pass either a forward ID or a Basecamp URL:
 			if err != nil {
 				return convertSDKError(err)
 			}
+			// A moved forward's old id redirects to the forward at its new
+			// id, and only the new id reaches its replies and comments.
+			forwardIDStr = strconv.FormatInt(forward.ID, 10)
 
 			subject := forward.Subject
 			if subject == "" {

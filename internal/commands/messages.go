@@ -381,6 +381,9 @@ You can pass either a message ID or a Basecamp URL:
 		if err != nil {
 			return convertSDKError(err)
 		}
+		// A moved message's old id redirects to the message at its new id,
+		// and only the new id reaches its comments and attachments.
+		messageIDStr = strconv.FormatInt(message.ID, 10)
 
 		enrichment := fetchCommentsForRecording(cmd.Context(), app, messageIDStr, cf)
 

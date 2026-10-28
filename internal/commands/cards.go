@@ -2455,6 +2455,9 @@ You can pass either a column ID or a Basecamp URL:
 			if err != nil {
 				return convertSDKError(err)
 			}
+			// A moved column's old id redirects to the column at its new id,
+			// and only the new id takes writes.
+			columnIDStr = strconv.FormatInt(col.ID, 10)
 
 			return app.OK(col,
 				output.WithSummary(fmt.Sprintf("%s (%d cards)", col.Title, col.CardsCount)),

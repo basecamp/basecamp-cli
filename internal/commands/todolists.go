@@ -223,6 +223,9 @@ You can pass either a todolist ID or a Basecamp URL:
 			if err != nil {
 				return convertSDKError(err)
 			}
+			// A moved list's old id redirects to the list at its new id, and
+			// only the new id takes its to-dos and comments.
+			todolistIDStr = strconv.FormatInt(todolist.ID, 10)
 
 			enrichment := fetchCommentsForRecording(cmd.Context(), app, todolistIDStr, cf)
 			data, commentOpts := enrichment.apply(todolist, "")
