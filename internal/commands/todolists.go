@@ -813,7 +813,7 @@ func resolveFilingTodolist(cmd *cobra.Command, app *appctx.App, toProject, toLis
 		}
 		list, err := app.Account().Todolists().Get(cmd.Context(), id)
 		if err != nil {
-			return nil, convertSDKError(err)
+			return nil, notATodolistError(cmd, app, id, err)
 		}
 		listProject := strconv.FormatInt(todolistProjectID(list), 10)
 		if urlProjectID != "" && !sameNumericID(urlProjectID, listProject) {
@@ -866,6 +866,22 @@ func resolveFilingTodolist(cmd *cobra.Command, app *appctx.App, toProject, toLis
 	default:
 		return nil, ambiguousTodolistsError(named)
 	}
+}
+
+// notATodolistError explains a --to-list that names a project's To-dos, which
+// Basecamp does not file into, rather than reporting it as not found.
+func notATodolistError(cmd *cobra.Command, app *appctx.App, id int64, err error) error {
+	if basecamp.AsError(err).Code != basecamp.CodeNotFound {
+		return convertSDKError(err)
+	}
+	todoset, todosetErr := app.Account().Todosets().Get(cmd.Context(), id)
+	if todosetErr != nil || todoset.Bucket == nil {
+		return convertSDKError(err)
+	}
+	return output.ErrUsageHint(
+		fmt.Sprintf("%d is To-dos in project %d, not a to-do list", todoset.ID, todoset.Bucket.ID),
+		fmt.Sprintf("--to-list names a to-do list. See the lists there with: basecamp todolists list --in %d --todoset %d", todoset.Bucket.ID, todoset.ID),
+	)
 }
 
 // requireFilingDestinationList refuses a destination Basecamp refuses: a group

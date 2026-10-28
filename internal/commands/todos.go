@@ -2692,13 +2692,27 @@ func filedTodo(todo *basecamp.Todo, sourceID int64) filedRecording {
 }
 
 // requireListInTodosProject refuses a --list in another project before the
-// reposition, which only moves a to-do between the lists of its own project.
+// reposition, which only moves a to-do within its own project. The reposition
+// also takes the project's To-dos, which moves the to-do out of its list.
 func requireListInTodosProject(cmd *cobra.Command, app *appctx.App, todoID, listID int64) error {
 	todo, err := app.Account().Todos().Get(cmd.Context(), todoID)
 	if err != nil {
 		return convertSDKError(err)
 	}
 	list, err := app.Account().Todolists().Get(cmd.Context(), listID)
+	if err != nil && basecamp.AsError(err).Code == basecamp.CodeNotFound {
+		todoset, todosetErr := app.Account().Todosets().Get(cmd.Context(), listID)
+		if todosetErr != nil {
+			return convertSDKError(err)
+		}
+		if todo.Bucket == nil || todoset.Bucket == nil || todo.Bucket.ID == todoset.Bucket.ID {
+			return nil
+		}
+		return output.ErrUsageHint(
+			fmt.Sprintf("To-dos %d is in project %d, not in the to-do's project %d", todoset.ID, todoset.Bucket.ID, todo.Bucket.ID),
+			fmt.Sprintf("--list only moves a to-do within its project, and Basecamp moves one to another project only into a to-do list: basecamp todos move %d --to-project %d --to-list <list>", todo.ID, todoset.Bucket.ID),
+		)
+	}
 	if err != nil {
 		return convertSDKError(err)
 	}

@@ -51,6 +51,7 @@ type mockTodoFilingTransport struct {
 	requests []string
 	posts    []string
 	bodies   []map[string]any
+	puts     []map[string]any
 	filedTo  map[int64]int64
 }
 
@@ -94,6 +95,12 @@ func (m *mockTodoFilingTransport) RoundTrip(req *http.Request) (*http.Response, 
 		}
 	}
 	if req.Method == http.MethodPut {
+		body := map[string]any{}
+		if req.Body != nil {
+			raw, _ := io.ReadAll(req.Body)
+			_ = json.Unmarshal(raw, &body)
+		}
+		m.puts = append(m.puts, body)
 		return respond(204, ``)
 	}
 
@@ -361,6 +368,39 @@ func TestTodosMoveToAnotherListInItsProjectStillRepositions(t *testing.T) {
 	assert.Contains(t, transport.requests, "PUT /todos/456/position")
 	assert.Empty(t, transport.posts, "a move within the project keeps the to-do's id")
 	assert.Equal(t, "Moved todo #456 to list #310 at position 2", run.summary)
+}
+
+func TestTodosMoveToItsProjectsTodosRepositionsItLoose(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "456", "--to", "1", "--list", "300")
+	require.NoError(t, run.err)
+
+	assert.Contains(t, transport.requests, "PUT /todos/456/position")
+	require.Len(t, transport.puts, 1)
+	assert.Equal(t, float64(300), transport.puts[0]["parent_id"], "the to-do moves onto its project's To-dos, in no list")
+	assert.Empty(t, transport.posts)
+}
+
+func TestTodosMoveRefusesTheTodosOfAnotherProject(t *testing.T) {
+	transport := &mockTodoFilingTransport{}
+	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "456", "--to", "1", "--list", "900")
+	e := requireUsageRefusal(t, run, transport)
+
+	assert.Equal(t, "To-dos 900 is in project 999, not in the to-do's project 123", e.Message)
+	assert.Contains(t, e.Hint, "basecamp todos move 456 --to-project 999 --to-list <list>")
+}
+
+func TestTodosMoveRefusesToDosAsAFilingDestination(t *testing.T) {
+	for _, id := range []string{"300", "900"} {
+		t.Run(id, func(t *testing.T) {
+			transport := &mockTodoFilingTransport{}
+			run := runTodoFilingCommand(t, transport, NewTodosCmd(), "move", "456", "--to-list", id)
+			e := requireUsageRefusal(t, run, transport)
+
+			assert.Contains(t, e.Message, id+" is To-dos in project", "Basecamp files a to-do into a list, never onto To-dos")
+			assert.Contains(t, e.Hint, "basecamp todolists list --in")
+		})
+	}
 }
 
 func TestTodosRepositionRefusesSeveralTodos(t *testing.T) {
