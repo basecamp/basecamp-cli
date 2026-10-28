@@ -19,6 +19,10 @@ test_reports_schedule_returns_schedule_entries # 400 on some environments — sm
 test_timesheet_report_returns_timesheet_data # timesheets not enabled — smoke
 test_timesheet_project_returns_project_timesheet # timesheets not enabled — smoke
 test_timesheet_item_returns_timesheet_item_detail # timesheets not enabled — smoke
+test_timesheet_entry_create_logs_time_against_a_todo # timesheets not enabled — smoke
+test_timesheet_entry_show_returns_entry_detail # depends on timesheet entry create — smoke
+test_timesheet_entry_update_changes_the_hours # depends on timesheet entry create — smoke
+test_timesheet_entry_delete_removes_the_entry # depends on timesheet entry create — smoke
 
 # Lineup API may not exist on all environments
 test_lineup_create_creates_a_lineup_marker # API not available on some servers — smoke

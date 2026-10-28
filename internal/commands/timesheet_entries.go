@@ -83,7 +83,7 @@ time is for, and the item it is logged against.
 
 			return app.OK(entry,
 				output.WithSummary(timesheetEntrySummary("Timesheet entry", entry)),
-				output.WithBreadcrumbs(timesheetEntryBreadcrumbs(entry)...),
+				output.WithBreadcrumbs(timesheetEntryBreadcrumbs(cmd, entry)...),
 			)
 		},
 	}
@@ -155,7 +155,7 @@ project.
 
 			return app.OK(entry,
 				output.WithSummary(timesheetEntrySummary("Logged timesheet entry", entry)),
-				output.WithBreadcrumbs(timesheetEntryBreadcrumbs(entry)...),
+				output.WithBreadcrumbs(timesheetEntryBreadcrumbs(cmd, entry)...),
 			)
 		},
 	}
@@ -236,7 +236,7 @@ cleared through the API, only replaced.
 
 			return app.OK(entry,
 				output.WithSummary(timesheetEntrySummary("Updated timesheet entry", entry)),
-				output.WithBreadcrumbs(timesheetEntryBreadcrumbs(entry)...),
+				output.WithBreadcrumbs(timesheetEntryBreadcrumbs(cmd, entry)...),
 			)
 		},
 	}
@@ -461,7 +461,7 @@ func timesheetEntrySummary(prefix string, entry *basecamp.TimesheetEntry) string
 
 // timesheetEntryBreadcrumbs are the follow-ups for one entry: change or delete
 // it, and see the rest of the time on its item.
-func timesheetEntryBreadcrumbs(entry *basecamp.TimesheetEntry) []output.Breadcrumb {
+func timesheetEntryBreadcrumbs(cmd *cobra.Command, entry *basecamp.TimesheetEntry) []output.Breadcrumb {
 	crumbs := []output.Breadcrumb{
 		{
 			Action:      "update",
@@ -470,7 +470,7 @@ func timesheetEntryBreadcrumbs(entry *basecamp.TimesheetEntry) []output.Breadcru
 		},
 		{
 			Action:      "delete",
-			Cmd:         fmt.Sprintf("basecamp timesheet entry delete %d", entry.ID),
+			Cmd:         timesheetEntryDeleteCmd(cmd, entry.ID),
 			Description: "Delete entry",
 		},
 	}
@@ -482,4 +482,17 @@ func timesheetEntryBreadcrumbs(entry *basecamp.TimesheetEntry) []output.Breadcru
 		})
 	}
 	return crumbs
+}
+
+// timesheetEntryDeleteCmd builds the delete breadcrumb for whoever will read
+// it, as deleteLineCmd does for chat lines: machine output cannot answer the
+// confirmation, so it gets --force; a person gets the bare command and is
+// asked, with any flag holding this invocation in a human format carried
+// along so the pasted command renders the same way.
+func timesheetEntryDeleteCmd(cmd *cobra.Command, entryID int64) string {
+	c := fmt.Sprintf("basecamp timesheet entry delete %d", entryID)
+	if machineReadsThisOutput(cmd) {
+		return c + " --force"
+	}
+	return c + humanFormatOverride(appctx.FromContext(cmd.Context()))
 }

@@ -4,11 +4,14 @@
 load smoke_helper
 
 setup_file() {
+  # Each test depends on the one before it: create writes the entry id the
+  # rest read, and delete must come last.
+  export BATS_NO_PARALLELIZE_WITHIN_FILE=true
   ensure_token || return 1
   ensure_todo || return 1
 }
 
-@test "timesheet entry create logs time against a to-do" {
+@test "timesheet entry create logs time against a todo" {
   run_smoke basecamp timesheet entry create "$QA_TODO" --hours 0.25 --description "Smoke entry $(date +%s)" --json
   # Timesheets may not be enabled on all accounts (403 forbidden)
   [[ "$status" -eq 4 ]] && mark_unverifiable "Timesheets not enabled in this account"

@@ -264,3 +264,27 @@ func TestTimesheetEntryVerbsHoldAURLToItsHostAndAccount(t *testing.T) {
 		})
 	}
 }
+
+// The delete breadcrumb is something its reader can run: machine output cannot
+// answer a confirmation, so the JSON a test renders carries --force.
+func TestTimesheetEntryDeleteBreadcrumbCarriesForceForMachineOutput(t *testing.T) {
+	app, _, out := setupPersonalFeedApp(t,
+		stubRoute{method: http.MethodGet, path: timesheetEntryPath(1069480283), status: http.StatusOK, body: timesheetEntryFixture})
+	app.Flags.Hints = true // breadcrumbs are stripped from the envelope without this
+	require.NoError(t, executeRecordingCommand(NewTimesheetCmd(), app, "entry", "show", "1069480283"))
+
+	var envelope struct {
+		Breadcrumbs []struct {
+			Action string `json:"action"`
+			Cmd    string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope), out.String())
+	var deleteCmd string
+	for _, b := range envelope.Breadcrumbs {
+		if b.Action == "delete" {
+			deleteCmd = b.Cmd
+		}
+	}
+	assert.Equal(t, "basecamp timesheet entry delete 1069480283 --force", deleteCmd)
+}
