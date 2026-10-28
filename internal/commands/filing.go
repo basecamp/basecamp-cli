@@ -395,25 +395,108 @@ var filingWait = struct{ first, max, total time.Duration }{
 	total: time.Minute,
 }
 
-// recordingCopyLookFor lists the recordings of one type in a project in the
-// source's status, every page. A copy keeps the source's status, so this shows
-// a copy whatever state it was made in. Basecamp's recordings listing serves
-// Todo, Todolist (groups included), Message, Document, Upload, Vault,
-// Kanban::Card and Schedule::Entry, in the active, archived and trashed
-// statuses only. A drafted copy is listed only among its author's drafts,
-// which hold messages, documents and uploads.
-func recordingCopyLookFor(recordableType string, projectID int64, status string) string {
-	switch status {
-	case "archived", "trashed":
-	case "drafted":
-		if slices.Contains([]string{"Message", "Document", "Upload"}, recordableType) {
-			return "basecamp drafts list --all"
+// copyPlace is a copy by what decides which listing can show it: the
+// recordable type, the status it keeps from its source, and whether its
+// container is in a calendar rather than a project.
+type copyPlace struct {
+	typ      string
+	status   string
+	calendar bool
+}
+
+// copyListing lists where a copy in place lands in t, newest first and every
+// page.
+type copyListing func(place copyPlace, t filingTarget) string
+
+// copyListings is how to find a copy whose start got no answer, so it is
+// checked for before copying again. A place is here only when its listing is
+// known to show a copy in that status; any other, a type or status added
+// later included, is checked by opening the destination in Basecamp.
+//
+//   - recordings list serves these types in the active, archived and trashed
+//     statuses, in projects (bc3 doc/api/sections/recordings.md).
+//   - drafts list holds drafted messages, documents and uploads, and no
+//     other drafts (drafts.md).
+//   - schedule entries --status lists a schedule's active, archived or
+//     trashed entries (schedule_entries.md), a calendar's included.
+//   - timeline shows a copied cloud file or question, active or archived, as
+//     reposted; it relays nothing drafted or trashed (Timeline::Relayer), and
+//     no copied forward, column or Google document (checked against bc3).
+//   - checkins questions, forwards list and cards columns list only
+//     recordings that inherit their status, which an archived, trashed or
+//     drafted copy does not.
+var copyListings = copyTable([]copyRow{
+	{[]string{"Document", "Kanban::Card", "Message", "Schedule::Entry", "Todo", "Todolist", "Upload", "Vault"}, []string{"active", "archived", "trashed"}, false, listRecordings},
+	{[]string{"Message", "Document", "Upload"}, []string{"drafted"}, false, listDrafts},
+	{[]string{"Schedule::Entry"}, []string{"active", "archived", "trashed"}, true, listCalendarEntries},
+	{[]string{"CloudFile"}, []string{"active", "archived"}, false, listTimeline},
+	{[]string{"Question"}, []string{"archived"}, false, listTimeline},
+	{[]string{"Question"}, []string{"active"}, false, listQuestions},
+	{[]string{"Inbox::Forward"}, []string{"active"}, false, listForwards},
+	{[]string{"Kanban::Column"}, []string{"active"}, false, listColumns},
+})
+
+// copyRow is one listing of copyListings with the places it shows.
+type copyRow struct {
+	types    []string
+	statuses []string
+	calendar bool
+	listing  copyListing
+}
+
+// copyTable spreads rows into one listing per place, refusing a place two
+// rows claim.
+func copyTable(rows []copyRow) map[copyPlace]copyListing {
+	table := map[copyPlace]copyListing{}
+	for _, row := range rows {
+		for _, typ := range row.types {
+			for _, status := range row.statuses {
+				place := copyPlace{typ: typ, status: status, calendar: row.calendar}
+				if _, claimed := table[place]; claimed {
+					panic(fmt.Sprintf("copyListings names %+v twice", place))
+				}
+				table[place] = row.listing
+			}
 		}
-		return fmt.Sprintf("open the destination in Basecamp, since Basecamp's API lists no drafted %s", recordableType)
-	default:
-		status = "active"
 	}
-	return fmt.Sprintf("basecamp recordings list %s --in %d --status %s --all", recordableType, projectID, status)
+	return table
+}
+
+func listRecordings(place copyPlace, t filingTarget) string {
+	return fmt.Sprintf("basecamp recordings list %s --in %d --status %s --sort created_at --direction desc --all", place.typ, t.projectID, place.status)
+}
+
+func listDrafts(copyPlace, filingTarget) string { return "basecamp drafts list --all" }
+
+func listCalendarEntries(place copyPlace, t filingTarget) string {
+	return fmt.Sprintf("basecamp schedule entries --in %d --schedule %d --status %s --all", t.projectID, t.id, place.status)
+}
+
+func listTimeline(_ copyPlace, t filingTarget) string {
+	return fmt.Sprintf("basecamp timeline --in %d --all", t.projectID)
+}
+
+func listQuestions(_ copyPlace, t filingTarget) string {
+	return fmt.Sprintf("basecamp checkins questions --in %d --questionnaire %d --all", t.projectID, t.id)
+}
+
+func listForwards(_ copyPlace, t filingTarget) string {
+	return fmt.Sprintf("basecamp forwards list --in %d --inbox %d --all", t.projectID, t.id)
+}
+
+func listColumns(_ copyPlace, t filingTarget) string {
+	return fmt.Sprintf("basecamp cards columns --in %d --card-table %d", t.projectID, t.id)
+}
+
+// copyLookFor says where to find a copy of a typ recording in status that
+// lands in t: its listing in copyListings, or else the destination's page in
+// Basecamp.
+func copyLookFor(typ, status string, t filingTarget) string {
+	place := copyPlace{typ: typ, status: cmp.Or(status, "active"), calendar: t.calendar}
+	if listing, ok := copyListings[place]; ok {
+		return listing(place, t)
+	}
+	return "open the destination in Basecamp: " + cmp.Or(t.appURL, t.describe("destination"))
 }
 
 // copyMatch says what tells a copy of a recording apart in the container it

@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"path"
@@ -982,13 +981,6 @@ func scheduleEntryFamily() filingFamily {
 		},
 		ownFlags: []string{"schedule"},
 		get:      getScheduleEntryForFiling,
-		lookFor: func(src filingSource, t filingTarget) string {
-			if t.calendar && src.status != "drafted" {
-				// The recordings listing serves projects, not calendars.
-				return fmt.Sprintf("basecamp schedule entries --in %d --schedule %d --status %s --all", t.projectID, t.id, cmp.Or(src.status, "active"))
-			}
-			return recordingCopyLookFor("Schedule::Entry", t.projectID, src.status)
-		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
 			return []output.Breadcrumb{{
 				Action:      "show",

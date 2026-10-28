@@ -1111,7 +1111,7 @@ func listFiling(cmd *cobra.Command, app *appctx.App, kind basecamp.FilingType, l
 		destinationID: todoset.ID,
 		destination:   fmt.Sprintf("To-dos %d in project %d", todoset.ID, projectID),
 		showCmd:       "basecamp todolists show",
-		lookFor:       recordingCopyLookFor("Todolist", projectID, list.Status),
+		lookFor:       copyLookFor("Todolist", list.Status, filingTarget{id: todoset.ID, appURL: todoset.AppURL, projectID: projectID}),
 		match:         copyMatch(list.ID, list.Name, todoset.Title, todoset.ID),
 		read:          readFiledTodolist(app, list.ID),
 	}, nil
@@ -1145,7 +1145,7 @@ func groupFiling(cmd *cobra.Command, app *appctx.App, kind basecamp.FilingType, 
 		destinationID: into.ID,
 		destination:   fmt.Sprintf("to-do list %d (%s)", into.ID, into.Name),
 		showCmd:       "basecamp todolists show",
-		lookFor:       recordingCopyLookFor("Todolist", todolistProjectID(into), group.Status),
+		lookFor:       copyLookFor("Todolist", group.Status, filingTarget{id: into.ID, appURL: into.AppURL, projectID: todolistProjectID(into)}),
 		match:         copyMatch(group.ID, group.Name, into.Name, into.ID),
 		read:          readFiledTodolist(app, group.ID),
 	}, nil
@@ -1208,7 +1208,7 @@ func resolveFilingTodoset(cmd *cobra.Command, app *appctx.App, toProject, toTodo
 	if err != nil {
 		return nil, err
 	}
-	return &basecamp.Todoset{ID: target.id, Title: target.title, Bucket: &basecamp.Bucket{ID: target.projectID, Name: target.projectName}}, nil
+	return &basecamp.Todoset{ID: target.id, Title: target.title, AppURL: target.appURL, Bucket: &basecamp.Bucket{ID: target.projectID, Name: target.projectName}}, nil
 }
 
 func todosetProjectID(todoset *basecamp.Todoset) int64 {

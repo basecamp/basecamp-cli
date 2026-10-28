@@ -513,19 +513,6 @@ func TestTodosCopyRecoveryFindsTheCopyByItsTitle(t *testing.T) {
 	assert.Contains(t, e.Hint, `basecamp recordings list Todo --in 999 --status active --all, then look for "Task 456" in Later (#902); a copy has its original's title and dates`)
 }
 
-// A copy keeps the source's status, so the listing that looks for it must
-// show that status, every page.
-func TestCopyRecoveryListingShowsTheCopyInItsStatus(t *testing.T) {
-	assert.Equal(t, "basecamp recordings list Todo --in 999 --status active --all",
-		recordingCopyLookFor("Todo", 999, ""))
-	assert.Equal(t, "basecamp recordings list Todolist --in 999 --status archived --all",
-		recordingCopyLookFor("Todolist", 999, "archived"))
-	assert.Equal(t, "basecamp recordings list Kanban::Card --in 999 --status trashed --all",
-		recordingCopyLookFor("Kanban::Card", 999, "trashed"))
-	assert.Equal(t, "basecamp drafts list --all", recordingCopyLookFor("Upload", 999, "drafted"),
-		"the recordings listing serves only active, archived and trashed")
-}
-
 func TestTodosCopyIntoTheListItIsInIsAllowed(t *testing.T) {
 	transport := &mockTodoFilingTransport{}
 	run := runTodoFilingCommand(t, transport, NewTodosCmd(), "copy", "456", "--to-list", "https://3.basecamp.com/99999/buckets/123/todolists/310")

@@ -2980,17 +2980,6 @@ func filesFamily() filingFamily {
 				fmt.Sprintf("Move it to that folder and keep its ID with: basecamp files move %d --to %d", src.id, folder),
 			)
 		},
-		lookFor: func(src filingSource, t filingTarget) string {
-			switch src.typ {
-			case "CloudFile":
-				return copiesInTimeline(t.projectID)
-			case "GoogleDocument":
-				// No API listing or timeline shows a Google document.
-				return fmt.Sprintf("basecamp files show %d --in %d, and open its app_url in Basecamp, since Basecamp's API lists no Google documents",
-					cmp.Or(t.parentID, t.id), t.projectID)
-			}
-			return recordingCopyLookFor(src.typ, t.projectID, src.status)
-		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
 			return []output.Breadcrumb{{
 				Action:      "show",
@@ -3074,7 +3063,7 @@ func filesFolderByTitle(cmd *cobra.Command, app *appctx.App, toProject, toFolder
 	switch len(named) {
 	case 1:
 		if named[0].ID != root.id {
-			root.parentID, root.parentTitle = named[0].ID, named[0].Title
+			root.parentID, root.parentTitle, root.appURL = named[0].ID, named[0].Title, named[0].AppURL
 		}
 		return root, nil
 	case 0:
@@ -3134,7 +3123,7 @@ func filesFolderTarget(ctx context.Context, app *appctx.App, folderID int64) (fi
 		}
 		if docked(parent.ID) {
 			target := bucketTarget(parent.ID, parent.Title, parent.AppURL, folder.Bucket)
-			target.parentID, target.parentTitle = folder.ID, folder.Title
+			target.parentID, target.parentTitle, target.appURL = folder.ID, folder.Title, folder.AppURL
 			return target, nil
 		}
 		above, err := app.Account().Vaults().Get(ctx, parent.ID)

@@ -20,13 +20,13 @@ func filesFilingTransport() *familyTransport {
 	return &familyTransport{gets: map[string]string{
 		"/projects":          filingProjects,
 		"/projects/123":      `{"id":123,"name":"Source","dock":[{"name":"vault","id":500,"title":"Docs & Files","enabled":true}]}`,
-		"/projects/999":      `{"id":999,"name":"Dest","dock":[{"name":"vault","id":900,"title":"Docs & Files","enabled":true}]}`,
+		"/projects/999":      `{"id":999,"name":"Dest","dock":[{"name":"vault","id":900,"title":"Docs & Files","enabled":true,"app_url":"https://3.basecamp.com/99999/buckets/999/vaults/900"}]}`,
 		"/vaults/500":        `{"id":500,"type":"Vault","title":"Docs & Files","bucket":{"id":123,"name":"Source"}}`,
 		"/vaults/501":        `{"id":501,"type":"Vault","title":"Specs","bucket":{"id":123,"name":"Source"},"parent":{"id":500,"title":"Docs & Files","type":"Vault"}}`,
 		"/vaults/900":        `{"id":900,"type":"Vault","title":"Docs & Files","bucket":{"id":999,"name":"Dest"}}`,
 		"/vaults/950":        `{"id":950,"type":"Vault","title":"Contracts","bucket":{"id":999,"name":"Dest"},"parent":{"id":900,"title":"Docs & Files","type":"Vault"}}`,
 		"/vaults/960":        `{"id":960,"type":"Vault","title":"2026","bucket":{"id":999,"name":"Dest"},"parent":{"id":950,"title":"Contracts","type":"Vault"}}`,
-		"/vaults/900/vaults": `[{"id":950,"type":"Vault","title":"Contracts"}]`,
+		"/vaults/900/vaults": `[{"id":950,"type":"Vault","title":"Contracts","app_url":"https://3.basecamp.com/99999/buckets/999/vaults/950"}]`,
 		"/documents/456":     `{"id":456,"type":"Document","title":"Plan","bucket":{"id":123,"name":"Source"},"parent":{"id":500,"title":"Docs & Files","type":"Vault"}}`,
 		"/documents/4560":    `{"id":4560,"type":"Document","title":"Plan","bucket":{"id":999,"name":"Dest"},"parent":{"id":900,"title":"Docs & Files","type":"Vault"}}`,
 		"/uploads/457":       `{"id":457,"type":"Upload","filename":"spec.pdf","bucket":{"id":123,"name":"Source"},"parent":{"id":501,"title":"Specs","type":"Vault"}}`,
@@ -242,8 +242,27 @@ func TestFilesCopyOfAGoogleDocumentPointsAtItsFolderInBasecamp(t *testing.T) {
 	transport.refuse = map[int64]int{459: 502}
 	e := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "459", "--to-project", "Dest", "--to-folder", "Contracts").failure(t)
 	assert.Contains(t, e.Hint, "may have started the copy")
-	assert.Contains(t, e.Hint, "basecamp files show 950 --in 999, and open its app_url in Basecamp")
+	assert.Contains(t, e.Hint, "open the destination in Basecamp: https://3.basecamp.com/99999/buckets/999/vaults/950")
 	assert.NotContains(t, e.Hint, "timeline", "the timeline never shows a Google document")
+}
+
+// Basecamp's timeline shows a copied cloud file as reposted, but leaves out
+// a trashed one, and a copy keeps its source's status.
+func TestFilesCopyOfACloudFileIsLookedForWhereItsStatusShows(t *testing.T) {
+	for status, want := range map[string]string{
+		"active":   "basecamp timeline --in 999 --all",
+		"archived": "basecamp timeline --in 999 --all",
+		"trashed":  "open the destination in Basecamp: https://3.basecamp.com/99999/buckets/999/vaults/900",
+	} {
+		t.Run(status, func(t *testing.T) {
+			transport := filesFilingTransport()
+			transport.gets["/cloud_files/458"] = strings.Replace(transport.gets["/cloud_files/458"], `"type":"CloudFile"`, `"type":"CloudFile","status":"`+status+`"`, 1)
+			transport.refuse = map[int64]int{458: 502}
+			e := runFamilyCommand(t, transport, NewFilesCmd(), "copy", "458", "--to-project", "Dest").failure(t)
+			assert.Contains(t, e.Hint, "may have started the copy")
+			assert.True(t, strings.HasSuffix(e.Hint, "Check first: "+want), e.Hint)
+		})
+	}
 }
 
 func TestFilesFolderTitleSharedWithItsDocsAndFilesIsAmbiguous(t *testing.T) {

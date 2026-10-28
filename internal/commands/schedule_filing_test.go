@@ -194,7 +194,7 @@ func TestScheduleCopyOfADraftWithNoFilingNamesNoListing(t *testing.T) {
 		transport.refuse = map[int64]int{456: 502}
 		e := runFamilyCommand(t, transport, NewScheduleCmd(), "copy", "456", "--to-schedule", dest).failure(t)
 		assert.Contains(t, e.Hint, "may have started the copy")
-		assert.Contains(t, e.Hint, "Basecamp's API lists no drafted Schedule::Entry", dest)
+		assert.Contains(t, e.Hint, "open the destination in Basecamp: ", dest)
 		assert.NotContains(t, e.Hint, "--status drafted", dest)
 	}
 }

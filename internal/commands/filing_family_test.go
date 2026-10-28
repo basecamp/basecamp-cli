@@ -337,12 +337,12 @@ func TestCopyRecoveryListsWhereTheCopyShows(t *testing.T) {
 		"an archived event":             {scheduleFilingTransport, NewScheduleCmd, "/schedule_entries/456", "archived", "basecamp recordings list Schedule::Entry --in 999 --status archived --sort created_at --direction desc --all"},
 		"a check-in question":           {checkinsFilingTransport, NewCheckinsCmd, "/questions/456", "", "basecamp checkins questions --in 999 --questionnaire 900 --all"},
 		"an archived check-in question": {checkinsFilingTransport, NewCheckinsCmd, "/questions/456", "archived", "basecamp timeline --in 999 --all"},
-		"a trashed check-in question":   {checkinsFilingTransport, NewCheckinsCmd, "/questions/456", "trashed", "open https://3.basecamp.com/99999/buckets/999/questionnaires/900 in Basecamp, since Basecamp's API lists no trashed check-in questions"},
+		"a trashed check-in question":   {checkinsFilingTransport, NewCheckinsCmd, "/questions/456", "trashed", "open the destination in Basecamp: https://3.basecamp.com/99999/buckets/999/questionnaires/900"},
 		"an email forward":              {forwardsFilingTransport, NewForwardsCmd, "/inbox_forwards/456", "", "basecamp forwards list --in 999 --inbox 900 --all"},
-		"an archived email forward":     {forwardsFilingTransport, NewForwardsCmd, "/inbox_forwards/456", "archived", "basecamp timeline --in 999 --all"},
-		"a trashed email forward":       {forwardsFilingTransport, NewForwardsCmd, "/inbox_forwards/456", "trashed", "open https://3.basecamp.com/99999/buckets/999/inboxes/900 in Basecamp, since Basecamp's API lists no trashed email forwards"},
+		"an archived email forward":     {forwardsFilingTransport, NewForwardsCmd, "/inbox_forwards/456", "archived", "open the destination in Basecamp: https://3.basecamp.com/99999/buckets/999/inboxes/900"},
+		"a trashed email forward":       {forwardsFilingTransport, NewForwardsCmd, "/inbox_forwards/456", "trashed", "open the destination in Basecamp: https://3.basecamp.com/99999/buckets/999/inboxes/900"},
 		"a card table column":           {columnsTransport, NewCardsCmd, "/card_tables/columns/456", "", "basecamp cards columns --in 999 --card-table 900"},
-		"an archived card table column": {columnsTransport, NewCardsCmd, "/card_tables/columns/456", "archived", "open https://3.basecamp.com/99999/buckets/999/card_tables/900 in Basecamp, since Basecamp's API lists no archived columns"},
+		"an archived card table column": {columnsTransport, NewCardsCmd, "/card_tables/columns/456", "archived", "open the destination in Basecamp: https://3.basecamp.com/99999/buckets/999/card_tables/900"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			transport := tc.transport()
@@ -362,6 +362,82 @@ func TestCopyRecoveryListsWhereTheCopyShows(t *testing.T) {
 			assert.Contains(t, e.Hint, tc.want)
 		})
 	}
+}
+
+// Every recording a move or copy files, in every status a copy can keep, is
+// looked for in a listing known to show it there, or at the destination's page
+// in Basecamp. Each listing below carries the places it is known to show; a
+// recovery naming anything else, or a listing for a place it hides, fails.
+func TestEveryCopyRecoveryCanShowTheCopy(t *testing.T) {
+	dest := filingTarget{id: 7, title: "Dest tool", appURL: "https://3.basecamp.com/99999/buckets/42/vaults/7", projectID: 42}
+	listedStatuses := []string{"active", "archived", "trashed"}
+	// bc3 doc/api/sections/recordings.md: the types GET /projects/recordings.json takes.
+	recordingsTypes := []string{"Comment", "Document", "Door", "Kanban::Card", "Kanban::Step", "Message", "Question::Answer", "Schedule::Entry", "Todo", "Todolist", "Upload", "Vault"}
+	type knownListing struct {
+		listing *regexp.Regexp
+		shows   func(place copyPlace, match []string) bool
+	}
+	knownGood := []knownListing{
+		{regexp.MustCompile(`^basecamp recordings list (\S+) --in 42 --status (\S+) --sort created_at --direction desc --all$`),
+			func(p copyPlace, m []string) bool {
+				return !p.calendar && m[1] == p.typ && m[2] == p.status && slices.Contains(recordingsTypes, p.typ) && slices.Contains(listedStatuses, p.status)
+			}},
+		// drafts.md: messages, documents and uploads, and no other drafts.
+		{regexp.MustCompile(`^basecamp drafts list --all$`),
+			func(p copyPlace, _ []string) bool {
+				return p.status == "drafted" && slices.Contains([]string{"Message", "Document", "Upload"}, p.typ)
+			}},
+		// schedule_entries.md: a schedule's entries by status, active, archived or trashed.
+		{regexp.MustCompile(`^basecamp schedule entries --in 42 --schedule 7 --status (\S+) --all$`),
+			func(p copyPlace, m []string) bool {
+				return p.typ == "Schedule::Entry" && m[1] == p.status && slices.Contains(listedStatuses, p.status)
+			}},
+		// Seen against bc3: a copied cloud file (active or archived) and an
+		// archived question show as reposted; nothing trashed or drafted does.
+		{regexp.MustCompile(`^basecamp timeline --in 42 --all$`),
+			func(p copyPlace, _ []string) bool {
+				return !p.calendar && (p.typ == "CloudFile" && (p.status == "active" || p.status == "archived") ||
+					p.typ == "Question" && p.status == "archived")
+			}},
+		// These list only recordings that inherit their status: active ones.
+		{regexp.MustCompile(`^basecamp checkins questions --in 42 --questionnaire 7 --all$`),
+			func(p copyPlace, _ []string) bool { return !p.calendar && p.typ == "Question" && p.status == "active" }},
+		{regexp.MustCompile(`^basecamp forwards list --in 42 --inbox 7 --all$`),
+			func(p copyPlace, _ []string) bool { return !p.calendar && p.typ == "Inbox::Forward" && p.status == "active" }},
+		{regexp.MustCompile(`^basecamp cards columns --in 42 --card-table 7$`),
+			func(p copyPlace, _ []string) bool { return !p.calendar && p.typ == "Kanban::Column" && p.status == "active" }},
+	}
+
+	types := []string{"Todo", "Todolist", "Kanban::Card"}
+	for _, fam := range []filingFamily{messageFamily(), filesFamily(), columnFamily(), scheduleEntryFamily(), questionFamily(), forwardFamily()} {
+		types = append(types, fam.types...)
+	}
+	statuses := make([]string, 0, 4+len(copyListings))
+	statuses = append(statuses, "active", "archived", "trashed", "drafted")
+	for place := range copyListings {
+		types, statuses = append(types, place.typ), append(statuses, place.status)
+	}
+	listed := map[copyPlace]bool{}
+	for _, typ := range types {
+		for _, status := range statuses {
+			for _, calendar := range []bool{false, true} {
+				place := copyPlace{typ: typ, status: status, calendar: calendar}
+				target := dest
+				target.calendar = calendar
+				hint := copyLookFor(typ, status, target)
+				if hint == "open the destination in Basecamp: "+dest.appURL {
+					continue
+				}
+				listed[place] = true
+				shown := slices.ContainsFunc(knownGood, func(good knownListing) bool {
+					match := good.listing.FindStringSubmatch(hint)
+					return match != nil && good.shows(place, match)
+				})
+				assert.True(t, shown, "%+v: %q is not known to show this copy", place, hint)
+			}
+		}
+	}
+	assert.Len(t, listed, len(copyListings), "every listing in the table was checked")
 }
 
 // A filing's breadcrumbs name a show command for the record, which reads it by

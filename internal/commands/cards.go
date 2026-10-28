@@ -2068,7 +2068,7 @@ func cardFiling(app *appctx.App, kind basecamp.FilingType, card *basecamp.Card, 
 		includeComments: includeComments,
 		destination:     fmt.Sprintf("card table %d (%s)", table.ID, table.Title),
 		showCmd:         "basecamp cards show",
-		lookFor:         recordingCopyLookFor("Kanban::Card", cardTableProjectID(table), card.Status),
+		lookFor:         copyLookFor("Kanban::Card", card.Status, filingTarget{id: table.ID, appURL: table.AppURL, projectID: cardTableProjectID(table)}),
 		match:           copyMatch(card.ID, card.Title, table.Title, table.ID),
 		read: func(ctx context.Context, id int64) (filedRecording, error) {
 			filed, err := app.Account().Cards().Get(ctx, id)
@@ -2825,9 +2825,6 @@ func columnFamily() filingFamily {
 		},
 		sameHint: func(src filingSource, target filingTarget) string {
 			return fmt.Sprintf("Reposition it within that card table with: basecamp cards column move %d --position <n> --card-table %d --in %d", src.id, target.id, target.projectID)
-		},
-		lookFor: func(src filingSource, t filingTarget) string {
-			return copyInListing(src, t, "columns", fmt.Sprintf("basecamp cards columns --in %d --card-table %d", t.projectID, t.id), false)
 		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
 			return []output.Breadcrumb{{

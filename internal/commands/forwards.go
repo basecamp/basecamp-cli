@@ -685,9 +685,6 @@ func forwardFamily() filingFamily {
 			}
 			return f, filingSource{id: f.ID, typ: f.Type, status: f.Status, title: f.Subject, bucket: f.Bucket, parent: f.Parent}, nil
 		},
-		lookFor: func(src filingSource, t filingTarget) string {
-			return copyInListing(src, t, "email forwards", fmt.Sprintf("basecamp forwards list --in %d --inbox %d --all", t.projectID, t.id), true)
-		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
 			return []output.Breadcrumb{{
 				Action:      "show",

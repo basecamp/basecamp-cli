@@ -1140,9 +1140,6 @@ func messageFamily() filingFamily {
 			}
 			return m, filingSource{id: m.ID, typ: m.Type, status: m.Status, title: m.Subject, bucket: m.Bucket, parent: m.Parent}, nil
 		},
-		lookFor: func(src filingSource, t filingTarget) string {
-			return recordingCopyLookFor("Message", t.projectID, src.status)
-		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
 			return []output.Breadcrumb{{
 				Action:      "show",

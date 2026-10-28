@@ -1698,9 +1698,6 @@ func questionFamily() filingFamily {
 			}
 			return q, filingSource{id: q.ID, typ: q.Type, status: q.Status, title: q.Title, bucket: q.Bucket, parent: q.Parent}, nil
 		},
-		lookFor: func(src filingSource, t filingTarget) string {
-			return copyInListing(src, t, "check-in questions", fmt.Sprintf("basecamp checkins questions --in %d --questionnaire %d --all", t.projectID, t.id), true)
-		},
 		crumbs: func(id, projectID int64) []output.Breadcrumb {
 			return []output.Breadcrumb{{
 				Action:      "show",
