@@ -133,6 +133,11 @@ func TestTimesheetEntryCreateRefusesBadInput(t *testing.T) {
 		// Neither does a project's URL, or a listing's.
 		{"entry", "create", "https://3.basecamp.com/99999/projects/89", "--hours", "1"},
 		{"entry", "create", "https://3.basecamp.com/99999/buckets/89/todolists", "--hours", "1"},
+		// A person's URL parses to an id, but not a recording's.
+		{"entry", "create", "https://3.basecamp.com/99999/people/789", "--hours", "1"},
+		// Without a scheme there is no host to trust.
+		{"entry", "create", "//evil.example/11111/buckets/89/todos/789", "--hours", "1"},
+		{"entry", "create", "3.basecamp.com/99999/buckets/89/todos/789", "--hours", "1"},
 	} {
 		transport, _, _, err := runTimesheet(t, nil, args...)
 		requireBookmarksUsageError(t, err)
@@ -256,6 +261,8 @@ func TestTimesheetEntryVerbsHoldAURLToItsHostAndAccount(t *testing.T) {
 		{"update other account", []string{"entry", "update", "https://3.basecampapi.com/11111/timesheet_entries/1069480283.json", "--hours", "1"}},
 		{"delete other account", []string{"entry", "delete", "https://3.basecamp.com/11111/projects/89/timesheet/entries/1069480283", "--force"}},
 		{"create other account", []string{"entry", "create", "https://3.basecamp.com/11111/buckets/89/todos/789", "--hours", "1"}},
+		{"show scheme-less", []string{"entry", "show", "//evil.example/11111/timesheet_entries/1069480283"}},
+		{"delete scheme-less", []string{"entry", "delete", "3.basecamp.com/99999/timesheet_entries/1069480283", "--force"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			transport, _, _, err := runTimesheet(t, nil, tc.args...)
@@ -287,4 +294,41 @@ func TestTimesheetEntryDeleteBreadcrumbCarriesForceForMachineOutput(t *testing.T
 		}
 	}
 	assert.Equal(t, "basecamp timesheet entry delete 1069480283 --force", deleteCmd)
+}
+
+// Account ids compare as numbers, so a zero-padded URL account is the
+// configured one.
+func TestTimesheetEntryAcceptsAZeroPaddedAccountInAURL(t *testing.T) {
+	transport, _, _, err := runTimesheet(t,
+		[]stubRoute{{method: http.MethodGet, path: timesheetEntryPath(1069480283), status: http.StatusOK, body: timesheetEntryFixture}},
+		"entry", "show", "https://3.basecamp.com/099999/projects/89/timesheet/entries/1069480283")
+	require.NoError(t, err)
+	assert.Equal(t, timesheetEntryPath(1069480283), transport.last(t).Path)
+}
+
+// An account adopted from a pasted URL lasts only for this run, so the
+// follow-ups name it; otherwise a pasted update or delete would act in
+// whatever account the next run resolves.
+func TestTimesheetEntryBreadcrumbsCarryAnAccountAdoptedFromTheURL(t *testing.T) {
+	app, _, out := setupPersonalFeedApp(t,
+		stubRoute{method: http.MethodGet, path: timesheetEntryPath(1069480283), status: http.StatusOK, body: timesheetEntryFixture})
+	app.Config.AccountID = ""
+	app.Flags.Hints = true
+	require.NoError(t, executeRecordingCommand(NewTimesheetCmd(), app, "entry", "show",
+		"https://3.basecamp.com/99999/projects/89/timesheet/entries/1069480283"))
+
+	var envelope struct {
+		Breadcrumbs []struct {
+			Action string `json:"action"`
+			Cmd    string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope), out.String())
+	got := map[string]string{}
+	for _, b := range envelope.Breadcrumbs {
+		got[b.Action] = b.Cmd
+	}
+	assert.Equal(t, "basecamp timesheet entry update 1069480283 --hours <hours> --account 99999", got["update"])
+	assert.Equal(t, "basecamp timesheet entry delete 1069480283 --account 99999 --force", got["delete"])
+	assert.Equal(t, "basecamp timesheet item 789 --account 99999", got["item"])
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -69,6 +70,7 @@ time is for, and the item it is logged against.
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
 			if err := timesheetURLAccount(app, args[0], urlAccountID); err != nil {
 				return err
 			}
@@ -83,7 +85,7 @@ time is for, and the item it is logged against.
 
 			return app.OK(entry,
 				output.WithSummary(timesheetEntrySummary("Timesheet entry", entry)),
-				output.WithBreadcrumbs(timesheetEntryBreadcrumbs(cmd, entry)...),
+				output.WithBreadcrumbs(timesheetEntryBreadcrumbs(cmd, entry, scope.args(app.Config.AccountID))...),
 			)
 		},
 	}
@@ -130,6 +132,7 @@ project.
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
 			if err := timesheetURLAccount(app, args[0], urlAccountID); err != nil {
 				return err
 			}
@@ -155,7 +158,7 @@ project.
 
 			return app.OK(entry,
 				output.WithSummary(timesheetEntrySummary("Logged timesheet entry", entry)),
-				output.WithBreadcrumbs(timesheetEntryBreadcrumbs(cmd, entry)...),
+				output.WithBreadcrumbs(timesheetEntryBreadcrumbs(cmd, entry, scope.args(app.Config.AccountID))...),
 			)
 		},
 	}
@@ -216,6 +219,7 @@ cleared through the API, only replaced.
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
 			if err := timesheetURLAccount(app, args[0], urlAccountID); err != nil {
 				return err
 			}
@@ -236,7 +240,7 @@ cleared through the API, only replaced.
 
 			return app.OK(entry,
 				output.WithSummary(timesheetEntrySummary("Updated timesheet entry", entry)),
-				output.WithBreadcrumbs(timesheetEntryBreadcrumbs(cmd, entry)...),
+				output.WithBreadcrumbs(timesheetEntryBreadcrumbs(cmd, entry, scope.args(app.Config.AccountID))...),
 			)
 		},
 	}
@@ -277,6 +281,7 @@ who may not remove the entry are refused.
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
 			if err := timesheetURLAccount(app, args[0], urlAccountID); err != nil {
 				return err
 			}
@@ -304,7 +309,7 @@ who may not remove the entry are refused.
 				output.WithSummary(fmt.Sprintf("Deleted timesheet entry #%d", entryID)),
 				output.WithBreadcrumbs(output.Breadcrumb{
 					Action:      "report",
-					Cmd:         "basecamp timesheet report",
+					Cmd:         "basecamp timesheet report" + scope.args(app.Config.AccountID),
 					Description: "View timesheet report",
 				}),
 			)
@@ -347,26 +352,37 @@ func timesheetEntryIDArg(arg string) (id int64, urlAccountID string, err error) 
 	return id, urlAccountID, nil
 }
 
-// timesheetRecordingIDArg resolves create's <recording-id|url>: the item the
-// time is logged against, and the URL's account. A URL that names no single
-// recording is refused — a project's or a project timesheet's URL carries the
-// project's id, which extractID would otherwise fall back to.
+// timesheetKinds are the URL types that name an item bc3 logs time against,
+// as its API docs list them, or a generic recordings/<id> URL, which is as good
+// as its bare id. bc3 still decides each case; the list keeps a URL for
+// something else (a person, a project, a Campfire, a path the router only
+// matched by shape) from sending its id out as a recording's.
+var timesheetKinds = []string{
+	"cards", "documents", "messages", "recordings", "schedule_entries", "todos", "uploads",
+}
+
+// timesheetRecordingIDArg resolves create's <recording-id|url>: a bare id, or
+// the http(s) URL of one item of a timesheet kind, returning the URL's account
+// too. Anything else is refused rather than read as a recording id.
 func timesheetRecordingIDArg(arg string) (id int64, urlAccountID string, err error) {
-	if parsed := urlarg.Parse(arg); parsed != nil {
-		if parsed.RecordingID == "" || parsed.IsCollection || parsed.Type == "timesheet" {
+	raw := strings.TrimSpace(arg)
+	if !isAllDigits(raw) {
+		parsed := urlarg.Parse(raw)
+		switch {
+		case !hasHTTPScheme(raw) || parsed == nil || parsed.IsCollection || parsed.RecordingID == "" ||
+			!slices.Contains(timesheetKinds, parsed.Type):
 			return 0, "", output.ErrUsageHint(
-				fmt.Sprintf("%q does not name one item", arg),
-				"Pass the id or URL of the to-do, message, card or other item to log time against. "+
+				fmt.Sprintf("%q does not name an item to log time against", arg),
+				"Pass the id or URL of the to-do, message, card, document, upload or schedule entry. "+
 					"For a project-level entry, pass the project timesheet's id: the parent id of a "+
 					"project-level entry in basecamp timesheet project")
+		case parsed.OccurrenceDate != "":
+			return 0, "", output.ErrUsageHint("That URL names one occurrence of a recurring event",
+				"Pass the occurrence's own id, which "+showOccurrence(raw)+" prints, or the event's id")
 		}
-		urlAccountID = parsed.AccountID
+		raw, urlAccountID = parsed.RecordingID, parsed.AccountID
 	}
-	idStr, err := extractID(arg)
-	if err != nil {
-		return 0, "", err
-	}
-	id, perr := strconv.ParseInt(idStr, 10, 64)
+	id, perr := strconv.ParseInt(raw, 10, 64)
 	if perr != nil || id <= 0 {
 		return 0, "", output.ErrUsageHint(
 			fmt.Sprintf("%q is not an item id or Basecamp URL", arg),
@@ -375,23 +391,42 @@ func timesheetRecordingIDArg(arg string) (id int64, urlAccountID string, err err
 	return id, urlAccountID, nil
 }
 
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func hasHTTPScheme(s string) bool {
+	lower := strings.ToLower(s)
+	return strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://")
+}
+
 // timesheetURLAccount holds a pasted URL to the account it names, before any
-// request. The URL router is host-agnostic, so a URL must be on a trusted
-// Basecamp host; its account is adopted when none is configured and must
-// match the configured one otherwise, rather than acting on a same-numbered
-// entry or item in another account. Bare ids skip both checks.
+// request. Any argument that is not a bare id is a URL here, and the URL
+// router is host-agnostic, so it must be on a trusted Basecamp host; its
+// account is adopted when none is configured and must equal the configured one
+// otherwise (numerically, as accountIDsEqual compares), rather than acting on
+// a same-numbered entry or item in another account.
 func timesheetURLAccount(app *appctx.App, arg, urlAccountID string) error {
-	if !strings.Contains(arg, "://") {
+	raw := strings.TrimSpace(arg)
+	if isAllDigits(raw) {
 		return nil
 	}
-	if !hostutil.IsTrustedBasecampHost(strings.TrimSpace(arg), app.Config.BaseURL) {
+	if !hostutil.IsTrustedBasecampHost(raw, app.Config.BaseURL) {
 		return output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
 	}
 	switch {
 	case urlAccountID == "":
 	case app.Config.AccountID == "":
 		app.Config.AccountID = urlAccountID
-	case urlAccountID != app.Config.AccountID:
+	case !accountIDsEqual(urlAccountID, app.Config.AccountID):
 		return output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", urlAccountID, app.Config.AccountID))
 	}
 	return nil
@@ -461,23 +496,27 @@ func timesheetEntrySummary(prefix string, entry *basecamp.TimesheetEntry) string
 
 // timesheetEntryBreadcrumbs are the follow-ups for one entry: change or delete
 // it, and see the rest of the time on its item.
-func timesheetEntryBreadcrumbs(cmd *cobra.Command, entry *basecamp.TimesheetEntry) []output.Breadcrumb {
+//
+// scopeArgs carries the profile and an account that would not come back on its
+// own (adopted from a URL, given with --account), so a pasted follow-up acts
+// where this one did.
+func timesheetEntryBreadcrumbs(cmd *cobra.Command, entry *basecamp.TimesheetEntry, scopeArgs string) []output.Breadcrumb {
 	crumbs := []output.Breadcrumb{
 		{
 			Action:      "update",
-			Cmd:         fmt.Sprintf("basecamp timesheet entry update %d --hours <hours>", entry.ID),
+			Cmd:         fmt.Sprintf("basecamp timesheet entry update %d --hours <hours>%s", entry.ID, scopeArgs),
 			Description: "Change entry",
 		},
 		{
 			Action:      "delete",
-			Cmd:         timesheetEntryDeleteCmd(cmd, entry.ID),
+			Cmd:         timesheetEntryDeleteCmd(cmd, entry.ID, scopeArgs),
 			Description: "Delete entry",
 		},
 	}
 	if entry.Parent != nil && entry.Parent.ID != 0 {
 		crumbs = append(crumbs, output.Breadcrumb{
 			Action:      "item",
-			Cmd:         fmt.Sprintf("basecamp timesheet item %d", entry.Parent.ID),
+			Cmd:         fmt.Sprintf("basecamp timesheet item %d%s", entry.Parent.ID, scopeArgs),
 			Description: "View the item's timesheet",
 		})
 	}
@@ -489,8 +528,8 @@ func timesheetEntryBreadcrumbs(cmd *cobra.Command, entry *basecamp.TimesheetEntr
 // confirmation, so it gets --force; a person gets the bare command and is
 // asked, with any flag holding this invocation in a human format carried
 // along so the pasted command renders the same way.
-func timesheetEntryDeleteCmd(cmd *cobra.Command, entryID int64) string {
-	c := fmt.Sprintf("basecamp timesheet entry delete %d", entryID)
+func timesheetEntryDeleteCmd(cmd *cobra.Command, entryID int64, scopeArgs string) string {
+	c := fmt.Sprintf("basecamp timesheet entry delete %d%s", entryID, scopeArgs)
 	if machineReadsThisOutput(cmd) {
 		return c + " --force"
 	}
