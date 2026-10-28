@@ -421,7 +421,9 @@ type copyListing func(place copyPlace, t filingTarget) string
 //   - recordings list serves these types in the active, archived and trashed
 //     statuses, in projects (bc3 doc/api/sections/recordings.md).
 //   - drafts list holds drafted messages, documents and uploads, and no
-//     other drafts (drafts.md).
+//     other drafts (drafts.md). It holds only the 250 most recently updated,
+//     and a copy keeps its original's updated_at, so it is capped: a copy
+//     missing there is checked for on the destination's page too.
 //   - schedule entries --status lists a schedule's active, archived or
 //     trashed entries (schedule_entries.md), a calendar's included.
 //   - timeline shows a copied cloud file or question, active or archived, as
@@ -431,14 +433,14 @@ type copyListing func(place copyPlace, t filingTarget) string
 //     recordings that inherit their status, which an archived, trashed or
 //     drafted copy does not.
 var copyListings = copyTable([]copyRow{
-	{[]string{"Document", "Kanban::Card", "Message", "Schedule::Entry", "Todo", "Todolist", "Upload", "Vault"}, []string{"active", "archived", "trashed"}, false, listRecordings},
-	{[]string{"Message", "Document", "Upload"}, []string{"drafted"}, false, listDrafts},
-	{[]string{"Schedule::Entry"}, []string{"active", "archived", "trashed"}, true, listCalendarEntries},
-	{[]string{"CloudFile"}, []string{"active", "archived"}, false, listTimeline},
-	{[]string{"Question"}, []string{"archived"}, false, listTimeline},
-	{[]string{"Question"}, []string{"active"}, false, listQuestions},
-	{[]string{"Inbox::Forward"}, []string{"active"}, false, listForwards},
-	{[]string{"Kanban::Column"}, []string{"active"}, false, listColumns},
+	{[]string{"Document", "Kanban::Card", "Message", "Schedule::Entry", "Todo", "Todolist", "Upload", "Vault"}, []string{"active", "archived", "trashed"}, false, listRecordings, false},
+	{[]string{"Message", "Document", "Upload"}, []string{"drafted"}, false, listDrafts, true},
+	{[]string{"Schedule::Entry"}, []string{"active", "archived", "trashed"}, true, listCalendarEntries, false},
+	{[]string{"CloudFile"}, []string{"active", "archived"}, false, listTimeline, false},
+	{[]string{"Question"}, []string{"archived"}, false, listTimeline, false},
+	{[]string{"Question"}, []string{"active"}, false, listQuestions, false},
+	{[]string{"Inbox::Forward"}, []string{"active"}, false, listForwards, false},
+	{[]string{"Kanban::Column"}, []string{"active"}, false, listColumns, false},
 })
 
 // copyRow is one listing of copyListings with the places it shows.
@@ -447,12 +449,14 @@ type copyRow struct {
 	statuses []string
 	calendar bool
 	listing  copyListing
+	// capped is a listing that may stop before an old enough copy.
+	capped bool
 }
 
 // copyTable spreads rows into one listing per place, refusing a place two
 // rows claim.
-func copyTable(rows []copyRow) map[copyPlace]copyListing {
-	table := map[copyPlace]copyListing{}
+func copyTable(rows []copyRow) map[copyPlace]copyRow {
+	table := map[copyPlace]copyRow{}
 	for _, row := range rows {
 		for _, typ := range row.types {
 			for _, status := range row.statuses {
@@ -460,7 +464,7 @@ func copyTable(rows []copyRow) map[copyPlace]copyListing {
 				if _, claimed := table[place]; claimed {
 					panic(fmt.Sprintf("copyListings names %+v twice", place))
 				}
-				table[place] = row.listing
+				table[place] = row
 			}
 		}
 	}
@@ -498,6 +502,7 @@ func listColumns(_ copyPlace, t filingTarget) string {
 // apart there.
 type copyCheck struct {
 	listing string
+	capped  bool
 	page    string
 	match   string
 }
@@ -509,8 +514,8 @@ type copyCheck struct {
 func copyLookFor(src filingSource, t filingTarget) copyCheck {
 	place := copyPlace{typ: src.typ, status: cmp.Or(src.status, "active"), calendar: t.calendar}
 	check := copyCheck{page: cmp.Or(t.appURL, t.describe("destination")), match: copyMatch(src, t)}
-	if listing, ok := copyListings[place]; ok {
-		check.listing = listing(place, t)
+	if row, ok := copyListings[place]; ok {
+		check.listing, check.capped = row.listing(place, t), row.capped
 	}
 	return check
 }
@@ -522,7 +527,11 @@ func (c copyCheck) text(scope string) string {
 	if c.listing != "" {
 		where = c.listing + scope
 	}
-	return where + ", then " + c.match
+	text := where + ", then " + c.match
+	if c.capped {
+		text += ". That listing stops at the most recently updated, so if the copy is not there, open the destination in Basecamp before copying again: " + c.page
+	}
+	return text
 }
 
 // copyMatch says what tells a copy of src apart in t: its title, in the

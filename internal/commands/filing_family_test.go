@@ -450,8 +450,9 @@ func TestEveryCopyRecoveryCanShowTheCopy(t *testing.T) {
 				place := copyPlace{typ: typ, status: status, calendar: calendar}
 				target := dest
 				target.calendar = calendar
-				hint, matched := strings.CutSuffix(copyLookFor(filingSource{id: 456, typ: typ, status: status, title: "Plan"}, target).text(scope),
-					`, then look for "Plan" in Dest tool (#7); a copy has its original's title and dates`)
+				hint, capped := strings.CutSuffix(copyLookFor(filingSource{id: 456, typ: typ, status: status, title: "Plan"}, target).text(scope),
+					". That listing stops at the most recently updated, so if the copy is not there, open the destination in Basecamp before copying again: "+dest.appURL)
+				hint, matched := strings.CutSuffix(hint, `, then look for "Plan" in Dest tool (#7); a copy has its original's title and dates`)
 				require.True(t, matched, "%+v: %q names the copy by its title in the destination", place, hint)
 				if hint == "open the destination in Basecamp: "+dest.appURL {
 					continue
@@ -459,6 +460,10 @@ func TestEveryCopyRecoveryCanShowTheCopy(t *testing.T) {
 				hint, matched = strings.CutSuffix(hint, scope)
 				require.True(t, matched, "%+v: %q carries the profile and account to reach this account", place, hint)
 				listed[place] = true
+				// The drafts listing holds only the 250 most recently updated,
+				// and a copy keeps its original's updated_at.
+				assert.Equal(t, strings.HasPrefix(hint, "basecamp drafts list"), capped,
+					"%+v: %q sends a capped listing's miss to the destination", place, hint)
 				shown := slices.ContainsFunc(knownGood, func(good knownListing) bool {
 					match := good.listing.FindStringSubmatch(hint)
 					return match != nil && good.shows(place, match)

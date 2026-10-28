@@ -154,6 +154,8 @@ func TestMessagesCopyOfADraftWithNoFilingIsLookedForAmongDrafts(t *testing.T) {
 	assert.Contains(t, e.Hint, "may have started the copy")
 	assert.Contains(t, e.Hint, "basecamp drafts list --all")
 	assert.NotContains(t, e.Hint, "--status drafted")
+	assert.Contains(t, e.Hint, "if the copy is not there, open the destination in Basecamp before copying again",
+		"drafts list stops at the 250 most recently updated, and a copy keeps its original's updated_at")
 }
 
 // A flat API URL names no project, and its id can be a board's title too. A
