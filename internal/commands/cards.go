@@ -1956,105 +1956,15 @@ func moveCardToCardTable(cmd *cobra.Command, app *appctx.App, scope followUpScop
 	return runFiling(cmd, app, scope, cardFiling(app, basecamp.FilingMove, card, table, false))
 }
 
-// resolveFilingTable finds the card table named by --to-project and
-// --to-card-table: a card table ID or URL on its own, a project's only card
-// table, or one of a project's card tables picked by ID or title. Only card
-// tables on the project's dock count, as in the web's dialogs. A URL is held
-// to parseFilingRef's host and account checks, and its project must agree
-// with --to-project.
+// resolveFilingTable finds the card table that --to-project and
+// --to-card-table name, as resolveFilingTarget finds any other container,
+// and reads it in full: a move checks whether the card is already on it.
 func resolveFilingTable(cmd *cobra.Command, app *appctx.App, toProject, toCardTable string) (*basecamp.CardTable, error) {
-	var urlProjectID, url string
-	if urlarg.IsURL(toCardTable) {
-		ref, err := parseFilingRef(app, toCardTable, "card table", "card_tables", "…/card_tables/<id>")
-		if err != nil {
-			return nil, err
-		}
-		url = toCardTable
-		toCardTable, urlProjectID = strconv.FormatInt(ref.id, 10), ref.project
-	}
-
-	if toProject == "" {
-		tableID, err := strconv.ParseInt(toCardTable, 10, 64)
-		if err != nil || tableID <= 0 {
-			return nil, output.ErrUsage("--to-card-table must be a positive card table ID")
-		}
-		table, err := getCardTable(cmd, app, tableID)
-		if err != nil {
-			return nil, err
-		}
-		if urlProjectID != "" && !sameNumericID(urlProjectID, strconv.FormatInt(cardTableProjectID(table), 10)) {
-			return nil, output.ErrUsage(fmt.Sprintf("The --to-card-table URL names project %s, but card table %d is in project %d", urlProjectID, table.ID, cardTableProjectID(table)))
-		}
-		return table, nil
-	}
-
-	projectID, projectName, err := app.Names.ResolveProject(cmd.Context(), toProject)
+	target, err := resolveFilingTarget(cmd, app, cardTableContainer, toProject, toCardTable)
 	if err != nil {
 		return nil, err
 	}
-	if urlProjectID != "" && !sameNumericID(urlProjectID, projectID) {
-		return nil, output.ErrUsageHint(
-			fmt.Sprintf("The --to-card-table URL is in project %s, but --to-project points at project %s", urlProjectID, projectID),
-			"Drop --to-project, since the card table URL names its own project",
-		)
-	}
-	all, err := listProjectCardTables(cmd, app, projectID)
-	if err != nil {
-		return nil, err
-	}
-	var tables []projectCardTable
-	for _, ct := range all {
-		if ct.Enabled {
-			tables = append(tables, ct)
-		}
-	}
-
-	if toCardTable == "" {
-		switch len(tables) {
-		case 0:
-			if projectName == "" {
-				projectName = projectID
-				if id, perr := strconv.ParseInt(projectID, 10, 64); perr == nil {
-					if name, nerr := app.Names.ProjectName(cmd.Context(), id); nerr == nil && name != "" {
-						projectName = name
-					}
-				}
-			}
-			return nil, &output.Error{
-				Code:    output.CodeNotFound,
-				Message: fmt.Sprintf("Project %s has no card table", projectName),
-				Hint:    "Pick a project that has one, or add a card table there first",
-			}
-		case 1:
-			return getCardTable(cmd, app, tables[0].ID)
-		default:
-			return nil, ambiguousCardTablesErrorFor("--to-card-table", tables)
-		}
-	}
-	var named []projectCardTable
-	for _, ct := range tables {
-		if strconv.FormatInt(ct.ID, 10) == toCardTable {
-			return getCardTable(cmd, app, ct.ID)
-		}
-		if url == "" && strings.EqualFold(ct.Title, toCardTable) {
-			named = append(named, ct)
-		}
-	}
-	if url != "" {
-		return nil, filingURLNotFound("--to-card-table", "card table", url, projectLabel(cmd, app, projectID, projectName),
-			fmt.Sprintf("Available card tables: %s", formatCardTableIDs(tables)))
-	}
-	switch len(named) {
-	case 1:
-		return getCardTable(cmd, app, named[0].ID)
-	case 0:
-	default:
-		return nil, ambiguousCardTablesErrorFor("--to-card-table", named)
-	}
-	return nil, output.ErrUsageHint(
-		fmt.Sprintf("Card table '%s' not found in project %s", toCardTable, projectID),
-		fmt.Sprintf("Available card tables: %s", formatCardTableIDs(tables)),
-	)
+	return getCardTable(cmd, app, target.id)
 }
 
 func getCardTable(cmd *cobra.Command, app *appctx.App, tableID int64) (*basecamp.CardTable, error) {
@@ -2797,6 +2707,23 @@ and On hold. The command waits for Basecamp to make the copy and shows it.`,
 		"Never re-run a copy that reported in_progress or a may-have-started error: each run makes another copy; check an in_progress one with basecamp filings show <filing id>.",
 }
 
+// cardTableContainer is a project's card table, where cards and columns are
+// filed.
+var cardTableContainer = filingContainer{
+	dockName: "kanban_board",
+	noun:     "card table",
+	flag:     "--to-card-table",
+	urlKind:  "card_tables",
+	urlShape: "…/card_tables/<id>",
+	get: func(ctx context.Context, app *appctx.App, id int64) (filingTarget, error) {
+		table, err := app.Account().CardTables().Get(ctx, id)
+		if err != nil {
+			return filingTarget{}, err
+		}
+		return bucketTarget(table.ID, table.Title, table.AppURL, table.Bucket), nil
+	},
+}
+
 // columnTypes are the columns a card table has: Kanban::Column is one a
 // person added, the rest are the ones every card table has.
 var columnTypes = []string{standardColumnType, "Kanban::Triage", "Kanban::NotNowColumn", "Kanban::DoneColumn", "Kanban::OnHold"}
@@ -2810,20 +2737,7 @@ func columnFamily() filingFamily {
 		types:    columnTypes,
 		urlKinds: []string{"columns"},
 		urlShape: "…/card_tables/columns/<id>",
-		into: filingContainer{
-			dockName: "kanban_board",
-			noun:     "card table",
-			flag:     "--to-card-table",
-			urlKind:  "card_tables",
-			urlShape: "…/card_tables/<id>",
-			get: func(ctx context.Context, app *appctx.App, id int64) (filingTarget, error) {
-				table, err := app.Account().CardTables().Get(ctx, id)
-				if err != nil {
-					return filingTarget{}, err
-				}
-				return bucketTarget(table.ID, table.Title, table.AppURL, table.Bucket), nil
-			},
-		},
+		into:     cardTableContainer,
 		get: func(ctx context.Context, app *appctx.App, id int64) (any, filingSource, error) {
 			c, err := app.Account().CardColumns().Get(ctx, id)
 			if err != nil {

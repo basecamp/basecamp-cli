@@ -73,6 +73,8 @@ func TestPollUntilHonoursCancellation(t *testing.T) {
 //   - Card 456 is in project 123 ("Source"), column 777 on card table 555.
 //   - Project 999 ("Dest") has card table 900 (Triage 901); with twoTables it
 //     also has card table 950 ("Roadmap"), and always a disabled card table 960.
+//   - Project 888 ("Bare") has only a card table turned off, 880; project 777
+//     ("Chat only") has none.
 //   - A move to a column 404s, as for a column in another project.
 //   - A move or copy POST answers filing 70, pending. Each GET of the filing
 //     takes the next of statuses, holding the last; "completed" names card 4560.
@@ -132,9 +134,11 @@ func (m *mockFilingTransport) RoundTrip(req *http.Request) (*http.Response, erro
 
 	switch {
 	case strings.HasSuffix(path, "/projects"):
-		return respond(200, `[{"id":123,"name":"Source"},{"id":999,"name":"Dest"},{"id":888,"name":"Bare"}]`)
+		return respond(200, `[{"id":123,"name":"Source"},{"id":999,"name":"Dest"},{"id":888,"name":"Bare"},{"id":777,"name":"Chat only"}]`)
 	case strings.HasSuffix(path, "/projects/888"):
 		return respond(200, `{"id":888,"dock":[{"name":"kanban_board","id":880,"title":"Off","enabled":false}]}`)
+	case strings.HasSuffix(path, "/projects/777"):
+		return respond(200, `{"id":777,"dock":[{"name":"chat","id":770,"title":"Chat","enabled":true}]}`)
 	case strings.HasSuffix(path, "/projects/123"):
 		return respond(200, `{"id":123,"dock":[{"name":"kanban_board","id":555,"title":"Board","enabled":true}]}`)
 	case strings.HasSuffix(path, "/projects/999"):
@@ -240,14 +244,29 @@ func TestCardsMoveToProjectWithSeveralCardTablesIsAmbiguous(t *testing.T) {
 	assert.Empty(t, transport.posts)
 }
 
+// A card table turned off is turned back on, never replaced by a second one,
+// so the refusal says which it is, as every other family's does.
+func TestCardsMoveToProjectWithCardTableTurnedOffSaysHowToTurnItOn(t *testing.T) {
+	for _, verb := range []string{"move", "copy"} {
+		transport := &mockFilingTransport{}
+		run := runFilingCommand(t, transport, verb, "456", "--to-project", "Bare")
+		e := requireFilingError(t, run)
+
+		assert.Equal(t, output.CodeNotFound, e.Code)
+		assert.Equal(t, "Bare's card table (Off) is turned off, so nothing can be moved or copied into it", e.Message)
+		assert.Equal(t, "Turn it on first with: basecamp tools enable 880 --in 888", e.Hint)
+		assert.Empty(t, transport.posts)
+	}
+}
+
 func TestCardsMoveToProjectWithoutCardTableNamesTheProject(t *testing.T) {
 	transport := &mockFilingTransport{}
-	run := runFilingCommand(t, transport, "move", "456", "--to-project", "Bare")
+	run := runFilingCommand(t, transport, "move", "456", "--to-project", "Chat only")
 	e := requireFilingError(t, run)
 
 	assert.Equal(t, output.CodeNotFound, e.Code)
-	assert.Equal(t, "Project Bare has no card table", e.Message)
-	assert.NotEmpty(t, e.Hint)
+	assert.Equal(t, "Project Chat only has no card table", e.Message)
+	assert.Equal(t, "Pick a project that has a card table", e.Hint)
 	assert.Empty(t, transport.posts)
 }
 
