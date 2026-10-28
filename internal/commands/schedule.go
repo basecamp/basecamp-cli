@@ -388,17 +388,21 @@ func runScheduleEntryShow(cmd *cobra.Command, app *appctx.App, entryID, occurren
 	return app.OK(data, opts...)
 }
 
-// scheduleEntriesCmd lists the entries of the schedule an event is on. A
-// calendar, such as an employee's, has no dock to find its schedule on, so
-// the command names the schedule there: the event's parent, or for a
-// recurring event, whose parent is the series, the calendar's schedule.
+// scheduleEntriesCmd lists the entries of the schedule an event is on. It
+// names the schedule whenever the event's parent is one, since a project can
+// have several. A calendar, such as an employee's, has no dock to find its
+// schedule on, so for a recurring event there, whose parent is the series,
+// it looks up the calendar's schedule.
 func scheduleEntriesCmd(ctx context.Context, app *appctx.App, entry *basecamp.ScheduleEntry) string {
 	list := "basecamp schedule entries --project " + recordProject(entry.Bucket)
-	if entry.Bucket == nil || entry.Bucket.Type != "Calendar" || entry.Parent == nil {
+	if entry.Parent == nil {
 		return list
 	}
 	schedule := entry.Parent
 	if schedule.Type != "Schedule" {
+		if entry.Bucket == nil || entry.Bucket.Type != "Calendar" {
+			return list
+		}
 		var err error
 		if schedule, err = seriesSchedule(ctx, app, entry.Bucket, entry.Parent.ID, entry.Status); err != nil || schedule == nil {
 			return list

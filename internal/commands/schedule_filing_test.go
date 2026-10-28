@@ -137,6 +137,15 @@ func TestScheduleShowListsACalendarEventsEntriesByItsSchedule(t *testing.T) {
 	}
 }
 
+func TestScheduleShowListsAProjectEventsEntriesByItsSchedule(t *testing.T) {
+	transport := scheduleFilingTransport()
+	transport.gets["/schedule_entries/460"] = `{"id":460,"type":"Schedule::Entry","summary":"Retro","bucket":{"id":123,"name":"Source","type":"Project"},"parent":{"id":556,"title":"Second schedule","type":"Schedule"}}`
+	run := runFamilyCommand(t, transport, NewScheduleCmd(), "show", "460")
+	require.NoError(t, run.err)
+	assert.Equal(t, "basecamp schedule entries --project 123 --schedule 556", run.envelope.Breadcrumbs[1].Cmd,
+		"a project can have several schedules, so the entries command names the one the event is on")
+}
+
 func TestScheduleFilesARecurringEventIntoACalendarAndReadsItBack(t *testing.T) {
 	transport := calendarTransport()
 	run := runFamilyCommand(t, transport, NewScheduleCmd(), "move", "457", "--to-schedule", "770")
