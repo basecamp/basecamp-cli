@@ -51,7 +51,7 @@ const (
 	mentionsParam        = "mentions"
 	syntheticSummaryTag  = "Synthetic: "
 	recordingsDomainTag  = "Recordings"
-	recordingsDomainDesc = "Recordings: the compact projection of one recording, resolved from the pointer an account event feed row carries."
+	recordingsDomainDesc = "Recordings: the compact projection of one recording, resolved from the pointer an account event feed row carries; and moving or copying a recording into another container or project, waiting for Basecamp to finish and returning the new recording."
 )
 
 // maxExactJSONInteger is the largest integer a JSON number carries without
@@ -84,6 +84,8 @@ type compositeHandler func(ctx context.Context, api API, op *catalog.Operation, 
 // dispatcher holds when a call arrives.
 var compositeHandlers = map[string]compositeHandler{
 	recordingsDomainKey + "." + summarizeAction: handleSummarize,
+	recordingsDomainKey + "." + moveAction:      handleFiling(basecamp.FilingMove),
+	recordingsDomainKey + "." + copyAction:      handleFiling(basecamp.FilingCopy),
 }
 
 // recordingsDomain is the hand-built domain carrying the composite reads.
@@ -96,6 +98,8 @@ func recordingsDomain() *catalog.Domain {
 		Tool:  recordingsToolName,
 		Blurb: recordingsDomainDesc,
 		Operations: []*catalog.Operation{
+			filingOperation(basecamp.FilingCopy),
+			filingOperation(basecamp.FilingMove),
 			{
 				ID:      "SummarizeRecording",
 				Action:  summarizeAction,
@@ -131,7 +135,8 @@ func recordingsDomain() *catalog.Domain {
 }
 
 // installComposites adds the composite surface to a loaded catalog: the
-// recordings domain, and the mentions parameter on messages.create_comment.
+// recordings domain, which takes over the model's move, copy and filing
+// operations, and the mentions parameter on messages.create_comment.
 // It runs after rescopeToAccount, which walks model paths the composite
 // operations deliberately do not have.
 func installComposites(cat *catalog.Catalog) error {
@@ -140,7 +145,11 @@ func installComposites(cat *catalog.Catalog) error {
 			return fmt.Errorf("the model already serves a %q domain; the composite domain would shadow it", recordingsDomainKey)
 		}
 	}
-	cat.Domains = append(cat.Domains, recordingsDomain())
+	recordings := recordingsDomain()
+	if err := installFilingOperations(cat, recordings); err != nil {
+		return err
+	}
+	cat.Domains = append(cat.Domains, recordings)
 	return installMentionsParam(cat)
 }
 
@@ -208,16 +217,8 @@ func handleSummarize(ctx context.Context, api API, op *catalog.Operation, params
 
 func summarizeRef(op *catalog.Operation, params map[string]any) (basecamp.RecordingRef, error) {
 	var ref basecamp.RecordingRef
-	// What is accepted is what is advertised: the same body schema describe
-	// serves, read here rather than restated, so the two cannot drift.
-	known, _ := op.Body["properties"].(map[string]any)
-	if len(known) == 0 {
-		return ref, fmt.Errorf("internal error: action %q declares no parameters", op.Action)
-	}
-	for name := range params {
-		if _, ok := known[name]; !ok {
-			return ref, fmt.Errorf("unknown parameter %q for action %q (describe the action for its schema)", name, op.Action)
-		}
+	if err := refuseUnknownParams(op, params); err != nil {
+		return ref, err
 	}
 
 	var err error
@@ -237,6 +238,22 @@ func summarizeRef(op *catalog.Operation, params map[string]any) (basecamp.Record
 		return ref, errNoTypeGiven
 	}
 	return ref, nil
+}
+
+// refuseUnknownParams holds a composite's parameters to what it advertises:
+// the same body schema describe serves, read here rather than restated, so
+// the two cannot drift.
+func refuseUnknownParams(op *catalog.Operation, params map[string]any) error {
+	known, _ := op.Body["properties"].(map[string]any)
+	if len(known) == 0 {
+		return fmt.Errorf("internal error: action %q declares no parameters", op.Action)
+	}
+	for name := range params {
+		if _, ok := known[name]; !ok {
+			return fmt.Errorf("unknown parameter %q for action %q (describe the action for its schema)", name, op.Action)
+		}
+	}
+	return nil
 }
 
 // errNoTypeGiven is a pointer with neither type. The SDK reaches the same

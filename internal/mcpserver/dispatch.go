@@ -25,8 +25,8 @@ import (
 //
 // The four verbs serve every model operation but the feed's two poll lanes.
 // The recordings and comments services serve the composite actions (see
-// composite.go), which are SDK compositions rather than single requests and so
-// cannot be assembled from a method and a path. The event feed service serves
+// composite.go and filing.go), which are SDK compositions rather than single
+// requests and so cannot be assembled from a method and a path. The event feed service serves
 // poll_events and poll_inbox, whose refusals carry the data a consumer resumes
 // from and whose bodies the verbs above throw away (see feed.go).
 //
@@ -44,6 +44,23 @@ type API interface {
 	Recordings() *basecamp.RecordingsService
 	Comments() *basecamp.CommentsService
 	EventFeed() *basecamp.EventFeedService
+
+	// The typed reads and the project dock that move and copy resolve a
+	// recording and its destination through (see filing.go).
+	Projects() *basecamp.ProjectsService
+	Cards() *basecamp.CardsService
+	CardColumns() *basecamp.CardColumnsService
+	Messages() *basecamp.MessagesService
+	Documents() *basecamp.DocumentsService
+	Uploads() *basecamp.UploadsService
+	CloudFiles() *basecamp.CloudFilesService
+	GoogleDocuments() *basecamp.GoogleDocumentsService
+	Vaults() *basecamp.VaultsService
+	Schedules() *basecamp.SchedulesService
+	Checkins() *basecamp.CheckinsService
+	Forwards() *basecamp.ForwardsService
+	Todolists() *basecamp.TodolistsService
+	Todos() *basecamp.TodosService
 }
 
 // The CLI hands its account-scoped client straight to New.

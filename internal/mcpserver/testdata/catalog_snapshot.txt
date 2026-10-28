@@ -241,7 +241,6 @@ Call {"action": "describe", "params": {"action": "NAME"}} for an action's full p
 
 ACTIONS (RO = read-only):
 - archive_recording: Archive a recording; bc3 answers 403 for types it never lets be archived, timesheet entries among them
-- copy_recording: Start copying a recording into another project; poll GetFiling for the result
 - create_answer: Create a new answer for a question
 - create_lineup_marker: Create a new lineup marker
 - create_project_from_template: Create a project from a template (asynchronous)
@@ -261,7 +260,6 @@ ACTIONS (RO = read-only):
 - enable_tool: Enable a tool (show it on the project dock)
 - get_answer (RO): Get a single answer by id
 - get_answers_by_person (RO, paginated): Get all answers from a specific person for a question
-- get_filing (RO): Get the state of a move or copy started by MoveRecording or CopyRecording
 - get_project_construction (RO): Get the status of a project construction
 - get_question (RO): Get a single question by id
 - get_question_reminders (RO, paginated): Get pending check-in reminders for the current user
@@ -282,7 +280,6 @@ ACTIONS (RO = read-only):
 - list_recordings (RO, paginated): List recordings of a given type across projects
 - list_templates (RO, paginated): List all templates visible to the current user
 - list_webhooks (RO, paginated): List all webhooks for a project
-- move_recording: Start moving a recording into another project; poll GetFiling for the result
 - move_recording_to_vault: Move a document, upload or vault into another vault in its project, or reorder it in its own vault
 - pause_question: Pause a check-in question (stops sending reminders)
 - reposition_tool: Reposition a tool on the project dock
@@ -413,11 +410,14 @@ ACTIONS (RO = read-only):
 - update_my_note: Replace the note's content, recording a new revision server-side
 
 == basecamp_recordings
-Recordings: the compact projection of one recording, resolved from the pointer an account event feed row carries.
+Recordings: the compact projection of one recording, resolved from the pointer an account event feed row carries; and moving or copying a recording into another container or project, waiting for Basecamp to finish and returning the new recording.
 
 Gateway tool: call with {"action": "...", "params": {...}}.
 Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
 
 ACTIONS (RO = read-only):
+- copy: Synthetic: copy a recording into another container or project, wait for Basecamp to finish, and return the new recording.
+- get_filing (RO): Get the state of a move or copy, by the filing_id a move or copy answered with when it had not finished
+- move: Synthetic: move a recording into another container or project, wait for Basecamp to finish, and return the new recording.
 - summarize (RO): Synthetic: resolve a recording pointer into a compact projection.
 
