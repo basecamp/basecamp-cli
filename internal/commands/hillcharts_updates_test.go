@@ -121,6 +121,7 @@ func TestHillchartsUpdatesFindsTheTodosetFromTheProject(t *testing.T) {
 
 func TestHillchartsUpdatesEmptyIsAnArray(t *testing.T) {
 	app, _, out := setupHillUpdatesApp(t, hillVersionsRoute("[]"))
+	app.Flags.Hints = true
 
 	require.NoError(t, executeHillchartsCommand(NewHillchartsCmd(), app, "updates", "--todoset", "12345"))
 
@@ -216,9 +217,11 @@ func TestHillchartsUpdatesShowByIDAndProject(t *testing.T) {
 // and nothing else is requested.
 func TestHillchartsUpdatesShowByURL(t *testing.T) {
 	for name, url := range map[string]string{
-		"web app_url":        "https://3.basecamp.com/99999/buckets/123/todosets/12345/hills/versions#__recording_501",
-		"API url":            "https://3.basecampapi.com/99999/buckets/123/todosets/12345/hills/versions/501.json",
-		"web path, no .json": "https://3.basecamp.com/99999/buckets/123/todosets/12345/hills/versions/501",
+		"web app_url":             "https://3.basecamp.com/99999/buckets/123/todosets/12345/hills/versions#__recording_501",
+		"API url":                 "https://3.basecampapi.com/99999/buckets/123/todosets/12345/hills/versions/501.json",
+		"web path, no .json":      "https://3.basecamp.com/99999/buckets/123/todosets/12345/hills/versions/501",
+		"account-level API url":   "https://3.basecampapi.com/99999/todosets/12345/hills/versions/501.json",
+		"account-level, no .json": "https://3.basecampapi.com/99999/todosets/12345/hills/versions/501",
 	} {
 		t.Run(name, func(t *testing.T) {
 			app, transport, _ := setupHillUpdatesApp(t, hillVersionRoute())
@@ -257,6 +260,76 @@ func TestHillchartsUpdatesShowURLAgreesWithFlags(t *testing.T) {
 			assert.NotContains(t, call.Path, "/hills/", "no progress update is read for a contradicted URL")
 		}
 	})
+}
+
+// The account-level API URL names no project, so --in is checked against the
+// todoset's own bucket.
+func TestHillchartsUpdatesShowAccountLevelURLChecksProjectThroughTodoset(t *testing.T) {
+	url := "https://3.basecampapi.com/99999/todosets/12345/hills/versions/501.json"
+	todoset := func(bucket string) stubRoute {
+		return stubRoute{method: http.MethodGet, path: "/99999/todosets/12345", status: http.StatusOK,
+			body: `{"id":12345,"todolists_count":2,"bucket":{"id":` + bucket + `,"name":"P"}}`}
+	}
+
+	t.Run("its project", func(t *testing.T) {
+		app, transport, _ := setupHillUpdatesApp(t, projectsRoute(), todoset("123"), hillVersionRoute())
+		require.NoError(t, executeHillchartsCommand(NewHillchartsCmd(), app, "updates", "show", url, "--in", "123"))
+		assert.Equal(t, hillVersionPath, transport.last(t).Path)
+	})
+
+	t.Run("another project", func(t *testing.T) {
+		app, transport, _ := setupHillUpdatesApp(t, projectsRoute(), todoset("456"))
+		err := executeHillchartsCommand(NewHillchartsCmd(), app, "updates", "show", url, "--in", "123")
+		requireUsageError(t, err, "belongs to project 456")
+		for _, call := range transport.recorded() {
+			assert.NotContains(t, call.Path, "/hills/")
+		}
+	})
+}
+
+// An account adopted from a pasted URL is carried into the follow-up
+// commands, which would otherwise run against no account (or another one).
+func TestHillchartsUpdatesShowBreadcrumbsCarryAnAdoptedAccount(t *testing.T) {
+	app, _, out := setupHillUpdatesApp(t, hillVersionRoute())
+	app.Config.AccountID = ""
+	app.Flags.Hints = true
+
+	require.NoError(t, executeHillchartsCommand(NewHillchartsCmd(), app, "updates", "show",
+		"https://3.basecamp.com/99999/buckets/123/todosets/12345/hills/versions#__recording_501"))
+
+	var envelope struct {
+		Breadcrumbs []struct {
+			Cmd string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope), out.String())
+	require.NotEmpty(t, envelope.Breadcrumbs)
+	for _, b := range envelope.Breadcrumbs {
+		assert.Contains(t, b.Cmd, "--account 99999", b.Cmd)
+	}
+}
+
+// With the account inherited from configuration, follow-ups stay bare.
+func TestHillchartsUpdatesBreadcrumbsInheritAConfiguredAccount(t *testing.T) {
+	app, _, out := setupHillUpdatesApp(t, hillVersionsRoute("[]"))
+	app.Flags.Hints = true
+
+	require.NoError(t, executeHillchartsCommand(NewHillchartsCmd(), app, "updates", "--todoset", "12345"))
+
+	var envelope struct {
+		Breadcrumbs []struct {
+			Cmd string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope), out.String())
+	cmds := make([]string, 0, len(envelope.Breadcrumbs))
+	for _, b := range envelope.Breadcrumbs {
+		cmds = append(cmds, b.Cmd)
+	}
+	assert.Contains(t, cmds, "basecamp hillcharts updates show <id> --todoset 12345")
+	for _, c := range cmds {
+		assert.NotContains(t, c, "--account", c)
+	}
 }
 
 func TestHillchartsUpdatesShowRefusesURLsBeforeAnyRequest(t *testing.T) {

@@ -108,6 +108,7 @@ func runHillchartsUpdatesList(cmd *cobra.Command, project, todosetID string, lf 
 	}
 
 	app := appctx.FromContext(cmd.Context())
+	followUp := newFollowUpScope(app)
 
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
@@ -138,7 +139,7 @@ func runHillchartsUpdatesList(cmd *cobra.Command, project, todosetID string, lf 
 		versions = []basecamp.HillChartVersion{}
 	}
 
-	scope := hillchartScope(resolvedProjectID, todosetID)
+	scope := hillchartScope(resolvedProjectID, todosetID) + followUp.args(app.Config.AccountID)
 
 	respOpts := []output.ResponseOption{
 		output.WithSummary(fmt.Sprintf("%d progress update(s)", len(versions))),
@@ -188,6 +189,7 @@ func runHillchartsUpdatesShow(cmd *cobra.Command, project, todosetID, arg string
 	}
 
 	app := appctx.FromContext(cmd.Context())
+	followUp := newFollowUpScope(app)
 
 	// A pasted URL names its account and todoset: hold it to a trusted host
 	// and the configured account before anything is resolved or requested.
@@ -208,18 +210,25 @@ func runHillchartsUpdatesShow(cmd *cobra.Command, project, todosetID, arg string
 			return output.ErrUsage(fmt.Sprintf(
 				"--todoset %s does not match the URL's todoset %d", todosetID, ref.todosetID))
 		}
+		urlTodosetID := strconv.FormatInt(ref.todosetID, 10)
 		if project != "" {
 			resolvedProjectID, err = resolveProjectID(cmd, app, project)
 			if err != nil {
 				return err
 			}
-			if resolvedProjectID != ref.projectID {
+			switch {
+			case ref.projectID == "":
+				// The account-level API URL names no project; ask the todoset.
+				if err := validateTodosetOwnership(cmd, app, urlTodosetID, resolvedProjectID); err != nil {
+					return err
+				}
+			case resolvedProjectID != ref.projectID:
 				return output.ErrUsage(fmt.Sprintf(
 					"the URL is in project %s, not %s", ref.projectID, resolvedProjectID))
 			}
 		}
 		tsID = ref.todosetID
-		todosetID = strconv.FormatInt(ref.todosetID, 10)
+		todosetID = urlTodosetID
 	} else {
 		resolvedProjectID, _, tsID, err = resolveHillchartTodoset(cmd, app, project, todosetID)
 		if err != nil {
@@ -232,7 +241,8 @@ func runHillchartsUpdatesShow(cmd *cobra.Command, project, todosetID, arg string
 		return convertSDKError(err)
 	}
 
-	scope := hillchartScope(resolvedProjectID, todosetID)
+	accountArgs := followUp.args(app.Config.AccountID)
+	scope := hillchartScope(resolvedProjectID, todosetID) + accountArgs
 	summary := fmt.Sprintf("Progress update #%d: %d dot(s)", version.ID, len(version.Dots))
 	if version.Creator != nil && version.Creator.Name != "" {
 		summary = fmt.Sprintf("Progress update #%d by %s: %d dot(s)", version.ID, version.Creator.Name, len(version.Dots))
@@ -244,7 +254,7 @@ func runHillchartsUpdatesShow(cmd *cobra.Command, project, todosetID, arg string
 		output.WithBreadcrumbs(
 			output.Breadcrumb{
 				Action:      "comments",
-				Cmd:         fmt.Sprintf("basecamp comments list %d", version.ID),
+				Cmd:         fmt.Sprintf("basecamp comments list %d%s", version.ID, accountArgs),
 				Description: "Read the discussion on this update",
 			},
 			output.Breadcrumb{
@@ -257,8 +267,8 @@ func runHillchartsUpdatesShow(cmd *cobra.Command, project, todosetID, arg string
 }
 
 // hillchartUpdateRef is what a `hillcharts updates show` argument names: the
-// progress update, and, when it is a URL, the account, project and todoset it
-// lives under.
+// progress update, and, when it is a URL, the account and todoset it lives
+// under, and its project when the URL names one.
 type hillchartUpdateRef struct {
 	versionID int64
 	todosetID int64
@@ -267,11 +277,13 @@ type hillchartUpdateRef struct {
 }
 
 // hillchartVersionRoute matches the path of a progress update's URL, web or
-// API: /{account}/buckets/{project}/todosets/{todoset}/hills/versions, then
+// API: /{account}[/buckets/{project}]/todosets/{todoset}/hills/versions, then
 // either /{id}[.json] (the API's url) or nothing, with the update named by a
-// #__recording_{id} fragment (the web's app_url).
+// #__recording_{id} fragment (the web's app_url). The project segment is
+// optional because the API also routes the todoset by account alone, as the
+// SDK requests it.
 var hillchartVersionRoute = regexp.MustCompile(
-	`^/(\d+)/buckets/(\d+)/todosets/(\d+)/hills/versions(?:/(\d+)(?:\.json)?)?/?$`)
+	`^/(\d+)(?:/buckets/(\d+))?/todosets/(\d+)/hills/versions(?:/(\d+)(?:\.json)?)?/?$`)
 
 var hillchartVersionFragment = regexp.MustCompile(`^__recording_(\d+)$`)
 
@@ -308,7 +320,7 @@ func hillchartUpdateArg(arg string) (hillchartUpdateRef, error) {
 		if f == nil {
 			return hillchartUpdateRef{}, output.ErrUsageHint(
 				"That URL is the list of progress updates, not one of them",
-				"List them with: basecamp hillcharts updates --todoset "+m[3])
+				"List them with: basecamp hillcharts updates --todoset "+m[3]+" --account "+m[1])
 		}
 		idStr = f[1]
 	}
