@@ -410,6 +410,10 @@ ARG basecamp templates delete 00 <id>
 ARG basecamp templates show 00 <id>
 ARG basecamp templates update 00 <id>
 ARG basecamp timeline 00 [me]
+ARG basecamp timesheet entry create 00 <recording-id|url>
+ARG basecamp timesheet entry delete 00 <id|url>
+ARG basecamp timesheet entry show 00 <id|url>
+ARG basecamp timesheet entry update 00 <id|url>
 ARG basecamp timesheet item 00 <id>
 ARG basecamp timesheet recording 00 <id>
 ARG basecamp tlgroup copy 00 <id|url>
@@ -1169,6 +1173,11 @@ CMD basecamp templates show
 CMD basecamp templates update
 CMD basecamp timeline
 CMD basecamp timesheet
+CMD basecamp timesheet entry
+CMD basecamp timesheet entry create
+CMD basecamp timesheet entry delete
+CMD basecamp timesheet entry show
+CMD basecamp timesheet entry update
 CMD basecamp timesheet item
 CMD basecamp timesheet project
 CMD basecamp timesheet recording
@@ -15734,6 +15743,143 @@ FLAG basecamp timesheet --styled type=bool
 FLAG basecamp timesheet --to type=string
 FLAG basecamp timesheet --todolist type=string
 FLAG basecamp timesheet --verbose type=count
+FLAG basecamp timesheet entry --account type=string
+FLAG basecamp timesheet entry --agent type=bool
+FLAG basecamp timesheet entry --cache-dir type=string
+FLAG basecamp timesheet entry --count type=bool
+FLAG basecamp timesheet entry --end type=string
+FLAG basecamp timesheet entry --from type=string
+FLAG basecamp timesheet entry --help type=bool
+FLAG basecamp timesheet entry --hints type=bool
+FLAG basecamp timesheet entry --ids-only type=bool
+FLAG basecamp timesheet entry --in type=string
+FLAG basecamp timesheet entry --jq type=string
+FLAG basecamp timesheet entry --json type=bool
+FLAG basecamp timesheet entry --markdown type=bool
+FLAG basecamp timesheet entry --md type=bool
+FLAG basecamp timesheet entry --no-hints type=bool
+FLAG basecamp timesheet entry --no-stats type=bool
+FLAG basecamp timesheet entry --person type=string
+FLAG basecamp timesheet entry --profile type=string
+FLAG basecamp timesheet entry --project type=string
+FLAG basecamp timesheet entry --quiet type=bool
+FLAG basecamp timesheet entry --start type=string
+FLAG basecamp timesheet entry --stats type=bool
+FLAG basecamp timesheet entry --styled type=bool
+FLAG basecamp timesheet entry --to type=string
+FLAG basecamp timesheet entry --todolist type=string
+FLAG basecamp timesheet entry --verbose type=count
+FLAG basecamp timesheet entry create --account type=string
+FLAG basecamp timesheet entry create --agent type=bool
+FLAG basecamp timesheet entry create --cache-dir type=string
+FLAG basecamp timesheet entry create --count type=bool
+FLAG basecamp timesheet entry create --date type=string
+FLAG basecamp timesheet entry create --description type=string
+FLAG basecamp timesheet entry create --end type=string
+FLAG basecamp timesheet entry create --from type=string
+FLAG basecamp timesheet entry create --help type=bool
+FLAG basecamp timesheet entry create --hints type=bool
+FLAG basecamp timesheet entry create --hours type=string
+FLAG basecamp timesheet entry create --ids-only type=bool
+FLAG basecamp timesheet entry create --in type=string
+FLAG basecamp timesheet entry create --jq type=string
+FLAG basecamp timesheet entry create --json type=bool
+FLAG basecamp timesheet entry create --markdown type=bool
+FLAG basecamp timesheet entry create --md type=bool
+FLAG basecamp timesheet entry create --no-hints type=bool
+FLAG basecamp timesheet entry create --no-stats type=bool
+FLAG basecamp timesheet entry create --person type=string
+FLAG basecamp timesheet entry create --profile type=string
+FLAG basecamp timesheet entry create --project type=string
+FLAG basecamp timesheet entry create --quiet type=bool
+FLAG basecamp timesheet entry create --start type=string
+FLAG basecamp timesheet entry create --stats type=bool
+FLAG basecamp timesheet entry create --styled type=bool
+FLAG basecamp timesheet entry create --to type=string
+FLAG basecamp timesheet entry create --todolist type=string
+FLAG basecamp timesheet entry create --verbose type=count
+FLAG basecamp timesheet entry delete --account type=string
+FLAG basecamp timesheet entry delete --agent type=bool
+FLAG basecamp timesheet entry delete --cache-dir type=string
+FLAG basecamp timesheet entry delete --count type=bool
+FLAG basecamp timesheet entry delete --end type=string
+FLAG basecamp timesheet entry delete --force type=bool
+FLAG basecamp timesheet entry delete --from type=string
+FLAG basecamp timesheet entry delete --help type=bool
+FLAG basecamp timesheet entry delete --hints type=bool
+FLAG basecamp timesheet entry delete --ids-only type=bool
+FLAG basecamp timesheet entry delete --in type=string
+FLAG basecamp timesheet entry delete --jq type=string
+FLAG basecamp timesheet entry delete --json type=bool
+FLAG basecamp timesheet entry delete --markdown type=bool
+FLAG basecamp timesheet entry delete --md type=bool
+FLAG basecamp timesheet entry delete --no-hints type=bool
+FLAG basecamp timesheet entry delete --no-stats type=bool
+FLAG basecamp timesheet entry delete --person type=string
+FLAG basecamp timesheet entry delete --profile type=string
+FLAG basecamp timesheet entry delete --project type=string
+FLAG basecamp timesheet entry delete --quiet type=bool
+FLAG basecamp timesheet entry delete --start type=string
+FLAG basecamp timesheet entry delete --stats type=bool
+FLAG basecamp timesheet entry delete --styled type=bool
+FLAG basecamp timesheet entry delete --to type=string
+FLAG basecamp timesheet entry delete --todolist type=string
+FLAG basecamp timesheet entry delete --verbose type=count
+FLAG basecamp timesheet entry show --account type=string
+FLAG basecamp timesheet entry show --agent type=bool
+FLAG basecamp timesheet entry show --cache-dir type=string
+FLAG basecamp timesheet entry show --count type=bool
+FLAG basecamp timesheet entry show --end type=string
+FLAG basecamp timesheet entry show --from type=string
+FLAG basecamp timesheet entry show --help type=bool
+FLAG basecamp timesheet entry show --hints type=bool
+FLAG basecamp timesheet entry show --ids-only type=bool
+FLAG basecamp timesheet entry show --in type=string
+FLAG basecamp timesheet entry show --jq type=string
+FLAG basecamp timesheet entry show --json type=bool
+FLAG basecamp timesheet entry show --markdown type=bool
+FLAG basecamp timesheet entry show --md type=bool
+FLAG basecamp timesheet entry show --no-hints type=bool
+FLAG basecamp timesheet entry show --no-stats type=bool
+FLAG basecamp timesheet entry show --person type=string
+FLAG basecamp timesheet entry show --profile type=string
+FLAG basecamp timesheet entry show --project type=string
+FLAG basecamp timesheet entry show --quiet type=bool
+FLAG basecamp timesheet entry show --start type=string
+FLAG basecamp timesheet entry show --stats type=bool
+FLAG basecamp timesheet entry show --styled type=bool
+FLAG basecamp timesheet entry show --to type=string
+FLAG basecamp timesheet entry show --todolist type=string
+FLAG basecamp timesheet entry show --verbose type=count
+FLAG basecamp timesheet entry update --account type=string
+FLAG basecamp timesheet entry update --agent type=bool
+FLAG basecamp timesheet entry update --cache-dir type=string
+FLAG basecamp timesheet entry update --count type=bool
+FLAG basecamp timesheet entry update --date type=string
+FLAG basecamp timesheet entry update --description type=string
+FLAG basecamp timesheet entry update --end type=string
+FLAG basecamp timesheet entry update --from type=string
+FLAG basecamp timesheet entry update --help type=bool
+FLAG basecamp timesheet entry update --hints type=bool
+FLAG basecamp timesheet entry update --hours type=string
+FLAG basecamp timesheet entry update --ids-only type=bool
+FLAG basecamp timesheet entry update --in type=string
+FLAG basecamp timesheet entry update --jq type=string
+FLAG basecamp timesheet entry update --json type=bool
+FLAG basecamp timesheet entry update --markdown type=bool
+FLAG basecamp timesheet entry update --md type=bool
+FLAG basecamp timesheet entry update --no-hints type=bool
+FLAG basecamp timesheet entry update --no-stats type=bool
+FLAG basecamp timesheet entry update --person type=string
+FLAG basecamp timesheet entry update --profile type=string
+FLAG basecamp timesheet entry update --project type=string
+FLAG basecamp timesheet entry update --quiet type=bool
+FLAG basecamp timesheet entry update --start type=string
+FLAG basecamp timesheet entry update --stats type=bool
+FLAG basecamp timesheet entry update --styled type=bool
+FLAG basecamp timesheet entry update --to type=string
+FLAG basecamp timesheet entry update --todolist type=string
+FLAG basecamp timesheet entry update --verbose type=count
 FLAG basecamp timesheet item --account type=string
 FLAG basecamp timesheet item --agent type=bool
 FLAG basecamp timesheet item --cache-dir type=string
@@ -21224,6 +21370,11 @@ SUB basecamp templates show
 SUB basecamp templates update
 SUB basecamp timeline
 SUB basecamp timesheet
+SUB basecamp timesheet entry
+SUB basecamp timesheet entry create
+SUB basecamp timesheet entry delete
+SUB basecamp timesheet entry show
+SUB basecamp timesheet entry update
 SUB basecamp timesheet item
 SUB basecamp timesheet project
 SUB basecamp timesheet recording

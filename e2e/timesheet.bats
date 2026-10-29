@@ -90,3 +90,42 @@ load test_helper
   run basecamp timesheet foobar
   # Command may show help or require project - just verify it runs
 }
+
+
+# Entry verbs: refused locally, before any request
+
+@test "timesheet entry create without --hours shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp timesheet entry create 789
+  assert_failure
+  assert_output_contains "--hours is required"
+}
+
+@test "timesheet entry update with nothing to change shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp timesheet entry update 123
+  assert_failure
+  assert_output_contains "Nothing to update"
+}
+
+@test "timesheet entry delete refuses an item URL" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp timesheet entry delete "https://3.basecamp.com/99999/buckets/89/todos/789" --force
+  assert_failure
+  assert_output_contains "does not name a timesheet entry"
+}
+
+@test "timesheet entry delete needs --force without a terminal" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp timesheet entry delete 123 --json
+  assert_failure
+  assert_output_contains "--force"
+}
