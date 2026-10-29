@@ -44,3 +44,16 @@ setup_file() {
   assert_success
   assert_json_value '.data.id' "$id"
 }
+
+@test "hillcharts update posts a progress update" {
+  run_smoke basecamp hillcharts show -p "$QA_PROJECT" --json
+  [[ "$status" -eq 0 ]] || mark_unverifiable "Hill chart not enabled on project"
+  local id position
+  id=$(echo "$output" | jq -r '.data.dots[0].id // empty')
+  position=$(echo "$output" | jq -r '.data.dots[0].position // empty')
+  [[ -n "$id" && -n "$position" ]] || mark_unverifiable "No tracked todolists on the project's hill chart"
+  # Re-post the dot where it sits, so the chart is left as it was.
+  run_smoke basecamp hillcharts update --dot "$id=$position" --note "Smoke test" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}

@@ -37,6 +37,7 @@ triggers:
   - basecamp gauge
   - basecamp hill chart
   - hill chart progress
+  - update the hill chart
   - basecamp assignment
   - basecamp notification
   - basecamp account

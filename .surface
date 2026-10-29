@@ -992,6 +992,7 @@ CMD basecamp hillcharts
 CMD basecamp hillcharts show
 CMD basecamp hillcharts track
 CMD basecamp hillcharts untrack
+CMD basecamp hillcharts update
 CMD basecamp hillcharts updates
 CMD basecamp hillcharts updates list
 CMD basecamp hillcharts updates show
@@ -11616,6 +11617,32 @@ FLAG basecamp hillcharts untrack --styled type=bool
 FLAG basecamp hillcharts untrack --todolist type=string
 FLAG basecamp hillcharts untrack --todoset type=string
 FLAG basecamp hillcharts untrack --verbose type=count
+FLAG basecamp hillcharts update --account type=string
+FLAG basecamp hillcharts update --agent type=bool
+FLAG basecamp hillcharts update --cache-dir type=string
+FLAG basecamp hillcharts update --count type=bool
+FLAG basecamp hillcharts update --dot type=stringArray
+FLAG basecamp hillcharts update --format type=string
+FLAG basecamp hillcharts update --help type=bool
+FLAG basecamp hillcharts update --hints type=bool
+FLAG basecamp hillcharts update --ids-only type=bool
+FLAG basecamp hillcharts update --in type=string
+FLAG basecamp hillcharts update --jq type=string
+FLAG basecamp hillcharts update --json type=bool
+FLAG basecamp hillcharts update --markdown type=bool
+FLAG basecamp hillcharts update --md type=bool
+FLAG basecamp hillcharts update --no-hints type=bool
+FLAG basecamp hillcharts update --no-stats type=bool
+FLAG basecamp hillcharts update --note type=string
+FLAG basecamp hillcharts update --notify type=string
+FLAG basecamp hillcharts update --profile type=string
+FLAG basecamp hillcharts update --project type=string
+FLAG basecamp hillcharts update --quiet type=bool
+FLAG basecamp hillcharts update --stats type=bool
+FLAG basecamp hillcharts update --styled type=bool
+FLAG basecamp hillcharts update --todolist type=string
+FLAG basecamp hillcharts update --todoset type=string
+FLAG basecamp hillcharts update --verbose type=count
 FLAG basecamp hillcharts updates --account type=string
 FLAG basecamp hillcharts updates --agent type=bool
 FLAG basecamp hillcharts updates --all type=bool
@@ -21264,6 +21291,7 @@ SUB basecamp hillcharts
 SUB basecamp hillcharts show
 SUB basecamp hillcharts track
 SUB basecamp hillcharts untrack
+SUB basecamp hillcharts update
 SUB basecamp hillcharts updates
 SUB basecamp hillcharts updates list
 SUB basecamp hillcharts updates show

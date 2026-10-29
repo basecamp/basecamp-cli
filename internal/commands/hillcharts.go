@@ -26,7 +26,8 @@ A hill chart shows the progress of todolists in a project's todoset,
 with each tracked todolist represented as a dot on the hill.`,
 		Annotations: map[string]string{
 			"agent_notes": "Hill charts track todolist progress. Requires a todoset (auto-detected from project). Use track/untrack with todolist IDs.\n" +
-				"updates lists past progress updates (newest first); updates show <id|url> reads one, with its note and each todolist's position.",
+				"updates lists past progress updates (newest first); updates show <id|url> reads one, with its note and each todolist's position.\n" +
+				"update --dot <todolist-id|name>=<0-100> (repeatable) moves tracked todolists and posts a progress update; --note (Markdown, - for stdin) adds a note; --notify names who is told (nobody otherwise). Lists left out keep their position.",
 		},
 	}
 
@@ -38,6 +39,7 @@ with each tracked todolist represented as a dot on the hill.`,
 		newHillchartsTrackCmd(&project),
 		newHillchartsUntrackCmd(&project),
 		newHillchartsUpdatesCmd(&project),
+		newHillchartsUpdateCmd(&project),
 	)
 
 	return cmd
