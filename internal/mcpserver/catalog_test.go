@@ -78,7 +78,7 @@ func TestCatalogExcludesUnservedOperations(t *testing.T) {
 			assert.False(t, excluded[op.ID], "operation %q should be excluded from the vendored model", op.ID)
 		}
 	}
-	assert.Equal(t, 284, model, "served model operation count")
+	assert.Equal(t, 286, model, "served model operation count")
 	assert.Equal(t, 3, composite, "served composite operation count")
 }
 
@@ -219,7 +219,7 @@ func TestCatalogPaginatedActionsTakePage(t *testing.T) {
 			assert.Equal(t, 1, pages, "operation %q must declare exactly one page query parameter", op.ID)
 		}
 	}
-	assert.Equal(t, 62, link, "Link-style paginated operation count")
+	assert.Equal(t, 63, link, "Link-style paginated operation count")
 }
 
 // TestCatalogCursorPaginatedActionsTakeNoPage pins the other half. A

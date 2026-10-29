@@ -28855,6 +28855,224 @@
         }
       }
     },
+    "/{accountId}/todosets/{todosetId}/hills/versions.json": {
+      "get": {
+        "description": "List the progress updates on a todoset's hill chart, newest first.\n\nEach time someone updates a hill chart, Basecamp saves a progress update:\nthe note they wrote (`description`, rich text) and where each tracked\ntodolist sat on the hill at that moment (`dots`). Earlier updates are kept,\nso this list is the hill chart's history. Discussion on an update is read\nthrough its `comments_url`.\n\nTo collect updates across projects, read the progress report: events with\na `kind` of `hill_version_created` have a `url` that `GetHillChartVersion`\nanswers.\n\n**Pagination**: Uses Link header (RFC5988). Follow the `next` rel URL\nto fetch additional pages. X-Total-Count header provides total count.",
+        "operationId": "ListHillChartVersions",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "todosetId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page number for paginating through results. Defaults to 1. A positive value selects exactly that page, not a starting offset; see SPEC section 8.",
+            "schema": {
+              "type": "integer",
+              "description": "Page number for paginating through results. Defaults to 1. A positive value selects exactly that page, not a starting offset; see SPEC section 8.",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ListHillChartVersions 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListHillChartVersionsResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Todos"
+        ],
+        "x-basecamp-pagination": {
+          "style": "link",
+          "totalCountHeader": "X-Total-Count",
+          "maxPageSize": 50
+        },
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
+    "/{accountId}/todosets/{todosetId}/hills/versions/{versionId}": {
+      "get": {
+        "description": "Get one progress update from a todoset's hill chart",
+        "operationId": "GetHillChartVersion",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "todosetId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GetHillChartVersion 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetHillChartVersionResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Todos"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
     "/{accountId}/todosets/{todosetId}/todolists.json": {
       "get": {
         "description": "List todolists in a todoset\n\n**Pagination**: Uses Link header (RFC5988). Follow the `next` rel URL\nto fetch additional pages. X-Total-Count header provides total count.",
@@ -35042,6 +35260,9 @@
       "GetHillChartResponseContent": {
         "$ref": "#/components/schemas/HillChart"
       },
+      "GetHillChartVersionResponseContent": {
+        "$ref": "#/components/schemas/HillChartVersion"
+      },
       "GetInboxResponseContent": {
         "$ref": "#/components/schemas/Inbox"
       },
@@ -35483,6 +35704,10 @@
               "$ref": "#/components/schemas/HillChartDot"
             },
             "x-go-type-skip-optional-pointer": true
+          },
+          "versions_url": {
+            "type": "string",
+            "description": "API URL of the chart's progress updates (`ListHillChartVersions`).\nPresent only when the chart has at least one progress update."
           }
         },
         "required": [
@@ -35517,6 +35742,152 @@
         "required": [
           "color",
           "id",
+          "label",
+          "position"
+        ]
+      },
+      "HillChartVersion": {
+        "type": "object",
+        "description": "A progress update on a hill chart: the note someone wrote when they\nupdated the chart, and where each tracked todolist sat at that moment.",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string"
+          },
+          "visible_to_clients": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "x-go-type": "time.Time",
+            "x-go-type-import": {
+              "path": "time"
+            }
+          },
+          "updated_at": {
+            "type": "string",
+            "x-go-type": "time.Time",
+            "x-go-type-import": {
+              "path": "time"
+            }
+          },
+          "title": {
+            "type": "string"
+          },
+          "inherits_status": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "app_url": {
+            "type": "string"
+          },
+          "bookmark_url": {
+            "type": "string"
+          },
+          "subscription_url": {
+            "type": "string"
+          },
+          "comments_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "comments_url": {
+            "type": "string"
+          },
+          "boosts_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "boosts_url": {
+            "type": "string"
+          },
+          "parent": {
+            "$ref": "#/components/schemas/RecordingParent"
+          },
+          "bucket": {
+            "$ref": "#/components/schemas/TodoBucket"
+          },
+          "creator": {
+            "$ref": "#/components/schemas/Person"
+          },
+          "description": {
+            "type": "string",
+            "description": "The note written with the update, as rich text."
+          },
+          "description_attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RichTextAttachment"
+            }
+          },
+          "dots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HillChartVersionDot"
+            },
+            "description": "Where each tracked todolist sat on the hill when the update was made,\nordered by position."
+          }
+        },
+        "required": [
+          "app_url",
+          "bucket",
+          "created_at",
+          "creator",
+          "description_attachments",
+          "dots",
+          "id",
+          "inherits_status",
+          "parent",
+          "status",
+          "title",
+          "type",
+          "updated_at",
+          "url",
+          "visible_to_clients"
+        ]
+      },
+      "HillChartVersionDot": {
+        "type": "object",
+        "description": "A todolist's place on the hill in one progress update.",
+        "properties": {
+          "id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The todolist's ID, or null when it has since been permanently deleted\nor moved to another project; `url` and `app_url` are then omitted.",
+            "format": "int64",
+            "x-go-type": "int64"
+          },
+          "label": {
+            "type": "string",
+            "description": "The todolist's full name at the time of the update."
+          },
+          "color": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "description": "Position on the same 0\u2013100 scale as the hill chart's dots.",
+            "format": "int32"
+          },
+          "url": {
+            "type": "string"
+          },
+          "app_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "color",
           "label",
           "position"
         ]
@@ -35808,6 +36179,12 @@
         "type": "array",
         "items": {
           "$ref": "#/components/schemas/Gauge"
+        }
+      },
+      "ListHillChartVersionsResponseContent": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/HillChartVersion"
         }
       },
       "ListLineupMarkersResponseContent": {

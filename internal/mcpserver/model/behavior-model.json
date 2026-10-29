@@ -1416,6 +1416,18 @@
         ]
       }
     },
+    "GetHillChartVersion": {
+      "readonly": true,
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
     "GetInbox": {
       "readonly": true,
       "retry": {
@@ -2273,6 +2285,22 @@
       }
     },
     "ListGauges": {
+      "readonly": true,
+      "pagination": {
+        "style": "link",
+        "maxPageSize": 50
+      },
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListHillChartVersions": {
       "readonly": true,
       "pagination": {
         "style": "link",
