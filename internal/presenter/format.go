@@ -30,6 +30,8 @@ func FormatField(spec FieldSpec, key string, val any, locale Locale) string {
 		return formatDock(val)
 	case "steps":
 		return formatSteps(val)
+	case "hill_dots":
+		return formatHillDots(val)
 	case "logo":
 		return formatLogo(val)
 	case "wallpaper":
@@ -90,6 +92,31 @@ func formatSteps(val any) string {
 			marker = "[x]"
 		}
 		lines = append(lines, fmt.Sprintf("%s %s", marker, title))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// formatHillDots renders a hill chart's dots as a list, one todolist per item:
+// its position on the 0–100 hill, then its name, in the order the API gives
+// them (by position). A dot whose todolist is gone (id null) keeps its label.
+func formatHillDots(val any) string {
+	items, ok := val.([]any)
+	if !ok || len(items) == 0 {
+		return ""
+	}
+	var lines []string
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		label, _ := m["label"].(string)
+		label = richtext.SanitizeSingleLine(label)
+		position := "?"
+		if p := stepPosition(m); p != 1<<31-1 {
+			position = strconv.Itoa(p)
+		}
+		lines = append(lines, fmt.Sprintf("- %3s/100  %s", position, label))
 	}
 	return strings.Join(lines, "\n")
 }

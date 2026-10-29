@@ -71,6 +71,71 @@ load test_helper
 }
 
 
+# Progress updates
+
+@test "hillcharts updates without project shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp hillcharts updates
+  assert_failure
+  assert_output_contains "project"
+}
+
+@test "hillcharts updates with --todoset skips project requirement" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp hillcharts updates --todoset 12345
+  assert_failure
+  assert_output_not_contains "project"
+}
+
+@test "hillcharts updates rejects --all with --limit" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp hillcharts updates --todoset 12345 --all --limit 5
+  assert_failure
+  assert_output_contains "--all and --limit are mutually exclusive"
+}
+
+@test "hillcharts updates with an ID points at show" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp hillcharts updates 501 --todoset 12345
+  assert_failure
+  assert_output_contains "hillcharts updates show"
+}
+
+@test "hillcharts updates show without args shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp hillcharts updates show
+  assert_failure
+}
+
+@test "hillcharts updates show refuses an untrusted URL" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp hillcharts updates show "https://3.basecamp.example.com/99999/buckets/1/todosets/2/hills/versions#__recording_3"
+  assert_failure
+  assert_output_contains "untrusted host"
+}
+
+@test "hillcharts updates show refuses a URL that is not a progress update" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp hillcharts updates show "https://3.basecamp.com/99999/buckets/1/todolists/2"
+  assert_failure
+  assert_output_contains "does not name a hill chart progress update"
+}
+
+
 # Help
 
 @test "hillcharts --help shows help" {

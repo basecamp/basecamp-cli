@@ -1,0 +1,58 @@
+entity: hill_chart_version
+kind: recording
+type_key: "Hill::Version"
+
+# A hill chart progress update (`hillcharts updates`). Its title is always
+# "Hill Chart: Progress update", so the list leads with who and when, and the
+# detail view with the note and where each todolist sat.
+
+identity:
+  label: title
+  id: id
+
+headline:
+  default:
+    template: "Progress update"
+
+fields:
+  description:
+    role: body
+    format: text
+    collapse: true
+
+  dots:
+    role: body
+    format: hill_dots
+    collapse: true
+
+  creator:
+    role: detail
+    format: person
+
+  created_at:
+    role: meta
+    emphasis: muted
+    format: relative_time
+
+  comments_count:
+    role: detail
+    format: number
+
+  id:
+    role: meta
+    emphasis: muted
+
+  app_url:
+    role: meta
+    format: text
+
+views:
+  list:
+    columns: [id, creator, created_at, description]
+  detail:
+    sections:
+      - fields: [description]
+      - heading: Dots
+        fields: [dots]
+      - heading: Metadata
+        fields: [id, creator, created_at, comments_count, app_url]

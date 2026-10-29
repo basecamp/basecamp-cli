@@ -25,3 +25,22 @@ setup_file() {
   # Untrack may fail with not-found for a fake ID; just verify it reaches the API
   mark_unverifiable "Requires valid todolist ID"
 }
+
+@test "hillcharts updates list returns progress updates" {
+  run_smoke basecamp hillcharts updates list -p "$QA_PROJECT" --json
+  # A hill chart with no tracked todolists may be refused (403)
+  [[ "$status" -eq 4 ]] && mark_unverifiable "Hill chart not enabled on project"
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "hillcharts updates show returns a progress update" {
+  run_smoke basecamp hillcharts updates list -p "$QA_PROJECT" --limit 1 --json
+  [[ "$status" -eq 0 ]] || mark_unverifiable "Cannot list progress updates"
+  local id
+  id=$(echo "$output" | jq -r '.data[0].id // empty')
+  [[ -n "$id" ]] || mark_unverifiable "No progress updates on the project's hill chart"
+  run_smoke basecamp hillcharts updates show "$id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.data.id' "$id"
+}

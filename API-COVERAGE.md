@@ -6,12 +6,17 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 57 | 218 |
+| ✅ Implemented | 58 | 220 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **61** | **230** |
+| **Total tracked** | **62** | **232** |
 
-**218 of 218 tracked in-scope endpoints.** Uploading and removing a project's
+**220 of 220 tracked in-scope endpoints.** Reading a hill chart's progress
+updates (`GET /todosets/:id/hills/versions.json` and
+`GET /todosets/:id/hills/versions/:id.json`, modelled by
+[basecamp/basecamp-sdk#1061](https://github.com/basecamp/basecamp-sdk/pull/1061) and
+shipped in SDK v0.33.0) lands as `hillcharts updates` and `hillcharts updates show`.
+Uploading and removing a project's
 logo (`PUT`/`DELETE /projects/:id/logo.json`, added by
 [bc3#14174](https://github.com/basecamp/bc3/pull/14174) and shipped in
 [SDK v0.30.0](https://github.com/basecamp/basecamp-sdk/releases/tag/v0.30.0))
@@ -226,6 +231,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | dock_tools | 7 | `tools` | ✅ | BC4 | - | Dock tool management: show, update, trash, enable, disable, reposition (also `tools move --position`; `tools move --to-project` moves a tool to another project through recordings (moves, copies)). `create` is BC5-only (create-by-type: `POST /buckets/{id}/dock/tools.json`), replacing the removed clone call; create-time `visible_to_clients` behind `tools create --visible-to-clients` (chat/kanban only) |
 | **Hill Charts** |
 | hill_charts | 2 | `hillcharts` | ✅ | BC4 | - | show, track/untrack todolists |
+| hill_charts (progress updates) | 2 | `hillcharts updates` | ✅ | BC5 | - | list (`GET /todosets/:id/hills/versions.json`, paginated, newest first; bare `hillcharts updates` or `updates list`), show (`GET /todosets/:id/hills/versions/:id.json`; an id with `--in`/`--todoset`, or the update's web or API URL, which names its todoset). Each update carries its note (`description`, rich text) and every tracked todolist's position (`dots`; `id` is null for a todolist since deleted or moved). Todoset resolved as `hillcharts show` does |
 | gauges | 7 | `gauges` | ✅ | BC4 | - | list, needles, needle, create, update, delete, enable/disable |
 | **Communication** |
 | messages | 10 | `messages`, `message` | ✅ | BC4 | - | list, show, create, update, publish, pin, unpin. Create supports `--subscribe`/`--no-subscribe` and `--draft`. Publish promotes drafts to active. `move`/`copy` file a message onto a message board in another project (see recordings (moves, copies)) |
