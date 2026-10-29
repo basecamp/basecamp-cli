@@ -181,6 +181,7 @@ func TestHillchartsUpdateRefusesBadFlagsBeforeAnyRequest(t *testing.T) {
 		"empty notify":       {[]string{"update", "--todoset", "12345", "--dot", "111=5", "--notify", " , "}, "at least one person"},
 		"empty note alone":   {[]string{"update", "--todoset", "12345", "--note", "  "}, "nothing to post"},
 		"positional arg":     {[]string{"update", "--todoset", "12345", "111=5"}, "unknown command"},
+		"todoset not an id":  {[]string{"update", "--todoset", "bogus", "--note", "-"}, "Invalid todoset ID: bogus"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -213,4 +214,17 @@ func TestHillchartsUpdateSurfacesTheServersRefusal(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "isn't tracked")
 	assert.Empty(t, out.String())
+}
+
+// --notify alone records the chart as it stands and tells the people named.
+func TestHillchartsUpdateNotifyAlonePosts(t *testing.T) {
+	app, transport, _ := setupHillUpdatesApp(t, hillPeopleRoute(), hillCreateVersionRoute())
+
+	require.NoError(t, executeHillchartsCommand(NewHillchartsCmd(), app, "update",
+		"--todoset", "12345", "--notify", "7"))
+
+	body := postedHillBody(t, transport)
+	assert.Equal(t, []any{float64(7)}, body["subscriptions"])
+	assert.NotContains(t, body, "dots")
+	assert.NotContains(t, body, "description")
 }

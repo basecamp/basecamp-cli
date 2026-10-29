@@ -34,7 +34,8 @@ Each --dot moves one tracked todolist, named by ID or name, to a position from
 --format html to send HTML as written). Use - to read it from stdin.
 
 Nobody else is notified unless named with --notify (names, emails, IDs or
-"me", comma-separated).
+"me", comma-separated). --notify alone posts the chart as it stands and tells
+the people named.
 
   basecamp hillcharts update --dot "Design=60" --in MyProject
   basecamp hillcharts update --dot 111=40 --dot 222=100 --note "Design is done" --in MyProject
@@ -96,10 +97,16 @@ func runHillchartsUpdate(cmd *cobra.Command, project, todosetID string, dotArgs 
 		}
 		parsed = append(parsed, d)
 	}
-	if cmd.Flags().Changed("notify") && strings.TrimSpace(strings.ReplaceAll(notify, ",", "")) == "" {
+	if todosetID != "" && !isAllDigits(todosetID) {
+		return output.ErrUsage("Invalid todoset ID: " + todosetID)
+	}
+	notifying := cmd.Flags().Changed("notify")
+	if notifying && strings.TrimSpace(strings.ReplaceAll(notify, ",", "")) == "" {
 		return output.ErrUsage("--notify needs at least one person")
 	}
-	if len(parsed) == 0 && !cmd.Flags().Changed("note") {
+	// --notify alone is a post: it records the chart as it stands and tells
+	// the people named, which the API allows.
+	if len(parsed) == 0 && !cmd.Flags().Changed("note") && !notifying {
 		return noChanges(cmd)
 	}
 
@@ -109,8 +116,8 @@ func runHillchartsUpdate(cmd *cobra.Command, project, todosetID string, dotArgs 
 	if err != nil {
 		return err
 	}
-	if cmd.Flags().Changed("note") && strings.TrimSpace(note) == "" && len(parsed) == 0 {
-		return output.ErrUsage("--note is empty, and no --dot was given: there is nothing to post")
+	if cmd.Flags().Changed("note") && strings.TrimSpace(note) == "" && len(parsed) == 0 && !notifying {
+		return output.ErrUsage("--note is empty, and no --dot or --notify was given: there is nothing to post")
 	}
 
 	app := appctx.FromContext(cmd.Context())
