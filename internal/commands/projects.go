@@ -467,13 +467,15 @@ account is already at that limit.`,
 		Example: "  $ basecamp projects unarchive 12345",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runProjectStatusChange(cmd, args, (*basecamp.ProjectsService).Unarchive, "active", "Project restored", "archive", "Archive the project")
+			return runProjectStatusChange(cmd, args, (*basecamp.ProjectsService).Unarchive, "active", "Project restored", "", "")
 		},
 	}
 }
 
 // runProjectStatusChange makes the change, which answers with no body, and
-// reports the status it set, with the command that undoes it as a follow-up.
+// reports the status it set. inverse names the command that undoes it, offered
+// as a follow-up; unarchive has none, since a project it restored may have
+// come from the trash rather than the archive.
 func runProjectStatusChange(cmd *cobra.Command, args []string, change func(*basecamp.ProjectsService, context.Context, int64) error, status, summary, inverse, inverseDescription string) error {
 	if len(args) == 0 {
 		return missingArg(cmd, "<id>")
@@ -499,23 +501,24 @@ func runProjectStatusChange(cmd *cobra.Command, args []string, change func(*base
 	}
 
 	scopeArgs := scope.args(app.Config.AccountID)
+	crumbs := []output.Breadcrumb{{
+		Action:      "show",
+		Cmd:         fmt.Sprintf("basecamp projects show %d", projectID) + scopeArgs,
+		Description: "View the project",
+	}}
+	if inverse != "" {
+		crumbs = append(crumbs, output.Breadcrumb{
+			Action:      inverse,
+			Cmd:         fmt.Sprintf("basecamp projects %s %d", inverse, projectID) + scopeArgs,
+			Description: inverseDescription,
+		})
+	}
 	return app.OK(map[string]any{
 		"id":     projectID,
 		"status": status,
 	},
 		output.WithSummary(summary),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
-				Action:      "show",
-				Cmd:         fmt.Sprintf("basecamp projects show %d", projectID) + scopeArgs,
-				Description: "View the project",
-			},
-			output.Breadcrumb{
-				Action:      inverse,
-				Cmd:         fmt.Sprintf("basecamp projects %s %d", inverse, projectID) + scopeArgs,
-				Description: inverseDescription,
-			},
-		),
+		output.WithBreadcrumbs(crumbs...),
 	)
 }
 

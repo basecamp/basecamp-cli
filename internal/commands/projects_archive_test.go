@@ -32,11 +32,19 @@ func projectStatusServer(t *testing.T, path string, status int, body string) (*h
 }
 
 func TestProjectsArchiveAndUnarchive(t *testing.T) {
+	// unarchive offers no undo: the project it restored may have come from
+	// the trash, and archiving it would not put it back there.
 	for _, tc := range []struct {
-		action, path, status, summary, inverse string
+		action, path, status, summary string
+		follow                        map[string]string
 	}{
-		{"archive", "/99999/projects/123/status/archived.json", "archived", "Project archived", "unarchive"},
-		{"unarchive", "/99999/projects/123/status/active.json", "active", "Project restored", "archive"},
+		{"archive", "/99999/projects/123/status/archived.json", "archived", "Project archived", map[string]string{
+			"show":      "basecamp projects show 123",
+			"unarchive": "basecamp projects unarchive 123",
+		}},
+		{"unarchive", "/99999/projects/123/status/active.json", "active", "Project restored", map[string]string{
+			"show": "basecamp projects show 123",
+		}},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
 			server, calls := projectStatusServer(t, tc.path, http.StatusNoContent, "")
@@ -54,10 +62,7 @@ func TestProjectsArchiveAndUnarchive(t *testing.T) {
 			for _, crumb := range env.Breadcrumbs {
 				got[crumb.Action] = crumb.Cmd
 			}
-			assert.Equal(t, map[string]string{
-				"show":     "basecamp projects show 123",
-				tc.inverse: "basecamp projects " + tc.inverse + " 123",
-			}, got)
+			assert.Equal(t, tc.follow, got)
 		})
 	}
 }
