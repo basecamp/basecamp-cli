@@ -26,6 +26,7 @@ Call {"action": "describe", "params": {"action": "NAME"}} for an action's full p
 ACTIONS (RO = read-only):
 - complete_subtask: Mark a subtask as completed
 - complete_todo: Mark a todo as complete
+- create_hill_chart_version: Post a progress update on a todoset's hill chart
 - create_subtask: Create a subtask under a to-do or a card
 - create_todo: Create a new todo in a todolist
 - create_todolist: Create a new todolist in a todoset
