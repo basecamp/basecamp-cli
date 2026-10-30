@@ -281,6 +281,7 @@ ARG basecamp gauges update 00 <id>
 ARG basecamp help 00 [command]
 ARG basecamp hillcharts track 00 <todolist-ids>
 ARG basecamp hillcharts untrack 00 <todolist-ids>
+ARG basecamp hillcharts updates show 00 <id|url>
 ARG basecamp lineup create 00 <name>
 ARG basecamp lineup create 01 <date>
 ARG basecamp lineup delete 00 <id|url>
@@ -991,6 +992,9 @@ CMD basecamp hillcharts
 CMD basecamp hillcharts show
 CMD basecamp hillcharts track
 CMD basecamp hillcharts untrack
+CMD basecamp hillcharts updates
+CMD basecamp hillcharts updates list
+CMD basecamp hillcharts updates show
 CMD basecamp inbox
 CMD basecamp lineup
 CMD basecamp lineup create
@@ -11612,6 +11616,78 @@ FLAG basecamp hillcharts untrack --styled type=bool
 FLAG basecamp hillcharts untrack --todolist type=string
 FLAG basecamp hillcharts untrack --todoset type=string
 FLAG basecamp hillcharts untrack --verbose type=count
+FLAG basecamp hillcharts updates --account type=string
+FLAG basecamp hillcharts updates --agent type=bool
+FLAG basecamp hillcharts updates --all type=bool
+FLAG basecamp hillcharts updates --cache-dir type=string
+FLAG basecamp hillcharts updates --count type=bool
+FLAG basecamp hillcharts updates --help type=bool
+FLAG basecamp hillcharts updates --hints type=bool
+FLAG basecamp hillcharts updates --ids-only type=bool
+FLAG basecamp hillcharts updates --in type=string
+FLAG basecamp hillcharts updates --jq type=string
+FLAG basecamp hillcharts updates --json type=bool
+FLAG basecamp hillcharts updates --limit type=int
+FLAG basecamp hillcharts updates --markdown type=bool
+FLAG basecamp hillcharts updates --md type=bool
+FLAG basecamp hillcharts updates --no-hints type=bool
+FLAG basecamp hillcharts updates --no-stats type=bool
+FLAG basecamp hillcharts updates --page type=int
+FLAG basecamp hillcharts updates --profile type=string
+FLAG basecamp hillcharts updates --project type=string
+FLAG basecamp hillcharts updates --quiet type=bool
+FLAG basecamp hillcharts updates --stats type=bool
+FLAG basecamp hillcharts updates --styled type=bool
+FLAG basecamp hillcharts updates --todolist type=string
+FLAG basecamp hillcharts updates --todoset type=string
+FLAG basecamp hillcharts updates --verbose type=count
+FLAG basecamp hillcharts updates list --account type=string
+FLAG basecamp hillcharts updates list --agent type=bool
+FLAG basecamp hillcharts updates list --all type=bool
+FLAG basecamp hillcharts updates list --cache-dir type=string
+FLAG basecamp hillcharts updates list --count type=bool
+FLAG basecamp hillcharts updates list --help type=bool
+FLAG basecamp hillcharts updates list --hints type=bool
+FLAG basecamp hillcharts updates list --ids-only type=bool
+FLAG basecamp hillcharts updates list --in type=string
+FLAG basecamp hillcharts updates list --jq type=string
+FLAG basecamp hillcharts updates list --json type=bool
+FLAG basecamp hillcharts updates list --limit type=int
+FLAG basecamp hillcharts updates list --markdown type=bool
+FLAG basecamp hillcharts updates list --md type=bool
+FLAG basecamp hillcharts updates list --no-hints type=bool
+FLAG basecamp hillcharts updates list --no-stats type=bool
+FLAG basecamp hillcharts updates list --page type=int
+FLAG basecamp hillcharts updates list --profile type=string
+FLAG basecamp hillcharts updates list --project type=string
+FLAG basecamp hillcharts updates list --quiet type=bool
+FLAG basecamp hillcharts updates list --stats type=bool
+FLAG basecamp hillcharts updates list --styled type=bool
+FLAG basecamp hillcharts updates list --todolist type=string
+FLAG basecamp hillcharts updates list --todoset type=string
+FLAG basecamp hillcharts updates list --verbose type=count
+FLAG basecamp hillcharts updates show --account type=string
+FLAG basecamp hillcharts updates show --agent type=bool
+FLAG basecamp hillcharts updates show --cache-dir type=string
+FLAG basecamp hillcharts updates show --count type=bool
+FLAG basecamp hillcharts updates show --help type=bool
+FLAG basecamp hillcharts updates show --hints type=bool
+FLAG basecamp hillcharts updates show --ids-only type=bool
+FLAG basecamp hillcharts updates show --in type=string
+FLAG basecamp hillcharts updates show --jq type=string
+FLAG basecamp hillcharts updates show --json type=bool
+FLAG basecamp hillcharts updates show --markdown type=bool
+FLAG basecamp hillcharts updates show --md type=bool
+FLAG basecamp hillcharts updates show --no-hints type=bool
+FLAG basecamp hillcharts updates show --no-stats type=bool
+FLAG basecamp hillcharts updates show --profile type=string
+FLAG basecamp hillcharts updates show --project type=string
+FLAG basecamp hillcharts updates show --quiet type=bool
+FLAG basecamp hillcharts updates show --stats type=bool
+FLAG basecamp hillcharts updates show --styled type=bool
+FLAG basecamp hillcharts updates show --todolist type=string
+FLAG basecamp hillcharts updates show --todoset type=string
+FLAG basecamp hillcharts updates show --verbose type=count
 FLAG basecamp inbox --account type=string
 FLAG basecamp inbox --agent type=bool
 FLAG basecamp inbox --all type=bool
@@ -21188,6 +21264,9 @@ SUB basecamp hillcharts
 SUB basecamp hillcharts show
 SUB basecamp hillcharts track
 SUB basecamp hillcharts untrack
+SUB basecamp hillcharts updates
+SUB basecamp hillcharts updates list
+SUB basecamp hillcharts updates show
 SUB basecamp inbox
 SUB basecamp lineup
 SUB basecamp lineup create

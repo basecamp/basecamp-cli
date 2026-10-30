@@ -262,6 +262,24 @@ func TestFormatFieldSteps(t *testing.T) {
 	assert.Empty(t, FormatField(spec, "steps", nil, enUS))
 }
 
+// Hill dots keep the API's order (by position), show a deleted todolist's
+// dot by its label, strip terminal escapes from labels, and never print a
+// raw nil.
+func TestFormatFieldHillDots(t *testing.T) {
+	spec := FieldSpec{Format: "hill_dots"}
+
+	dots := []any{
+		map[string]any{"id": float64(111), "label": "Research", "position": float64(5)},
+		map[string]any{"id": nil, "label": "Gone list", "position": float64(100)},
+		map[string]any{"id": float64(222), "label": "No\x1b[31m position"},
+	}
+	want := "-   5/100  Research\n- 100/100  Gone list\n-   ?/100  No position"
+	assert.Equal(t, want, FormatField(spec, "dots", dots, enUS))
+
+	assert.Empty(t, FormatField(spec, "dots", []any{}, enUS))
+	assert.Empty(t, FormatField(spec, "dots", nil, enUS))
+}
+
 func TestFormatFieldStepsSanitizesTitles(t *testing.T) {
 	spec := FieldSpec{Format: "steps"}
 

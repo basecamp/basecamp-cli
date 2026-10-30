@@ -35,6 +35,8 @@ triggers:
   - basecamp template
   - basecamp webhook
   - basecamp gauge
+  - basecamp hill chart
+  - hill chart progress
   - basecamp assignment
   - basecamp notification
   - basecamp account

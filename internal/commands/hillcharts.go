@@ -25,7 +25,8 @@ func NewHillchartsCmd() *cobra.Command {
 A hill chart shows the progress of todolists in a project's todoset,
 with each tracked todolist represented as a dot on the hill.`,
 		Annotations: map[string]string{
-			"agent_notes": "Hill charts track todolist progress. Requires a todoset (auto-detected from project). Use track/untrack with todolist IDs.",
+			"agent_notes": "Hill charts track todolist progress. Requires a todoset (auto-detected from project). Use track/untrack with todolist IDs.\n" +
+				"updates lists past progress updates (newest first); updates show <id|url> reads one, with its note and each todolist's position.",
 		},
 	}
 
@@ -36,6 +37,7 @@ with each tracked todolist represented as a dot on the hill.`,
 		newHillchartsShowCmd(&project),
 		newHillchartsTrackCmd(&project),
 		newHillchartsUntrackCmd(&project),
+		newHillchartsUpdatesCmd(&project),
 	)
 
 	return cmd
@@ -68,34 +70,9 @@ func runHillchartsShow(cmd *cobra.Command, project, todosetID string) error {
 		return err
 	}
 
-	var resolvedProjectID string
-	if todosetID != "" {
-		if project != "" {
-			var err error
-			resolvedProjectID, err = resolveProjectID(cmd, app, project)
-			if err != nil {
-				return err
-			}
-			if err := validateTodosetOwnership(cmd, app, todosetID, resolvedProjectID); err != nil {
-				return err
-			}
-		}
-	} else {
-		var err error
-		resolvedProjectID, err = resolveProjectID(cmd, app, project)
-		if err != nil {
-			return err
-		}
-	}
-
-	resolvedTodosetID, err := ensureTodoset(cmd, app, resolvedProjectID, todosetID)
+	resolvedProjectID, resolvedTodosetID, tsID, err := resolveHillchartTodoset(cmd, app, project, todosetID)
 	if err != nil {
 		return err
-	}
-
-	tsID, err := strconv.ParseInt(resolvedTodosetID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid todoset ID")
 	}
 
 	hillChart, err := app.Account().HillCharts().Get(cmd.Context(), tsID)
@@ -188,34 +165,9 @@ func runHillchartsUpdateSettings(cmd *cobra.Command, project, todosetID, listsAr
 		return err
 	}
 
-	var resolvedProjectID string
-	if todosetID != "" {
-		if project != "" {
-			var err error
-			resolvedProjectID, err = resolveProjectID(cmd, app, project)
-			if err != nil {
-				return err
-			}
-			if err := validateTodosetOwnership(cmd, app, todosetID, resolvedProjectID); err != nil {
-				return err
-			}
-		}
-	} else {
-		var err error
-		resolvedProjectID, err = resolveProjectID(cmd, app, project)
-		if err != nil {
-			return err
-		}
-	}
-
-	resolvedTodosetID, err := ensureTodoset(cmd, app, resolvedProjectID, todosetID)
+	resolvedProjectID, resolvedTodosetID, tsID, err := resolveHillchartTodoset(cmd, app, project, todosetID)
 	if err != nil {
 		return err
-	}
-
-	tsID, err := strconv.ParseInt(resolvedTodosetID, 10, 64)
-	if err != nil {
-		return output.ErrUsage("Invalid todoset ID")
 	}
 
 	// Parse comma-separated todolist IDs (supports names via resolution)
@@ -269,6 +221,45 @@ func runHillchartsUpdateSettings(cmd *cobra.Command, project, todosetID, listsAr
 			},
 		),
 	)
+}
+
+// resolveHillchartTodoset picks the todoset a hill chart command acts on.
+// --todoset names it outright, and then a project is needed only to check
+// that the todoset belongs to it; otherwise the project (flag, config or
+// prompt) is resolved and its todoset found in the dock. It returns the
+// resolved project ID (empty when only --todoset was given), the todoset ID,
+// and the todoset ID as a number.
+func resolveHillchartTodoset(cmd *cobra.Command, app *appctx.App, project, todosetID string) (string, string, int64, error) {
+	var resolvedProjectID string
+	if todosetID != "" {
+		if project != "" {
+			var err error
+			resolvedProjectID, err = resolveProjectID(cmd, app, project)
+			if err != nil {
+				return "", "", 0, err
+			}
+			if err := validateTodosetOwnership(cmd, app, todosetID, resolvedProjectID); err != nil {
+				return "", "", 0, err
+			}
+		}
+	} else {
+		var err error
+		resolvedProjectID, err = resolveProjectID(cmd, app, project)
+		if err != nil {
+			return "", "", 0, err
+		}
+	}
+
+	resolvedTodosetID, err := ensureTodoset(cmd, app, resolvedProjectID, todosetID)
+	if err != nil {
+		return "", "", 0, err
+	}
+
+	tsID, err := strconv.ParseInt(resolvedTodosetID, 10, 64)
+	if err != nil {
+		return "", "", 0, output.ErrUsage("Invalid todoset ID")
+	}
+	return resolvedProjectID, resolvedTodosetID, tsID, nil
 }
 
 func hillchartScope(projectID, todosetFlag string) string {
