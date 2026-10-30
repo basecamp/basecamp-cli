@@ -94,6 +94,36 @@ setup_file() {
   assert_json_value '.data.wallpaper' 'null'
 }
 
+@test "projects archive archives a project" {
+  local id_file="$BATS_FILE_TMPDIR/created_project_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No project created in prior test"
+  local proj_id
+  proj_id=$(<"$id_file")
+
+  run_smoke basecamp projects archive "$proj_id" --json
+  assert_success
+  assert_json_value '.data.status' 'archived'
+
+  run_smoke basecamp projects show "$proj_id" --json
+  assert_success
+  assert_json_value '.data.status' 'archived'
+  touch "$BATS_FILE_TMPDIR/project_archived"
+}
+
+@test "projects unarchive restores an archived project" {
+  [[ -f "$BATS_FILE_TMPDIR/project_archived" ]] || mark_unverifiable "No project archived in prior test"
+  local proj_id
+  proj_id=$(<"$BATS_FILE_TMPDIR/created_project_id")
+
+  run_smoke basecamp projects unarchive "$proj_id" --json
+  assert_success
+  assert_json_value '.data.status' 'active'
+
+  run_smoke basecamp projects show "$proj_id" --json
+  assert_success
+  assert_json_value '.data.status' 'active'
+}
+
 @test "projects delete deletes a project" {
   local id_file="$BATS_FILE_TMPDIR/created_project_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No project created in prior test"

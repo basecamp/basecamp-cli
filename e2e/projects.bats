@@ -145,3 +145,39 @@ load test_helper
   run basecamp projects logo remove brand.png
   assert_failure
 }
+
+@test "projects archive without an id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp projects archive
+  assert_failure
+  assert_json_value '.error' '<id> required'
+  assert_json_value '.code' 'usage'
+}
+
+@test "projects archive refuses an ID that is not a number" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp projects archive launch
+  assert_failure
+  assert_json_value '.error' 'Invalid project ID'
+  assert_json_value '.code' 'usage'
+}
+
+@test "projects unarchive without an id shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp projects unarchive
+  assert_failure
+  assert_json_value '.error' '<id> required'
+  assert_json_value '.code' 'usage'
+}
+
+@test "projects unarchive help says it restores from the trash too" {
+  run basecamp projects unarchive --help
+  assert_success
+  assert_output_contains "from the archive or from the trash"
+}

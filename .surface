@@ -348,19 +348,23 @@ ARG basecamp profile create 00 <name>
 ARG basecamp profile delete 00 <name>
 ARG basecamp profile set-default 00 <name>
 ARG basecamp profile show 00 [name]
+ARG basecamp project archive 00 <id>
 ARG basecamp project create 00 <name>
 ARG basecamp project delete 00 <id>
 ARG basecamp project logo set 00 <file>
 ARG basecamp project show 00 <id>
 ARG basecamp project trash 00 <id>
+ARG basecamp project unarchive 00 <id>
 ARG basecamp project update 00 <id>
 ARG basecamp project wallpaper mode 00 <fill|tile>
 ARG basecamp project wallpaper set 00 <file>
+ARG basecamp projects archive 00 <id>
 ARG basecamp projects create 00 <name>
 ARG basecamp projects delete 00 <id>
 ARG basecamp projects logo set 00 <file>
 ARG basecamp projects show 00 <id>
 ARG basecamp projects trash 00 <id>
+ARG basecamp projects unarchive 00 <id>
 ARG basecamp projects update 00 <id>
 ARG basecamp projects wallpaper mode 00 <fill|tile>
 ARG basecamp projects wallpaper set 00 <file>
@@ -1086,6 +1090,7 @@ CMD basecamp profile list
 CMD basecamp profile set-default
 CMD basecamp profile show
 CMD basecamp project
+CMD basecamp project archive
 CMD basecamp project create
 CMD basecamp project delete
 CMD basecamp project list
@@ -1094,12 +1099,14 @@ CMD basecamp project logo remove
 CMD basecamp project logo set
 CMD basecamp project show
 CMD basecamp project trash
+CMD basecamp project unarchive
 CMD basecamp project update
 CMD basecamp project wallpaper
 CMD basecamp project wallpaper mode
 CMD basecamp project wallpaper remove
 CMD basecamp project wallpaper set
 CMD basecamp projects
+CMD basecamp projects archive
 CMD basecamp projects create
 CMD basecamp projects delete
 CMD basecamp projects list
@@ -1108,6 +1115,7 @@ CMD basecamp projects logo remove
 CMD basecamp projects logo set
 CMD basecamp projects show
 CMD basecamp projects trash
+CMD basecamp projects unarchive
 CMD basecamp projects update
 CMD basecamp projects wallpaper
 CMD basecamp projects wallpaper mode
@@ -13751,6 +13759,27 @@ FLAG basecamp project --stats type=bool
 FLAG basecamp project --styled type=bool
 FLAG basecamp project --todolist type=string
 FLAG basecamp project --verbose type=count
+FLAG basecamp project archive --account type=string
+FLAG basecamp project archive --agent type=bool
+FLAG basecamp project archive --cache-dir type=string
+FLAG basecamp project archive --count type=bool
+FLAG basecamp project archive --help type=bool
+FLAG basecamp project archive --hints type=bool
+FLAG basecamp project archive --ids-only type=bool
+FLAG basecamp project archive --in type=string
+FLAG basecamp project archive --jq type=string
+FLAG basecamp project archive --json type=bool
+FLAG basecamp project archive --markdown type=bool
+FLAG basecamp project archive --md type=bool
+FLAG basecamp project archive --no-hints type=bool
+FLAG basecamp project archive --no-stats type=bool
+FLAG basecamp project archive --profile type=string
+FLAG basecamp project archive --project type=string
+FLAG basecamp project archive --quiet type=bool
+FLAG basecamp project archive --stats type=bool
+FLAG basecamp project archive --styled type=bool
+FLAG basecamp project archive --todolist type=string
+FLAG basecamp project archive --verbose type=count
 FLAG basecamp project create --account type=string
 FLAG basecamp project create --agent type=bool
 FLAG basecamp project create --cache-dir type=string
@@ -13927,6 +13956,27 @@ FLAG basecamp project trash --stats type=bool
 FLAG basecamp project trash --styled type=bool
 FLAG basecamp project trash --todolist type=string
 FLAG basecamp project trash --verbose type=count
+FLAG basecamp project unarchive --account type=string
+FLAG basecamp project unarchive --agent type=bool
+FLAG basecamp project unarchive --cache-dir type=string
+FLAG basecamp project unarchive --count type=bool
+FLAG basecamp project unarchive --help type=bool
+FLAG basecamp project unarchive --hints type=bool
+FLAG basecamp project unarchive --ids-only type=bool
+FLAG basecamp project unarchive --in type=string
+FLAG basecamp project unarchive --jq type=string
+FLAG basecamp project unarchive --json type=bool
+FLAG basecamp project unarchive --markdown type=bool
+FLAG basecamp project unarchive --md type=bool
+FLAG basecamp project unarchive --no-hints type=bool
+FLAG basecamp project unarchive --no-stats type=bool
+FLAG basecamp project unarchive --profile type=string
+FLAG basecamp project unarchive --project type=string
+FLAG basecamp project unarchive --quiet type=bool
+FLAG basecamp project unarchive --stats type=bool
+FLAG basecamp project unarchive --styled type=bool
+FLAG basecamp project unarchive --todolist type=string
+FLAG basecamp project unarchive --verbose type=count
 FLAG basecamp project update --account type=string
 FLAG basecamp project update --agent type=bool
 FLAG basecamp project update --cache-dir type=string
@@ -14056,6 +14106,27 @@ FLAG basecamp projects --stats type=bool
 FLAG basecamp projects --styled type=bool
 FLAG basecamp projects --todolist type=string
 FLAG basecamp projects --verbose type=count
+FLAG basecamp projects archive --account type=string
+FLAG basecamp projects archive --agent type=bool
+FLAG basecamp projects archive --cache-dir type=string
+FLAG basecamp projects archive --count type=bool
+FLAG basecamp projects archive --help type=bool
+FLAG basecamp projects archive --hints type=bool
+FLAG basecamp projects archive --ids-only type=bool
+FLAG basecamp projects archive --in type=string
+FLAG basecamp projects archive --jq type=string
+FLAG basecamp projects archive --json type=bool
+FLAG basecamp projects archive --markdown type=bool
+FLAG basecamp projects archive --md type=bool
+FLAG basecamp projects archive --no-hints type=bool
+FLAG basecamp projects archive --no-stats type=bool
+FLAG basecamp projects archive --profile type=string
+FLAG basecamp projects archive --project type=string
+FLAG basecamp projects archive --quiet type=bool
+FLAG basecamp projects archive --stats type=bool
+FLAG basecamp projects archive --styled type=bool
+FLAG basecamp projects archive --todolist type=string
+FLAG basecamp projects archive --verbose type=count
 FLAG basecamp projects create --account type=string
 FLAG basecamp projects create --agent type=bool
 FLAG basecamp projects create --cache-dir type=string
@@ -14232,6 +14303,27 @@ FLAG basecamp projects trash --stats type=bool
 FLAG basecamp projects trash --styled type=bool
 FLAG basecamp projects trash --todolist type=string
 FLAG basecamp projects trash --verbose type=count
+FLAG basecamp projects unarchive --account type=string
+FLAG basecamp projects unarchive --agent type=bool
+FLAG basecamp projects unarchive --cache-dir type=string
+FLAG basecamp projects unarchive --count type=bool
+FLAG basecamp projects unarchive --help type=bool
+FLAG basecamp projects unarchive --hints type=bool
+FLAG basecamp projects unarchive --ids-only type=bool
+FLAG basecamp projects unarchive --in type=string
+FLAG basecamp projects unarchive --jq type=string
+FLAG basecamp projects unarchive --json type=bool
+FLAG basecamp projects unarchive --markdown type=bool
+FLAG basecamp projects unarchive --md type=bool
+FLAG basecamp projects unarchive --no-hints type=bool
+FLAG basecamp projects unarchive --no-stats type=bool
+FLAG basecamp projects unarchive --profile type=string
+FLAG basecamp projects unarchive --project type=string
+FLAG basecamp projects unarchive --quiet type=bool
+FLAG basecamp projects unarchive --stats type=bool
+FLAG basecamp projects unarchive --styled type=bool
+FLAG basecamp projects unarchive --todolist type=string
+FLAG basecamp projects unarchive --verbose type=count
 FLAG basecamp projects update --account type=string
 FLAG basecamp projects update --agent type=bool
 FLAG basecamp projects update --cache-dir type=string
@@ -21358,6 +21450,7 @@ SUB basecamp profile list
 SUB basecamp profile set-default
 SUB basecamp profile show
 SUB basecamp project
+SUB basecamp project archive
 SUB basecamp project create
 SUB basecamp project delete
 SUB basecamp project list
@@ -21366,12 +21459,14 @@ SUB basecamp project logo remove
 SUB basecamp project logo set
 SUB basecamp project show
 SUB basecamp project trash
+SUB basecamp project unarchive
 SUB basecamp project update
 SUB basecamp project wallpaper
 SUB basecamp project wallpaper mode
 SUB basecamp project wallpaper remove
 SUB basecamp project wallpaper set
 SUB basecamp projects
+SUB basecamp projects archive
 SUB basecamp projects create
 SUB basecamp projects delete
 SUB basecamp projects list
@@ -21380,6 +21475,7 @@ SUB basecamp projects logo remove
 SUB basecamp projects logo set
 SUB basecamp projects show
 SUB basecamp projects trash
+SUB basecamp projects unarchive
 SUB basecamp projects update
 SUB basecamp projects wallpaper
 SUB basecamp projects wallpaper mode
