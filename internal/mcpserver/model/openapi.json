@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Basecamp",
-    "version": "2026-10-27",
+    "version": "2026-10-30",
     "description": "Basecamp API",
     "contact": {
       "name": "Basecamp",
@@ -28970,6 +28970,125 @@
             503
           ]
         }
+      },
+      "post": {
+        "description": "Post a progress update on a todoset's hill chart.\n\nMoves the todolists named in `dots` and saves a progress update, as\nupdating the hill chart in Basecamp does. Todolists left out of `dots` keep\ntheir current position, so one dot can move without sending the others.\nEvery field is optional: with none, the update records the chart as it\nstands. To track or untrack a todolist, use `UpdateHillChartSettings`.\n\nAnswers 201 with the new progress update, in the shape\n`GetHillChartVersion` returns, including where every tracked todolist now\nsits. Answers 422, with an `error` message and nothing saved, when `dots`\nisn't a list of objects, a todolist appears in it more than once or isn't\ntracked on the chart, a `position` isn't a whole number from 0 to 100, or\nthe chart tracks no todolists.",
+        "operationId": "CreateHillChartVersion",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateHillChartVersionRequestContent"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "todosetId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "CreateHillChartVersion 201 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateHillChartVersionResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ValidationError 422 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Todos"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 2,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
       }
     },
     "/{accountId}/todosets/{todosetId}/hills/versions/{versionId}": {
@@ -32943,6 +33062,33 @@
       "CreateGoogleDocumentResponseContent": {
         "$ref": "#/components/schemas/GoogleDocument"
       },
+      "CreateHillChartVersionRequestContent": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "A note about the update, as rich text (HTML)."
+          },
+          "dots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HillChartDotPosition"
+            },
+            "description": "Todolists to move, each with its ID and new position. Todolists left\nout keep their current position."
+          },
+          "subscriptions": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "People to notify of the update and subscribe to it. If absent, nobody\nelse is notified."
+          }
+        }
+      },
+      "CreateHillChartVersionResponseContent": {
+        "$ref": "#/components/schemas/HillChartVersion"
+      },
       "CreateLineupMarkerRequestContent": {
         "type": "object",
         "properties": {
@@ -35743,6 +35889,26 @@
           "color",
           "id",
           "label",
+          "position"
+        ]
+      },
+      "HillChartDotPosition": {
+        "type": "object",
+        "description": "Where to move one tracked todolist in a progress update.",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "The todolist's ID. It must be tracked on the hill chart.",
+            "format": "int64"
+          },
+          "position": {
+            "type": "integer",
+            "description": "A whole number from 0 to 100, on the same scale as the hill chart's dots.",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "id",
           "position"
         ]
       },

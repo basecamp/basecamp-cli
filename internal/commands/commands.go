@@ -39,7 +39,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "subtasks", Category: "core", Description: "Manage subtasks on to-dos and cards", Actions: []string{"list", "show", "create", "update", "complete", "uncomplete", "move", "delete"}},
 				{Name: "todolists", Category: "core", Description: "Manage to-do lists", Actions: []string{"list", "show", "create", "update", "position", "copy", "trash", "archive", "restore"}},
 				{Name: "todosets", Category: "core", Description: "Manage to-do set containers", Actions: []string{"list", "show"}},
-				{Name: "hillcharts", Category: "core", Description: "Manage hill charts", Actions: []string{"show", "track", "untrack", "updates"}},
+				{Name: "hillcharts", Category: "core", Description: "Manage hill charts", Actions: []string{"show", "track", "untrack", "updates", "update"}},
 				{Name: "gauges", Category: "core", Description: "Manage gauges", Actions: []string{"list", "needles", "needle", "create", "update", "delete", "enable", "disable"}},
 				{Name: "todolistgroups", Category: "core", Description: "Manage to-do list groups", Actions: []string{"list", "show", "create", "update", "position", "copy"}},
 				{Name: "messages", Category: "core", Description: "Manage messages", Actions: []string{"list", "show", "create", "update", "publish", "pin", "unpin", "move", "copy", "trash", "archive", "restore"}},
