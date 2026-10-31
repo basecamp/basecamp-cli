@@ -316,6 +316,7 @@ func NewPeopleCmd() *cobra.Command {
 	cmd.AddCommand(newPeopleShowCmd())
 	cmd.AddCommand(newPeopleUpdateCmd())
 	cmd.AddCommand(newPeopleOutOfOfficeCmd())
+	cmd.AddCommand(newPeoplePreferencesCmd())
 	cmd.AddCommand(newPeoplePingableCmd())
 	cmd.AddCommand(newPeopleAddCmd())
 	cmd.AddCommand(newPeopleRemoveCmd())
@@ -359,8 +360,8 @@ empty value to clear that field:
   basecamp people update me --title "Staff Engineer" --location "Chicago, IL"
   basecamp people update me --bio ""
 
-Week-start and time-format are account preferences, not profile fields, and
-are not edited here.`,
+Week-start and time-format are preferences, not profile fields; set them with
+"basecamp people preferences me".`,
 		Example: `basecamp people update me --bio "Building the Basecamp CLI" --title "Staff Engineer"`,
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -570,6 +571,164 @@ func outOfOfficeSummary(ooo *basecamp.OutOfOffice) string {
 		return "Not out of office"
 	}
 	return fmt.Sprintf("Out of office %s to %s", ooo.StartDate, ooo.EndDate)
+}
+
+func newPeoplePreferencesCmd() *cobra.Command {
+	var weekStart, timeFormat, timeZone string
+
+	cmd := &cobra.Command{
+		Use:   "preferences [me] [flags]",
+		Short: "Show or update your preferences",
+		Long: `Show or update your own preferences: the first day of your week, how times
+are displayed, and your time zone.
+
+Only your own preferences are addressed here, so the target is always "me".
+With no flags it reports your current preferences.
+
+  basecamp people preferences me
+  basecamp people preferences me --week-start Monday
+  basecamp people preferences me --time-format 24h --time-zone Europe/London
+
+Each preference is left unchanged unless you pass its flag. --week-start takes
+a day name (Sunday through Saturday). --time-format takes 12h or 24h (or
+twelve_hour / twenty_four_hour). --time-zone takes a Rails time zone name
+("London", "UTC") or an IANA identifier ("America/Chicago"); Basecamp reports
+it back as the Rails-style name.`,
+		Example: `basecamp people preferences me --week-start Monday --time-format 24h`,
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := "me"
+			if len(args) > 0 {
+				target = args[0]
+			}
+			if err := requireMeTarget(target); err != nil {
+				return err
+			}
+			return runPeoplePreferences(cmd, weekStart, timeFormat, timeZone)
+		},
+	}
+
+	cmd.Flags().StringVar(&weekStart, "week-start", "", "First day of the week (Sunday through Saturday)")
+	cmd.Flags().StringVar(&timeFormat, "time-format", "", "Time display format: 12h or 24h")
+	cmd.Flags().StringVar(&timeZone, "time-zone", "", "Time zone (Rails name or IANA identifier, e.g. America/Chicago)")
+
+	return cmd
+}
+
+func runPeoplePreferences(cmd *cobra.Command, weekStart, timeFormat, timeZone string) error {
+	app := appctx.FromContext(cmd.Context())
+
+	// Settle all input before any account resolution or request. Flag presence,
+	// not emptiness, decides what is sent, so an explicit empty value is a
+	// mistake to report rather than an omission: none of these can be cleared,
+	// and the SDK would silently drop an empty one.
+	req := &basecamp.UpdateMyPreferencesRequest{}
+	changed := false
+	if cmd.Flags().Changed("week-start") {
+		day, err := normalizeWeekStart(weekStart)
+		if err != nil {
+			return err
+		}
+		req.FirstWeekDay = day
+		changed = true
+	}
+	if cmd.Flags().Changed("time-format") {
+		format, err := normalizeTimeFormat(timeFormat)
+		if err != nil {
+			return err
+		}
+		req.TimeFormat = format
+		changed = true
+	}
+	if cmd.Flags().Changed("time-zone") {
+		zone := strings.TrimSpace(timeZone)
+		if zone == "" {
+			return output.ErrUsage("--time-zone cannot be empty")
+		}
+		req.TimeZoneName = zone
+		changed = true
+	}
+
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	if !changed {
+		prefs, err := app.Account().People().GetMyPreferences(cmd.Context())
+		if err != nil {
+			return convertSDKError(err)
+		}
+		return app.OK(prefs,
+			output.WithSummary(preferencesSummary(prefs)),
+			output.WithBreadcrumbs(output.Breadcrumb{
+				Action: "update", Cmd: "basecamp people preferences me --week-start <day>", Description: "Change your preferences",
+			}),
+		)
+	}
+
+	if err := app.Account().People().UpdateMyPreferences(cmd.Context(), req); err != nil {
+		return convertSDKError(err)
+	}
+
+	// The SDK's update returns no preferences, so read them back to show the
+	// result. A failed read-back must not misreport the completed update: keep
+	// the success and attach a diagnostic, as the profile update does.
+	respOpts := []output.ResponseOption{output.WithSummary("Updated your preferences")}
+	prefs, err := app.Account().People().GetMyPreferences(cmd.Context())
+	if err != nil {
+		respOpts = append(respOpts, output.WithDiagnostic(
+			fmt.Sprintf("Preferences updated, but reading them back failed: %v", err)))
+		return app.OK(map[string]any{"updated": true}, respOpts...)
+	}
+	return app.OK(prefs, respOpts...)
+}
+
+// normalizeWeekStart accepts a day name in any case and returns it as the API
+// spells it ("Monday").
+func normalizeWeekStart(input string) (string, error) {
+	day := strings.TrimSpace(input)
+	for d := time.Sunday; d <= time.Saturday; d++ {
+		if strings.EqualFold(day, d.String()) {
+			return d.String(), nil
+		}
+	}
+	return "", output.ErrUsage(fmt.Sprintf("Invalid --week-start %q (use a day name, Sunday through Saturday)", input))
+}
+
+// normalizeTimeFormat accepts 12h/24h or the API's own names and returns the
+// API's name.
+func normalizeTimeFormat(input string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(input)) {
+	case "12h", "twelve_hour":
+		return "twelve_hour", nil
+	case "24h", "twenty_four_hour":
+		return "twenty_four_hour", nil
+	}
+	return "", output.ErrUsage(fmt.Sprintf("Invalid --time-format %q (use 12h or 24h)", input))
+}
+
+// preferencesSummary renders a one-line view of a person's preferences.
+func preferencesSummary(prefs *basecamp.Preferences) string {
+	var parts []string
+	if prefs.FirstWeekDay != "" {
+		parts = append(parts, "week starts "+prefs.FirstWeekDay)
+	}
+	switch prefs.TimeFormat {
+	case "twelve_hour":
+		parts = append(parts, "12-hour time")
+	case "twenty_four_hour":
+		parts = append(parts, "24-hour time")
+	case "":
+	default:
+		parts = append(parts, prefs.TimeFormat)
+	}
+	if prefs.TimeZoneName != "" {
+		parts = append(parts, prefs.TimeZoneName)
+	}
+	if len(parts) == 0 {
+		return "Your preferences"
+	}
+	return "Your preferences: " + strings.Join(parts, ", ")
 }
 
 func newPeopleListCmd() *cobra.Command {
