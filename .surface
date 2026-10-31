@@ -325,6 +325,7 @@ ARG basecamp people clients invite 00 <invitee>...
 ARG basecamp people clients remove 00 <id|email|name>...
 ARG basecamp people ooo 00 [me]
 ARG basecamp people out-of-office 00 [me]
+ARG basecamp people preferences 00 [me]
 ARG basecamp people remove 00 <person-id>...
 ARG basecamp people show 00 <id|name>
 ARG basecamp people update 00 [me]
@@ -1061,6 +1062,7 @@ CMD basecamp people list
 CMD basecamp people ooo
 CMD basecamp people out-of-office
 CMD basecamp people pingable
+CMD basecamp people preferences
 CMD basecamp people remove
 CMD basecamp people show
 CMD basecamp people update
@@ -13207,6 +13209,30 @@ FLAG basecamp people pingable --stats type=bool
 FLAG basecamp people pingable --styled type=bool
 FLAG basecamp people pingable --todolist type=string
 FLAG basecamp people pingable --verbose type=count
+FLAG basecamp people preferences --account type=string
+FLAG basecamp people preferences --agent type=bool
+FLAG basecamp people preferences --cache-dir type=string
+FLAG basecamp people preferences --count type=bool
+FLAG basecamp people preferences --help type=bool
+FLAG basecamp people preferences --hints type=bool
+FLAG basecamp people preferences --ids-only type=bool
+FLAG basecamp people preferences --in type=string
+FLAG basecamp people preferences --jq type=string
+FLAG basecamp people preferences --json type=bool
+FLAG basecamp people preferences --markdown type=bool
+FLAG basecamp people preferences --md type=bool
+FLAG basecamp people preferences --no-hints type=bool
+FLAG basecamp people preferences --no-stats type=bool
+FLAG basecamp people preferences --profile type=string
+FLAG basecamp people preferences --project type=string
+FLAG basecamp people preferences --quiet type=bool
+FLAG basecamp people preferences --stats type=bool
+FLAG basecamp people preferences --styled type=bool
+FLAG basecamp people preferences --time-format type=string
+FLAG basecamp people preferences --time-zone type=string
+FLAG basecamp people preferences --todolist type=string
+FLAG basecamp people preferences --verbose type=count
+FLAG basecamp people preferences --week-start type=string
 FLAG basecamp people remove --account type=string
 FLAG basecamp people remove --agent type=bool
 FLAG basecamp people remove --cache-dir type=string
@@ -21360,6 +21386,7 @@ SUB basecamp people list
 SUB basecamp people ooo
 SUB basecamp people out-of-office
 SUB basecamp people pingable
+SUB basecamp people preferences
 SUB basecamp people remove
 SUB basecamp people show
 SUB basecamp people update
