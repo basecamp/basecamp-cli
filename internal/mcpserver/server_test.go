@@ -16,19 +16,30 @@ import (
 	"github.com/basecamp/mcp/mcptest"
 )
 
+const testToken = "test-token"
+
 type testTokenProvider struct{}
 
 func (testTokenProvider) AccessToken(context.Context) (string, error) {
-	return "test-token", nil
+	return testToken, nil
 }
 
 // testUpstream is a fake Basecamp for the client newTestAPI builds.
 type testUpstream struct{ *httptest.Server }
 
-// newUpstream serves handler as a fake Basecamp until the test ends.
+// newUpstream serves handler as a fake Basecamp until the test ends. Only
+// requests carrying the test client's token reach it: other programs on the
+// machine connect to new localhost listeners, and the fakes here count every
+// request they see.
 func newUpstream(t *testing.T, handler http.Handler) testUpstream {
 	t.Helper()
-	upstream := httptest.NewServer(handler)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+testToken {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}))
 	t.Cleanup(upstream.Close)
 	return testUpstream{upstream}
 }
