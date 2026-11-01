@@ -44,7 +44,7 @@ func TestSetupCodexFreshInstallCommandOrder(t *testing.T) {
 	assertCallOrder(t, calls,
 		"plugin marketplace add basecamp/claude-plugins --json",
 		"plugin add basecamp-cli@37signals --json",
-		"plugin list --available --json",
+		"plugin list --available --json --marketplace 37signals",
 	)
 }
 
@@ -96,7 +96,7 @@ func TestSetupCodexReplacesLegacyCLIPlugin(t *testing.T) {
 	assertCallOrder(t, readCodexSetupCalls(t, logPath),
 		"plugin add basecamp-cli@37signals --json",
 		"plugin remove basecamp@37signals --json",
-		"plugin list --available --json",
+		"plugin list --available --json --marketplace 37signals",
 	)
 }
 
@@ -324,7 +324,10 @@ func installCodexStub(t *testing.T, options codexStubOptions) string {
 		"  \"plugin remove basecamp@37signals --json\")\n" +
 		"    if [ " + boolShell(options.legacyRemoveFailure) + " = 1 ]; then echo 'remove failure' >&2; exit 1; fi\n" +
 		"    echo removed > \"" + legacyPath + "\"; echo '{}'; exit 0 ;;\n" +
-		"  \"plugin list --available --json\")\n" +
+		// Unfiltered, a signed-in Codex also fetches the remote openai-curated
+		// catalog, which on a cold cache outlasts every probe deadline, so the
+		// stub answers only the listing scoped to our marketplace.
+		"  \"plugin list --available --json --marketplace 37signals\")\n" +
 		"    enabled=true; if [ " + boolShell(options.pluginDisabled) + " = 1 ]; then enabled=false; fi\n" +
 		"    legacy_state=''; [ -f \"" + legacyPath + "\" ] && read -r legacy_state < \"" + legacyPath + "\"\n" +
 		"    if [ \"$legacy_state\" = installed ]; then legacy='{\"pluginId\":\"basecamp@37signals\",\"version\":\"0.11.0\",\"installed\":true,\"enabled\":true},'; else legacy=''; fi\n" +

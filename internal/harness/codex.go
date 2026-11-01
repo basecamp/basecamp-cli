@@ -299,7 +299,10 @@ func queryCodexPlugin(parent context.Context) (codexPluginState, bool, error) {
 	}
 	ctx, cancel := context.WithTimeout(parent, codexQueryTimeout)
 	defer cancel()
-	data, err := runCodexCommand(ctx, path, "plugin", "list", "--available", "--json")
+	// Unscoped, a signed-in Codex first fetches the remote openai-curated
+	// catalog, about 35s on a cold cache. The deadline kills it before the
+	// cache is written, so every later probe would time out too.
+	data, err := runCodexCommand(ctx, path, "plugin", "list", "--available", "--json", "--marketplace", CodexMarketplaceName)
 	if err != nil {
 		return codexPluginState{}, false, fmt.Errorf("query Codex plugins: %w", err)
 	}
@@ -362,7 +365,7 @@ func codexQueryFailure(name string, err error) *StatusCheck {
 			Name:    name,
 			Status:  "fail",
 			Message: "Cannot query Codex plugins",
-			Hint:    "Run `codex plugin list --available --json`, then: basecamp setup codex",
+			Hint:    "Run `codex plugin list --available --json --marketplace " + CodexMarketplaceName + "`, then: basecamp setup codex",
 		}
 	}
 	message := "Cannot query Codex plugins"
@@ -373,6 +376,6 @@ func codexQueryFailure(name string, err error) *StatusCheck {
 		Name:    name,
 		Status:  "fail",
 		Message: message,
-		Hint:    "Run `codex plugin list --available --json`, then: basecamp setup codex",
+		Hint:    "Run `codex plugin list --available --json --marketplace " + CodexMarketplaceName + "`, then: basecamp setup codex",
 	}
 }
