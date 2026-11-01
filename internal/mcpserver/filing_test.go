@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"regexp"
 	"slices"
@@ -171,8 +170,7 @@ func newFake(t *testing.T, recordType, parentType string) *fakeBasecamp {
 
 func filingSession(t *testing.T, fake *fakeBasecamp, cfg Config) *mcp.ClientSession {
 	t.Helper()
-	upstream := httptest.NewServer(fake)
-	t.Cleanup(upstream.Close)
+	upstream := newUpstream(t, fake)
 	srv, err := New(newTestAPI(upstream), cfg)
 	require.NoError(t, err)
 	return mcptest.Connect(t, srv.BuildMCPServer(slog.New(slog.DiscardHandler)))
@@ -423,9 +421,6 @@ func TestFilingRefusesWhatItCannotFile(t *testing.T) {
 // TestFilingSaysWhetherTryingAgainIsSafe pins how each way a filing can end
 // short of a new recording reads to the caller.
 func TestFilingSaysWhetherTryingAgainIsSafe(t *testing.T) {
-	defer func(saved basecamp.FilingWaitOptions) { filingWait = saved }(filingWait)
-	filingWait.Timeout = 300 * time.Millisecond
-
 	params := map[string]any{"recording_id": fakeSourceID, "recording_type": "Message", "container_id": 5}
 
 	t.Run("refused", func(t *testing.T) {
@@ -465,7 +460,14 @@ func TestFilingSaysWhetherTryingAgainIsSafe(t *testing.T) {
 		assert.Equal(t, false, failure["retry_safe"])
 	})
 	t.Run("unsettled", func(t *testing.T) {
+		defer func(saved basecamp.FilingWaitOptions) { filingWait = saved }(filingWait)
+		filingWait.Timeout = 300 * time.Millisecond
 		fake := newFake(t, "Message", "Message::Board")
+		// Started as processing too: the wait can end before its first poll
+		// returns, and the status reported is the last one it saw.
+		fake.start = func(w http.ResponseWriter, _ *http.Request) {
+			fake.json(w, http.StatusCreated, fake.filing(basecamp.FilingProcessing))
+		}
 		fake.statuses = []basecamp.FilingStatus{basecamp.FilingProcessing}
 		failure := failureOf(t, mustFail(t, filingSession(t, fake, Config{}), copyAction, params))
 		assert.Equal(t, "filing_unsettled", failure["type"])

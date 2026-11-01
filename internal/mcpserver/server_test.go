@@ -16,25 +16,63 @@ import (
 	"github.com/basecamp/mcp/mcptest"
 )
 
+const testToken = "test-token"
+
 type testTokenProvider struct{}
 
 func (testTokenProvider) AccessToken(context.Context) (string, error) {
-	return "test-token", nil
+	return testToken, nil
+}
+
+// testUpstream is a fake Basecamp for the client newTestAPI builds.
+type testUpstream struct{ *httptest.Server }
+
+// newUpstream serves handler as a fake Basecamp until the test ends. Only
+// requests carrying the test client's token reach it: other programs on the
+// machine connect to new localhost listeners, and the fakes here count every
+// request they see.
+func newUpstream(t *testing.T, handler http.Handler) testUpstream {
+	t.Helper()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+testToken {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(upstream.Close)
+	return testUpstream{upstream}
 }
 
 // newTestAPI returns an account-scoped basecamp-sdk client — the same kind
 // the CLI hands the server — pointed at upstream.
-func newTestAPI(upstream *httptest.Server) *basecamp.AccountClient {
+func newTestAPI(upstream testUpstream) *basecamp.AccountClient {
 	client := basecamp.NewClient(&basecamp.Config{BaseURL: upstream.URL}, testTokenProvider{},
 		basecamp.WithMaxRetries(1))
 	return client.ForAccount("999")
 }
 
+// TestFakeBasecampAnswersOnlyTheClientUnderTest sends what moshi-hook sends
+// to every new localhost listener: two bare GET / without credentials. A
+// fake that judged those as the server's own requests failed whichever test
+// happened to be listening.
+func TestFakeBasecampAnswersOnlyTheClientUnderTest(t *testing.T) {
+	upstream := newUpstream(t, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		t.Errorf("a request from another program reached the fake: %s %s", r.Method, r.URL.Path)
+	}))
+	for range 2 {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, upstream.URL+"/", nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+	}
+}
+
 func TestServerListsDomainTools(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
-	t.Cleanup(upstream.Close)
 
 	srv, err := New(newTestAPI(upstream), Config{})
 	require.NoError(t, err)
@@ -49,10 +87,9 @@ func TestServerListsDomainTools(t *testing.T) {
 }
 
 func TestServerDescribeServesSchemas(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
-	t.Cleanup(upstream.Close)
 
 	srv, err := New(newTestAPI(upstream), Config{})
 	require.NoError(t, err)
@@ -68,7 +105,7 @@ func TestServerDescribeServesSchemas(t *testing.T) {
 }
 
 func TestServerDispatchesThroughSDKClient(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodGet, r.Method)
 		require.Equal(t, "/999/projects.json", r.URL.Path)
 		require.Equal(t, "archived", r.URL.Query().Get("status"))
@@ -76,7 +113,6 @@ func TestServerDispatchesThroughSDKClient(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"id":1,"name":"Making a Podcast"}]`))
 	}))
-	t.Cleanup(upstream.Close)
 
 	srv, err := New(newTestAPI(upstream), Config{})
 	require.NoError(t, err)
@@ -96,7 +132,7 @@ func TestServerDispatchesThroughSDKClient(t *testing.T) {
 }
 
 func TestServerWrapsBodyAndCreates(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodPost, r.Method)
 		require.Equal(t, "/999/todolists/2/todos.json", r.URL.Path)
 		var body map[string]any
@@ -106,7 +142,6 @@ func TestServerWrapsBodyAndCreates(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"id":3,"content":"Buy milk"}`))
 	}))
-	t.Cleanup(upstream.Close)
 
 	srv, err := New(newTestAPI(upstream), Config{})
 	require.NoError(t, err)
@@ -121,12 +156,11 @@ func TestServerWrapsBodyAndCreates(t *testing.T) {
 }
 
 func TestServerSurfacesEmptyBodyStatus(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodPost, r.Method)
 		require.Equal(t, "/999/todos/2/completion.json", r.URL.Path)
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	t.Cleanup(upstream.Close)
 
 	srv, err := New(newTestAPI(upstream), Config{})
 	require.NoError(t, err)
@@ -141,12 +175,11 @@ func TestServerSurfacesEmptyBodyStatus(t *testing.T) {
 }
 
 func TestServerSurfacesPagination(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Link", `<http://`+r.Host+`/999/projects.json?page=2>; rel="next"`)
 		_, _ = w.Write([]byte(`[{"id":1}]`))
 	}))
-	t.Cleanup(upstream.Close)
 
 	srv, err := New(newTestAPI(upstream), Config{})
 	require.NoError(t, err)
@@ -171,7 +204,7 @@ func TestServerSurfacesPagination(t *testing.T) {
 // without declaring a page parameter: the next_page a listing returns must
 // be acceptable as the follow-up call's page parameter.
 func TestServerAcceptsSynthesizedPageParam(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/999/buckets/1/webhooks.json", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("page") == "2" {
@@ -181,7 +214,6 @@ func TestServerAcceptsSynthesizedPageParam(t *testing.T) {
 		w.Header().Set("Link", `<http://`+r.Host+`/999/buckets/1/webhooks.json?page=2>; rel="next"`)
 		_, _ = w.Write([]byte(`[{"id":1}]`))
 	}))
-	t.Cleanup(upstream.Close)
 
 	srv, err := New(newTestAPI(upstream), Config{})
 	require.NoError(t, err)
@@ -207,10 +239,9 @@ func TestServerAcceptsSynthesizedPageParam(t *testing.T) {
 }
 
 func TestServerSurfacesAPIErrorsInBand(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"Record not found"}`, http.StatusNotFound)
 	}))
-	t.Cleanup(upstream.Close)
 
 	srv, err := New(newTestAPI(upstream), Config{})
 	require.NoError(t, err)
@@ -225,10 +256,9 @@ func TestServerSurfacesAPIErrorsInBand(t *testing.T) {
 }
 
 func TestServerReadOnlyDropsWrites(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
-	t.Cleanup(upstream.Close)
 
 	srv, err := New(newTestAPI(upstream), Config{ReadOnly: true})
 	require.NoError(t, err)
@@ -250,10 +280,9 @@ func TestServerReadOnlyDropsWrites(t *testing.T) {
 }
 
 func TestServerDomainNarrowing(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
-	t.Cleanup(upstream.Close)
 
 	srv, err := New(newTestAPI(upstream), Config{Domains: []string{"projects", "todos"}})
 	require.NoError(t, err)
@@ -266,10 +295,9 @@ func TestServerDomainNarrowing(t *testing.T) {
 }
 
 func TestServerUnknownDomainFailsClosed(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
-	t.Cleanup(upstream.Close)
 
 	_, err := New(newTestAPI(upstream), Config{Domains: []string{"projects", "nonsense"}})
 	require.Error(t, err)
