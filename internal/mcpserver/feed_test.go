@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"testing"
 
@@ -20,7 +19,7 @@ import (
 // records the request that asked.
 func feedSession(t *testing.T, status int, body string, seen *http.Request) *mcp.ClientSession {
 	t.Helper()
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if seen != nil {
 			*seen = *r
 		}
@@ -29,7 +28,6 @@ func feedSession(t *testing.T, status int, body string, seen *http.Request) *mcp
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
-	t.Cleanup(upstream.Close)
 
 	srv, err := New(newTestAPI(upstream), Config{})
 	require.NoError(t, err)
@@ -278,10 +276,9 @@ func TestFeedUnrecognizedRefusalsSayOnlyWhatTheyKnow(t *testing.T) {
 // policy, because its result is a bearer credential this surface would hand to
 // a model transcript and could not use.
 func TestFeedReadOnlyServesBothPollLanes(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
-	t.Cleanup(upstream.Close)
 
 	srv, err := New(newTestAPI(upstream), Config{ReadOnly: true})
 	require.NoError(t, err)
@@ -321,7 +318,7 @@ func TestFeedRefusesAFilterThatNarrowsNothing(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var reached bool
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				reached = true
 				w.Header().Set("Content-Type", "application/json")
 				// The page a widened read would have returned. If the
@@ -330,7 +327,6 @@ func TestFeedRefusesAFilterThatNarrowsNothing(t *testing.T) {
 				// isError.
 				_, _ = w.Write([]byte(`{"events":[],"items":[],"position":"aBcD"}`))
 			}))
-			t.Cleanup(upstream.Close)
 
 			srv, err := New(newTestAPI(upstream), Config{})
 			require.NoError(t, err)
@@ -363,12 +359,11 @@ func TestFeedKeepsMalformedFilterComponentsVerbatim(t *testing.T) {
 
 	t.Run("an id filter is refused rather than silently narrowed", func(t *testing.T) {
 		var reached bool
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			reached = true
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"events":[],"position":"aBcD"}`))
 		}))
-		t.Cleanup(upstream.Close)
 
 		srv, err := New(newTestAPI(upstream), Config{})
 		require.NoError(t, err)
@@ -603,12 +598,11 @@ func TestFeedRefusesAParameterItWouldDrop(t *testing.T) {
 	t.Cleanup(func() { feedLaneParams[opPollEvents] = original })
 
 	var reached bool
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached = true
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"events":[],"position":"aBcD"}`))
 	}))
-	t.Cleanup(upstream.Close)
 	srv, err := New(newTestAPI(upstream), Config{})
 	require.NoError(t, err)
 	session := mcptest.Connect(t, srv.BuildMCPServer(slog.New(slog.DiscardHandler)))
@@ -633,12 +627,11 @@ func TestFeedRefusesAnEmptyEntryPoint(t *testing.T) {
 	} {
 		t.Run(tc.action+" "+tc.name, func(t *testing.T) {
 			var reached bool
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				reached = true
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(`{"events":[],"items":[],"position":"aBcD"}`))
 			}))
-			t.Cleanup(upstream.Close)
 			srv, err := New(newTestAPI(upstream), Config{})
 			require.NoError(t, err)
 			session := mcptest.Connect(t, srv.BuildMCPServer(slog.New(slog.DiscardHandler)))

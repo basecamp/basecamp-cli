@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"regexp"
 	"slices"
@@ -171,8 +170,7 @@ func newFake(t *testing.T, recordType, parentType string) *fakeBasecamp {
 
 func filingSession(t *testing.T, fake *fakeBasecamp, cfg Config) *mcp.ClientSession {
 	t.Helper()
-	upstream := httptest.NewServer(fake)
-	t.Cleanup(upstream.Close)
+	upstream := newUpstream(t, fake)
 	srv, err := New(newTestAPI(upstream), cfg)
 	require.NoError(t, err)
 	return mcptest.Connect(t, srv.BuildMCPServer(slog.New(slog.DiscardHandler)))
