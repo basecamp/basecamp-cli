@@ -227,7 +227,7 @@ load test_helper
   run basecamp chat bots create
   assert_failure
   assert_json_value '.code' 'usage'
-  assert_output_contains "required"
+  assert_json_value '.error' '<name> required'
 }
 
 @test "chat bots update with nothing to change shows error" {
@@ -237,7 +237,7 @@ load test_helper
   run basecamp chat bots update 42
   assert_failure
   assert_json_value '.code' 'usage'
-  assert_output_contains "Nothing to update"
+  assert_json_value '.error' 'Nothing to update'
 }
 
 @test "chat bots update refuses a non-numeric ID" {
@@ -246,7 +246,8 @@ load test_helper
 
   run basecamp chat bots update deploys --name x
   assert_failure
-  assert_output_contains "Invalid chatbot ID"
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'Invalid chatbot ID: deploys'
 }
 
 @test "chat bots delete needs --force in machine output" {
@@ -255,7 +256,9 @@ load test_helper
 
   run basecamp chat bots delete 42 --json
   assert_failure
-  assert_output_contains "--force"
+  assert_json_value '.code' 'usage'
+  echo "$output" | jq -e '.hint | contains("--force")' >/dev/null \
+    || fail "expected the hint to name --force, got: $(echo "$output" | jq -r '.hint')"
 }
 
 @test "chat bots help says lines_url carries the bot's key" {

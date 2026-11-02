@@ -305,7 +305,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | client_replies | 6 | - | ⏭️ | BC4 | skip | Legacy Clientside only (see notes) |
 | **Chatbots** |
 | chatbots (management) | 5 | `chat bots` | ✅ | BC4 | - | list, show, create, update, delete, on OAuth (`/buckets/:id/chats/:id/integrations`). Chatbots belong to the account; managing them takes an administrator. `update` reads the bot first and sends back the name and command URL it doesn't change, since the API takes the name on every update; a command URL can't be removed. `delete` is permanent and asks for confirmation or `--force`. Answers carry `lines_url`, which holds the bot's key (see notes) |
-| chatbots (posting) | - | - | ⏭️ | BC4 | skip | Posting as the bot takes the chatbot key in `lines_url`, not OAuth (see notes) |
+| chatbots (posting) | 1 | - | ⏭️ | BC4 | skip | Posting as the bot takes the chatbot key in `lines_url`, not OAuth (see notes) |
 | **Account** |
 | account | 4 | `accounts` | ✅ | BC4 | - | show, update name, upload logo, remove logo |
 | **Lineup** |

@@ -4,6 +4,9 @@
 load smoke_helper
 
 setup_file() {
+  # The line and chatbot lifecycles each depend on the test before: create
+  # writes the id the rest read, and delete must come last.
+  export BATS_NO_PARALLELIZE_WITHIN_FILE=true
   ensure_token || return 1
   ensure_project || return 1
   ensure_campfire || return 1
@@ -104,7 +107,10 @@ setup_file() {
 @test "campfire bots create adds a chatbot" {
   run_smoke basecamp campfire bots create "smoke_$(date +%s)" \
     --room "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
-  [[ "$status" -ne 0 ]] && mark_unverifiable "Creating a chatbot needs an account administrator"
+  if [[ "$status" -ne 0 ]] && [[ "$(echo "$output" | jq -r '.code // empty' 2>/dev/null)" == "forbidden" ]]; then
+    mark_unverifiable "Creating a chatbot needs an account administrator"
+  fi
+  assert_success
   assert_json_value '.ok' 'true'
   assert_json_not_null '.data.lines_url'
 

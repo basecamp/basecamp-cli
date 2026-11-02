@@ -75,9 +75,16 @@ func chatBotOK(req *http.Request) (int, string) {
 
 func runChatBotCommand(t *testing.T, respond func(*http.Request) (int, string), args ...string) (*chatBotTransport, map[string]any, error) {
 	t.Helper()
+	return runChatBotCommandAs(t, "", respond, args...)
+}
+
+// runChatBotCommandAs runs the command under the named profile ("" for none).
+func runChatBotCommandAs(t *testing.T, profile string, respond func(*http.Request) (int, string), args ...string) (*chatBotTransport, map[string]any, error) {
+	t.Helper()
 	transport := &chatBotTransport{respond: respond}
 	app, buf := newTestAppWithTransport(t, transport)
 	app.Flags.Hints = true
+	app.Config.ActiveProfile = profile
 	err := executeChatCommand(NewChatCmd(), app, args...)
 	var envelope map[string]any
 	if buf.Len() > 0 {
@@ -107,6 +114,38 @@ func TestChatUploadsPageAsksForThatPage(t *testing.T) {
 	require.Len(t, transport.requests, 1)
 	assert.Equal(t, "/99999/chats/789/uploads.json", transport.requests[0].path)
 	assert.Contains(t, transport.requests[0].query, "page=2")
+}
+
+// Newest first, asked for explicitly, so a --limit keeps the latest files
+// whatever the server's default order.
+func TestChatUploadsAsksForNewestFirst(t *testing.T) {
+	transport, _, err := runChatBotCommand(t, chatBotOK, "uploads")
+	require.NoError(t, err)
+	require.Len(t, transport.requests, 1)
+	assert.Contains(t, transport.requests[0].query, "sort=created_at")
+	assert.Contains(t, transport.requests[0].query, "direction=desc")
+}
+
+// A follow-up runs as a fresh process, so it carries the profile the run used.
+func TestChatBotFollowUpsCarryTheProfile(t *testing.T) {
+	for name, args := range map[string][]string{
+		"uploads": {"uploads"},
+		"list":    {"bots", "list"},
+		"show":    {"bots", "show", "42"},
+		"create":  {"bots", "create", "deploys"},
+		"update":  {"bots", "update", "42", "--name", "ship"},
+		"delete":  {"bots", "delete", "42", "--force"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, envelope, err := runChatBotCommandAs(t, "staging", chatBotOK, args...)
+			require.NoError(t, err)
+			cmds := envelopeBreadcrumbCmds(envelope)
+			require.NotEmpty(t, cmds)
+			for _, cmd := range cmds {
+				assert.Contains(t, cmd, "--profile staging")
+			}
+		})
+	}
 }
 
 // Contradictory flags are the caller's error, refused before any request.

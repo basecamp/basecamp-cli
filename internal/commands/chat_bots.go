@@ -58,7 +58,7 @@ func newChatUploadsCmd(project, chatID *string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "uploads",
 		Short: "List files posted in a chat",
-		Long: `List the files posted in a chat, oldest first.
+		Long: `List the files posted in a chat, newest first.
 
 Each one is the chat line that carried the file, with the file in its
 attachments. 'basecamp chat upload <file>' posts one.
@@ -83,6 +83,7 @@ every one, or --page for a single page.`,
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			follow := newFollowUpScope(app)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -91,7 +92,9 @@ every one, or --page for a single page.`,
 				return err
 			}
 
-			opts := &basecamp.CampfireUploadListOptions{Page: page}
+			// Newest first, asked for explicitly: with a limit, the files kept
+			// are the most recent ones.
+			opts := &basecamp.CampfireUploadListOptions{Sort: "created_at", Direction: "desc", Page: page}
 			switch {
 			case all:
 				opts.Limit = -1 // the SDK reads -1 as no limit
@@ -109,6 +112,7 @@ every one, or --page for a single page.`,
 			}
 
 			nav := chatRoomNav(strconv.FormatInt(roomID, 10), projectID)
+			followArgs := follow.args(app.Config.AccountID)
 			respOpts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("%d files posted in chat", len(lines))),
 				output.WithEntity("chat_line"),
@@ -116,12 +120,12 @@ every one, or --page for a single page.`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "upload",
-						Cmd:         fmt.Sprintf("basecamp chat upload <file> --room %d --in %s", roomID, projectID),
+						Cmd:         fmt.Sprintf("basecamp chat upload <file> --room %d --in %s%s", roomID, projectID, followArgs),
 						Description: "Post a file",
 					},
 					output.Breadcrumb{
 						Action:      "messages",
-						Cmd:         nav.messages(0),
+						Cmd:         nav.messages(0) + followArgs,
 						Description: "View messages",
 					},
 				),
@@ -186,13 +190,13 @@ func chatBotID(arg string) (int64, error) {
 }
 
 // chatBotScope is where a chatbot command continues: the chat's room and
-// project, carried into each follow-up.
-func chatBotScope(roomID int64, projectID string) string {
-	return fmt.Sprintf("--room %d --in %s", roomID, projectID)
+// project, and the profile and account the run used where a fresh process
+// wouldn't pick them up, carried into each follow-up.
+func chatBotScope(app *appctx.App, follow followUpScope, roomID int64, projectID string) string {
+	return fmt.Sprintf("--room %d --in %s", roomID, projectID) + follow.args(app.Config.AccountID)
 }
 
-func chatBotBreadcrumbs(bot *basecamp.Chatbot, roomID int64, projectID string) []output.Breadcrumb {
-	scope := chatBotScope(roomID, projectID)
+func chatBotBreadcrumbs(bot *basecamp.Chatbot, scope string) []output.Breadcrumb {
 	return []output.Breadcrumb{
 		{
 			Action:      "update",
@@ -218,6 +222,7 @@ The answer arrives in one unpaginated response.`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+			follow := newFollowUpScope(app)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -239,9 +244,10 @@ The answer arrives in one unpaginated response.`,
 				bots = []basecamp.Chatbot{}
 			}
 
-			scope := chatBotScope(roomID, projectID)
+			scope := chatBotScope(app, follow, roomID, projectID)
 			return app.OK(bots,
 				output.WithSummary(fmt.Sprintf("%d chatbots", len(bots))),
+				output.WithEntity("chatbot"),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
@@ -272,6 +278,7 @@ func newChatBotsShowCmd(project, chatID *string) *cobra.Command {
 				return err
 			}
 			app := appctx.FromContext(cmd.Context())
+			follow := newFollowUpScope(app)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -290,7 +297,8 @@ func newChatBotsShowCmd(project, chatID *string) *cobra.Command {
 			}
 			return app.OK(bot,
 				output.WithSummary(fmt.Sprintf("Chatbot #%d: %s", bot.ID, bot.ServiceName)),
-				output.WithBreadcrumbs(chatBotBreadcrumbs(bot, roomID, projectID)...),
+				output.WithEntity("chatbot"),
+				output.WithBreadcrumbs(chatBotBreadcrumbs(bot, chatBotScope(app, follow, roomID, projectID))...),
 			)
 		},
 	}
@@ -327,6 +335,7 @@ as the bot. Takes an account administrator.`,
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			follow := newFollowUpScope(app)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -346,7 +355,8 @@ as the bot. Takes an account administrator.`,
 			}
 			return app.OK(bot,
 				output.WithSummary(fmt.Sprintf("Created chatbot #%d: %s", bot.ID, bot.ServiceName)),
-				output.WithBreadcrumbs(chatBotBreadcrumbs(bot, roomID, projectID)...),
+				output.WithEntity("chatbot"),
+				output.WithBreadcrumbs(chatBotBreadcrumbs(bot, chatBotScope(app, follow, roomID, projectID))...),
 			)
 		},
 	}
@@ -390,6 +400,7 @@ Takes an account administrator.`,
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			follow := newFollowUpScope(app)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -420,7 +431,8 @@ Takes an account administrator.`,
 			}
 			return app.OK(bot,
 				output.WithSummary(fmt.Sprintf("Updated chatbot #%d: %s", bot.ID, bot.ServiceName)),
-				output.WithBreadcrumbs(chatBotBreadcrumbs(bot, roomID, projectID)...),
+				output.WithEntity("chatbot"),
+				output.WithBreadcrumbs(chatBotBreadcrumbs(bot, chatBotScope(app, follow, roomID, projectID))...),
 			)
 		},
 	}
@@ -461,6 +473,7 @@ Takes an account administrator.`,
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			follow := newFollowUpScope(app)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -492,7 +505,7 @@ Takes an account administrator.`,
 				output.WithSummary(fmt.Sprintf("Deleted chatbot #%d", botID)),
 				output.WithBreadcrumbs(output.Breadcrumb{
 					Action:      "list",
-					Cmd:         "basecamp chat bots list " + chatBotScope(roomID, projectID),
+					Cmd:         "basecamp chat bots list " + chatBotScope(app, follow, roomID, projectID),
 					Description: "List chatbots",
 				}),
 			)
