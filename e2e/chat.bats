@@ -206,3 +206,62 @@ load test_helper
   assert_success
   assert_output_contains "basecamp chat"
 }
+
+
+# Uploads and chatbots: refusals that need no request
+
+@test "chat uploads refuses --all with --limit" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp chat uploads --all --limit 5
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_output_contains "mutually exclusive"
+}
+
+@test "chat bots create without a name shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp chat bots create
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_output_contains "required"
+}
+
+@test "chat bots update with nothing to change shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp chat bots update 42
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_output_contains "Nothing to update"
+}
+
+@test "chat bots update refuses a non-numeric ID" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp chat bots update deploys --name x
+  assert_failure
+  assert_output_contains "Invalid chatbot ID"
+}
+
+@test "chat bots delete needs --force in machine output" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp chat bots delete 42 --json
+  assert_failure
+  assert_output_contains "--force"
+}
+
+@test "chat bots help says lines_url carries the bot's key" {
+  run basecamp chat bots --help
+  assert_success
+  assert_output_contains "lines_url"
+  assert_output_contains "password"
+  assert_output_contains "administrator"
+}

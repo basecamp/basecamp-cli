@@ -91,3 +91,59 @@ setup_file() {
   assert_success
   assert_json_value '.ok' 'true'
 }
+
+@test "campfire uploads lists files posted in the room" {
+  run_smoke basecamp campfire uploads --room "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+# Chatbots belong to the account and managing them takes an administrator, so
+# a smoke user who isn't one can't verify the lifecycle. Every step after
+# create reads the bot it made, and delete --force leaves none behind.
+@test "campfire bots create adds a chatbot" {
+  run_smoke basecamp campfire bots create "smoke_$(date +%s)" \
+    --room "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
+  [[ "$status" -ne 0 ]] && mark_unverifiable "Creating a chatbot needs an account administrator"
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.lines_url'
+
+  echo "$output" | jq -r '.data.id' > "$BATS_FILE_TMPDIR/campfire_bot_id"
+}
+
+@test "campfire bots list lists chatbots" {
+  run_smoke basecamp campfire bots list --room "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+}
+
+@test "campfire bots show shows a chatbot" {
+  local id_file="$BATS_FILE_TMPDIR/campfire_bot_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No chatbot created in prior test"
+
+  run_smoke basecamp campfire bots show "$(<"$id_file")" \
+    --room "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_not_null '.data.service_name'
+}
+
+@test "campfire bots update renames a chatbot" {
+  local id_file="$BATS_FILE_TMPDIR/campfire_bot_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No chatbot created in prior test"
+  local name="smoke_renamed_$(date +%s)"
+
+  run_smoke basecamp campfire bots update "$(<"$id_file")" --name "$name" \
+    --room "$QA_CAMPFIRE" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.data.service_name' "$name"
+}
+
+@test "campfire bots delete deletes a chatbot" {
+  local id_file="$BATS_FILE_TMPDIR/campfire_bot_id"
+  [[ -f "$id_file" ]] || mark_unverifiable "No chatbot created in prior test"
+
+  run_smoke basecamp campfire bots delete "$(<"$id_file")" \
+    --room "$QA_CAMPFIRE" -p "$QA_PROJECT" --json --force
+  assert_success
+  assert_json_value '.ok' 'true'
+}

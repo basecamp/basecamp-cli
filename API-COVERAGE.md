@@ -6,12 +6,12 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 58 | 221 |
+| ✅ Implemented | 60 | 227 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **62** | **233** |
+| **Total tracked** | **64** | **239** |
 
-**221 of 221 tracked in-scope endpoints.** Posting a hill chart progress update
+**227 of 227 tracked in-scope endpoints.** Managing chatbots (`GET`/`POST /buckets/:id/chats/:id/integrations.json`, `GET`/`PUT`/`DELETE /buckets/:id/chats/:id/integrations/:id`, all on OAuth) lands as `chat bots`, and listing the files posted in a chat (`GET /chats/:id/uploads.json`) as `chat uploads`; posting as a chatbot, which takes the chatbot's key, stays out of scope. Posting a hill chart progress update
 (`POST /todosets/:id/hills/versions.json`, added by
 [bc3#14214](https://github.com/basecamp/bc3/pull/14214) and modelled by
 [basecamp/basecamp-sdk#1068](https://github.com/basecamp/basecamp-sdk/pull/1068), not yet
@@ -79,7 +79,7 @@ very section the 100%-of-tracked claim rests on. It now reads 8. And
 `card_table_columns` gained `subscribe`/`unsubscribe` operations in the SDK that
 the CLI deliberately does not spell twice; see that row.
 
-Out-of-scope sections are excluded from parity totals and scripts: chatbots (different auth), legacy Clientside (deprecated)
+Out-of-scope sections are excluded from parity totals and scripts: posting as a chatbot (chatbot key, not OAuth), legacy Clientside (deprecated)
 
 > Note: the per-row `Endpoints` column in the Coverage by Section table sums higher than the Summary totals above. The discrepancy predates the BC5 baseline; the row count (48 sections) is authoritative for the `Since` column. Reconciling endpoint counts is pre-existing maintenance, tracked separately.
 
@@ -242,6 +242,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | message_boards | 3 | `messageboards` | ✅ | BC4 | - | Container, accessed via project dock |
 | message_types | 5 | `messagetypes` | ✅ | BC4 | - | list, show, create, update, delete. Bucket-scoped (`/buckets/{id}/categories…`); commands are project-scoped via `--in`/`--project` |
 | campfires | 14 | `chat` | ✅ | BC4 | - | list, messages, post, line show/update/delete. @mentions in content |
+| campfires (uploads) | 1 | `chat uploads` | ✅ | BC4 | - | `GET /chats/:id/uploads.json`: the chat lines that carried a file, oldest first; 100 by default, `--limit`, `--all` or `--page`. Room from `--room` or the project's one chat |
 | pings | 3 | `pings` | ✅ | BC5 | - | list (`GET /circles.json`: active pings with at least one line, newest first, unpaginated), show (`GET /circles/:id.json`, archived included), start (`POST /circles.json`, which opens or reuses: an active direct ping is always reused, a group with the same people unless `--new-group`). A ping is a Circle bucket with one Campfire, so `messages`, `post` and `upload` run through the Campfire lines endpoints on the ping's `campfire_id`, with @mentions resolved among the ping's people. `<ping>` is an id, a ping URL, or a person (a direct ping: read from the list, or started when writing). `show` and `chat line` take ping URLs (`/circles/:id`, `/circles/:id@:line`). 403 `Pings have been disabled` and 422 (an agent starting a ping with nobody who can ping) surface as errors. Requires basecamp/bc3#13943 |
 | comments | 8 | `comment`, `comments` | ✅ | BC4 | - | list, show, thread, create, update. @mentions in content. `show` surfaces `reply_target` + paste-ready `mention` from its single Get (no new calls). `thread` composes Get + parent recording (via type endpoint) + List into a deterministic reply-ready context (no new endpoints) |
 | boosts | 7 | `boost`, `react` | ✅ | BC4 | - | list (recording + event), show, create (recording + event), update (`PUT /boosts/{id}`, the creator only; same 16-character cap as create), delete. No account-wide listing — BC5 withdrew `/boosts.json` (basecamp/bc3#12464); temporary, returns via basecamp/bc3#12463 |
@@ -303,7 +304,8 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | client_correspondences | 6 | - | ⏭️ | BC4 | skip | Legacy Clientside only (see notes) |
 | client_replies | 6 | - | ⏭️ | BC4 | skip | Legacy Clientside only (see notes) |
 | **Chatbots** |
-| chatbots | 10 | - | ⏭️ | BC4 | skip | Requires chatbot key, not OAuth (see notes) |
+| chatbots (management) | 5 | `chat bots` | ✅ | BC4 | - | list, show, create, update, delete, on OAuth (`/buckets/:id/chats/:id/integrations`). Chatbots belong to the account; managing them takes an administrator. `update` reads the bot first and sends back the name and command URL it doesn't change, since the API takes the name on every update; a command URL can't be removed. `delete` is permanent and asks for confirmation or `--force`. Answers carry `lines_url`, which holds the bot's key (see notes) |
+| chatbots (posting) | - | - | ⏭️ | BC4 | skip | Posting as the bot takes the chatbot key in `lines_url`, not OAuth (see notes) |
 | **Account** |
 | account | 4 | `accounts` | ✅ | BC4 | - | show, update name, upload logo, remove logo |
 | **Lineup** |
@@ -317,12 +319,12 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 - **high**: Core workflow, frequently needed
 - **medium**: Useful but not critical path
 - **low**: Specialized, rarely needed
-- **skip**: Out of scope (client portal, chatbots, internal)
+- **skip**: Out of scope (client portal, posting as a chatbot, internal)
 
 ## Remaining (Intentionally Skipped)
 
 All remaining sections are intentionally out of scope:
-- **chatbots** (10 endpoints) - Requires chatbot key auth, not OAuth
+- **chatbots (posting)** - Requires chatbot key auth, not OAuth; managing chatbots is covered by `chat bots`
 - **client_approvals/correspondences/replies** (18 endpoints) - Legacy Clientside portal
 These are excluded from doc parity totals.
 
@@ -340,14 +342,16 @@ These endpoints are for the **legacy "Clientside"** feature (the dedicated clien
 
 **Note:** The `client_visibility` endpoint IS implemented (via `basecamp recordings visibility`) because it's part of the **modern** clients setup for controlling what client participants can see on any recording.
 
-### Chatbots
+### Chatbots (posting)
 
-The chatbots API uses a **chatbot key** for authentication rather than OAuth tokens. This is a fundamentally different auth model:
+Posting as a chatbot uses the **chatbot key** for authentication rather than OAuth tokens. This is a fundamentally different auth model:
 - Chatbot keys are per-integration, not per-user
 - They're designed for automated integrations (Slack bots, etc.)
 - The CLI uses OAuth for user-scoped access
 
-Supporting chatbot auth would require a separate configuration path. If chatbot functionality is needed, a dedicated chatbot-specific tool would be more appropriate.
+Supporting chatbot auth would require a separate configuration path. If posting as a chatbot is needed, a dedicated chatbot-specific tool would be more appropriate.
+
+Managing chatbots is a different matter: listing, adding, renaming and deleting them are OAuth calls an administrator makes, and `chat bots` covers them. Their answers carry `lines_url`, the address a bot posts to, which holds the bot's key: anyone with it can post as the bot, so the CLI's help says to treat it like a password. The CLI shows it as the API returns it, since giving it to the bot's operator is what creating one is for.
 
 ## Implementation Notes
 
