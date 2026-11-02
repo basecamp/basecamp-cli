@@ -50,6 +50,8 @@ Use 'basecamp chat post "message"' to post a message.`,
 		newChatLineShowCmd(&project, &chatID),
 		newChatLineUpdateCmd(&project, &chatID, &contentType),
 		newChatLineDeleteCmd(&project, &chatID),
+		newChatUploadsCmd(&project, &chatID),
+		newChatBotsCmd(&project, &chatID),
 	)
 
 	return cmd

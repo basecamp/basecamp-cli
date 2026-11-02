@@ -23,6 +23,10 @@ load smoke_helper
   mark_out_of_scope "Alias for chat line — tested via canonical form"
 }
 
+@test "chat bot is out of scope" {
+  mark_out_of_scope "Alias for chat bots — tested via canonical form"
+}
+
 @test "checkin is out of scope" {
   mark_out_of_scope "Alias for checkins — tested via canonical form"
 }
