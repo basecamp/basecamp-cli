@@ -50,3 +50,10 @@ test_notifications_bubbleups_lists_bubble_ups # endpoint not available on some s
 # Inbox — served to agent principals only; a person's smoke token gets 403,
 # which the test asserts before marking the gap.
 test_inbox_polls_addressed_items # agents-only lane, smoke token is a person — smoke
+
+# Chatbots — managing them takes an account administrator; a smoke token that
+# isn't one gets forbidden on create, and the rest read the bot create made.
+test_campfire_bots_create_adds_a_chatbot # needs an account administrator — smoke
+test_campfire_bots_show_shows_a_chatbot # depends on campfire bots create — smoke
+test_campfire_bots_update_renames_a_chatbot # depends on campfire bots create — smoke
+test_campfire_bots_delete_deletes_a_chatbot # depends on campfire bots create — smoke
