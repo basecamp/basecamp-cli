@@ -331,13 +331,11 @@ func (l *Ledger) launchTask(ctx context.Context, spec LaunchSpec, attemptID stri
 		// non-dispatcher caller fail closed.
 		//
 		// What closes the window between reading connect.json and
-		// committing this transaction is the caller's, and Dispatcher.launch
-		// — the only caller that reaches this one — now holds it: it reads
-		// the served set under connect.json's own lock and keeps the lock
-		// until this commits, so an unserve lands wholly before the reading
-		// or wholly after the task exists. This check is what that reading
-		// is spent on. (`connect redispatch` does the same thing for its own
-		// write, which is Ledger.Redispatch and not this.)
+		// committing this transaction is the caller's: read the served set
+		// under connect.json's own lock and keep the lock until this
+		// commits, so an unserve lands wholly before the reading or wholly
+		// after the task exists. Dispatcher.launch did, and it went with the
+		// worker side (#815); nothing outside tests calls this now.
 		return Launch{}, fmt.Errorf("connector: launch event %d in project %d, which is not served: %w", spec.EventID, record.BucketID, ErrNotStartable)
 	}
 	var busy bool

@@ -262,8 +262,12 @@ func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 	if line.Ack, err = acknowledge(ctx, opts, record); err != nil {
 		return err
 	}
-	// A hold can land while the boost is in flight. A record it moved is not
-	// handed off; its ack stays recorded for a later redispatch to reuse.
+	// A record that moved while it was acknowledged is not handed off. No
+	// hold moves one today: `connect --hold` sets the marker as a run starts,
+	// before any part runs, and `shadow promote` needs the connector stopped.
+	// A hold that could land beside a running handoff would need more than
+	// this re-check, which a hold between it and the close gets past: that
+	// record is left held, and the close from held is refused.
 	current, ok, err := opts.Ledger.Get(ctx, record.ID)
 	if err != nil {
 		return err

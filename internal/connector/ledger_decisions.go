@@ -190,11 +190,11 @@ func (l *Ledger) redispatch(ctx context.Context, eventID int64, by string, serve
 	// reported success and left the record for a dispatcher that will refuse
 	// to launch it is worse than one that refuses here (Copilot on #765).
 	//
-	// served is a reading its caller took under connect.json's own lock and
-	// holds until this commits (`connect redispatch`'s authorizedRedispatch,
-	// in internal/commands), so an unserve lands wholly before that read or
-	// wholly after this write. This checks the set it was given; the caller
-	// is what makes the set current.
+	// This checks the set it was given; the caller is what makes the set
+	// current, by reading it under connect.json's own lock and holding the
+	// lock until this commits, so an unserve lands wholly before that read
+	// or wholly after this write. `connect redispatch` did, and it went with
+	// the worker side (#815); nothing outside tests calls this now.
 	dispatchable := !record.ContentDropped && len(record.Decision.Snapshot) > 0 &&
 		record.Decision.Served && slices.Contains(served, record.BucketID) &&
 		record.Decision.ConversationKey != ""
