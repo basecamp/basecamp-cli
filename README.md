@@ -188,8 +188,20 @@ redirect. Login falls back to Launchpad's authorization-code flow only when
 no modern OAuth issuer is advertised for the server; once a modern issuer is
 selected, login failures surface loudly rather than silently falling back.
 
+At a terminal, against Basecamp's own server, login first asks who this
+computer connects as: **your agent** (recommended, and what Enter picks), which
+works in Basecamp as itself, or **yourself**. Choosing your agent runs the same
+approval as `basecamp auth agent connect`, under the `-P` profile you name or
+else one called `agent`. On that page you pick your agent, create it if you
+don't have one yet, or pick a team agent. If Basecamp can't connect an agent for
+you, login offers to connect you instead. `--as agent` or `--as me` answers
+ahead of time. Scripts, CI and anything else without a terminal connect you, as
+they always have, unless they pass `--as agent`.
+
 ```bash
 basecamp auth login              # Authenticate with Basecamp (full access)
+basecamp auth login --as agent   # Connect this computer as your agent
+basecamp auth login --as me      # Connect as yourself, without asking
 basecamp auth login --scope read # Read-only access (ignored by Launchpad)
 basecamp auth login --scope full # Full read+write access (default; ignored by Launchpad)
 basecamp auth token              # Print token for scripts
@@ -266,7 +278,7 @@ already connected on this computer under a profile, name it
 another. The same steps, scriptable:
 
 ```bash
-basecamp auth agent connect -P my-agent                 # one approval
+basecamp auth agent connect -P my-agent                 # one approval (or: basecamp auth login --as agent -P my-agent)
 basecamp connect setup -P my-agent --serve 12345        # who may give it work, which projects
 basecamp connect -P my-agent                            # the watcher
 ```

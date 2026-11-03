@@ -848,6 +848,10 @@ type LoginOptions struct {
 	// ignores it.
 	LoginHint string
 
+	// Provider, when set, is the authorization server the caller already
+	// discovered (DiscoverProvider), used instead of discovering again.
+	Provider *Provider
+
 	// Verify, when set, is called with the freshly issued access token and
 	// its provider type ("bc5" or "launchpad") before anything is stored. A
 	// non-nil error aborts the login and nothing is written: the credential
@@ -1007,7 +1011,7 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) (*LoginResult, e
 
 	credKey := m.credentialKey()
 
-	disc, err := m.discoverOAuth(ctx, opts.log)
+	disc, err := m.discoverOrUse(ctx, opts.Provider, opts.log)
 	if err != nil {
 		return nil, err
 	}
@@ -1434,6 +1438,42 @@ func (m *Manager) ImportToken(ctx context.Context, token, scope, userID, userEma
 	return m.store.withKeyLock(ctx, credKey, func() error {
 		return m.store.SaveContext(ctx, credKey, creds)
 	})
+}
+
+// Provider is the authorization server OAuth discovery selected, found
+// ahead of a login so the caller can decide what to run against it — `auth
+// login` asks who this computer connects as only where Basecamp's own server
+// can connect an agent — and then hand it to Login or ConnectAgent, which
+// use it instead of discovering again.
+type Provider struct{ disc *discovery }
+
+// Basecamp reports whether discovery selected Basecamp's own authorization
+// server, the one that runs the device flow and connects agents, rather
+// than the Launchpad fallback.
+func (p *Provider) Basecamp() bool {
+	return p != nil && p.disc.oauthType == oauthTypeBC5
+}
+
+// DiscoverProvider runs OAuth discovery for the configured base URL, saying
+// what it selected through log as a login would.
+func (m *Manager) DiscoverProvider(ctx context.Context, log func(string)) (*Provider, error) {
+	if log == nil {
+		log = func(string) {}
+	}
+	disc, err := m.discoverOAuth(ctx, log)
+	if err != nil {
+		return nil, err
+	}
+	return &Provider{disc: disc}, nil
+}
+
+// discoverOrUse is the discovery a flow runs under: the provider its caller
+// already found, or a fresh discovery.
+func (m *Manager) discoverOrUse(ctx context.Context, p *Provider, log func(string)) (*discovery, error) {
+	if p != nil {
+		return p.disc, nil
+	}
+	return m.discoverOAuth(ctx, log)
 }
 
 // discovery is the outcome of provider selection: the OAuth config to use

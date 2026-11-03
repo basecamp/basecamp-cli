@@ -664,6 +664,7 @@ func buildLoginCmd(use string) *cobra.Command {
 	var clientID string
 	var expectIdentity string
 	var loginHint string
+	var connectAs string
 
 	cmd := &cobra.Command{
 		Use:   use,
@@ -677,8 +678,21 @@ in CI, or on a host with no display the browser is skipped and the link is yours
 to open on any device — your phone included; --local forces a launch anyway,
 --no-browser skips it. Ctrl-C cancels the wait.
 
+At a terminal, against Basecamp's own server, login first asks who this
+computer connects as: your agent (recommended), which works in Basecamp as
+itself, or yourself. Choosing your agent runs the same approval as
+` + "`basecamp auth agent connect`" + `, under the -P profile you name or else one
+called "agent". If Basecamp can't connect an agent for you, login offers to
+connect you instead. --as agent or --as me answers ahead of time. Everywhere
+else (a script, CI, no terminal) login connects you, as it always has, unless
+--as agent is given. It doesn't ask when signing a profile that already holds
+your own login back in, or with --login-hint or --expect-identity, which only
+apply to you.
+
 Examples:
   basecamp auth login                              # Browser (or device) flow
+  basecamp auth login --as agent                   # Connect this computer as your agent
+  basecamp auth login --as me                      # Connect as yourself, without asking
   basecamp auth login --device-code                # Headless: approve the printed code from any device
   basecamp auth login --expect-identity 12345      # Refuse the login unless it is this identity
 
@@ -714,6 +728,10 @@ client credentials are what is kept.
 			if err != nil {
 				return err
 			}
+			as, err := parseConnectAs(connectAs)
+			if err != nil {
+				return err
+			}
 
 			// --client-id names which agent is being authenticated, so
 			// running an ordinary interactive login with it set would sign
@@ -734,77 +752,16 @@ client credentials are what is kept.
 				return runLoginClientCredentials(cmd, app, clientID, scope)
 			}
 
-			if err := refuseMachineOutputLogin(app, "the login command"); err != nil {
-				return err
-			}
-			if err := refuseNonInteractiveLogin(deviceCode); err != nil {
-				return err
-			}
-			if expect != 0 && os.Getenv("BASECAMP_TOKEN") != "" {
-				return errEnvTokenShadows("--expect-identity cannot be checked while BASECAMP_TOKEN is set")
-			}
-			if name := app.Config.ActiveProfile; name != "" {
-				existing, ok := app.Config.Profiles[name]
-				if !ok {
-					return output.ErrUsageHint(fmt.Sprintf("Profile %q does not exist", name),
-						fmt.Sprintf("Create it with `basecamp profile create %s`, or import a token: `... | basecamp auth login --with-token -P %s --account <id>`.", name, name))
-				}
-				if err := requireProfileBinding(app, name, existing); err != nil {
-					return err
-				}
-			}
-
-			if deviceCode {
-				remote = true
-			}
-
-			w := cmd.OutOrStdout()
-			r := output.NewRendererWithTheme(w, false, tui.ResolveTheme(tui.DetectDark()))
-
-			if app.Config.ActiveProfile != "" {
-				fmt.Fprintln(w, r.Summary.Render(fmt.Sprintf("Starting authentication for profile %q...", app.Config.ActiveProfile)))
-			} else {
-				fmt.Fprintln(w, r.Summary.Render("Starting Basecamp authentication..."))
-			}
-
-			// With an expectation the login is assertive: the token is
-			// checked before it is stored, and a mismatch stores nothing.
-			// Without one the identity line stays informational.
-			verifier := &loginVerifier{app: app, expectIdentity: expect, account: app.Config.AccountID, strict: expect != 0}
-			ctx, stop := loginContext(cmd)
-			result, err := app.Auth.Login(ctx, auth.LoginOptions{
-				Scope:     scope,
-				NoBrowser: noBrowser,
-				Remote:    remote,
-				Local:     local,
-				LoginHint: loginHint,
-				Logger:    func(msg string) { fmt.Fprintln(w, msg) },
-				Progress:  w,
-				Verify:    verifier.verify,
+			return runBrowserLogin(cmd, app, browserLogin{
+				as:         as,
+				scope:      scope,
+				noBrowser:  noBrowser,
+				remote:     remote,
+				local:      local,
+				deviceCode: deviceCode,
+				loginHint:  loginHint,
+				expect:     expect,
 			})
-			err = loginOutcome(ctx, err, w, r)
-			stop()
-			if err != nil {
-				return err
-			}
-
-			fmt.Fprintln(w)
-			fmt.Fprintln(w, r.Success.Render("Authentication successful!"))
-
-			if result.Scope != "" {
-				fmt.Fprintln(w, r.Muted.Render(fmt.Sprintf("Access: %s", result.Scope)))
-			}
-
-			if who := verifier.who; who != nil {
-				if who.PersonID != 0 {
-					_ = app.Auth.SetUserIdentity(cmd.Context(), strconv.FormatInt(who.PersonID, 10), who.Email)
-				}
-				fmt.Fprintln(w, r.Data.Render("Logged in as: "+who.label()))
-			}
-
-			printAgentNudge(w, r)
-
-			return nil
 		},
 	}
 
@@ -815,6 +772,9 @@ client credentials are what is kept.
 	cmd.Flags().StringVar(&clientID, "client-id", "", "OAuth client ID of the agent to authenticate as (with --with-client-credentials)")
 	cmd.Flags().StringVar(&expectIdentity, "expect-identity", "", "Identity ID the login must authenticate as; otherwise store nothing")
 	cmd.Flags().StringVar(&loginHint, "login-hint", "", "Email address to sign in as on the device-flow approval page (ignored by Launchpad)")
+	cmd.Flags().StringVar(&connectAs, "as", "", "Who this computer connects as: 'agent' (your Basecamp agent) or 'me' (yourself). Asked when run at a terminal; otherwise 'me'")
+	cmd.MarkFlagsMutuallyExclusive("with-token", "as")
+	cmd.MarkFlagsMutuallyExclusive("with-client-credentials", "as")
 	cmd.MarkFlagsMutuallyExclusive("remote", "local")
 	cmd.MarkFlagsMutuallyExclusive("device-code", "local")
 	for _, flag := range []string{"device-code", "remote", "local", "no-browser", "login-hint"} {
