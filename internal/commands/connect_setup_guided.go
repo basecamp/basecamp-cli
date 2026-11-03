@@ -49,7 +49,7 @@ var connectSetupPolicyFlags = []string{
 	"serve", "unserve", "class", "watch-completions", "no-watch-completions",
 	"allow-assignments-from-authorized",
 	"allow-agent", "disallow-agent", "agent-thread-cap", "agent-daily-cap",
-	"allow-in-ping", "disallow-in-ping", "ack-boost", "no-ack-boost",
+	"allow-in-ping", "disallow-in-ping", "allow-agent-in-ping", "disallow-agent-in-ping", "ack-boost", "no-ack-boost",
 }
 
 // connectGOOS is the platform guided setup checks before connecting. A

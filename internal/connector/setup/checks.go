@@ -481,7 +481,8 @@ func ErrorText(err error) string {
 // VerifyPings checks everyone connect.json will let into one Ping, as the
 // agent sees that Ping, since admission reads it as the agent: the agent is
 // in it, so is the person, and the person is neither the agent, an Agent, nor
-// a client of the account. One read per Ping.
+// a client of the account. An agent let in (--allow-agent-in-ping) must be in
+// it too, and be an Agent other than this one. One read per Ping.
 //
 // A person recorded there already who cannot be confirmed now (the Ping
 // cannot be read, or they have left it) is a warning, as for the allowlist: a
@@ -500,6 +501,9 @@ func VerifyPings(ctx context.Context, r Reader, pings, recorded map[int64]admiss
 		for _, id := range pings[pingID].Participants {
 			checks = append(checks, verifyPingPerson(ping, err, pingID, id, agentID, slices.Contains(recorded[pingID].Participants, id)))
 		}
+		for _, id := range pings[pingID].Agents {
+			checks = append(checks, verifyPingAgent(ping, err, pingID, id, agentID, slices.Contains(recorded[pingID].Agents, id)))
+		}
 	}
 	return checks
 }
@@ -510,6 +514,44 @@ func verifyPingPerson(ping Ping, readErr error, pingID, id, agentID int64, recor
 		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is the agent itself; the agent's own id never authorizes", id)
 		return c
 	}
+	p, ok := pingMember(&c, ping, readErr, pingID, id, recorded)
+	if !ok {
+		return c
+	}
+	switch {
+	case p.PersonableType == PersonableAgent:
+		c.Status = StatusFail
+		c.Message = fmt.Sprintf("Person %d is an Agent; agents never authorize, and are allowed with --allow-agent or --allow-agent-in-ping", id)
+	case p.Client:
+		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is a client of the account; only members are trusted", id)
+	default:
+		c.Status = StatusPass
+		c.Message = fmt.Sprintf("Person %d, %s, may ask by mention in Ping %d alone", id, richtext.SanitizeSingleLine(p.Name), pingID)
+	}
+	return c
+}
+
+func verifyPingAgent(ping Ping, readErr error, pingID, id, agentID int64, recorded bool) Check {
+	c := Check{Name: fmt.Sprintf("Ping %d, agent %d", pingID, id)}
+	if id == agentID {
+		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is the agent itself; an agent never wakes itself", id)
+		return c
+	}
+	p, ok := pingMember(&c, ping, readErr, pingID, id, recorded)
+	if !ok {
+		return c
+	}
+	if p.PersonableType != PersonableAgent {
+		c.Status = StatusFail
+		c.Message = fmt.Sprintf("Person %d is not an Agent; --allow-agent-in-ping names agents, and people are let in with --allow-in-ping", id)
+		return c
+	}
+	c.Status = StatusPass
+	c.Message = fmt.Sprintf("Agent %d, %s, may wake this agent by mention in Ping %d alone", id, richtext.SanitizeSingleLine(p.Name), pingID)
+	return c
+}
+
+func pingMember(c *Check, ping Ping, readErr error, pingID, id int64, recorded bool) (Person, bool) {
 	if readErr != nil {
 		c.Status = StatusFail
 		c.Message = fmt.Sprintf("Ping %d could not be read as the agent (%s)", pingID, ErrorText(readErr))
@@ -520,7 +562,7 @@ func verifyPingPerson(ping Ping, readErr error, pingID, id, agentID int64, recor
 		if recorded {
 			c.Status, c.Hint = StatusWarn, ""
 		}
-		return c
+		return Person{}, false
 	}
 	i := slices.IndexFunc(ping.People, func(p Person) bool { return p.ID == id })
 	if i < 0 {
@@ -530,18 +572,7 @@ func verifyPingPerson(ping Ping, readErr error, pingID, id, agentID int64, recor
 		if recorded {
 			c.Status, c.Message, c.Hint = StatusWarn, fmt.Sprintf("Person %d, already let into Ping %d, is no longer in it", id, pingID), ""
 		}
-		return c
+		return Person{}, false
 	}
-	p := ping.People[i]
-	switch {
-	case p.PersonableType == PersonableAgent:
-		c.Status = StatusFail
-		c.Message = fmt.Sprintf("Person %d is an Agent; agents never authorize, and are allowed only with --allow-agent", id)
-	case p.Client:
-		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is a client of the account; only members are trusted", id)
-	default:
-		c.Status = StatusPass
-		c.Message = fmt.Sprintf("Person %d, %s, may ask by mention in Ping %d alone", id, richtext.SanitizeSingleLine(p.Name), pingID)
-	}
-	return c
+	return ping.People[i], true
 }
