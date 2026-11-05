@@ -2836,6 +2836,228 @@
         }
       }
     },
+    "/{accountId}/buckets/{bucketId}/dock/doors.json": {
+      "get": {
+        "description": "List the active external links in a project\nThey come in the order they appear in the project's External links section.\nNot paginated: a project has a handful at most. Clients see only the\nexternal links visible to them. Listing needs only access to the project,\nnot permission to edit it.",
+        "operationId": "ListDoors",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "bucketId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ListDoors 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDoorsResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Dock"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      },
+      "post": {
+        "description": "Create an external link in a project\nIt goes at the end of the project's External links section. The link's\nfields go under the `door` key and `visible_to_clients` sits beside it.\nOmitting `visible_to_clients` keeps the link private to the team, whatever\nthe visibility of the project's other tools; a client caller always creates\na client-visible link. An unusable `url` (e.g. a `javascript:` address) is a\nfield-keyed 422. Needs permission to edit the project. The `door[image]`\nthumbnail is multipart-only and not modelled.",
+        "operationId": "CreateDoor",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDoorRequestContent"
+              }
+            }
+          },
+          "required": true
+        },
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "bucketId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "CreateDoor 201 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateDoorResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "FieldValidationError 422 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldValidationErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Dock"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 2,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
     "/{accountId}/buckets/{bucketId}/dock/tools.json": {
       "post": {
         "description": "Create a tool in a project dock",
@@ -8500,6 +8722,316 @@
         },
         "tags": [
           "Messages"
+        ],
+        "x-basecamp-idempotent": {
+          "natural": true
+        },
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
+    "/{accountId}/dock/doors/{doorId}": {
+      "delete": {
+        "description": "Delete an external link (returns 204 No Content)\nIts status becomes \"deleted\" and it leaves the project's External links section. It does not\ngo to the trash: Basecamp permanently destroys it about five days later.\nNeeds permission to edit the project.",
+        "operationId": "DeleteDoor",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "doorId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "DeleteDoor 204 response"
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Dock"
+        ],
+        "x-basecamp-idempotent": {
+          "natural": true
+        },
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      },
+      "get": {
+        "description": "Get an external link by id\nA door hidden from a client, an unknown id, or the id of a recording that is\nnot a door is a 404.",
+        "operationId": "GetDoor",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "doorId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GetDoor 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDoorResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Dock"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      },
+      "put": {
+        "description": "Update an external link\nA partial update: every field is optional, and those left out keep their\nvalues. Omit `door` entirely to change only `visible_to_clients`; omit\n`visible_to_clients` to keep the current visibility. An unusable `url` is a\nfield-keyed 422. Needs permission to edit the project.",
+        "operationId": "UpdateDoor",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDoorRequestContent"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "doorId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "UpdateDoor 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateDoorResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "FieldValidationError 422 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldValidationErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Dock"
         ],
         "x-basecamp-idempotent": {
           "natural": true
@@ -32946,6 +33478,49 @@
       "CreateDocumentResponseContent": {
         "$ref": "#/components/schemas/Document"
       },
+      "CreateDoorPayload": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "description": "Short identifier for the external service: figma, dropbox, google_drive,\ngithub, notion, trello, slack, zoom, airtable, jira, miro, \u2026 or `other`\nfor a generic link."
+          },
+          "url": {
+            "type": "string",
+            "description": "The address the link points to. Supply an HTTP or HTTPS URL; a value\nwithout a scheme is prefixed with `https://`."
+          },
+          "title": {
+            "type": "string",
+            "description": "Name shown in the External links section. Defaults to \"Untitled\"."
+          },
+          "description": {
+            "type": "string",
+            "description": "Rich-text (HTML) description shown beneath the title."
+          }
+        },
+        "required": [
+          "service",
+          "url"
+        ]
+      },
+      "CreateDoorRequestContent": {
+        "type": "object",
+        "properties": {
+          "door": {
+            "$ref": "#/components/schemas/CreateDoorPayload"
+          },
+          "visible_to_clients": {
+            "type": "boolean",
+            "description": "Whether the project's clients can see the external link. Omitted means\nfalse: the link is private to the team. A client caller always creates a\nclient-visible link regardless of what is sent."
+          }
+        },
+        "required": [
+          "door"
+        ]
+      },
+      "CreateDoorResponseContent": {
+        "$ref": "#/components/schemas/Door"
+      },
       "CreateEmbedRequestContent": {
         "type": "object",
         "properties": {
@@ -33936,6 +34511,91 @@
           "id",
           "inherits_status",
           "parent",
+          "status",
+          "title",
+          "type",
+          "updated_at",
+          "url",
+          "visible_to_clients"
+        ]
+      },
+      "Door": {
+        "type": "object",
+        "description": "An external link (`Door` recording), as ListDoors, GetDoor, CreateDoor and\nUpdateDoor render it: the shared recording envelope plus the outside `url`,\nthe `service` struct and `description`. Docked, so it carries no `parent`.",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string"
+          },
+          "visible_to_clients": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "x-go-type": "time.Time",
+            "x-go-type-import": {
+              "path": "time"
+            }
+          },
+          "updated_at": {
+            "type": "string",
+            "x-go-type": "time.Time",
+            "x-go-type-import": {
+              "path": "time"
+            }
+          },
+          "title": {
+            "type": "string"
+          },
+          "inherits_status": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "description": "The external link's outside address (e.g. the Figma URL) \u2014 NOT this\nrecord's API URL. The door partial renders the shared recording partial\nand then `json.(recording.recordable, :url, :service, :description)`,\nwhich overwrites the recording's url key. `app_url` is still this record's\nBasecamp URL (a redirector to the outside address)."
+          },
+          "app_url": {
+            "type": "string"
+          },
+          "bookmark_url": {
+            "type": "string"
+          },
+          "subscription_url": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "description": "Ordinal position within the project's External links section.",
+            "format": "int32"
+          },
+          "bucket": {
+            "$ref": "#/components/schemas/RecordingBucket"
+          },
+          "creator": {
+            "$ref": "#/components/schemas/Person"
+          },
+          "service": {
+            "$ref": "#/components/schemas/DoorService"
+          },
+          "description": {
+            "type": "string",
+            "description": "Rich-text (HTML) description shown beneath the link."
+          }
+        },
+        "required": [
+          "app_url",
+          "bucket",
+          "created_at",
+          "creator",
+          "id",
+          "inherits_status",
+          "service",
           "status",
           "title",
           "type",
@@ -35286,6 +35946,9 @@
       "GetDocumentResponseContent": {
         "$ref": "#/components/schemas/Document"
       },
+      "GetDoorResponseContent": {
+        "$ref": "#/components/schemas/Door"
+      },
       "GetEmbedResponseContent": {
         "$ref": "#/components/schemas/Embed"
       },
@@ -36303,6 +36966,12 @@
         "type": "array",
         "items": {
           "$ref": "#/components/schemas/Document"
+        }
+      },
+      "ListDoorsResponseContent": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Door"
         }
       },
       "ListEventBoostsResponseContent": {
@@ -41270,6 +41939,42 @@
       },
       "UpdateCommentResponseContent": {
         "$ref": "#/components/schemas/Comment"
+      },
+      "UpdateDoorPayload": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "description": "Short identifier for the external service, as for CreateDoor."
+          },
+          "url": {
+            "type": "string",
+            "description": "The address the link points to."
+          },
+          "title": {
+            "type": "string",
+            "description": "Name shown in the External links section."
+          },
+          "description": {
+            "type": "string",
+            "description": "Rich-text (HTML) description shown beneath the title."
+          }
+        }
+      },
+      "UpdateDoorRequestContent": {
+        "type": "object",
+        "properties": {
+          "door": {
+            "$ref": "#/components/schemas/UpdateDoorPayload"
+          },
+          "visible_to_clients": {
+            "type": "boolean",
+            "description": "Whether the project's clients can see the external link. Omitted keeps\nthe current visibility."
+          }
+        }
+      },
+      "UpdateDoorResponseContent": {
+        "$ref": "#/components/schemas/Door"
       },
       "UpdateFolderRequestContent": {
         "type": "object",
