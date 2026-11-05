@@ -14,7 +14,7 @@ accept:
   # the create command, laid out in more than one block, both in that one
   # call. A body sent on stdin never reaches the trace and would pass them
   # unread.
-  - 'comments? create [^\n]*999([\s\S]*\n\n[\s\S]*HEY_DATABASE_SCHEMA_CHECK|[\s\S]*HEY_DATABASE_SCHEMA_CHECK[\s\S]*\n\n)'
+  - 'comments? create (999|"999"|''999'')\s([\s\S]*\n\n[\s\S]*HEY_DATABASE_SCHEMA_CHECK|[\s\S]*HEY_DATABASE_SCHEMA_CHECK[\s\S]*\n\n)'
 reject:
   # Basecamp shows blocks flush against each other unless a blank line in the
   # Markdown separates them, and in prose a single newline joins two lines
