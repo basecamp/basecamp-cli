@@ -22,7 +22,8 @@ reject:
   # or a capitalized line ending in a colon) followed directly by its text
   # runs label and text together. The next line must start flush left, so
   # indented lines in fenced code, such as a YAML key's value, don't count.
-  - '(^|\n)(\*\*[^*\n]+\*\*|#+ [^\n]+|[A-Z][^*\n]*:)\n[^\s`]'
+  # The label may open the body, right after the quote that starts it.
+  - '(^|\n|"|'')(\*\*[^*\n]+\*\*|#+ [^\n]+|[A-Z][^*\n]*:)\n[^\s`]'
   # A line of text followed directly by a list item: the list sits flush
   # against the paragraph above it.
   - '(^|\n)[^-*+\n0-9 `][^\n]*\n(?:[-*+] |[0-9]+\. )'
