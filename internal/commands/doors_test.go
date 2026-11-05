@@ -138,7 +138,7 @@ func TestDoorsCreateExplicitServiceAndMarkdownDescription(t *testing.T) {
 
 	door := decodeDoorBody(t, transport.last(t).Body)["door"].(map[string]any)
 	assert.Equal(t, "jira", door["service"])
-	assert.Contains(t, door["description"], "<strong>Board</strong>")
+	assert.Equal(t, "<p><strong>Board</strong></p>", door["description"])
 }
 
 func TestDoorsCreateRequiresURLBeforeAnyRequest(t *testing.T) {
@@ -290,8 +290,42 @@ func TestInferDoorService(t *testing.T) {
 		"javascript:alert(1)":                             "",
 		"https://github.com.evil.example/basecamp/x":      "",
 		"https://docs.google.com.evil.example/document/x": "",
+		"figma.com/file/abc?redirect=https://example.com": "figma",
+		"figma.com:443/file/abc":                          "figma",
 	}
 	for in, want := range cases {
 		assert.Equal(t, want, inferDoorService(in), "inferDoorService(%q)", in)
+	}
+}
+
+// A door URL only supplies an ID when it is a Basecamp URL for one door in the
+// configured account: anything else is refused before any request, so update
+// and delete never act on a same-numbered door the URL did not name.
+func TestDoorsRefuseURLsThatDoNotNameADoorHere(t *testing.T) {
+	cases := map[string]struct {
+		url  string
+		want string
+	}{
+		"untrusted host": {"https://3.basecamp.com.evil.example/99999/buckets/123/dock/doors/456", "untrusted host"},
+		"another kind":   {"https://3.basecamp.com/99999/buckets/123/todos/456", "does not name one external link"},
+		"a collection":   {"https://3.basecamp.com/99999/buckets/123/dock/doors", "does not name one external link"},
+		"other account":  {"https://3.basecamp.com/11111/buckets/123/dock/doors/456", "does not match the configured account"},
+	}
+	for name, tc := range cases {
+		for _, action := range [][]string{{"show"}, {"update", "--title", "X"}, {"delete"}} {
+			t.Run(name+"/"+action[0], func(t *testing.T) {
+				app, transport := setupRecordingTestApp(t)
+				args := append([]string{action[0], tc.url}, action[1:]...)
+
+				err := executeRecordingCommand(NewDoorsCmd(), app, args...)
+				require.Error(t, err)
+
+				var e *output.Error
+				require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+				assert.Equal(t, output.CodeUsage, e.Code)
+				assert.Contains(t, e.Message, tc.want)
+				assert.Empty(t, transport.recorded(), "a refused URL must send no request")
+			})
+		}
 	}
 }

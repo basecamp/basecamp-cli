@@ -10,7 +10,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // NewDoorsCmd creates the doors command for managing a project's external
@@ -108,12 +110,12 @@ func inferDoorService(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	if !strings.Contains(raw, "://") {
-		raw = "https://" + raw
-	}
 	u, err := url.Parse(raw)
-	if err != nil {
-		return ""
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		u, err = url.Parse("https://" + raw)
+		if err != nil {
+			return ""
+		}
 	}
 	host := strings.ToLower(u.Hostname())
 
@@ -137,19 +139,40 @@ func inferDoorService(raw string) string {
 	return ""
 }
 
-// doorIDArg reads a door ID or URL. A URL that names its project supplies
-// the project for breadcrumbs when --in was not given.
-func doorIDArg(arg, project string) (int64, string, error) {
-	idStr, urlProject, err := extractWithProject(arg)
-	if err != nil {
-		return 0, "", err
+// doorIDArg reads a door ID or the URL of one door. The URL router is
+// host-agnostic, so a URL must be on a trusted Basecamp host and name a door:
+// a look-alike or another kind of recording never supplies an ID. Its account
+// is adopted when none is configured and refused when it differs, so a
+// same-numbered door in the configured account is never touched. A URL that
+// names its project supplies the project for breadcrumbs when --in was not
+// given.
+func doorIDArg(app *appctx.App, arg, project string) (int64, string, error) {
+	idStr := arg
+	if urlarg.IsURL(arg) {
+		if !hostutil.IsTrustedBasecampHost(arg, app.Config.BaseURL) {
+			return 0, "", output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
+		}
+		parsed := urlarg.Parse(arg)
+		if parsed == nil || parsed.IsCollection || parsed.Type != "doors" || parsed.RecordingID == "" {
+			return 0, "", output.ErrUsageHint("The URL does not name one external link",
+				"Pass the door's ID, or its URL (…/buckets/<project>/dock/doors/<id>); basecamp doors list --in <project> lists them")
+		}
+		if parsed.AccountID != "" {
+			switch {
+			case app.Config.AccountID == "":
+				app.Config.AccountID = parsed.AccountID
+			case !accountIDsEqual(parsed.AccountID, app.Config.AccountID):
+				return 0, "", output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", parsed.AccountID, app.Config.AccountID))
+			}
+		}
+		idStr = parsed.RecordingID
+		if project == "" {
+			project = parsed.ProjectID
+		}
 	}
 	doorID, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		return 0, "", output.ErrUsage("Invalid door ID")
-	}
-	if project == "" {
-		project = urlProject
 	}
 	return doorID, project, nil
 }
@@ -224,7 +247,7 @@ description and client visibility.
 				return err
 			}
 
-			doorID, projectArg, err := doorIDArg(args[0], *project)
+			doorID, projectArg, err := doorIDArg(app, args[0], *project)
 			if err != nil {
 				return err
 			}
@@ -411,7 +434,7 @@ link private to the team.
 				return err
 			}
 
-			doorID, projectArg, err := doorIDArg(args[0], *project)
+			doorID, projectArg, err := doorIDArg(app, args[0], *project)
 			if err != nil {
 				return err
 			}
@@ -490,7 +513,7 @@ in the Basecamp web app.
 				return err
 			}
 
-			doorID, projectArg, err := doorIDArg(args[0], *project)
+			doorID, projectArg, err := doorIDArg(app, args[0], *project)
 			if err != nil {
 				return err
 			}

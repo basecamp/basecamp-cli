@@ -25,9 +25,10 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp doors list
+  run basecamp doors list --json
   assert_failure
-  assert_output_contains "project"
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'Project ID required'
 }
 
 
@@ -37,34 +38,38 @@ load test_helper
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run basecamp doors create --title "Design"
+  run basecamp doors create --title "Design" --json
   assert_failure
-  assert_output_contains "--url is required"
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' '--url is required'
 }
 
 @test "doors update without any fields shows error" {
   create_credentials
   create_global_config '{"account_id": 99999, "project_id": 123}'
 
-  run basecamp doors update 456
+  run basecamp doors update 456 --json
   assert_failure
-  assert_output_contains "No update fields specified"
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'No update fields specified'
 }
 
 @test "doors show with a non-numeric id shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp doors show abc
+  run basecamp doors show abc --json
   assert_failure
-  assert_output_contains "Invalid door ID"
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'Invalid door ID'
 }
 
 @test "doors delete without id shows error" {
   create_credentials
   create_global_config '{"account_id": 99999}'
 
-  run basecamp doors delete
+  run basecamp doors delete --json
   assert_failure
-  assert_output_contains "ID required"
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'ID required'
 }
