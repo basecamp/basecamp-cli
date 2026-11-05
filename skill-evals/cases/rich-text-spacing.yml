@@ -1,0 +1,25 @@
+task: >-
+  Post a status update as a comment on card 999 in project 555 for the
+  schema-check work, with a short section for each of three things. What
+  changed: the schema check can now stop a boot, refusing only a dropped table,
+  column, unique key or hinted index, a column made invisible, or a column that
+  must now be written. How it behaves on deploy: the refusal comes before /up,
+  so the new container fails its health check and the old one keeps serving;
+  small changes like added columns with defaults are only logged. The switch:
+  HEY_DATABASE_SCHEMA_CHECK is refuse, report or off, set from the deploy file.
+tags: [create, rich-text]
+accept:
+  - 'comments? create .*999'
+  - '--(in|project) 555'
+reject:
+  # Basecamp shows blocks flush against each other unless a blank line in the
+  # Markdown separates them, and a single newline joins two lines into one
+  # paragraph. A section label on a line of its own, bold or a heading,
+  # followed directly by its text runs label and text together.
+  - '(^|\n)(\*\*[^*\n]+\*\*|#+ [^\n]+)\n[^\n]'
+  # A line of text followed directly by a list item: the list sits flush
+  # against the paragraph above it.
+  - '(^|\n)[^-*\n0-9 ][^\n]*\n[-*] '
+  # HTML is stored as written, so its spacing is whatever the agent typed.
+  - '--format[ =]html'
+  - '<(p|div|br|h[1-6])\b'
