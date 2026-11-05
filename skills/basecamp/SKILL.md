@@ -336,10 +336,10 @@ A pipe is never consumed implicitly. Only one input may read stdin in an
 invocation. Do not use shell-specific ANSI-C quoting such as `$'line 1\nline 2'`
 in portable commands.
 
-Basecamp shows blocks flush against each other unless a blank line in the
-Markdown separates them. Leave one between every two blocks, headings and lists
-included; a single newline joins lines into one paragraph. Don't hand-write
-HTML: `--format html` is stored as written, so touching blocks and
+Basecamp shows blocks flush together unless a blank line in the Markdown
+separates them. Leave one between every two blocks, headings and lists
+included; in prose, a single newline joins lines into one paragraph. Don't
+hand-write HTML: `--format html` is stored as written, so touching blocks and
 `<br>`-stacked lines read as a wall of text.
 
 Rich-text fields support Mermaid diagrams. Put the source in a fenced code block

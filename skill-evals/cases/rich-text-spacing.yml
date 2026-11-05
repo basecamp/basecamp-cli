@@ -14,12 +14,13 @@ accept:
 reject:
   # Basecamp shows blocks flush against each other unless a blank line in the
   # Markdown separates them, and a single newline joins two lines into one
-  # paragraph. A section label on a line of its own, bold or a heading,
-  # followed directly by its text runs label and text together.
-  - '(^|\n)(\*\*[^*\n]+\*\*|#+ [^\n]+)\n[^\n]'
+  # paragraph. A section label on a line of its own, bold, a heading or
+  # ending in a colon, followed directly by its text runs label and text
+  # together.
+  - '(^|\n)(\*\*[^*\n]+\*\*|#+ [^\n]+|[^*\n]+:)\n[^\n]'
   # A line of text followed directly by a list item: the list sits flush
   # against the paragraph above it.
-  - '(^|\n)[^-*\n0-9 ][^\n]*\n[-*] '
+  - '(^|\n)[^-*+\n0-9 ][^\n]*\n(?:[-*+] |[0-9]+\. )'
   # HTML is stored as written, so its spacing is whatever the agent typed.
   - '--format[ =]html'
   - '<(p|div|br|h[1-6])\b'
