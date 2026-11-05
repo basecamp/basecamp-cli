@@ -329,3 +329,58 @@ func TestDoorsRefuseURLsThatDoNotNameADoorHere(t *testing.T) {
 		}
 	}
 }
+
+// A door URL names its account, so it serves where none is configured: the
+// account is read from the URL before any account is required.
+func TestDoorsURLSuppliesTheAccount(t *testing.T) {
+	for _, action := range [][]string{{"show"}, {"update", "--title", "X"}, {"delete"}} {
+		t.Run(action[0], func(t *testing.T) {
+			app, transport := setupRecordingTestApp(t,
+				stubRoute{method: http.MethodGet, path: "/99999/dock/doors/456", status: http.StatusOK, body: doorJSON},
+				stubRoute{method: http.MethodPut, path: "/99999/dock/doors/456", status: http.StatusOK, body: doorJSON},
+				stubRoute{method: http.MethodDelete, path: "/99999/dock/doors/456", status: http.StatusNoContent},
+				projectsRoute(),
+			)
+			app.Config.AccountID = ""
+			args := append([]string{action[0], "https://3.basecamp.com/99999/buckets/123/dock/doors/456"}, action[1:]...)
+
+			require.NoError(t, executeRecordingCommand(NewDoorsCmd(), app, args...))
+			assert.Equal(t, "99999", app.Config.AccountID)
+			assert.Equal(t, "/99999/dock/doors/456", transport.last(t).Path)
+		})
+	}
+}
+
+// A follow-up copied into a fresh shell must act where this command did, so
+// it names the active profile and an account that came from the URL.
+func TestDoorsFollowUpsCarryTheProfileAndAccount(t *testing.T) {
+	const doorURL = "https://3.basecamp.com/99999/buckets/123/dock/doors/456"
+	cases := map[string]struct {
+		arg      string
+		profile  string
+		inherit  bool
+		followUp string
+	}{
+		"account from config":       {arg: "456", inherit: true, followUp: "basecamp doors delete 456"},
+		"profile, config account":   {arg: "456", profile: "staging", inherit: true, followUp: "basecamp doors delete 456 --profile staging"},
+		"profile, account from URL": {arg: doorURL, profile: "staging", followUp: "basecamp doors delete 456 --in 123 --profile staging --account 99999"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			app, _ := setupRecordingTestApp(t, projectsRoute(),
+				stubRoute{method: http.MethodGet, path: "/99999/dock/doors/456", status: http.StatusOK, body: doorJSON})
+			app.Config.ActiveProfile = c.profile
+			app.Config.Sources = map[string]string{}
+			if !c.inherit {
+				app.Config.AccountID = ""
+			}
+			buf := captureSpotlightOutput(app)
+
+			require.NoError(t, executeRecordingCommand(NewDoorsCmd(), app, "show", c.arg))
+
+			assert.Contains(t, decodeSpotlightEnvelope(t, buf).Breadcrumbs, output.Breadcrumb{
+				Action: "delete", Cmd: c.followUp, Description: "Delete external link",
+			})
+		})
+	}
+}

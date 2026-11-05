@@ -196,6 +196,7 @@ links section.
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
@@ -214,7 +215,7 @@ links section.
 
 			return app.OK(doors,
 				output.WithSummary(fmt.Sprintf("%d external links", len(doors))),
-				output.WithBreadcrumbs(
+				output.WithBreadcrumbs(doorCrumbs(scope.args(app.Config.AccountID),
 					output.Breadcrumb{
 						Action:      "show",
 						Cmd:         fmt.Sprintf("basecamp doors show <id> --in %s", resolvedProjectID),
@@ -225,7 +226,7 @@ links section.
 						Cmd:         fmt.Sprintf("basecamp doors create --url <url> --title \"Title\" --in %s", resolvedProjectID),
 						Description: "Add external link",
 					},
-				),
+				)...),
 			)
 		},
 	}
@@ -242,13 +243,14 @@ description and client visibility.
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
+			scope := newFollowUpScope(app)
 
 			doorID, projectArg, err := doorIDArg(app, args[0], *project)
 			if err != nil {
+				return err
+			}
+
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -285,7 +287,7 @@ description and client visibility.
 
 			return app.OK(door,
 				output.WithSummary(doorSummary(door)),
-				output.WithBreadcrumbs(crumbs...),
+				output.WithBreadcrumbs(doorCrumbs(scope.args(app.Config.AccountID), crumbs...)...),
 			)
 		},
 	}
@@ -327,6 +329,7 @@ The link is private to the team unless --visible-to-clients is passed.
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
@@ -362,7 +365,7 @@ The link is private to the team unless --visible-to-clients is passed.
 
 			return app.OK(door,
 				output.WithSummary("Created: "+doorSummary(door)),
-				output.WithBreadcrumbs(
+				output.WithBreadcrumbs(doorCrumbs(scope.args(app.Config.AccountID),
 					output.Breadcrumb{
 						Action:      "show",
 						Cmd:         fmt.Sprintf("basecamp doors show %d --in %s", door.ID, resolvedProjectID),
@@ -373,7 +376,7 @@ The link is private to the team unless --visible-to-clients is passed.
 						Cmd:         fmt.Sprintf("basecamp doors list --in %s", resolvedProjectID),
 						Description: "List external links",
 					},
-				),
+				)...),
 			)
 		},
 	}
@@ -429,13 +432,14 @@ link private to the team.
 			}
 
 			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
+			scope := newFollowUpScope(app)
 
 			doorID, projectArg, err := doorIDArg(app, args[0], *project)
 			if err != nil {
+				return err
+			}
+
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -471,13 +475,13 @@ link private to the team.
 
 			return app.OK(door,
 				output.WithSummary("Updated: "+doorSummary(door)),
-				output.WithBreadcrumbs(
+				output.WithBreadcrumbs(doorCrumbs(scope.args(app.Config.AccountID),
 					output.Breadcrumb{
 						Action:      "show",
 						Cmd:         fmt.Sprintf("basecamp doors show %d%s", doorID, inFlag),
 						Description: "View external link",
 					},
-				),
+				)...),
 			)
 		},
 	}
@@ -508,13 +512,14 @@ in the Basecamp web app.
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-
-			if err := ensureAccount(cmd, app); err != nil {
-				return err
-			}
+			scope := newFollowUpScope(app)
 
 			doorID, projectArg, err := doorIDArg(app, args[0], *project)
 			if err != nil {
+				return err
+			}
+
+			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
@@ -538,10 +543,20 @@ in the Basecamp web app.
 
 			return app.OK(map[string]any{"deleted": true, "id": doorID},
 				output.WithSummary(fmt.Sprintf("Deleted external link %d (not in the trash; destroyed in about five days)", doorID)),
-				output.WithBreadcrumbs(crumbs...),
+				output.WithBreadcrumbs(doorCrumbs(scope.args(app.Config.AccountID), crumbs...)...),
 			)
 		},
 	}
+}
+
+// doorCrumbs appends the invocation's profile and, where it was not
+// inherited, its account to each follow-up command, so a pasted command acts
+// where this one did.
+func doorCrumbs(scopeArgs string, crumbs ...output.Breadcrumb) []output.Breadcrumb {
+	for i := range crumbs {
+		crumbs[i].Cmd += scopeArgs
+	}
+	return crumbs
 }
 
 func registerDoorServiceCompletion(cmd *cobra.Command) {

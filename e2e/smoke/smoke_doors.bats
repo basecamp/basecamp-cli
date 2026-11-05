@@ -4,6 +4,9 @@
 load smoke_helper
 
 setup_file() {
+  # Each test depends on the one before it: create writes the door id the
+  # rest read, and delete must come last.
+  export BATS_NO_PARALLELIZE_WITHIN_FILE=true
   ensure_token || return 1
   ensure_project || return 1
 }
