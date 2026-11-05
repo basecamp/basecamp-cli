@@ -275,8 +275,20 @@ func sameInstructionsInstance(docURL, baseURL string) bool {
 	case hostutil.IsLocalhost(strings.ToLower(d.Host)) && hostutil.IsLocalhost(strings.ToLower(b.Host)):
 		return true
 	default:
-		return dh == bh
+		return d.Scheme == b.Scheme && instructionsOriginPort(d) == instructionsOriginPort(b) && dh == bh
 	}
+}
+
+// instructionsOriginPort is the port a URL reaches, its scheme's default when
+// none is written.
+func instructionsOriginPort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	if u.Scheme == "http" {
+		return "80"
+	}
+	return "443"
 }
 
 // sameInstructionsAccount compares account ids as numbers, so a configured
@@ -412,6 +424,15 @@ func writeInstructionsCache(path string, entry instructionsCacheEntry) {
 // nothing to follow it prints nothing on stdout and says why on stderr, so
 // "run basecamp instructions before writing" is safe for every agent to do.
 func renderInstructions(cmd *cobra.Command, app *appctx.App, result instructionsResult) error {
+	// The stale warning goes to stderr in every mode: a --jq filter that
+	// keeps only the content would otherwise drop the stale flag with it.
+	for _, doc := range result.Documents {
+		if doc.Stale {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not read the instructions document (%s); these are the copy read at %s\n",
+				richtext.SanitizeSingleLine(doc.StaleReason), doc.FetchedAt.Format(time.RFC3339))
+		}
+	}
+
 	if app.IsMachineOutput() {
 		summary := "No instructions to follow: " + result.Reason
 		if result.Applies {
@@ -427,10 +448,6 @@ func renderInstructions(cmd *cobra.Command, app *appctx.App, result instructions
 
 	out := cmd.OutOrStdout()
 	for _, doc := range result.Documents {
-		if doc.Stale {
-			fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not read the instructions document (%s); these are the copy read at %s\n",
-				richtext.SanitizeSingleLine(doc.StaleReason), doc.FetchedAt.Format(time.RFC3339))
-		}
 		title := doc.Title
 		if title == "" {
 			title = "Instructions"

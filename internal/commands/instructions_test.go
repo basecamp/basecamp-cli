@@ -252,6 +252,9 @@ func TestLoadInstructionsOtherInstanceDoesNotApply(t *testing.T) {
 	}
 	assert.True(t, sameInstructionsInstance("http://3.basecamp.localhost:3001/1/buckets/2/documents/3", "http://localhost:3000"))
 	assert.True(t, sameInstructionsInstance("https://bc.example/1/buckets/2/documents/3", "https://bc.example"))
+	assert.True(t, sameInstructionsInstance("https://bc.example/1/buckets/2/documents/3", "https://bc.example:443"))
+	assert.False(t, sameInstructionsInstance("https://bc.example:8443/1/buckets/2/documents/3", "https://bc.example"), "another port is another deployment")
+	assert.False(t, sameInstructionsInstance("http://bc.example/1/buckets/2/documents/3", "https://bc.example"), "another scheme is another deployment")
 }
 
 // A cached copy is followed like the document, so it is read only from a
@@ -491,4 +494,20 @@ func TestConfigSetInstructionsDocForProfile(t *testing.T) {
 	profile = written["profiles"].(map[string]any)["marie"].(map[string]any)
 	assert.NotContains(t, profile, "instructions_doc")
 	assert.Equal(t, "https://3.basecampapi.com", profile["base_url"])
+}
+
+// A stale copy is announced on stderr in machine modes too, where a --jq
+// filter may keep the content and drop the stale flag.
+func TestInstructionsStaleWarningInMachineOutput(t *testing.T) {
+	app, _, _ := instructionsCommandApp(t, true)
+	fetched := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	result := instructionsResult{Configured: true, Applies: true, Documents: []instructionsDocument{
+		{Scope: "global", URL: instructionsTestURL, Content: "v1", Stale: true, StaleReason: "offline", FetchedAt: &fetched},
+	}}
+	cmd := NewInstructionsCmd()
+	stderr := &bytes.Buffer{}
+	cmd.SetErr(stderr)
+
+	require.NoError(t, renderInstructions(cmd, app, result))
+	assert.Contains(t, stderr.String(), "could not read the instructions document (offline)")
 }
