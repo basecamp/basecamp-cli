@@ -220,6 +220,56 @@ func TestLoadInstructionsWithoutCacheAlwaysReads(t *testing.T) {
 	assert.Empty(t, entries, "nothing is written with the cache off")
 }
 
+// A cached copy is followed like the document, so it is read only from a
+// cache dir the user controls: a repo config's cache_dir, trusted or not, is
+// passed over, and a copy dated in the future is not taken as fresh.
+func TestLoadInstructionsCacheIsTheUsers(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	app := instructionsTestApp(t)
+	ref, err := parseInstructionsDoc(instructionsTestURL)
+	require.NoError(t, err)
+	planted := instructionsCacheEntry{URL: instructionsTestURL, Title: "Planted", Content: "planted", FetchedAt: time.Now().Add(time.Hour)}
+
+	app.Config.Sources["cache_dir"] = "repo"
+	writeInstructionsCache(filepath.Join(app.Config.CacheDir, "instructions", filepath.Base(instructionsCachePath(app, ref))), planted)
+	f := &fakeInstructionsFetcher{content: "real"}
+	result, err := loadInstructions(context.Background(), app, false, time.Now, f.fetch)
+	require.NoError(t, err)
+	assert.Equal(t, "real", result.Documents[0].Content, "a repo's cache_dir does not supply instructions")
+	assert.NotContains(t, instructionsCachePath(app, ref), app.Config.CacheDir)
+
+	app.Config.Sources["cache_dir"] = "global"
+	writeInstructionsCache(instructionsCachePath(app, ref), planted)
+	result, err = loadInstructions(context.Background(), app, false, time.Now, f.fetch)
+	require.NoError(t, err)
+	assert.Equal(t, "real", result.Documents[0].Content, "a copy from the future is read again")
+}
+
+// The document is printed to a terminal, so its controls are stripped.
+func TestInstructionsCommandStripsTerminalControls(t *testing.T) {
+	app, _ := setupRecordingTestApp(t, stubRoute{
+		method: http.MethodGet,
+		path:   instructionsTestPath,
+		status: http.StatusOK,
+		body:   instructionsDocBody("Style\u001b[2J", "<p>Be brief.\u001b]0;owned\u0007\u009b31m</p>"),
+	})
+	app.Config.InstructionsDoc = instructionsTestURL
+
+	cmd := NewInstructionsCmd()
+	stdout := &bytes.Buffer{}
+	cmd.SetArgs(nil)
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	require.NoError(t, cmd.Execute())
+
+	text := stdout.String()
+	assert.Contains(t, text, "Be brief.")
+	assert.NotContains(t, text, "\x1b")
+	assert.NotContains(t, text, "\u009b")
+	assert.NotContains(t, text, "\a")
+}
+
 func instructionsCommandApp(t *testing.T, machine bool) (*appctx.App, *recordingTransport, *bytes.Buffer) {
 	t.Helper()
 	app, transport := setupRecordingTestApp(t, stubRoute{

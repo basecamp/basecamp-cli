@@ -1503,3 +1503,25 @@ func TestProfileInstructionsDocGlobalOnly(t *testing.T) {
 	assert.Equal(t, docURL, cfg.ProfileInstructionsDoc)
 	assert.Equal(t, "profile", cfg.Sources["profile_instructions_doc"])
 }
+
+// The warning for a profile's instructions_doc from a repo config suggests a
+// command to paste; a profile name is not validated, so it is quoted.
+func TestProfileInstructionsDocWarningQuotesTheProfile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	body := `{"profiles": {"a; rm -rf x": {"base_url": "https://3.basecampapi.com", "instructions_doc": "https://3.basecamp.com/1/buckets/2/documents/4"}}}`
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+	trust := NewTrustStore(t.TempDir())
+	require.NoError(t, trust.Trust(path))
+
+	origStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	loadFromFile(Default(), path, SourceRepo, trust)
+	w.Close()
+	var buf [4096]byte
+	n, _ := r.Read(buf[:])
+	os.Stderr = origStderr
+
+	assert.Contains(t, string(buf[:n]), "--for-profile 'a; rm -rf x'")
+}

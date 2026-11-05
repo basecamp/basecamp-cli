@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
@@ -244,7 +245,7 @@ func sameInstructionsAccount(a, b string) bool {
 func loadInstructionsDoc(ctx context.Context, app *appctx.App, ref instructionsDocRef, scope string, refresh bool, now func() time.Time, fetch instructionsFetcher) (instructionsDocument, error) {
 	cachePath := instructionsCachePath(app, ref)
 	cached, haveCache := readInstructionsCache(cachePath, ref)
-	if haveCache && !refresh && now().Sub(cached.FetchedAt) < instructionsMaxAge {
+	if age := now().Sub(cached.FetchedAt); haveCache && !refresh && age >= 0 && age < instructionsMaxAge {
 		return instructionsDoc(ref, scope, cached), nil
 	}
 
@@ -301,14 +302,25 @@ func instructionsDoc(ref instructionsDocRef, scope string, entry instructionsCac
 }
 
 // instructionsCachePath names the cache file after the account and document,
-// and returns "" when caching is off.
+// and returns "" when caching is off. A cached copy is followed like the
+// document itself, so a cache_dir from a local or repo config is not used: a
+// checked-in directory would otherwise supply the instructions that config
+// cannot link. The default cache dir stands in for it.
 func instructionsCachePath(app *appctx.App, ref instructionsDocRef) string {
-	if app.Config == nil || !app.Config.CacheEnabled || app.Config.CacheDir == "" {
+	if app.Config == nil || !app.Config.CacheEnabled {
+		return ""
+	}
+	dir := app.Config.CacheDir
+	switch config.Source(app.Config.Sources["cache_dir"]) {
+	case config.SourceLocal, config.SourceRepo:
+		dir = config.Default().CacheDir
+	}
+	if dir == "" {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(ref.URL))
 	name := fmt.Sprintf("%s-%d-%s.json", ref.AccountID, ref.DocumentID, hex.EncodeToString(sum[:4]))
-	return filepath.Join(app.Config.CacheDir, "instructions", name)
+	return filepath.Join(dir, "instructions", name)
 }
 
 func readInstructionsCache(path string, ref instructionsDocRef) (instructionsCacheEntry, bool) {
@@ -364,13 +376,17 @@ func renderInstructions(cmd *cobra.Command, app *appctx.App, result instructions
 	for _, doc := range result.Documents {
 		if doc.Stale {
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not read the instructions document (%s); these are the copy read at %s\n",
-				doc.StaleReason, doc.FetchedAt.Format(time.RFC3339))
+				richtext.SanitizeSingleLine(doc.StaleReason), doc.FetchedAt.Format(time.RFC3339))
 		}
 		title := doc.Title
 		if title == "" {
 			title = "Instructions"
 		}
-		fmt.Fprintf(out, "# %s\n\n%s\n\nSource: %s\n\n%s\n", title, instructionsPreface, doc.URL, doc.Content)
+		// The document is someone else's text printed to a terminal: strip
+		// the controls that could move the cursor or rewrite the screen.
+		fmt.Fprintf(out, "# %s\n\n%s\n\nSource: %s\n\n%s\n",
+			richtext.SanitizeSingleLine(title), instructionsPreface,
+			richtext.SanitizeSingleLine(doc.URL), richtext.SanitizeTerminal(doc.Content))
 	}
 	return nil
 }

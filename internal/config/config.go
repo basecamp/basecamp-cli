@@ -527,7 +527,7 @@ func mergeProfile(cfg *Config, name string, entry map[string]any, layer ProfileL
 		if layer.Source == SourceGlobal || layer.Source == SourceSystem {
 			set("instructions_doc", &p.InstructionsDoc, v)
 		} else {
-			fmt.Fprintf(os.Stderr, "warning: ignoring instructions_doc for profile %q from %s config at %s (set it with `basecamp config set instructions_doc <url> --global --for-profile %s`)\n", name, layer.Source, layer.Path, name)
+			fmt.Fprintf(os.Stderr, "warning: ignoring instructions_doc for profile %q from %s config at %s (set it with `basecamp config set instructions_doc <url> --global --for-profile %s`)\n", name, layer.Source, layer.Path, richtext.ShellQuote(name))
 		}
 	}
 }
