@@ -237,7 +237,7 @@ ACTIONS (RO = read-only):
 - update_subscription: Update subscriptions by adding or removing specific users
 
 == basecamp_automation
-Automatic check-ins (questionnaires, questions, answers, reminders), project templates and the template library, webhooks, lineup markers, dock tools, recording lifecycle (archive/trash), change events, and search.
+Automatic check-ins (questionnaires, questions, answers, reminders), project templates and the template library, webhooks, lineup markers, dock tools and external links (doors), recording lifecycle (archive/trash), change events, and search.
 
 Gateway tool: call with {"action": "...", "params": {...}}.
 Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
@@ -245,6 +245,7 @@ Call {"action": "describe", "params": {"action": "NAME"}} for an action's full p
 ACTIONS (RO = read-only):
 - archive_recording: Archive a recording; bc3 answers 403 for types it never lets be archived, timesheet entries among them
 - create_answer: Create a new answer for a question
+- create_door: Create an external link in a project It goes at the end of the project's External links section
 - create_lineup_marker: Create a new lineup marker
 - create_project_from_template: Create a project from a template (asynchronous)
 - create_question: Create a new question in a questionnaire
@@ -255,6 +256,7 @@ ACTIONS (RO = read-only):
 - create_templatification: Templatify a to-do list or card table
 - create_tool: Create a tool in a project dock
 - create_webhook: Create a new webhook for a project
+- delete_door: Delete an external link (returns 204 No Content) Its status becomes "deleted" and it leaves the project's External links section
 - delete_lineup_marker: Delete a lineup marker
 - delete_template: Delete a template (trash it)
 - delete_tool: Remove a tool from the dock: deletes an external link or an empty extra tool, and disables any other tool (returns 204 No Content either way)
@@ -263,6 +265,7 @@ ACTIONS (RO = read-only):
 - enable_tool: Enable a tool (show it on the project dock)
 - get_answer (RO): Get a single answer by id
 - get_answers_by_person (RO, paginated): Get all answers from a specific person for a question
+- get_door (RO): Get an external link by id A door hidden from a client, an unknown id, or the id of a recording that is not a door is a 404
 - get_project_construction (RO): Get the status of a project construction
 - get_question (RO): Get a single question by id
 - get_question_reminders (RO, paginated): Get pending check-in reminders for the current user
@@ -276,6 +279,7 @@ ACTIONS (RO = read-only):
 - get_tool (RO): Get a dock tool by id
 - get_webhook (RO): Get a single webhook by id
 - list_answers (RO, paginated): List all answers for a question
+- list_doors (RO): List the active external links in a project They come in the order they appear in the project's External links section
 - list_events (RO, paginated): List all events for a recording
 - list_lineup_markers (RO): List all lineup markers for the account
 - list_question_answerers (RO, paginated): List all people who have answered a question (answerers)
@@ -293,6 +297,7 @@ ACTIONS (RO = read-only):
 - unarchive_recording: Unarchive a recording (restore to active status)
 - unspotlight_recording: Remove a recording from the spotlight area
 - update_answer: Update an existing answer
+- update_door: Update an external link A partial update: every field is optional, and those left out keep their values
 - update_lineup_marker: Update an existing lineup marker
 - update_question: Update an existing question's title, schedule or both
 - update_question_notification_settings: Update notification settings for a check-in question

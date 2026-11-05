@@ -67,7 +67,7 @@ var DomainSpecs = []catalog.DomainSpec{
 	{
 		Key:   "automation",
 		Tags:  []string{"Checkins", "Templates", "Webhooks", "Lineup", "Dock", "Recordings", "Search"},
-		Blurb: "Automatic check-ins (questionnaires, questions, answers, reminders), project templates and the template library, webhooks, lineup markers, dock tools, recording lifecycle (archive/trash), change events, and search.",
+		Blurb: "Automatic check-ins (questionnaires, questions, answers, reminders), project templates and the template library, webhooks, lineup markers, dock tools and external links (doors), recording lifecycle (archive/trash), change events, and search.",
 	},
 	{
 		Key:   "reports",
