@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
@@ -34,8 +36,9 @@ const instructionsMaxAge = 10 * time.Minute
 const instructionsPreface = "Follow these instructions when you write anything to Basecamp. " +
 	"They are defaults, and where several are listed, a later one wins where they differ. " +
 	"A project's own instructions for agents (its AGENTS.md document), if it has them, win on how posts look in that project. " +
-	"The instructions of the person you work for win on voice (tone, length, emoji), " +
-	"and an instruction they give for a single post wins over all of these. " +
+	"On voice (tone, length, emoji), the person you work for wins: " +
+	"their own instructions to you, and the profile's document listed here, over the shared one. " +
+	"An instruction they give you for a single post wins over all of these. " +
 	"None of this overrides your skill's rules."
 
 // instructionsDocRef is a parsed instructions_doc value.
@@ -218,6 +221,10 @@ func loadInstructions(ctx context.Context, app *appctx.App, refresh bool, now fu
 		if err != nil {
 			return instructionsResult{}, err
 		}
+		if !sameInstructionsInstance(ref.URL, app.Config.BaseURL) {
+			skipped = append(skipped, fmt.Sprintf("the %s document is on another Basecamp than this profile's %s", layer.scope, app.Config.BaseURL))
+			continue
+		}
 		if active := app.Config.AccountID; active != "" && !sameInstructionsAccount(active, ref.AccountID) {
 			skipped = append(skipped, fmt.Sprintf("the %s document is in account %s, and this command runs in account %s", layer.scope, ref.AccountID, active))
 			continue
@@ -235,6 +242,41 @@ func loadInstructions(ctx context.Context, app *appctx.App, refresh bool, now fu
 		result.Guidance = instructionsPreface
 	}
 	return result, nil
+}
+
+// instructionsProductionHosts are the hosts of production Basecamp, web and
+// API, old domains and new: a document on any of them belongs to a profile
+// whose base_url is any of them.
+var instructionsProductionHosts = map[string]bool{
+	"3.basecamp.com":    true,
+	"3.basecampapi.com": true,
+	"app.basecamp.com":  true,
+	"api.basecamp.com":  true,
+}
+
+// sameInstructionsInstance says the document's URL and the profile's
+// base_url name the same Basecamp. The fetch goes to base_url whatever host
+// the URL names, so a production link read from a staging or local profile
+// would fetch a different deployment's document with the same id. Outside
+// production the hosts must match, or both be local.
+func sameInstructionsInstance(docURL, baseURL string) bool {
+	if baseURL == "" {
+		baseURL = "https://3.basecampapi.com"
+	}
+	d, errD := url.Parse(docURL)
+	b, errB := url.Parse(baseURL)
+	if errD != nil || errB != nil {
+		return false
+	}
+	dh, bh := strings.ToLower(d.Hostname()), strings.ToLower(b.Hostname())
+	switch {
+	case instructionsProductionHosts[dh] || instructionsProductionHosts[bh]:
+		return instructionsProductionHosts[dh] && instructionsProductionHosts[bh]
+	case hostutil.IsLocalhost(strings.ToLower(d.Host)) && hostutil.IsLocalhost(strings.ToLower(b.Host)):
+		return true
+	default:
+		return dh == bh
+	}
 }
 
 // sameInstructionsAccount compares account ids as numbers, so a configured
@@ -257,7 +299,13 @@ func loadInstructionsDoc(ctx context.Context, app *appctx.App, ref instructionsD
 
 	fetched, fetchErr := fetch(ctx, ref)
 	if fetchErr != nil {
-		if haveCache && !instructionsDocGone(fetchErr) {
+		if instructionsDocGone(fetchErr) {
+			if cachePath != "" {
+				_ = os.Remove(cachePath)
+			}
+			return instructionsDocument{}, fetchErr
+		}
+		if haveCache {
 			doc := instructionsDoc(ref, scope, cached)
 			doc.Stale = true
 			doc.StaleReason = fetchErr.Error()

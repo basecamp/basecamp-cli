@@ -68,8 +68,8 @@ there.
 whenever you write to Basecamp: the house defaults the operator linked, or
 nothing when none are linked. The project's AGENTS.md (below) wins on how
 posts look there, your operator's own instructions win on voice (tone,
-length, emoji), and a one-off instruction for the post you're writing wins
-over all of them.
+length, emoji), and a one-off instruction from your operator for the post
+you're writing wins over all of them.
 
 **Read the project's AGENTS.md doc, if it has one, and follow it.** It's the
 project's standing instructions for agents: board meanings, how to talk, which

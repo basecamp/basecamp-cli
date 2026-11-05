@@ -182,6 +182,11 @@ func TestLoadInstructionsFallsBackToStaleCopy(t *testing.T) {
 		_, err = loadInstructions(context.Background(), app, false, now, f.fetch)
 		require.Error(t, err, "a %s document is not served from the cache", code)
 	}
+
+	// Its copy is evicted, so a later outage does not bring it back.
+	f.err = errors.New("offline")
+	_, err = loadInstructions(context.Background(), app, false, now, f.fetch)
+	require.Error(t, err, "no copy is left to serve")
 }
 
 // The SDK fetcher reports an archived or trashed document as gone, so the
@@ -218,6 +223,35 @@ func TestLoadInstructionsWithoutCacheAlwaysReads(t *testing.T) {
 	assert.Equal(t, 2, f.calls)
 	entries, _ := os.ReadDir(filepath.Join(app.Config.CacheDir, "instructions"))
 	assert.Empty(t, entries, "nothing is written with the cache off")
+}
+
+// The fetch goes to the profile's base_url, so a document on another
+// Basecamp is skipped rather than read by its id from this one.
+func TestLoadInstructionsOtherInstanceDoesNotApply(t *testing.T) {
+	cases := []struct {
+		base  string
+		match bool
+	}{
+		{"", true},
+		{"https://3.basecampapi.com", true},
+		{"https://api.basecamp.com", true},
+		{"https://3.basecampapi.staging.example", false},
+		{"http://3.basecamp.localhost:3001", false},
+	}
+	for _, tc := range cases {
+		app := instructionsTestApp(t)
+		app.Config.BaseURL = tc.base
+		f := &fakeInstructionsFetcher{content: "Be brief."}
+		result, err := loadInstructions(context.Background(), app, false, time.Now, f.fetch)
+		require.NoError(t, err)
+		assert.Equal(t, tc.match, result.Applies, "base_url %q", tc.base)
+		if !tc.match {
+			assert.Zero(t, f.calls, "base_url %q: nothing is read", tc.base)
+			assert.Contains(t, result.Reason, "another Basecamp")
+		}
+	}
+	assert.True(t, sameInstructionsInstance("http://3.basecamp.localhost:3001/1/buckets/2/documents/3", "http://localhost:3000"))
+	assert.True(t, sameInstructionsInstance("https://bc.example/1/buckets/2/documents/3", "https://bc.example"))
 }
 
 // A cached copy is followed like the document, so it is read only from a
