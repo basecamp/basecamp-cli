@@ -506,6 +506,14 @@ func newConfigUnsetCmd() *cobra.Command {
 			app := appctx.FromContext(cmd.Context())
 
 			key := resolveKeyAlias(args[0])
+			if forProfile != "" {
+				if key != "instructions_doc" {
+					return output.ErrUsage("--for-profile applies only to instructions_doc")
+				}
+				if !global {
+					return output.ErrUsage("--for-profile needs --global: profiles live in the global config")
+				}
+			}
 
 			var configPath string
 			var scope string
@@ -550,9 +558,6 @@ func newConfigUnsetCmd() *cobra.Command {
 					configData["experimental"] = expMap
 				}
 			} else if forProfile != "" {
-				if key != "instructions_doc" {
-					return output.ErrUsage("--for-profile applies only to instructions_doc")
-				}
 				entry, err := profileEntryForInstructions(configData, forProfile)
 				if err != nil {
 					return err
@@ -916,8 +921,8 @@ Without --project, an interactive picker is shown.`,
 
 // profileEntryForInstructions returns the global config's entry for a
 // profile, for a setting that belongs to it. The profile has to be in that
-// file already: an entry without its base_url is skipped on load, so writing
-// one would save a setting nothing reads.
+// file already, with its base_url: an entry without one is skipped on load,
+// so writing to it would save a setting nothing reads.
 func profileEntryForInstructions(configData map[string]any, name string) (map[string]any, error) {
 	profiles, _ := configData["profiles"].(map[string]any)
 	entry, _ := profiles[name].(map[string]any)
@@ -925,6 +930,12 @@ func profileEntryForInstructions(configData map[string]any, name string) (map[st
 		return nil, output.ErrUsageHint(
 			fmt.Sprintf("profile %q is not in the global config", name),
 			"See the profiles with `basecamp profile list`",
+		)
+	}
+	if baseURL, _ := entry["base_url"].(string); baseURL == "" {
+		return nil, output.ErrUsageHint(
+			fmt.Sprintf("profile %q in the global config has no base_url, so it is not loaded", name),
+			"Set the profile up with `basecamp profile create`",
 		)
 	}
 	return entry, nil

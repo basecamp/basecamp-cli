@@ -109,6 +109,11 @@ func TestLoadInstructionsOtherAccountDoesNotApply(t *testing.T) {
 	assert.Contains(t, result.Reason, "account 99999")
 	assert.Empty(t, result.Documents)
 	assert.Zero(t, f.calls, "a document that does not apply is not read")
+
+	app.Config.AccountID = "099999"
+	result, err = loadInstructions(context.Background(), app, false, time.Now, f.fetch)
+	require.NoError(t, err)
+	assert.True(t, result.Applies, "account ids compare as numbers")
 }
 
 // The cache serves a copy younger than instructionsMaxAge, reads the document
@@ -169,6 +174,36 @@ func TestLoadInstructionsFallsBackToStaleCopy(t *testing.T) {
 	empty := instructionsTestApp(t)
 	_, err = loadInstructions(context.Background(), empty, false, now, f.fetch)
 	require.Error(t, err)
+
+	// A document Basecamp says is gone stops applying: its last copy is not
+	// served the way an outage's is.
+	for _, code := range []string{output.CodeNotFound, output.CodeForbidden} {
+		f.err = &output.Error{Code: code, Message: "gone"}
+		_, err = loadInstructions(context.Background(), app, false, now, f.fetch)
+		require.Error(t, err, "a %s document is not served from the cache", code)
+	}
+}
+
+// The SDK fetcher reports an archived or trashed document as gone, so the
+// cache does not keep it applying.
+func TestSDKInstructionsFetcherRefusesAnInactiveDocument(t *testing.T) {
+	var body map[string]any
+	require.NoError(t, json.Unmarshal([]byte(instructionsDocBody("House style", "<p>Old.</p>")), &body))
+	body["status"] = "archived"
+	archived, _ := json.Marshal(body)
+	app, _ := setupRecordingTestApp(t, stubRoute{
+		method: http.MethodGet,
+		path:   instructionsTestPath,
+		status: http.StatusOK,
+		body:   string(archived),
+	})
+	ref, err := parseInstructionsDoc(instructionsTestURL)
+	require.NoError(t, err)
+
+	_, err = sdkInstructionsFetcher(app)(context.Background(), ref)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "archived")
+	assert.True(t, instructionsDocGone(err))
 }
 
 func TestLoadInstructionsWithoutCacheAlwaysReads(t *testing.T) {
@@ -347,6 +382,21 @@ func TestConfigSetInstructionsDocForProfile(t *testing.T) {
 
 	err = executeConfigCommand(app, "set", "--global", "--for-profile", "marie", "format", "json")
 	require.True(t, errors.As(err, &outErr), "--for-profile takes only instructions_doc")
+
+	require.NoError(t, os.WriteFile(globalPath, []byte(`{"profiles": {"marie": {"base_url": "https://3.basecampapi.com"}, "bare": {"account_id": "1"}}, "experimental": {"foo": true}}`), 0o600))
+	require.NoError(t, executeConfigCommand(app, "set", "--global", "--for-profile", "marie", "instructions_doc", profileDoc))
+	err = executeConfigCommand(app, "set", "--global", "--for-profile", "bare", "instructions_doc", profileDoc)
+	require.True(t, errors.As(err, &outErr), "a profile without its base_url is not loaded, so it is refused")
+	assert.Contains(t, outErr.Message, "base_url")
+
+	err = executeConfigCommand(app, "unset", "--for-profile", "marie", "instructions_doc")
+	require.True(t, errors.As(err, &outErr), "unset --for-profile needs --global")
+	assert.Contains(t, outErr.Message, "--global")
+	err = executeConfigCommand(app, "unset", "--global", "--for-profile", "marie", "experimental.foo")
+	require.True(t, errors.As(err, &outErr), "unset --for-profile takes only instructions_doc")
+	raw, err = os.ReadFile(globalPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), `"foo"`, "the experimental key stays")
 
 	buf.Reset()
 	require.NoError(t, executeConfigCommand(app, "unset", "--global", "--for-profile", "marie", "instructions_doc"))

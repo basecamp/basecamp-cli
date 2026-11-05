@@ -1488,10 +1488,15 @@ func TestProfileInstructionsDocGlobalOnly(t *testing.T) {
 		assert.Empty(t, cfg.Profiles["agent"].InstructionsDoc, "but not its instructions_doc")
 	}
 
+	for _, source := range []Source{SourceGlobal, SourceSystem} {
+		cfg := Default()
+		loadFromFile(cfg, path, source, nil)
+		require.Contains(t, cfg.Profiles, "agent")
+		assert.Equal(t, docURL, cfg.Profiles["agent"].InstructionsDoc, "a %s config sets it", source)
+	}
+
 	cfg := Default()
 	loadFromFile(cfg, path, SourceGlobal, nil)
-	require.Contains(t, cfg.Profiles, "agent")
-	assert.Equal(t, docURL, cfg.Profiles["agent"].InstructionsDoc)
 	assert.Empty(t, cfg.ProfileInstructionsDoc, "nothing is active until the profile is applied")
 
 	require.NoError(t, cfg.ApplyProfile("agent"))

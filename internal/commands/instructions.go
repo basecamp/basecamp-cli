@@ -73,8 +73,8 @@ type instructionsDocument struct {
 	Content   string     `json:"content,omitempty"` // Markdown
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 	FetchedAt *time.Time `json:"fetched_at,omitempty"`
-	// Stale says Basecamp could not be reached and this is the last copy
-	// read, older than instructionsMaxAge.
+	// Stale says Basecamp could not be read just now, so this is the last
+	// copy read, which may be older than instructionsMaxAge.
 	Stale bool `json:"stale"`
 	// StaleReason is why the document could not be read, when Stale.
 	StaleReason string `json:"stale_reason,omitempty"`
@@ -155,10 +155,11 @@ func sdkInstructionsFetcher(app *appctx.App) instructionsFetcher {
 			return instructionsFetched{}, convertSDKError(err)
 		}
 		if doc.Status != "" && doc.Status != "active" {
-			return instructionsFetched{}, output.ErrUsageHint(
-				fmt.Sprintf("the linked instructions document is %s", doc.Status),
-				"Restore it in Basecamp, or link another with `basecamp config set instructions_doc <url> --global`",
-			)
+			return instructionsFetched{}, &output.Error{
+				Code:    output.CodeNotFound,
+				Message: fmt.Sprintf("the linked instructions document is %s", doc.Status),
+				Hint:    "Restore it in Basecamp, or link another with `basecamp config set instructions_doc <url> --global`",
+			}
 		}
 		return instructionsFetched{
 			Title:     doc.Title,
@@ -210,7 +211,7 @@ func loadInstructions(ctx context.Context, app *appctx.App, refresh bool, now fu
 		if err != nil {
 			return instructionsResult{}, err
 		}
-		if active := app.Config.AccountID; active != "" && active != ref.AccountID {
+		if active := app.Config.AccountID; active != "" && !sameInstructionsAccount(active, ref.AccountID) {
 			skipped = append(skipped, fmt.Sprintf("the %s document is in account %s, and this command runs in account %s", layer.scope, ref.AccountID, active))
 			continue
 		}
@@ -229,6 +230,17 @@ func loadInstructions(ctx context.Context, app *appctx.App, refresh bool, now fu
 	return result, nil
 }
 
+// sameInstructionsAccount compares account ids as numbers, so a configured
+// "09999" is the 9999 a document URL names.
+func sameInstructionsAccount(a, b string) bool {
+	x, errA := strconv.ParseUint(a, 10, 64)
+	y, errB := strconv.ParseUint(b, 10, 64)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	return x == y
+}
+
 func loadInstructionsDoc(ctx context.Context, app *appctx.App, ref instructionsDocRef, scope string, refresh bool, now func() time.Time, fetch instructionsFetcher) (instructionsDocument, error) {
 	cachePath := instructionsCachePath(app, ref)
 	cached, haveCache := readInstructionsCache(cachePath, ref)
@@ -238,7 +250,7 @@ func loadInstructionsDoc(ctx context.Context, app *appctx.App, ref instructionsD
 
 	fetched, fetchErr := fetch(ctx, ref)
 	if fetchErr != nil {
-		if haveCache {
+		if haveCache && !instructionsDocGone(fetchErr) {
 			doc := instructionsDoc(ref, scope, cached)
 			doc.Stale = true
 			doc.StaleReason = fetchErr.Error()
@@ -256,6 +268,17 @@ func loadInstructionsDoc(ctx context.Context, app *appctx.App, ref instructionsD
 	}
 	writeInstructionsCache(cachePath, entry)
 	return instructionsDoc(ref, scope, entry), nil
+}
+
+// instructionsDocGone says Basecamp answered that the document can no longer
+// be read: archived or trashed, deleted, or out of reach of this login. Its
+// last copy then stops applying, where an outage still serves it.
+func instructionsDocGone(err error) bool {
+	switch output.AsError(err).Code {
+	case output.CodeNotFound, output.CodeForbidden:
+		return true
+	}
+	return false
 }
 
 func instructionsDoc(ref instructionsDocRef, scope string, entry instructionsCacheEntry) instructionsDocument {
