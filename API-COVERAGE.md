@@ -6,12 +6,17 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 58 | 221 |
+| ✅ Implemented | 59 | 226 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **62** | **233** |
+| **Total tracked** | **63** | **238** |
 
-**221 of 221 tracked in-scope endpoints.** Posting a hill chart progress update
+**226 of 226 tracked in-scope endpoints.** Listing, reading, creating, updating and
+deleting a project's external links (`GET`/`POST /buckets/:id/dock/doors.json`,
+`GET`/`PUT`/`DELETE /dock/doors/:id`, added by
+[bc3#14314](https://github.com/basecamp/bc3/pull/14314) and modelled by the
+basecamp-sdk Doors PR, not yet released; the SDK is pinned to that branch) land as
+`doors`. Posting a hill chart progress update
 (`POST /todosets/:id/hills/versions.json`, added by
 [bc3#14214](https://github.com/basecamp/bc3/pull/14214) and modelled by
 [basecamp/basecamp-sdk#1068](https://github.com/basecamp/basecamp-sdk/pull/1068), not yet
@@ -233,6 +238,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | todosets | 3 | `todosets` | ✅ | BC4 | - | Container for todolists, accessed via project dock (BC5: `todos_count`, `completed_loose_todos_count`, `todos_url`, `app_todos_url`) |
 | todolist_groups | 8 | `todolistgroups` | ✅ | BC4 | - | list, show, create, update, position, copy |
 | dock_tools | 7 | `tools` | ✅ | BC4 | - | Dock tool management: show, update, trash, enable, disable, reposition (also `tools move --position`; `tools move --to-project` moves a tool to another project through recordings (moves, copies)). `create` is BC5-only (create-by-type: `POST /buckets/{id}/dock/tools.json`), replacing the removed clone call; create-time `visible_to_clients` behind `tools create --visible-to-clients` (chat/kanban only) |
+| dock_doors | 5 | `doors`, `external-links` | ✅ | BC5 | - | External links (doors) in a project's dock: list (`GET /buckets/:id/dock/doors.json`, not paginated), show, create (`POST` on the same route; `door` wrapper, `visible_to_clients` top level and private when omitted), update (`PUT /dock/doors/:id`, partial), delete (`DELETE`, status deleted, not trashed). `--service` is inferred from the URL's host when omitted, falling back to `other`; `--description` is Markdown converted to rich text |
 | **Hill Charts** |
 | hill_charts | 2 | `hillcharts` | ✅ | BC4 | - | show, track/untrack todolists |
 | hill_charts (progress updates) | 3 | `hillcharts updates`, `hillcharts update` | ✅ | BC5 | - | post (`POST /todosets/:id/hills/versions.json`; `hillcharts update --dot <todolist-id\|name>=<0-100>`, repeatable, lists left out keep their position; `--note` Markdown converted to rich text, `-` reads stdin; `--notify` names who is told, nobody otherwise), list (`GET /todosets/:id/hills/versions.json`, paginated, newest first; bare `hillcharts updates` or `updates list`), show (`GET /todosets/:id/hills/versions/:id.json`; an id with `--in`/`--todoset`, or the update's web or API URL, which names its todoset). Each update carries its note (`description`, rich text) and every tracked todolist's position (`dots`; `id` is null for a todolist since deleted or moved). Todoset resolved as `hillcharts show` does |
