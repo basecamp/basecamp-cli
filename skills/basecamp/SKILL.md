@@ -274,8 +274,7 @@ basecamp projects wallpaper remove --in "<project>" --json
   or `tile`, and leaving it out keeps the current mode.
 - Each command returns the project. `.data.wallpaper` is `{url, mode}`, and is
   absent when the project has none; `projects show` carries the same field.
-  The URL requires authentication and redirects to the image; it is not a
-  public image link.
+  The URL needs authentication and redirects to the image.
 
 ## Project logo
 
@@ -295,9 +294,8 @@ basecamp projects logo remove --in "<project>" --json
   names the limits. Server image validations still apply. Removing a logo from
   a project that has none succeeds.
 - Each command returns the project. `.data.logo` is `{url}`, and is absent when
-  the project has none; `projects show` carries the same field. The URL
-  requires authentication and redirects to the image; it is not a public image
-  link.
+  the project has none; `projects show` carries the same field. Like the
+  wallpaper's, the URL needs authentication.
 
 ## Timesheet entries
 
@@ -338,12 +336,17 @@ A pipe is never consumed implicitly. Only one input may read stdin in an
 invocation. Do not use shell-specific ANSI-C quoting such as `$'line 1\nline 2'`
 in portable commands.
 
-Rich-text fields support [Mermaid](https://mermaid.js.org) diagrams. Put the
-source in a fenced code block with the language `mermaid`, and Basecamp shows
-the diagram to people reading the post. Previews, emails, and exports show the
-source, and so does a post whose source does not parse. Use a diagram for a
-flow, sequence, timeline, or structure that is easier to follow as a picture
-than as prose. Diagram source spans several lines, so pass it on stdin:
+Basecamp shows blocks flush together unless a blank line in the Markdown
+separates them. Leave one between every two blocks, headings and lists
+included; in prose, a single newline joins lines into one paragraph. Don't
+hand-write HTML: `--format html` is stored as written, so touching blocks and
+`<br>`-stacked lines read as a wall of text.
+
+Rich-text fields support Mermaid diagrams. Put the source in a fenced code block
+with the language `mermaid`, and Basecamp shows the diagram to people reading
+the post. Previews, emails, and exports show the source, and so does a post
+whose source does not parse. Use one where a picture beats prose. Diagram source
+spans several lines, so pass it on stdin:
 
 ````bash
 basecamp messages create "Release flow" - --in "<project>" --json <<'EOF'
@@ -373,9 +376,9 @@ EOF
 With `--format html` nothing is embedded for you: run
 `basecamp embeds create <url> --json` and put its `attachment` tag in the HTML.
 
-For deterministic mentions, prefer the machine-provided mention syntax from
-people or comment results, for example `[@Name](mention:SGID)`. Mention support
-varies by field; leaf help is authoritative.
+Mentions need no HTML. For deterministic ones, use the syntax people and
+comment results print, such as `[@Name](mention:SGID)`; leaf help says where
+mentions work.
 
 ## Errors and recovery
 

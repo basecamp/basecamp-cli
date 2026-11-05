@@ -199,8 +199,11 @@ basecamp pings post <bucket_id> - --profile '<profile>' < reply.md
 
 **Rich text.** In comments, messages, documents and cards, the CLI converts
 Markdown: headings, **bold**, lists, quotes, fenced code for commands, diffs
-and errors, and pipe tables for real grids. Don't hand-write HTML there: raw
-tags switch off the conversion for the whole field.
+and errors, and pipe tables for real grids. Don't hand-write HTML there.
+Basecamp shows blocks flush against each other unless a blank line in the
+Markdown separates them, so leave one between every two blocks, after a
+heading and around a list too. In prose, a single newline is no break: it
+joins the lines into one paragraph.
 
 Campfire is different: `chat post` sends plain text and leaves Markdown as
 typed. The exception is a line with an `@`: the CLI reads it as a mention and
