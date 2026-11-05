@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Basecamp",
-    "version": "2026-10-30",
+    "version": "2026-11-05",
     "description": "Basecamp API",
     "contact": {
       "name": "Basecamp",
@@ -2938,7 +2938,7 @@
         }
       },
       "post": {
-        "description": "Create an external link in a project\nIt goes at the end of the project's External links section. The link's\nfields go under the `door` key and `visible_to_clients` sits beside it.\nOmitting `visible_to_clients` keeps the link private to the team, whatever\nthe visibility of the project's other tools; a client caller always creates\na client-visible link. An unusable `url` (e.g. a `javascript:` address) is a\nfield-keyed 422. Needs permission to edit the project. The `door[image]`\nthumbnail is multipart-only and not modelled.",
+        "description": "Create an external link in a project\nIt goes at the end of the project's External links section. The link's\nfields go under the `door` key and `visible_to_clients` sits beside it.\nOmitting `visible_to_clients` keeps the link private to the team, whatever\nthe visibility of the project's other tools; a client caller always creates\na client-visible link. An unusable `url` (e.g. a `javascript:` address) is a\n422 with Rails' default error body, which names no field. Needs permission\nto edit the project. The `door[image]`\nthumbnail is multipart-only and not modelled.",
         "operationId": "CreateDoor",
         "requestBody": {
           "content": {
@@ -3014,11 +3014,11 @@
             }
           },
           "422": {
-            "description": "FieldValidationError 422 response",
+            "description": "ValidationError 422 response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FieldValidationErrorResponseContent"
+                  "$ref": "#/components/schemas/ValidationErrorResponseContent"
                 }
               }
             }
@@ -8925,7 +8925,7 @@
         }
       },
       "put": {
-        "description": "Update an external link\nA partial update: every field is optional, and those left out keep their\nvalues. Omit `door` entirely to change only `visible_to_clients`; omit\n`visible_to_clients` to keep the current visibility. An unusable `url` is a\nfield-keyed 422. Needs permission to edit the project.",
+        "description": "Update an external link\nA partial update: every field is optional, and those left out keep their\nvalues. Omit `door` entirely to change only `visible_to_clients`; omit\n`visible_to_clients` to keep the current visibility. An unusable `url` is a\n422 with Rails' default error body, as for CreateDoor. Needs permission to\nedit the project.",
         "operationId": "UpdateDoor",
         "requestBody": {
           "content": {
@@ -9000,11 +9000,11 @@
             }
           },
           "422": {
-            "description": "FieldValidationError 422 response",
+            "description": "ValidationError 422 response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FieldValidationErrorResponseContent"
+                  "$ref": "#/components/schemas/ValidationErrorResponseContent"
                 }
               }
             }
