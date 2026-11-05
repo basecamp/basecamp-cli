@@ -311,8 +311,7 @@ func instructionsCachePath(app *appctx.App, ref instructionsDocRef) string {
 		return ""
 	}
 	dir := app.Config.CacheDir
-	switch config.Source(app.Config.Sources["cache_dir"]) {
-	case config.SourceLocal, config.SourceRepo:
+	if src := config.Source(app.Config.Sources["cache_dir"]); src == config.SourceLocal || src == config.SourceRepo {
 		dir = config.Default().CacheDir
 	}
 	if dir == "" {
