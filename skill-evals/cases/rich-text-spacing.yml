@@ -11,16 +11,22 @@ tags: [create, rich-text]
 accept:
   - 'comments? create .*999'
   - '--(in|project) 555'
+  # The rejects below read the trace, so the body has to be in it: inline in
+  # the command, laid out in more than one block. A body sent on stdin never
+  # reaches the trace and would pass them unread.
+  - 'HEY_DATABASE_SCHEMA_CHECK'
+  - '\n\n'
 reject:
   # Basecamp shows blocks flush against each other unless a blank line in the
-  # Markdown separates them, and a single newline joins two lines into one
-  # paragraph. A section label on a line of its own, bold, a heading or
-  # ending in a colon, followed directly by its text runs label and text
-  # together.
-  - '(^|\n)(\*\*[^*\n]+\*\*|#+ [^\n]+|[^*\n]+:)\n[^\n]'
+  # Markdown separates them, and in prose a single newline joins two lines
+  # into one paragraph. A section label on a line of its own (bold, a heading,
+  # or a capitalized line ending in a colon) followed directly by its text
+  # runs label and text together. The next line must start flush left, so
+  # indented lines in fenced code, such as a YAML key's value, don't count.
+  - '(^|\n)(\*\*[^*\n]+\*\*|#+ [^\n]+|[A-Z][^*\n]*:)\n[^\s`]'
   # A line of text followed directly by a list item: the list sits flush
   # against the paragraph above it.
-  - '(^|\n)[^-*+\n0-9 ][^\n]*\n(?:[-*+] |[0-9]+\. )'
+  - '(^|\n)[^-*+\n0-9 `][^\n]*\n(?:[-*+] |[0-9]+\. )'
   # HTML is stored as written, so its spacing is whatever the agent typed.
   - '--format[ =]html'
   - '<(p|div|br|h[1-6])\b'
