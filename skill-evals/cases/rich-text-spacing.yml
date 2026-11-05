@@ -9,13 +9,12 @@ task: >-
   HEY_DATABASE_SCHEMA_CHECK is refuse, report or off, set from the deploy file.
 tags: [create, rich-text]
 accept:
-  - 'comments? create .*999'
   - '--(in|project) 555'
   # The rejects below read the trace, so the body has to be in it: inline in
-  # the command, laid out in more than one block. A body sent on stdin never
-  # reaches the trace and would pass them unread.
-  - 'HEY_DATABASE_SCHEMA_CHECK'
-  - '\n\n'
+  # the create command, laid out in more than one block, both in that one
+  # call. A body sent on stdin never reaches the trace and would pass them
+  # unread.
+  - 'comments? create [^\n]*999([\s\S]*\n\n[\s\S]*HEY_DATABASE_SCHEMA_CHECK|[\s\S]*HEY_DATABASE_SCHEMA_CHECK[\s\S]*\n\n)'
 reject:
   # Basecamp shows blocks flush against each other unless a blank line in the
   # Markdown separates them, and in prose a single newline joins two lines
