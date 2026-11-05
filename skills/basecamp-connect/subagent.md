@@ -64,6 +64,11 @@ people (`basecamp pings show <bucket_id> --json -P '<profile>'`), they can't
 see the ask: say in the Ping that this needs the operator's word, and stop
 there.
 
+**Run `basecamp instructions -P '<profile>'` and follow what it prints**
+whenever you write to Basecamp: the instructions the operator linked for every
+agent, or nothing when none are linked. They shape how you write; the
+project's AGENTS.md is more specific and wins where the two differ.
+
 **Read the project's AGENTS.md doc, if it has one, and follow it.** It's the
 project's standing instructions for agents: board meanings, how to talk, which
 repo, which workflow. Read the full document content passed in the handoff,

@@ -89,6 +89,8 @@ func runConfigShow(cmd *cobra.Command) error {
 		{"llm_endpoint", app.Config.LLMEndpoint, app.Config.LLMEndpoint != ""},
 		{"llm_max_concurrent", fmt.Sprintf("%d", app.Config.LLMMaxConcurrent), app.Config.Sources["llm_max_concurrent"] != ""},
 		{"llm_token_budget", fmt.Sprintf("%d", app.Config.LLMTokenBudget), app.Config.Sources["llm_token_budget"] != ""},
+		{"instructions_doc", app.Config.InstructionsDoc, app.Config.InstructionsDoc != ""},
+		{"profile_instructions_doc", app.Config.ProfileInstructionsDoc, app.Config.ProfileInstructionsDoc != ""},
 	}
 
 	for _, k := range keys {
@@ -181,6 +183,7 @@ func newConfigInitCmd() *cobra.Command {
 
 func newConfigSetCmd() *cobra.Command {
 	var global bool
+	var forProfile string
 
 	cmd := &cobra.Command{
 		Use:   "set <key> <value>",
@@ -190,7 +193,13 @@ func newConfigSetCmd() *cobra.Command {
 Valid keys: account_id, project_id (or project), todolist_id, base_url, cache_dir,
             cache_enabled, format, scope, default_profile, hints, stats, verbose,
             onboarded, llm_provider (or llm), llm_model, llm_api_key, llm_endpoint,
-            llm_max_concurrent, llm_token_budget, experimental.<feature>`,
+            llm_max_concurrent, llm_token_budget, instructions_doc,
+            experimental.<feature>
+
+instructions_doc links a Basecamp document that agents read and follow
+before they write to Basecamp (see basecamp instructions). It takes the
+document's URL and must be set with --global. With --for-profile <name> it
+links that profile's own document, read after the shared one.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -219,6 +228,7 @@ Valid keys: account_id, project_id (or project), todolist_id, base_url, cache_di
 				"llm_endpoint":       true,
 				"llm_max_concurrent": true,
 				"llm_token_budget":   true,
+				"instructions_doc":   true,
 			}
 			isExperimentalKey := strings.HasPrefix(key, "experimental.")
 			if !validKeys[key] && !isExperimentalKey {
@@ -257,6 +267,13 @@ Valid keys: account_id, project_id (or project), todolist_id, base_url, cache_di
 			// llm_api_key must be set globally or via env var
 			if key == "llm_api_key" && !global {
 				return output.ErrUsage("llm_api_key must be set globally (--global) or via BASECAMP_LLM_API_KEY env var")
+			}
+
+			if key == "instructions_doc" && !global {
+				return output.ErrUsage("instructions_doc must be set globally (--global): a repo's config cannot steer every agent")
+			}
+			if forProfile != "" && key != "instructions_doc" {
+				return output.ErrUsage("--for-profile applies only to instructions_doc")
 			}
 
 			// Validate default_profile against configured profiles
@@ -310,6 +327,20 @@ Valid keys: account_id, project_id (or project), todolist_id, base_url, cache_di
 					fmt.Fprintln(os.Stderr, "warning: llm_endpoint is plain http on a non-localhost host; the LLM feature will refuse it if an API key is set with the openai provider")
 				}
 				configData[key] = value
+			case "instructions_doc":
+				if _, err := parseInstructionsDoc(value); err != nil {
+					return err
+				}
+				if forProfile != "" {
+					entry, err := profileEntryForInstructions(configData, forProfile)
+					if err != nil {
+						return err
+					}
+					entry[key] = value
+					scope = fmt.Sprintf("global, profile %s", forProfile)
+				} else {
+					configData[key] = value
+				}
 			case "llm_max_concurrent":
 				level, err := strconv.Atoi(value)
 				if err != nil || level < 1 || level > 10 {
@@ -392,6 +423,7 @@ Valid keys: account_id, project_id (or project), todolist_id, base_url, cache_di
 	}
 
 	cmd.Flags().BoolVar(&global, "global", false, "Set in global config (~/.config/basecamp/)")
+	cmd.Flags().StringVar(&forProfile, "for-profile", "", "Set instructions_doc for this profile only, on top of the shared one")
 	// Note: local is the default, so no --local flag needed
 
 	return cmd
@@ -463,6 +495,7 @@ func parseBoolFlag(value string) (bool, bool) {
 
 func newConfigUnsetCmd() *cobra.Command {
 	var global bool
+	var forProfile string
 
 	cmd := &cobra.Command{
 		Use:   "unset <key>",
@@ -516,6 +549,21 @@ func newConfigUnsetCmd() *cobra.Command {
 				} else {
 					configData["experimental"] = expMap
 				}
+			} else if forProfile != "" {
+				if key != "instructions_doc" {
+					return output.ErrUsage("--for-profile applies only to instructions_doc")
+				}
+				entry, err := profileEntryForInstructions(configData, forProfile)
+				if err != nil {
+					return err
+				}
+				if _, exists := entry[key]; !exists {
+					return app.OK(map[string]any{
+						"key": key, "status": "not_set",
+					}, output.WithSummary(fmt.Sprintf("Key not set: %s for profile %s", key, forProfile)))
+				}
+				delete(entry, key)
+				scope = fmt.Sprintf("%s, profile %s", scope, forProfile)
 			} else {
 				if _, exists := configData[key]; !exists {
 					return app.OK(map[string]any{
@@ -554,6 +602,7 @@ func newConfigUnsetCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&global, "global", false, "Unset from global config")
+	cmd.Flags().StringVar(&forProfile, "for-profile", "", "Unset instructions_doc for this profile only")
 
 	return cmd
 }
@@ -863,4 +912,20 @@ Without --project, an interactive picker is shown.`,
 			)
 		},
 	}
+}
+
+// profileEntryForInstructions returns the global config's entry for a
+// profile, for a setting that belongs to it. The profile has to be in that
+// file already: an entry without its base_url is skipped on load, so writing
+// one would save a setting nothing reads.
+func profileEntryForInstructions(configData map[string]any, name string) (map[string]any, error) {
+	profiles, _ := configData["profiles"].(map[string]any)
+	entry, _ := profiles[name].(map[string]any)
+	if entry == nil {
+		return nil, output.ErrUsageHint(
+			fmt.Sprintf("profile %q is not in the global config", name),
+			"See the profiles with `basecamp profile list`",
+		)
+	}
+	return entry, nil
 }

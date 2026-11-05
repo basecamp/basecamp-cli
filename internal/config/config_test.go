@@ -1440,3 +1440,61 @@ func TestProfileEntryForAnotherProjectDropsTheInheritedTodolist(t *testing.T) {
 
 	assert.Equal(t, "3", cfg.Profiles["bot"].TodolistID, "the same project, spelled differently")
 }
+
+// instructions_doc steers every agent that links it, so it is read from the
+// global and system configs only. A cloned repo's config never sets it, even
+// once trusted: trust vouches for where tokens go, not for what agents write.
+func TestLoadFromFileInstructionsDocGlobalOnly(t *testing.T) {
+	const docURL = "https://3.basecamp.com/1/buckets/2/documents/3"
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(`{"instructions_doc": "`+docURL+`"}`), 0o600))
+
+	trust := NewTrustStore(t.TempDir())
+	require.NoError(t, trust.Trust(path))
+
+	for _, source := range []Source{SourceLocal, SourceRepo} {
+		for _, ts := range []*TrustStore{nil, trust} {
+			cfg := Default()
+			loadFromFile(cfg, path, source, ts)
+			assert.Empty(t, cfg.InstructionsDoc, "%s config (trusted=%t) must not set instructions_doc", source, ts != nil)
+		}
+	}
+
+	for _, source := range []Source{SourceGlobal, SourceSystem} {
+		cfg := Default()
+		loadFromFile(cfg, path, source, nil)
+		assert.Equal(t, docURL, cfg.InstructionsDoc)
+		assert.Equal(t, string(source), cfg.Sources["instructions_doc"])
+	}
+}
+
+// A profile's own instructions document layers over the shared one. It is
+// read from the global and system configs only, like the top-level key, and
+// becomes the active profile's when the profile is applied.
+func TestProfileInstructionsDocGlobalOnly(t *testing.T) {
+	const docURL = "https://3.basecamp.com/1/buckets/2/documents/4"
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	body := `{"profiles": {"agent": {"base_url": "https://3.basecampapi.com", "account_id": "1", "instructions_doc": "` + docURL + `"}}}`
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+
+	trust := NewTrustStore(t.TempDir())
+	require.NoError(t, trust.Trust(path))
+	for _, source := range []Source{SourceLocal, SourceRepo} {
+		cfg := Default()
+		loadFromFile(cfg, path, source, trust)
+		require.Contains(t, cfg.Profiles, "agent", "a trusted %s config still sets the profile", source)
+		assert.Empty(t, cfg.Profiles["agent"].InstructionsDoc, "but not its instructions_doc")
+	}
+
+	cfg := Default()
+	loadFromFile(cfg, path, SourceGlobal, nil)
+	require.Contains(t, cfg.Profiles, "agent")
+	assert.Equal(t, docURL, cfg.Profiles["agent"].InstructionsDoc)
+	assert.Empty(t, cfg.ProfileInstructionsDoc, "nothing is active until the profile is applied")
+
+	require.NoError(t, cfg.ApplyProfile("agent"))
+	assert.Equal(t, docURL, cfg.ProfileInstructionsDoc)
+	assert.Equal(t, "profile", cfg.Sources["profile_instructions_doc"])
+}

@@ -997,6 +997,7 @@ CMD basecamp hillcharts updates
 CMD basecamp hillcharts updates list
 CMD basecamp hillcharts updates show
 CMD basecamp inbox
+CMD basecamp instructions
 CMD basecamp lineup
 CMD basecamp lineup create
 CMD basecamp lineup delete
@@ -5621,6 +5622,7 @@ FLAG basecamp config set --account type=string
 FLAG basecamp config set --agent type=bool
 FLAG basecamp config set --cache-dir type=string
 FLAG basecamp config set --count type=bool
+FLAG basecamp config set --for-profile type=string
 FLAG basecamp config set --global type=bool
 FLAG basecamp config set --help type=bool
 FLAG basecamp config set --hints type=bool
@@ -5686,6 +5688,7 @@ FLAG basecamp config unset --account type=string
 FLAG basecamp config unset --agent type=bool
 FLAG basecamp config unset --cache-dir type=string
 FLAG basecamp config unset --count type=bool
+FLAG basecamp config unset --for-profile type=string
 FLAG basecamp config unset --global type=bool
 FLAG basecamp config unset --help type=bool
 FLAG basecamp config unset --hints type=bool
@@ -11743,6 +11746,28 @@ FLAG basecamp inbox --styled type=bool
 FLAG basecamp inbox --todolist type=string
 FLAG basecamp inbox --types type=stringSlice
 FLAG basecamp inbox --verbose type=count
+FLAG basecamp instructions --account type=string
+FLAG basecamp instructions --agent type=bool
+FLAG basecamp instructions --cache-dir type=string
+FLAG basecamp instructions --count type=bool
+FLAG basecamp instructions --help type=bool
+FLAG basecamp instructions --hints type=bool
+FLAG basecamp instructions --ids-only type=bool
+FLAG basecamp instructions --in type=string
+FLAG basecamp instructions --jq type=string
+FLAG basecamp instructions --json type=bool
+FLAG basecamp instructions --markdown type=bool
+FLAG basecamp instructions --md type=bool
+FLAG basecamp instructions --no-hints type=bool
+FLAG basecamp instructions --no-stats type=bool
+FLAG basecamp instructions --profile type=string
+FLAG basecamp instructions --project type=string
+FLAG basecamp instructions --quiet type=bool
+FLAG basecamp instructions --refresh type=bool
+FLAG basecamp instructions --stats type=bool
+FLAG basecamp instructions --styled type=bool
+FLAG basecamp instructions --todolist type=string
+FLAG basecamp instructions --verbose type=count
 FLAG basecamp lineup --account type=string
 FLAG basecamp lineup --agent type=bool
 FLAG basecamp lineup --cache-dir type=string
@@ -21296,6 +21321,7 @@ SUB basecamp hillcharts updates
 SUB basecamp hillcharts updates list
 SUB basecamp hillcharts updates show
 SUB basecamp inbox
+SUB basecamp instructions
 SUB basecamp lineup
 SUB basecamp lineup create
 SUB basecamp lineup delete

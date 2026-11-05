@@ -364,6 +364,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewMigrateCmd())
 	cmd.AddCommand(commands.NewProfileCmd())
 	cmd.AddCommand(commands.NewSkillCmd())
+	cmd.AddCommand(commands.NewInstructionsCmd())
 	cmd.AddCommand(commands.NewAttachmentsCmd())
 	cmd.AddCommand(commands.NewEmbedsCmd())
 	cmd.AddCommand(commands.NewAttachCmd())
