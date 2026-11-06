@@ -117,6 +117,12 @@ type Manager struct {
 
 	mu sync.Mutex
 
+	// held is the last credential this Manager read or renewed, under
+	// heldKey, kept to serve while the OS keyring is not answering (see
+	// storedAccessToken). Guarded by mu.
+	held    *Credentials
+	heldKey string
+
 	// kindMu guards kind, which is read while building an error's remedy
 	// and so cannot share the lock the credential operations hold.
 	kindMu sync.Mutex
@@ -302,9 +308,12 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 	credKey := m.credentialKey()
 	creds, err := m.store.LoadContext(ctx, credKey)
 	if err != nil {
+		if held := m.heldWhileKeyringStalls(ctx, credKey, err); held != nil {
+			return m.servableToken(credKey, held)
+		}
 		return "", m.unreadable(missing, credKey, err)
 	}
-	m.remember(creds)
+	m.hold(credKey, creds)
 	if !needsRenewal(creds) {
 		return m.servableToken(credKey, creds)
 	}
@@ -329,6 +338,7 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 				return m.unreadable("Failed to load renewed credentials for", credKey, loadErr)
 			}
 		}
+		m.hold(credKey, creds)
 		var tokenErr error
 		token, tokenErr = m.servableToken(credKey, creds)
 		return tokenErr
@@ -337,6 +347,38 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 		return "", err
 	}
 	return token, nil
+}
+
+// hold keeps creds as the credential this Manager last had in its hands.
+// Called with mu held.
+func (m *Manager) hold(credKey string, creds *Credentials) {
+	m.remember(creds)
+	held := *creds
+	m.held, m.heldKey = &held, credKey
+}
+
+// heldWhileKeyringStalls is the credential to serve when the store could
+// not be read because the OS keyring did not answer in time: the one this
+// Manager last read or renewed, while it is still comfortably inside its
+// lifetime. Nil otherwise — the store spoke, the caller's own wait ended,
+// nothing is held, or what is held is due for renewal, which needs the
+// store. Called with mu held.
+//
+// The keyring holds the same credential it did a moment ago; it is only
+// slow to say so. A long-running process — the connector above all —
+// would otherwise lose its token to one slow answer from a loaded desktop
+// session, and keep losing it for as long as the keyring stays slow.
+// Nothing is written: the store remains the record, and the first read
+// that succeeds replaces what is held.
+func (m *Manager) heldWhileKeyringStalls(ctx context.Context, credKey string, err error) *Credentials {
+	if ctx.Err() != nil || !KeyringUnavailable(err) {
+		return nil
+	}
+	if m.held == nil || m.heldKey != credKey || needsRenewal(m.held) {
+		return nil
+	}
+	m.remember(m.held)
+	return m.held
 }
 
 // needsRenewal reports whether a stored access token is inside the refresh
