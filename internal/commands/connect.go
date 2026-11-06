@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -1331,12 +1332,58 @@ func (t *managerTokens) AccessToken(ctx context.Context) (string, error) {
 type feedTokens struct {
 	managerTokens
 	// log says a wait the server named past the cap, once per answer that
-	// named it; nothing is said when nil.
+	// named it, and a keyring that stopped answering, once per outage;
+	// nothing is said when nil.
 	log func(string)
+
+	// now is the clock the keyring outage is measured by, and fetch the
+	// manager's AccessToken. Test seams; nil means time.Now and the manager.
+	now   func() time.Time
+	fetch func(context.Context) (string, error)
+
+	mu sync.Mutex
+	// keyringDownSince is when the feed last started failing to get a
+	// token because the OS keyring did not answer; zero while it answers.
+	keyringDownSince time.Time
+}
+
+// connectKeyringOutageLimit is how long the feed waits for a keyring that
+// has stopped answering before it ends the run.
+//
+// The auth manager serves the token it already holds while the keyring is
+// slow, and the store retries the keyring on its own backoff, so a feed
+// that is failing here has neither: the held token is due for renewal and
+// the keyring has not answered for that whole time. Waiting is right for a
+// while — a loaded desktop session catches up — but not forever: a feed
+// that retries quietly for hours delivers nothing and tells no one. Ending
+// the run is how this is seen: the process exits non-zero with the reason,
+// and a supervisor, or the person reading the log, starts it again.
+const connectKeyringOutageLimit = 15 * time.Minute
+
+func (t *feedTokens) clock() time.Time {
+	if t.now != nil {
+		return t.now()
+	}
+	return time.Now()
 }
 
 func (t *feedTokens) AccessToken(ctx context.Context) (string, error) {
-	token, err := t.mgr.AccessToken(ctx)
+	fetch := t.fetch
+	if fetch == nil {
+		fetch = t.mgr.AccessToken
+	}
+	token, err := fetch(ctx)
+	if ctx.Err() == nil && auth.KeyringUnavailable(err) {
+		return token, t.keyringStalled(err)
+	}
+	if ctx.Err() == nil {
+		// The keyring answered — a token, or a failure of something else,
+		// such as a renewal the server refused or could not serve. Either
+		// way this outage is over, and a later one gets its own clock.
+		t.mu.Lock()
+		t.keyringDownSince = time.Time{}
+		t.mu.Unlock()
+	}
 	e := tokenFailureInSDKTerms(err)
 	if e == nil {
 		return token, err
@@ -1345,6 +1392,33 @@ func (t *feedTokens) AccessToken(ctx context.Context) (string, error) {
 		t.log(connectWaitLine(output.AsError(err).Message, named, wait))
 	}
 	return token, e
+}
+
+// keyringStalled is the feed's error for a token the OS keyring did not
+// give up in time. Inside connectKeyringOutageLimit it is a network failure
+// the feed backs off from and retries — said once, when the outage starts,
+// since a feed that only retries prints nothing. Past it, it carries no
+// status, so the feed ends the run on it rather than retrying unseen.
+func (t *feedTokens) keyringStalled(err error) error {
+	now := t.clock()
+	t.mu.Lock()
+	first := t.keyringDownSince.IsZero()
+	if first {
+		t.keyringDownSince = now
+	}
+	down := now.Sub(t.keyringDownSince)
+	t.mu.Unlock()
+
+	if down >= connectKeyringOutageLimit {
+		e := output.ErrAPI(0, fmt.Sprintf("The system keyring has not given up the agent's token for %s, so the connector cannot reach Basecamp: %v", down.Round(time.Second), err))
+		e.Hint = "Start the connector again. If this keeps happening, check that the desktop keyring (the Secret Service: gnome-keyring or KeePassXC) is running and unlocked"
+		e.Cause = err
+		return &basecamp.Error{Code: basecamp.CodeAPI, Message: e.Error(), Retryable: false, Cause: e}
+	}
+	if first && t.log != nil {
+		t.log(fmt.Sprintf("connector: the system keyring did not give up the agent's token in time (%v); retrying, and ending the run if it has not answered within %s", err, connectKeyringOutageLimit))
+	}
+	return &basecamp.Error{Code: basecamp.CodeNetwork, Message: err.Error(), Retryable: true, Cause: err}
 }
 
 // tokenFailureInSDKTerms is a failed renewal as the SDK's error, classified
@@ -1398,6 +1472,10 @@ func tokenRetry(err error) (time.Duration, bool) {
 	}
 	var cliErr *output.Error
 	switch {
+	case auth.KeyringUnavailable(err):
+		// The keyring did not answer, which says nothing about the token:
+		// waited out on the backoff, at start as in the running feed.
+		return 0, true
 	case errors.As(err, &cliErr) && cliErr.Retryable:
 		// Exactly what the server named, never longer than the one cap,
 		// or nothing, which leaves it to the backoff: never a default

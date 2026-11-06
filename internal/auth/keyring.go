@@ -85,6 +85,11 @@ type Store struct {
 	inner       credStore
 	warnOnce    sync.Once
 
+	// opts is what inner was built with; stall is the keyring-stall
+	// recovery state (keyring_stall.go).
+	opts  credstore.StoreOptions
+	stall keyringStall
+
 	// lockWarnOnce fires the one warning a process gets when credential
 	// locking is impossible on this host (see lock.go).
 	lockWarnOnce sync.Once
@@ -152,9 +157,10 @@ func (s *Store) ensure() credStore {
 		} else if sessionIsHeadless() {
 			opts.ProbeTimeout = headlessProbeTimeout
 		}
+		s.opts = opts
 		s.inner = newCredStore(opts)
 	})
-	return s.inner
+	return s.current()
 }
 
 // warnFallback prints the keyring fallback warning once per process, on the
@@ -192,21 +198,28 @@ func (s *Store) LoadContext(ctx context.Context, origin string) (*Credentials, e
 func (s *Store) load(origin string, req lockRequest) (*Credentials, error) {
 	s.warnFallback()
 	var data []byte
+	var gen uint64
 	err := s.withStoreReadLock(req, func() error {
 		var loadErr error
-		data, loadErr = s.ensure().Load(origin)
+		data, gen, loadErr = s.read(origin, req)
 		return loadErr
 	})
 	if err != nil {
+		if errors.Is(err, ErrKeyringUnavailable) {
+			return nil, s.operationError(err)
+		}
 		if isMissingCredential(err) {
+			s.forget(origin)
 			return nil, fmt.Errorf("%w: %w", ErrNoCredential, err)
 		}
 		return nil, s.operationError(err)
 	}
 	var creds Credentials
 	if err := json.Unmarshal(data, &creds); err != nil {
+		s.forget(origin)
 		return nil, fmt.Errorf("%w: %w", ErrInvalidCredentials, err)
 	}
+	s.keepRead(origin, &creds, gen)
 	return &creds, nil
 }
 
@@ -254,12 +267,23 @@ func (s *Store) save(under func(func() error) error, origin string, creds *Crede
 	if err != nil {
 		return err
 	}
-	return s.operationError(under(func() error { return s.ensure().Save(origin, data) }))
+	err = s.operationError(under(func() error { return s.ensure().Save(origin, data) }))
+	if err != nil {
+		// Whether the write landed is unknown: hold nothing for this key.
+		s.forget(origin)
+		return err
+	}
+	s.keep(origin, creds)
+	return nil
 }
 
 // Delete removes credentials for the given origin. Locked for the same
 // reason Save is: the file backend rewrites the whole document.
 func (s *Store) Delete(origin string) error {
+	// Forgotten before and after: a read that began before the delete, or
+	// one that ran beside it, holds nothing once the delete returns.
+	s.forget(origin)
+	defer s.forget(origin)
 	return s.operationError(s.withStoreLock(func() error { return s.ensure().Delete(origin) }))
 }
 
