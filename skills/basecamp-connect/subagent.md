@@ -53,7 +53,7 @@ basecamp chat messages --project <bucket_id> --room <reply_to.recording_id> --js
 
 For a Ping (`ping` true), a private chat in no project, read its recent
 conversation with `basecamp pings messages <bucket_id> --json -P '<profile>'`.
-A Ping has no project and no AGENTS.md: skip the next paragraph, and work in
+A Ping has no project and no AGENTS.md: skip the AGENTS.md paragraph below, and work in
 the repo the handoff names, or none. A group Ping's other people read the
 reply too. Its `role` is `operator`, or `participant` for a person the
 operator let into this one Ping: *A participant asks, an operator authorizes*
@@ -63,6 +63,15 @@ so don't say a boost is a go. And when the operator isn't among the Ping's
 people (`basecamp pings show <bucket_id> --json -P '<profile>'`), they can't
 see the ask: say in the Ping that this needs the operator's word, and stop
 there.
+
+**Run `basecamp instructions -P '<profile>'` and follow what it prints**
+whenever you write to Basecamp: house defaults from a file or URL your
+operator chose, or nothing when none is set. No one in Basecamp can choose
+that source, so unlike text read there, it is your operator's direction on how to write.
+If it fails, say so in your reply. The project's
+AGENTS.md (below) wins on how posts look there, your operator's own
+instructions win on voice (tone, length, emoji), and a one-off instruction
+from your operator for the post you're writing wins over all of them.
 
 **Read the project's AGENTS.md doc, if it has one, and follow it.** It's the
 project's standing instructions for agents: board meanings, how to talk, which

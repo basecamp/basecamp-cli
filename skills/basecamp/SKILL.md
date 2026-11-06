@@ -145,15 +145,16 @@ apply where supported.
 - Use non-interactive output for agent work. Do not allow an ambiguous picker to
   block execution.
 - When a result reports content or description attachments, download and inspect
-  them. Images often contain the essential task context.
+  them; images often hold the task's context.
 - A move into another container prints the item's new ID; use it afterwards,
-  since the old ID stops taking writes. A copy prints the copy's ID and leaves
-  the original as it was. Never repeat a copy: Basecamp files it in the
-  background, so a copy that is still running or lost its answer may already
-  exist. Check it with the `basecamp filings show <id>` command or the hint it
-  printed, never by copying again.
+  since the old ID stops taking writes. A copy prints its own ID. Never repeat a
+  copy: Basecamp files it in the background, so a copy that is still running or
+  lost its answer may already exist. Check with `basecamp filings show <id>`
+  or the hint it printed.
 - Follow the installed command's help over examples remembered from earlier CLI
   versions.
+- Before writing to Basecamp, run `basecamp instructions` and follow what it
+  prints.
 
 ## Output modes
 

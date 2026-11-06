@@ -49,6 +49,18 @@ type Config struct {
 	LLMMaxConcurrent int    `json:"llm_max_concurrent,omitempty"`
 	LLMTokenBudget   int    `json:"llm_token_budget,omitempty"`
 
+	// Instructions is where agents get the Markdown they follow before they
+	// write to Basecamp, through `basecamp instructions`: the path of a local
+	// file, or an https URL (a GitHub file is read through gh when it can be,
+	// so private repos work). It is never text from Basecamp. Whoever can
+	// change what it names steers every agent here, so only the global and
+	// system configs may set it: a cloned repo's config never can, trusted or
+	// not.
+	Instructions string `json:"instructions,omitempty"`
+	// ProfileInstructions is the active profile's own instructions
+	// source, set at runtime by ApplyProfile.
+	ProfileInstructions string `json:"-"`
+
 	// Experimental feature flags (opt-in via "config set experimental.X true --global").
 	Experimental map[string]bool `json:"experimental,omitempty"`
 
@@ -142,6 +154,11 @@ type ProfileConfig struct {
 	TodolistID string `json:"todolist_id,omitempty"`
 	Scope      string `json:"scope,omitempty"`
 	ClientID   string `json:"client_id,omitempty"`
+	// Instructions is this profile's own instructions source, read
+	// after the top-level one and winning where they differ: an agent's
+	// voice on top of the account's shared baseline. Like the top-level
+	// key, only the global and system configs may set it.
+	Instructions string `json:"instructions,omitempty"`
 }
 
 // Source indicates where a config value came from.
@@ -382,6 +399,14 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 			}
 		}
 	}
+	if v, ok := fileCfg["instructions"].(string); ok && v != "" {
+		if source == SourceLocal || source == SourceRepo {
+			fmt.Fprintf(os.Stderr, "warning: ignoring instructions from %s config at %s (set it with `basecamp config set instructions <path-or-url> --global`)\n", source, path)
+		} else {
+			cfg.Instructions = v
+			cfg.Sources["instructions"] = string(source)
+		}
+	}
 	if v, ok := fileCfg["experimental"].(map[string]any); ok {
 		if cfg.Experimental == nil {
 			cfg.Experimental = make(map[string]bool)
@@ -499,6 +524,13 @@ func mergeProfile(cfg *Config, name string, entry map[string]any, layer ProfileL
 	}
 	if v, ok := entry["client_id"].(string); ok {
 		set("client_id", &p.ClientID, v)
+	}
+	if v, ok := entry["instructions"].(string); ok && v != "" {
+		if layer.Source == SourceGlobal || layer.Source == SourceSystem {
+			set("instructions", &p.Instructions, v)
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: ignoring instructions for profile %q from %s config at %s (set it with `basecamp config set instructions <path-or-url> --global --for-profile %s`)\n", name, layer.Source, layer.Path, richtext.ShellQuote(name))
+		}
 	}
 }
 
@@ -719,6 +751,10 @@ func (c *Config) ApplyProfile(name string) error {
 	if p.Scope != "" {
 		c.Scope = p.Scope
 		c.Sources["scope"] = "profile"
+	}
+	c.ProfileInstructions = p.Instructions
+	if p.Instructions != "" {
+		c.Sources["profile_instructions"] = "profile"
 	}
 
 	return nil

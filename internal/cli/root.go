@@ -149,8 +149,9 @@ func NewRootCmd() *cobra.Command {
 			}
 			// Profile-scoped cache (only if cache dir was not explicitly set
 			// via flag or env). A not-yet-registered name is unvalidated
-			// input, so it does not become a path component.
-			if profileKnown && flags.CacheDir == "" && os.Getenv("BASECAMP_CACHE_DIR") == "" {
+			// input, and a registered one may come from a repo config, so
+			// neither becomes a path component unless it is a single one.
+			if profileKnown && profileNameIsPathSafe(profileName) && flags.CacheDir == "" && os.Getenv("BASECAMP_CACHE_DIR") == "" {
 				cfg.CacheDir = filepath.Join(cfg.CacheDir, "profiles", profileName)
 			}
 
@@ -365,6 +366,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewMigrateCmd())
 	cmd.AddCommand(commands.NewProfileCmd())
 	cmd.AddCommand(commands.NewSkillCmd())
+	cmd.AddCommand(commands.NewInstructionsCmd())
 	cmd.AddCommand(commands.NewAttachmentsCmd())
 	cmd.AddCommand(commands.NewEmbedsCmd())
 	cmd.AddCommand(commands.NewAttachCmd())
@@ -1098,4 +1100,10 @@ func stdinDashNote(cmd *cobra.Command, args []ArgInfo) string {
 		return ""
 	}
 	return "Pass - to read from stdin: " + strings.Join(parts, ", ")
+}
+
+// profileNameIsPathSafe reports whether a profile name stays one directory
+// below the cache dir.
+func profileNameIsPathSafe(name string) bool {
+	return name != "." && filepath.IsLocal(name) && filepath.Base(name) == name
 }
