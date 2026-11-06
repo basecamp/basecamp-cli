@@ -499,7 +499,8 @@ const localClockLayout = "Jan 2 3:04 PM MST"
 // how an error happens to be phrased.
 func invalidGrant(err error) (string, bool) {
 	var refusal *basecamp.Error
-	if errors.As(err, &refusal) && refusal.OAuthError == "invalid_grant" {
+	if errors.As(err, &refusal) && refusal.OAuthError == "invalid_grant" &&
+		(refusal.HTTPStatus == http.StatusBadRequest || refusal.HTTPStatus == http.StatusUnauthorized) {
 		return refusal.OAuthErrorDescription, true
 	}
 	return "", false
@@ -525,6 +526,11 @@ func (m *Manager) errNewerCredential(oauthType string) *output.Error {
 	e.Hint = "Run: basecamp upgrade (or, to keep this version, log in again with it: " + command + ")"
 	return e
 }
+
+// ErrLoginRefused marks a BC5 refresh refused with invalid_grant: the
+// session expired or was revoked. Launchpad's same error can mean a
+// recoverable OAuth-client mismatch, so it does not carry this cause.
+var ErrLoginRefused = errors.New("the login's refresh token was refused")
 
 // forgetRefusedGrant deletes the stored credential only while it still
 // carries the refresh token the server just refused. Two processes used to
@@ -748,7 +754,11 @@ func (m *Manager) refreshCredential(ctx context.Context, origin string, creds *C
 		if reused && inContainer() {
 			msg += ". " + containerLoginAdvice
 		}
-		return m.errAuth(msg)
+		refused := m.errAuth(msg)
+		if creds.OAuthType == oauthTypeBC5 {
+			refused.Cause = ErrLoginRefused
+		}
+		return refused
 	}
 
 	creds.AccessToken = token.AccessToken

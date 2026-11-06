@@ -200,6 +200,9 @@ type connectStatusReport struct {
 	LockHolder *connectLockHolder `json:"lock_holder,omitempty"`
 	Pings      connectStatusPings `json:"pings"`
 	Status     connector.Status   `json:"status"`
+	// identity is a bot user's pinned identity, which the command that
+	// signs it in again names; zero for an Agent.
+	identity int64
 }
 
 // connectStatusPings is whether the profile's connector hears the agent's
@@ -276,7 +279,7 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 		status.Tasks[i].Worker = recordedWorkerState(t)
 		status.Tasks[i].Taker = recordedTakerState(t)
 	}
-	report := connectStatusReport{Profile: p.name, Shadow: shadow, Status: status}
+	report := connectStatusReport{Profile: p.name, Shadow: shadow, Status: status, identity: p.file.Agent.IdentityID}
 	if holder, ok := connector.InstanceHolder(dir, p.file.AccountID, p.file.Agent.PersonID); ok {
 		report.LockHolder = &connectLockHolder{PID: holder.PID, StartedAt: holder.StartedAt, PIDStatus: processPresence(holder.PID), Pings: holder.Pings, PingsBecause: holder.PingsBecause}
 	}
@@ -302,8 +305,13 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 
 func connectStatusSummary(r connectStatusReport) string {
 	parts := []string{}
-	if c := r.Status.Connection; c != nil && c.State == connector.ConnectionDisconnected {
-		parts = append(parts, "disconnected")
+	if c := r.Status.Connection; c != nil {
+		switch c.State {
+		case connector.ConnectionDisconnected:
+			parts = append(parts, "disconnected")
+		case connector.ConnectionSignedOut:
+			parts = append(parts, "signed out; "+botSignInHint(r.name(), r.identity))
+		}
 	}
 	if r.Status.Hold != nil {
 		parts = append(parts, "held")
@@ -324,8 +332,13 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 		title += " (shadow)"
 	}
 	fmt.Fprintf(w, "%s\n\n", title)
-	if s.Connection != nil && s.Connection.State == connector.ConnectionDisconnected {
-		fmt.Fprintf(w, "  Disconnected: %s. Reconnect it: basecamp connect setup -P %s\n\n", clean(s.Connection.Detail), richtext.ShellQuote(r.name()))
+	if c := s.Connection; c != nil {
+		switch c.State {
+		case connector.ConnectionDisconnected:
+			fmt.Fprintf(w, "  Disconnected: %s. Reconnect it: basecamp connect setup -P %s\n\n", clean(c.Detail), richtext.ShellQuote(r.name()))
+		case connector.ConnectionSignedOut:
+			fmt.Fprintf(w, "  Signed out: %s. %s\n\n", clean(c.Detail), botSignInHint(r.name(), r.identity))
+		}
 	}
 
 	switch {
