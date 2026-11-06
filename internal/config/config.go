@@ -49,15 +49,16 @@ type Config struct {
 	LLMMaxConcurrent int    `json:"llm_max_concurrent,omitempty"`
 	LLMTokenBudget   int    `json:"llm_token_budget,omitempty"`
 
-	// InstructionsDoc links a Basecamp document whose content agents read
-	// and follow before they write to Basecamp, through `basecamp
-	// instructions`. Whoever can edit that document steers every agent that
-	// links it, so only the global and system configs may set it: a cloned
-	// repo's config never can, trusted or not.
-	InstructionsDoc string `json:"instructions_doc,omitempty"`
-	// ProfileInstructionsDoc is the active profile's own instructions
-	// document, set at runtime by ApplyProfile.
-	ProfileInstructionsDoc string `json:"-"`
+	// InstructionsFile is the path of a local Markdown file whose content
+	// agents read and follow before they write to Basecamp, through
+	// `basecamp instructions`. It is a file on this computer, never text
+	// fetched from Basecamp, so what agents follow is whatever reviewed
+	// copy the person keeps there. Only the global and system configs may
+	// set it: a cloned repo's config never can, trusted or not.
+	InstructionsFile string `json:"instructions_file,omitempty"`
+	// ProfileInstructionsFile is the active profile's own instructions
+	// file, set at runtime by ApplyProfile.
+	ProfileInstructionsFile string `json:"-"`
 
 	// Experimental feature flags (opt-in via "config set experimental.X true --global").
 	Experimental map[string]bool `json:"experimental,omitempty"`
@@ -152,11 +153,11 @@ type ProfileConfig struct {
 	TodolistID string `json:"todolist_id,omitempty"`
 	Scope      string `json:"scope,omitempty"`
 	ClientID   string `json:"client_id,omitempty"`
-	// InstructionsDoc is this profile's own instructions document, read
+	// InstructionsFile is this profile's own instructions file, read
 	// after the top-level one and winning where they differ: an agent's
 	// voice on top of the account's shared baseline. Like the top-level
 	// key, only the global and system configs may set it.
-	InstructionsDoc string `json:"instructions_doc,omitempty"`
+	InstructionsFile string `json:"instructions_file,omitempty"`
 }
 
 // Source indicates where a config value came from.
@@ -397,12 +398,12 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 			}
 		}
 	}
-	if v, ok := fileCfg["instructions_doc"].(string); ok && v != "" {
+	if v, ok := fileCfg["instructions_file"].(string); ok && v != "" {
 		if source == SourceLocal || source == SourceRepo {
-			fmt.Fprintf(os.Stderr, "warning: ignoring instructions_doc from %s config at %s (set it with `basecamp config set instructions_doc <url> --global`)\n", source, path)
+			fmt.Fprintf(os.Stderr, "warning: ignoring instructions_file from %s config at %s (set it with `basecamp config set instructions_file <path> --global`)\n", source, path)
 		} else {
-			cfg.InstructionsDoc = v
-			cfg.Sources["instructions_doc"] = string(source)
+			cfg.InstructionsFile = v
+			cfg.Sources["instructions_file"] = string(source)
 		}
 	}
 	if v, ok := fileCfg["experimental"].(map[string]any); ok {
@@ -523,11 +524,11 @@ func mergeProfile(cfg *Config, name string, entry map[string]any, layer ProfileL
 	if v, ok := entry["client_id"].(string); ok {
 		set("client_id", &p.ClientID, v)
 	}
-	if v, ok := entry["instructions_doc"].(string); ok && v != "" {
+	if v, ok := entry["instructions_file"].(string); ok && v != "" {
 		if layer.Source == SourceGlobal || layer.Source == SourceSystem {
-			set("instructions_doc", &p.InstructionsDoc, v)
+			set("instructions_file", &p.InstructionsFile, v)
 		} else {
-			fmt.Fprintf(os.Stderr, "warning: ignoring instructions_doc for profile %q from %s config at %s (set it with `basecamp config set instructions_doc <url> --global --for-profile %s`)\n", name, layer.Source, layer.Path, richtext.ShellQuote(name))
+			fmt.Fprintf(os.Stderr, "warning: ignoring instructions_file for profile %q from %s config at %s (set it with `basecamp config set instructions_file <path> --global --for-profile %s`)\n", name, layer.Source, layer.Path, richtext.ShellQuote(name))
 		}
 	}
 }
@@ -750,9 +751,9 @@ func (c *Config) ApplyProfile(name string) error {
 		c.Scope = p.Scope
 		c.Sources["scope"] = "profile"
 	}
-	c.ProfileInstructionsDoc = p.InstructionsDoc
-	if p.InstructionsDoc != "" {
-		c.Sources["profile_instructions_doc"] = "profile"
+	c.ProfileInstructionsFile = p.InstructionsFile
+	if p.InstructionsFile != "" {
+		c.Sources["profile_instructions_file"] = "profile"
 	}
 
 	return nil

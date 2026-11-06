@@ -89,8 +89,8 @@ func runConfigShow(cmd *cobra.Command) error {
 		{"llm_endpoint", app.Config.LLMEndpoint, app.Config.LLMEndpoint != ""},
 		{"llm_max_concurrent", fmt.Sprintf("%d", app.Config.LLMMaxConcurrent), app.Config.Sources["llm_max_concurrent"] != ""},
 		{"llm_token_budget", fmt.Sprintf("%d", app.Config.LLMTokenBudget), app.Config.Sources["llm_token_budget"] != ""},
-		{"instructions_doc", app.Config.InstructionsDoc, app.Config.InstructionsDoc != ""},
-		{"profile_instructions_doc", app.Config.ProfileInstructionsDoc, app.Config.ProfileInstructionsDoc != ""},
+		{"instructions_file", app.Config.InstructionsFile, app.Config.InstructionsFile != ""},
+		{"profile_instructions_file", app.Config.ProfileInstructionsFile, app.Config.ProfileInstructionsFile != ""},
 	}
 
 	for _, k := range keys {
@@ -193,13 +193,14 @@ func newConfigSetCmd() *cobra.Command {
 Valid keys: account_id, project_id (or project), todolist_id, base_url, cache_dir,
             cache_enabled, format, scope, default_profile, hints, stats, verbose,
             onboarded, llm_provider (or llm), llm_model, llm_api_key, llm_endpoint,
-            llm_max_concurrent, llm_token_budget, instructions_doc,
+            llm_max_concurrent, llm_token_budget, instructions_file,
             experimental.<feature>
 
-instructions_doc links a Basecamp document that agents read and follow
+instructions_file names a local Markdown file that agents read and follow
 before they write to Basecamp (see basecamp instructions). It takes the
-document's URL and must be set with --global. With --for-profile <name> it
-links that profile's own document, read after the shared one.`,
+file's path, saved as an absolute path, and must be set with --global. With
+--for-profile <name> it sets that profile's own file, read after the shared
+one.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -228,7 +229,7 @@ links that profile's own document, read after the shared one.`,
 				"llm_endpoint":       true,
 				"llm_max_concurrent": true,
 				"llm_token_budget":   true,
-				"instructions_doc":   true,
+				"instructions_file":  true,
 			}
 			isExperimentalKey := strings.HasPrefix(key, "experimental.")
 			if !validKeys[key] && !isExperimentalKey {
@@ -269,11 +270,11 @@ links that profile's own document, read after the shared one.`,
 				return output.ErrUsage("llm_api_key must be set globally (--global) or via BASECAMP_LLM_API_KEY env var")
 			}
 
-			if key == "instructions_doc" && !global {
-				return output.ErrUsage("instructions_doc must be set globally (--global): a repo's config cannot steer every agent")
+			if key == "instructions_file" && !global {
+				return output.ErrUsage("instructions_file must be set globally (--global): a repo's config cannot steer every agent")
 			}
-			if forProfile != "" && key != "instructions_doc" {
-				return output.ErrUsage("--for-profile applies only to instructions_doc")
+			if forProfile != "" && key != "instructions_file" {
+				return output.ErrUsage("--for-profile applies only to instructions_file")
 			}
 
 			// Validate default_profile against configured profiles
@@ -327,10 +328,12 @@ links that profile's own document, read after the shared one.`,
 					fmt.Fprintln(os.Stderr, "warning: llm_endpoint is plain http on a non-localhost host; the LLM feature will refuse it if an API key is set with the openai provider")
 				}
 				configData[key] = value
-			case "instructions_doc":
-				if _, err := parseInstructionsDoc(value); err != nil {
+			case "instructions_file":
+				path, err := resolveInstructionsFile(value)
+				if err != nil {
 					return err
 				}
+				value, valueOut = path, path
 				if forProfile != "" {
 					entry, err := profileEntryForInstructions(configData, forProfile)
 					if err != nil {
@@ -423,7 +426,7 @@ links that profile's own document, read after the shared one.`,
 	}
 
 	cmd.Flags().BoolVar(&global, "global", false, "Set in global config (~/.config/basecamp/)")
-	cmd.Flags().StringVar(&forProfile, "for-profile", "", "Set instructions_doc for this profile only, on top of the shared one")
+	cmd.Flags().StringVar(&forProfile, "for-profile", "", "Set instructions_file for this profile only, on top of the shared one")
 	// Note: local is the default, so no --local flag needed
 
 	return cmd
@@ -507,8 +510,8 @@ func newConfigUnsetCmd() *cobra.Command {
 
 			key := resolveKeyAlias(args[0])
 			if forProfile != "" {
-				if key != "instructions_doc" {
-					return output.ErrUsage("--for-profile applies only to instructions_doc")
+				if key != "instructions_file" {
+					return output.ErrUsage("--for-profile applies only to instructions_file")
 				}
 				if !global {
 					return output.ErrUsage("--for-profile needs --global: profiles live in the global config")
@@ -607,7 +610,7 @@ func newConfigUnsetCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&global, "global", false, "Unset from global config")
-	cmd.Flags().StringVar(&forProfile, "for-profile", "", "Unset instructions_doc for this profile only")
+	cmd.Flags().StringVar(&forProfile, "for-profile", "", "Unset instructions_file for this profile only")
 
 	return cmd
 }

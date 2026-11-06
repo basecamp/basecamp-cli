@@ -12059,7 +12059,6 @@ FLAG basecamp instructions --no-stats type=bool
 FLAG basecamp instructions --profile type=string
 FLAG basecamp instructions --project type=string
 FLAG basecamp instructions --quiet type=bool
-FLAG basecamp instructions --refresh type=bool
 FLAG basecamp instructions --stats type=bool
 FLAG basecamp instructions --styled type=bool
 FLAG basecamp instructions --todolist type=string
