@@ -190,9 +190,17 @@ ARG basecamp documents uploads create 00 <file>
 ARG basecamp documents vault create 00 <name>
 ARG basecamp documents vaults create 00 <name>
 ARG basecamp documents versions 00 <upload_id|url>
+ARG basecamp doors create 00 [title]
+ARG basecamp doors delete 00 <id|url>
+ARG basecamp doors show 00 <id|url>
+ARG basecamp doors update 00 <id|url>
 ARG basecamp embeds create 00 <url>
 ARG basecamp embeds show 00 <sgid>
 ARG basecamp events 00 [id|url]
+ARG basecamp external-links create 00 [title]
+ARG basecamp external-links delete 00 <id|url>
+ARG basecamp external-links show 00 <id|url>
+ARG basecamp external-links update 00 <id|url>
 ARG basecamp file archive 00 <id|url>
 ARG basecamp file copy 00 <id|url>...
 ARG basecamp file doc create 00 <title>
@@ -840,6 +848,12 @@ CMD basecamp documents vaults
 CMD basecamp documents vaults create
 CMD basecamp documents vaults list
 CMD basecamp documents versions
+CMD basecamp doors
+CMD basecamp doors create
+CMD basecamp doors delete
+CMD basecamp doors list
+CMD basecamp doors show
+CMD basecamp doors update
 CMD basecamp drafts
 CMD basecamp drafts list
 CMD basecamp embeds
@@ -848,6 +862,12 @@ CMD basecamp embeds show
 CMD basecamp events
 CMD basecamp events poll
 CMD basecamp events ticket
+CMD basecamp external-links
+CMD basecamp external-links create
+CMD basecamp external-links delete
+CMD basecamp external-links list
+CMD basecamp external-links show
+CMD basecamp external-links update
 CMD basecamp file
 CMD basecamp file archive
 CMD basecamp file copy
@@ -7809,6 +7829,144 @@ FLAG basecamp documents versions --styled type=bool
 FLAG basecamp documents versions --todolist type=string
 FLAG basecamp documents versions --vault type=string
 FLAG basecamp documents versions --verbose type=count
+FLAG basecamp doors --account type=string
+FLAG basecamp doors --agent type=bool
+FLAG basecamp doors --cache-dir type=string
+FLAG basecamp doors --count type=bool
+FLAG basecamp doors --help type=bool
+FLAG basecamp doors --hints type=bool
+FLAG basecamp doors --ids-only type=bool
+FLAG basecamp doors --in type=string
+FLAG basecamp doors --jq type=string
+FLAG basecamp doors --json type=bool
+FLAG basecamp doors --markdown type=bool
+FLAG basecamp doors --md type=bool
+FLAG basecamp doors --no-hints type=bool
+FLAG basecamp doors --no-stats type=bool
+FLAG basecamp doors --profile type=string
+FLAG basecamp doors --project type=string
+FLAG basecamp doors --quiet type=bool
+FLAG basecamp doors --stats type=bool
+FLAG basecamp doors --styled type=bool
+FLAG basecamp doors --todolist type=string
+FLAG basecamp doors --verbose type=count
+FLAG basecamp doors create --account type=string
+FLAG basecamp doors create --agent type=bool
+FLAG basecamp doors create --cache-dir type=string
+FLAG basecamp doors create --count type=bool
+FLAG basecamp doors create --description type=string
+FLAG basecamp doors create --format type=string
+FLAG basecamp doors create --help type=bool
+FLAG basecamp doors create --hints type=bool
+FLAG basecamp doors create --ids-only type=bool
+FLAG basecamp doors create --in type=string
+FLAG basecamp doors create --jq type=string
+FLAG basecamp doors create --json type=bool
+FLAG basecamp doors create --markdown type=bool
+FLAG basecamp doors create --md type=bool
+FLAG basecamp doors create --no-hints type=bool
+FLAG basecamp doors create --no-stats type=bool
+FLAG basecamp doors create --profile type=string
+FLAG basecamp doors create --project type=string
+FLAG basecamp doors create --quiet type=bool
+FLAG basecamp doors create --service type=string
+FLAG basecamp doors create --stats type=bool
+FLAG basecamp doors create --styled type=bool
+FLAG basecamp doors create --title type=string
+FLAG basecamp doors create --todolist type=string
+FLAG basecamp doors create --url type=string
+FLAG basecamp doors create --verbose type=count
+FLAG basecamp doors create --visible-to-clients type=bool
+FLAG basecamp doors delete --account type=string
+FLAG basecamp doors delete --agent type=bool
+FLAG basecamp doors delete --cache-dir type=string
+FLAG basecamp doors delete --count type=bool
+FLAG basecamp doors delete --help type=bool
+FLAG basecamp doors delete --hints type=bool
+FLAG basecamp doors delete --ids-only type=bool
+FLAG basecamp doors delete --in type=string
+FLAG basecamp doors delete --jq type=string
+FLAG basecamp doors delete --json type=bool
+FLAG basecamp doors delete --markdown type=bool
+FLAG basecamp doors delete --md type=bool
+FLAG basecamp doors delete --no-hints type=bool
+FLAG basecamp doors delete --no-stats type=bool
+FLAG basecamp doors delete --profile type=string
+FLAG basecamp doors delete --project type=string
+FLAG basecamp doors delete --quiet type=bool
+FLAG basecamp doors delete --stats type=bool
+FLAG basecamp doors delete --styled type=bool
+FLAG basecamp doors delete --todolist type=string
+FLAG basecamp doors delete --verbose type=count
+FLAG basecamp doors list --account type=string
+FLAG basecamp doors list --agent type=bool
+FLAG basecamp doors list --cache-dir type=string
+FLAG basecamp doors list --count type=bool
+FLAG basecamp doors list --help type=bool
+FLAG basecamp doors list --hints type=bool
+FLAG basecamp doors list --ids-only type=bool
+FLAG basecamp doors list --in type=string
+FLAG basecamp doors list --jq type=string
+FLAG basecamp doors list --json type=bool
+FLAG basecamp doors list --markdown type=bool
+FLAG basecamp doors list --md type=bool
+FLAG basecamp doors list --no-hints type=bool
+FLAG basecamp doors list --no-stats type=bool
+FLAG basecamp doors list --profile type=string
+FLAG basecamp doors list --project type=string
+FLAG basecamp doors list --quiet type=bool
+FLAG basecamp doors list --stats type=bool
+FLAG basecamp doors list --styled type=bool
+FLAG basecamp doors list --todolist type=string
+FLAG basecamp doors list --verbose type=count
+FLAG basecamp doors show --account type=string
+FLAG basecamp doors show --agent type=bool
+FLAG basecamp doors show --cache-dir type=string
+FLAG basecamp doors show --count type=bool
+FLAG basecamp doors show --help type=bool
+FLAG basecamp doors show --hints type=bool
+FLAG basecamp doors show --ids-only type=bool
+FLAG basecamp doors show --in type=string
+FLAG basecamp doors show --jq type=string
+FLAG basecamp doors show --json type=bool
+FLAG basecamp doors show --markdown type=bool
+FLAG basecamp doors show --md type=bool
+FLAG basecamp doors show --no-hints type=bool
+FLAG basecamp doors show --no-stats type=bool
+FLAG basecamp doors show --profile type=string
+FLAG basecamp doors show --project type=string
+FLAG basecamp doors show --quiet type=bool
+FLAG basecamp doors show --stats type=bool
+FLAG basecamp doors show --styled type=bool
+FLAG basecamp doors show --todolist type=string
+FLAG basecamp doors show --verbose type=count
+FLAG basecamp doors update --account type=string
+FLAG basecamp doors update --agent type=bool
+FLAG basecamp doors update --cache-dir type=string
+FLAG basecamp doors update --count type=bool
+FLAG basecamp doors update --description type=string
+FLAG basecamp doors update --format type=string
+FLAG basecamp doors update --help type=bool
+FLAG basecamp doors update --hints type=bool
+FLAG basecamp doors update --ids-only type=bool
+FLAG basecamp doors update --in type=string
+FLAG basecamp doors update --jq type=string
+FLAG basecamp doors update --json type=bool
+FLAG basecamp doors update --markdown type=bool
+FLAG basecamp doors update --md type=bool
+FLAG basecamp doors update --no-hints type=bool
+FLAG basecamp doors update --no-stats type=bool
+FLAG basecamp doors update --profile type=string
+FLAG basecamp doors update --project type=string
+FLAG basecamp doors update --quiet type=bool
+FLAG basecamp doors update --service type=string
+FLAG basecamp doors update --stats type=bool
+FLAG basecamp doors update --styled type=bool
+FLAG basecamp doors update --title type=string
+FLAG basecamp doors update --todolist type=string
+FLAG basecamp doors update --url type=string
+FLAG basecamp doors update --verbose type=count
+FLAG basecamp doors update --visible-to-clients type=bool
 FLAG basecamp drafts --account type=string
 FLAG basecamp drafts --agent type=bool
 FLAG basecamp drafts --cache-dir type=string
@@ -7994,6 +8152,144 @@ FLAG basecamp events ticket --stats type=bool
 FLAG basecamp events ticket --styled type=bool
 FLAG basecamp events ticket --todolist type=string
 FLAG basecamp events ticket --verbose type=count
+FLAG basecamp external-links --account type=string
+FLAG basecamp external-links --agent type=bool
+FLAG basecamp external-links --cache-dir type=string
+FLAG basecamp external-links --count type=bool
+FLAG basecamp external-links --help type=bool
+FLAG basecamp external-links --hints type=bool
+FLAG basecamp external-links --ids-only type=bool
+FLAG basecamp external-links --in type=string
+FLAG basecamp external-links --jq type=string
+FLAG basecamp external-links --json type=bool
+FLAG basecamp external-links --markdown type=bool
+FLAG basecamp external-links --md type=bool
+FLAG basecamp external-links --no-hints type=bool
+FLAG basecamp external-links --no-stats type=bool
+FLAG basecamp external-links --profile type=string
+FLAG basecamp external-links --project type=string
+FLAG basecamp external-links --quiet type=bool
+FLAG basecamp external-links --stats type=bool
+FLAG basecamp external-links --styled type=bool
+FLAG basecamp external-links --todolist type=string
+FLAG basecamp external-links --verbose type=count
+FLAG basecamp external-links create --account type=string
+FLAG basecamp external-links create --agent type=bool
+FLAG basecamp external-links create --cache-dir type=string
+FLAG basecamp external-links create --count type=bool
+FLAG basecamp external-links create --description type=string
+FLAG basecamp external-links create --format type=string
+FLAG basecamp external-links create --help type=bool
+FLAG basecamp external-links create --hints type=bool
+FLAG basecamp external-links create --ids-only type=bool
+FLAG basecamp external-links create --in type=string
+FLAG basecamp external-links create --jq type=string
+FLAG basecamp external-links create --json type=bool
+FLAG basecamp external-links create --markdown type=bool
+FLAG basecamp external-links create --md type=bool
+FLAG basecamp external-links create --no-hints type=bool
+FLAG basecamp external-links create --no-stats type=bool
+FLAG basecamp external-links create --profile type=string
+FLAG basecamp external-links create --project type=string
+FLAG basecamp external-links create --quiet type=bool
+FLAG basecamp external-links create --service type=string
+FLAG basecamp external-links create --stats type=bool
+FLAG basecamp external-links create --styled type=bool
+FLAG basecamp external-links create --title type=string
+FLAG basecamp external-links create --todolist type=string
+FLAG basecamp external-links create --url type=string
+FLAG basecamp external-links create --verbose type=count
+FLAG basecamp external-links create --visible-to-clients type=bool
+FLAG basecamp external-links delete --account type=string
+FLAG basecamp external-links delete --agent type=bool
+FLAG basecamp external-links delete --cache-dir type=string
+FLAG basecamp external-links delete --count type=bool
+FLAG basecamp external-links delete --help type=bool
+FLAG basecamp external-links delete --hints type=bool
+FLAG basecamp external-links delete --ids-only type=bool
+FLAG basecamp external-links delete --in type=string
+FLAG basecamp external-links delete --jq type=string
+FLAG basecamp external-links delete --json type=bool
+FLAG basecamp external-links delete --markdown type=bool
+FLAG basecamp external-links delete --md type=bool
+FLAG basecamp external-links delete --no-hints type=bool
+FLAG basecamp external-links delete --no-stats type=bool
+FLAG basecamp external-links delete --profile type=string
+FLAG basecamp external-links delete --project type=string
+FLAG basecamp external-links delete --quiet type=bool
+FLAG basecamp external-links delete --stats type=bool
+FLAG basecamp external-links delete --styled type=bool
+FLAG basecamp external-links delete --todolist type=string
+FLAG basecamp external-links delete --verbose type=count
+FLAG basecamp external-links list --account type=string
+FLAG basecamp external-links list --agent type=bool
+FLAG basecamp external-links list --cache-dir type=string
+FLAG basecamp external-links list --count type=bool
+FLAG basecamp external-links list --help type=bool
+FLAG basecamp external-links list --hints type=bool
+FLAG basecamp external-links list --ids-only type=bool
+FLAG basecamp external-links list --in type=string
+FLAG basecamp external-links list --jq type=string
+FLAG basecamp external-links list --json type=bool
+FLAG basecamp external-links list --markdown type=bool
+FLAG basecamp external-links list --md type=bool
+FLAG basecamp external-links list --no-hints type=bool
+FLAG basecamp external-links list --no-stats type=bool
+FLAG basecamp external-links list --profile type=string
+FLAG basecamp external-links list --project type=string
+FLAG basecamp external-links list --quiet type=bool
+FLAG basecamp external-links list --stats type=bool
+FLAG basecamp external-links list --styled type=bool
+FLAG basecamp external-links list --todolist type=string
+FLAG basecamp external-links list --verbose type=count
+FLAG basecamp external-links show --account type=string
+FLAG basecamp external-links show --agent type=bool
+FLAG basecamp external-links show --cache-dir type=string
+FLAG basecamp external-links show --count type=bool
+FLAG basecamp external-links show --help type=bool
+FLAG basecamp external-links show --hints type=bool
+FLAG basecamp external-links show --ids-only type=bool
+FLAG basecamp external-links show --in type=string
+FLAG basecamp external-links show --jq type=string
+FLAG basecamp external-links show --json type=bool
+FLAG basecamp external-links show --markdown type=bool
+FLAG basecamp external-links show --md type=bool
+FLAG basecamp external-links show --no-hints type=bool
+FLAG basecamp external-links show --no-stats type=bool
+FLAG basecamp external-links show --profile type=string
+FLAG basecamp external-links show --project type=string
+FLAG basecamp external-links show --quiet type=bool
+FLAG basecamp external-links show --stats type=bool
+FLAG basecamp external-links show --styled type=bool
+FLAG basecamp external-links show --todolist type=string
+FLAG basecamp external-links show --verbose type=count
+FLAG basecamp external-links update --account type=string
+FLAG basecamp external-links update --agent type=bool
+FLAG basecamp external-links update --cache-dir type=string
+FLAG basecamp external-links update --count type=bool
+FLAG basecamp external-links update --description type=string
+FLAG basecamp external-links update --format type=string
+FLAG basecamp external-links update --help type=bool
+FLAG basecamp external-links update --hints type=bool
+FLAG basecamp external-links update --ids-only type=bool
+FLAG basecamp external-links update --in type=string
+FLAG basecamp external-links update --jq type=string
+FLAG basecamp external-links update --json type=bool
+FLAG basecamp external-links update --markdown type=bool
+FLAG basecamp external-links update --md type=bool
+FLAG basecamp external-links update --no-hints type=bool
+FLAG basecamp external-links update --no-stats type=bool
+FLAG basecamp external-links update --profile type=string
+FLAG basecamp external-links update --project type=string
+FLAG basecamp external-links update --quiet type=bool
+FLAG basecamp external-links update --service type=string
+FLAG basecamp external-links update --stats type=bool
+FLAG basecamp external-links update --styled type=bool
+FLAG basecamp external-links update --title type=string
+FLAG basecamp external-links update --todolist type=string
+FLAG basecamp external-links update --url type=string
+FLAG basecamp external-links update --verbose type=count
+FLAG basecamp external-links update --visible-to-clients type=bool
 FLAG basecamp file --account type=string
 FLAG basecamp file --agent type=bool
 FLAG basecamp file --cache-dir type=string
@@ -21164,6 +21460,12 @@ SUB basecamp documents vaults
 SUB basecamp documents vaults create
 SUB basecamp documents vaults list
 SUB basecamp documents versions
+SUB basecamp doors
+SUB basecamp doors create
+SUB basecamp doors delete
+SUB basecamp doors list
+SUB basecamp doors show
+SUB basecamp doors update
 SUB basecamp drafts
 SUB basecamp drafts list
 SUB basecamp embeds
@@ -21172,6 +21474,12 @@ SUB basecamp embeds show
 SUB basecamp events
 SUB basecamp events poll
 SUB basecamp events ticket
+SUB basecamp external-links
+SUB basecamp external-links create
+SUB basecamp external-links delete
+SUB basecamp external-links list
+SUB basecamp external-links show
+SUB basecamp external-links update
 SUB basecamp file
 SUB basecamp file archive
 SUB basecamp file copy

@@ -349,6 +349,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewTodosetsCmd())
 	cmd.AddCommand(commands.NewHillchartsCmd())
 	cmd.AddCommand(commands.NewToolsCmd())
+	cmd.AddCommand(commands.NewDoorsCmd())
 	cmd.AddCommand(commands.NewConfigCmd())
 	cmd.AddCommand(commands.NewTodolistgroupsCmd())
 	cmd.AddCommand(commands.NewCommandsCmd())

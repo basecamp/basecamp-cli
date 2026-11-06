@@ -100,6 +100,7 @@ func buildRootWithAllCommands() *cobra.Command {
 	root.AddCommand(commands.NewTodosetsCmd())
 	root.AddCommand(commands.NewHillchartsCmd())
 	root.AddCommand(commands.NewToolsCmd())
+	root.AddCommand(commands.NewDoorsCmd())
 	root.AddCommand(commands.NewConfigCmd())
 	root.AddCommand(commands.NewTodolistgroupsCmd())
 	root.AddCommand(commands.NewCommandsCmd())

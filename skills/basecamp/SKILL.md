@@ -34,6 +34,7 @@ triggers:
   - log time
   - basecamp template
   - basecamp webhook
+  - external link
   - basecamp gauge
   - basecamp hill chart
   - hill chart progress
@@ -88,7 +89,7 @@ argument-hint: "[action] [args...]"
 # Basecamp CLI
 
 Use the installed CLI as the command reference. This skill defines the operating
-rules; it intentionally does not duplicate the CLI's command catalog.
+rules; it does not duplicate the CLI's command catalog.
 
 ## Discovery-first workflow
 
@@ -117,7 +118,7 @@ For each task:
    breadcrumbs before deciding what to do next.
 
 Targeted leaf help is cheap and local; root help returns the full command catalog
-and is not token-cheap. Do not load root help merely to confirm global flags
+and is not token-cheap. Do not load root help to confirm global flags
 already documented by this skill. For obvious Docs & Files requests, route
 straight to `files list`, `files download`, or `files uploads create` before
 trying parent or root help. A subcommand's `inherited_flags` is intentionally
