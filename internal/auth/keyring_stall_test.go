@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"net"
+	"net/http"
 	"os"
 	"sync"
 	"syscall"
@@ -502,4 +503,58 @@ func TestTheAskAgainWaitEndsWithTheCaller(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Less(t, time.Since(start), 5*time.Second, "the wait ends with the caller")
 	machine.set(func(m *keyringMachine) { assert.Equal(t, 1, m.reads, "no second read after the caller left") })
+}
+
+// A save that lands while a read is in flight wins: the read must not
+// replace the credential just written with the one it found before.
+func TestAReadRacingASaveDoesNotRestoreTheOldCredential(t *testing.T) {
+	store, machine, _ := stallingStore(t)
+	saveCreds(t, machine, "profile:agent", liveCreds("old"))
+	_, err := store.Load("profile:agent")
+	require.NoError(t, err)
+
+	var once sync.Once
+	machine.set(func(m *keyringMachine) {
+		m.onRead = func() {
+			once.Do(func() { require.NoError(t, store.Save("profile:agent", liveCreds("new"))) })
+		}
+	})
+	creds, err := store.Load("profile:agent")
+	require.NoError(t, err)
+	assert.Equal(t, "old", creds.AccessToken, "the read looked the item up before the save")
+	held := store.heldCredential("profile:agent")
+	require.NotNil(t, held)
+	assert.Equal(t, "new", held.AccessToken, "what was saved is what is held")
+}
+
+// A renewal that was saved, followed by a keyring too slow to read it back,
+// serves the token the renewal saved.
+func TestARenewedTokenIsServedWhenItsReadBackStalls(t *testing.T) {
+	as := startDeviceAS(t)
+	as.token = func(int) (int, string) {
+		return http.StatusOK, `{"access_token":"minted-1","token_type":"bearer","expires_in":3600,"resource":"urn:bc:agent:42","scope":"full"}`
+	}
+	store, machine, _ := stallingStore(t)
+	m := newDeviceTestManager(t, as.srv.URL)
+	m.SetStore(store)
+	key := m.credentialKey()
+	require.NoError(t, store.Save(key, agentCredential(as.srv.URL+"/oauth/token", time.Now().Add(-time.Minute))))
+
+	// The first read finds the token spent, the second (under the key lock)
+	// confirms it; the keyring stops answering from the read-back on.
+	machine.set(func(m *keyringMachine) {
+		m.reads = 0
+		m.onRead = func() {
+			machine.set(func(m *keyringMachine) {
+				if m.reads == 2 {
+					m.stalled = true
+				}
+			})
+		}
+	})
+	token, err := m.AccessToken(t.Context())
+	require.NoError(t, err, "the renewal was saved; the keyring's silence is not the token's")
+	assert.Equal(t, "minted-1", token)
+	machine.set(func(m *keyringMachine) { assert.Equal(t, 3, m.reads, "the read-back was attempted") })
+	assert.Len(t, as.tokenCalls(), 1)
 }

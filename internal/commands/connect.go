@@ -1472,6 +1472,10 @@ func tokenRetry(err error) (time.Duration, bool) {
 	}
 	var cliErr *output.Error
 	switch {
+	case auth.KeyringUnavailable(err):
+		// The keyring did not answer, which says nothing about the token:
+		// waited out on the backoff, at start as in the running feed.
+		return 0, true
 	case errors.As(err, &cliErr) && cliErr.Retryable:
 		// Exactly what the server named, never longer than the one cap,
 		// or nothing, which leaves it to the backoff: never a default

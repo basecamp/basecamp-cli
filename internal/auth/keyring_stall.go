@@ -77,8 +77,8 @@ type keyringStall struct {
 	retryAt  time.Time
 	stalls   int
 	// held is the credential last read or written per key, and gen counts
-	// each key's invalidations, so a read that started before one cannot
-	// put back what it removed.
+	// each key's writes and invalidations, so a read that started before
+	// one cannot put back what it replaced or removed.
 	held map[string]Credentials
 	gen  map[string]uint64
 
@@ -269,7 +269,9 @@ func (s *Store) keepRead(key string, creds *Credentials, gen uint64) {
 	k.held[key] = *creds
 }
 
-// keep holds creds as the credential last written for key.
+// keep holds creds as the credential last written for key. A write is an
+// invalidation too: a read that began before it must not replace what it
+// wrote with what was there before.
 func (s *Store) keep(key string, creds *Credentials) {
 	k := &s.stall
 	k.mu.Lock()
@@ -278,6 +280,10 @@ func (s *Store) keep(key string, creds *Credentials) {
 		k.held = make(map[string]Credentials)
 	}
 	k.held[key] = *creds
+	if k.gen == nil {
+		k.gen = make(map[string]uint64)
+	}
+	k.gen[key]++
 }
 
 // forget drops what is held for key: the store said it is gone or

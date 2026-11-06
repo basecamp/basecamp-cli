@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -175,4 +176,30 @@ func TestAFailureThatIsNotTheKeyringsEndsTheOutage(t *testing.T) {
 	f.mu.Unlock()
 	f.advance(2 * time.Minute)
 	assert.Equal(t, eventfeed.PollTransient, f.pollKind(t), "the old outage's clock does not carry over")
+}
+
+type scriptedTokens struct{ errs []error }
+
+func (s *scriptedTokens) AccessToken(context.Context) (string, error) {
+	if len(s.errs) == 0 {
+		return "token", nil
+	}
+	err := s.errs[0]
+	s.errs = s.errs[1:]
+	return "", err
+}
+
+// A connector started while the keyring is not answering, whether timed
+// out or off the bus, waits for it on the backoff, as the running feed
+// does, rather than exiting on the first try.
+func TestAStartWaitsOutASilentKeyring(t *testing.T) {
+	offTheBus := errors.Join(fmt.Errorf("credentials not found: %w", io.EOF), auth.ErrKeyringUnavailable)
+	tokens := &scriptedTokens{errs: []error{offTheBus, keyringLatchedError()}}
+	var waits []time.Duration
+	err := awaitToken(t.Context(), tokens, connectStartWait{Sleep: func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		return nil
+	}})
+	require.NoError(t, err)
+	assert.Len(t, waits, 2, "each silence is waited out")
 }
