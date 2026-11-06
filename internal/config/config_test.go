@@ -1441,14 +1441,14 @@ func TestProfileEntryForAnotherProjectDropsTheInheritedTodolist(t *testing.T) {
 	assert.Equal(t, "3", cfg.Profiles["bot"].TodolistID, "the same project, spelled differently")
 }
 
-// instructions_file steers every agent that links it, so it is read from the
+// instructions steers every agent that links it, so it is read from the
 // global and system configs only. A cloned repo's config never sets it, even
 // once trusted: trust vouches for where tokens go, not for what agents write.
-func TestLoadFromFileInstructionsFileGlobalOnly(t *testing.T) {
+func TestLoadFromFileInstructionsGlobalOnly(t *testing.T) {
 	const stylePath = "/home/someone/style.md"
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	require.NoError(t, os.WriteFile(path, []byte(`{"instructions_file": "`+stylePath+`"}`), 0o600))
+	require.NoError(t, os.WriteFile(path, []byte(`{"instructions": "`+stylePath+`"}`), 0o600))
 
 	trust := NewTrustStore(t.TempDir())
 	require.NoError(t, trust.Trust(path))
@@ -1457,26 +1457,26 @@ func TestLoadFromFileInstructionsFileGlobalOnly(t *testing.T) {
 		for _, ts := range []*TrustStore{nil, trust} {
 			cfg := Default()
 			loadFromFile(cfg, path, source, ts)
-			assert.Empty(t, cfg.InstructionsFile, "%s config (trusted=%t) must not set instructions_file", source, ts != nil)
+			assert.Empty(t, cfg.Instructions, "%s config (trusted=%t) must not set instructions", source, ts != nil)
 		}
 	}
 
 	for _, source := range []Source{SourceGlobal, SourceSystem} {
 		cfg := Default()
 		loadFromFile(cfg, path, source, nil)
-		assert.Equal(t, stylePath, cfg.InstructionsFile)
-		assert.Equal(t, string(source), cfg.Sources["instructions_file"])
+		assert.Equal(t, stylePath, cfg.Instructions)
+		assert.Equal(t, string(source), cfg.Sources["instructions"])
 	}
 }
 
 // A profile's own instructions file layers over the shared one. It is
 // read from the global and system configs only, like the top-level key, and
 // becomes the active profile's when the profile is applied.
-func TestProfileInstructionsFileGlobalOnly(t *testing.T) {
+func TestProfileInstructionsGlobalOnly(t *testing.T) {
 	const stylePath = "/home/someone/agent-style.md"
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	body := `{"profiles": {"agent": {"base_url": "https://3.basecampapi.com", "account_id": "1", "instructions_file": "` + stylePath + `"}}}`
+	body := `{"profiles": {"agent": {"base_url": "https://3.basecampapi.com", "account_id": "1", "instructions": "` + stylePath + `"}}}`
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
 
 	trust := NewTrustStore(t.TempDir())
@@ -1485,31 +1485,31 @@ func TestProfileInstructionsFileGlobalOnly(t *testing.T) {
 		cfg := Default()
 		loadFromFile(cfg, path, source, trust)
 		require.Contains(t, cfg.Profiles, "agent", "a trusted %s config still sets the profile", source)
-		assert.Empty(t, cfg.Profiles["agent"].InstructionsFile, "but not its instructions_file")
+		assert.Empty(t, cfg.Profiles["agent"].Instructions, "but not its instructions")
 	}
 
 	for _, source := range []Source{SourceGlobal, SourceSystem} {
 		cfg := Default()
 		loadFromFile(cfg, path, source, nil)
 		require.Contains(t, cfg.Profiles, "agent")
-		assert.Equal(t, stylePath, cfg.Profiles["agent"].InstructionsFile, "a %s config sets it", source)
+		assert.Equal(t, stylePath, cfg.Profiles["agent"].Instructions, "a %s config sets it", source)
 	}
 
 	cfg := Default()
 	loadFromFile(cfg, path, SourceGlobal, nil)
-	assert.Empty(t, cfg.ProfileInstructionsFile, "nothing is active until the profile is applied")
+	assert.Empty(t, cfg.ProfileInstructions, "nothing is active until the profile is applied")
 
 	require.NoError(t, cfg.ApplyProfile("agent"))
-	assert.Equal(t, stylePath, cfg.ProfileInstructionsFile)
-	assert.Equal(t, "profile", cfg.Sources["profile_instructions_file"])
+	assert.Equal(t, stylePath, cfg.ProfileInstructions)
+	assert.Equal(t, "profile", cfg.Sources["profile_instructions"])
 }
 
-// The warning for a profile's instructions_file from a repo config suggests a
+// The warning for a profile's instructions from a repo config suggests a
 // command to paste; a profile name is not validated, so it is quoted.
-func TestProfileInstructionsFileWarningQuotesTheProfile(t *testing.T) {
+func TestProfileInstructionsWarningQuotesTheProfile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	body := `{"profiles": {"a; rm -rf x": {"base_url": "https://3.basecampapi.com", "instructions_file": "/home/someone/agent-style.md"}}}`
+	body := `{"profiles": {"a; rm -rf x": {"base_url": "https://3.basecampapi.com", "instructions": "/home/someone/agent-style.md"}}}`
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
 	trust := NewTrustStore(t.TempDir())
 	require.NoError(t, trust.Trust(path))
