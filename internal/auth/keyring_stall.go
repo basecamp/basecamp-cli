@@ -3,8 +3,12 @@ package auth
 import (
 	"context"
 	"errors"
+	"io"
+	"io/fs"
+	"net"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -72,8 +76,11 @@ type keyringStall struct {
 	retrying bool
 	retryAt  time.Time
 	stalls   int
-	// held is the credential last read or written per key.
+	// held is the credential last read or written per key, and gen counts
+	// each key's invalidations, so a read that started before one cannot
+	// put back what it removed.
 	held map[string]Credentials
+	gen  map[string]uint64
 
 	// now is the backoff's clock. Test seam; nil means time.Now.
 	now func() time.Time
@@ -122,15 +129,21 @@ func (s *Store) current() credStore {
 	return fresh
 }
 
-// read is one credential read with the stall handling around it.
-func (s *Store) read(origin string) ([]byte, error) {
+// read is one credential read with the stall handling around it. It
+// returns the key's generation as of the start of the read, for keepRead.
+// A caller's cancellation (req) ends the grace wait, and no second read
+// starts after it.
+func (s *Store) read(origin string, req lockRequest) ([]byte, uint64, error) {
+	gen := s.generation(origin)
 	inner := s.ensure()
 	data, err := inner.Load(origin)
 	if !inner.UsingKeyring() {
-		return data, err
+		return data, gen, err
 	}
 	if err != nil && isMissingCredential(err) && s.holds(origin) {
-		time.Sleep(keyringRestartGrace)
+		if waitErr := waitOrCancel(keyringRestartGrace, req); waitErr != nil {
+			return nil, gen, waitErr
+		}
 		inner = s.ensure()
 		data, err = inner.Load(origin)
 	}
@@ -138,7 +151,22 @@ func (s *Store) read(origin string) ([]byte, error) {
 	if err != nil && keyringDidNotAnswer(err) {
 		err = &keyringUnavailableError{err}
 	}
-	return data, err
+	return data, gen, err
+}
+
+// waitOrCancel waits d, or returns the caller's cancellation if it comes
+// first or has already come.
+func waitOrCancel(d time.Duration, req lockRequest) error {
+	if err := lockCause(req.cause); err != nil {
+		return err
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-req.done:
+	}
+	return lockCause(req.cause)
 }
 
 // noteRead records how a read on inner went. A timeout, or the refusal a
@@ -203,12 +231,45 @@ func keyringDidNotAnswer(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) && strings.Contains(err.Error(), "keyring ") {
 		return true
 	}
+	// A refusal is an answer, and is classified as one (#866).
+	if errors.Is(err, fs.ErrPermission) {
+		return false
+	}
 	var dbusErr dbus.Error
 	var dbusErrPtr *dbus.Error
-	return errors.As(err, &dbusErr) || errors.As(err, &dbusErrPtr) || errors.Is(err, dbus.ErrClosed)
+	var opErr *net.OpError
+	return errors.As(err, &dbusErr) || errors.As(err, &dbusErrPtr) || errors.Is(err, dbus.ErrClosed) ||
+		// The bus connection itself: a socket that is missing, refused,
+		// reset or closed under the call.
+		errors.As(err, &opErr) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE)
 }
 
-// keep holds creds as the credential last read or written for key.
+// generation is key's invalidation count.
+func (s *Store) generation(key string) uint64 {
+	k := &s.stall
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.gen[key]
+}
+
+// keepRead holds what a read returned, unless key was invalidated since the
+// read began: a read that raced a delete must not restore the credential
+// the delete removed.
+func (s *Store) keepRead(key string, creds *Credentials, gen uint64) {
+	k := &s.stall
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.gen[key] != gen {
+		return
+	}
+	if k.held == nil {
+		k.held = make(map[string]Credentials)
+	}
+	k.held[key] = *creds
+}
+
+// keep holds creds as the credential last written for key.
 func (s *Store) keep(key string, creds *Credentials) {
 	k := &s.stall
 	k.mu.Lock()
@@ -226,6 +287,10 @@ func (s *Store) forget(key string) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	delete(k.held, key)
+	if k.gen == nil {
+		k.gen = make(map[string]uint64)
+	}
+	k.gen[key]++
 }
 
 func (s *Store) holds(key string) bool {

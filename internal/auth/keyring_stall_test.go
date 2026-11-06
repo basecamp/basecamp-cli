@@ -5,7 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
+	"net"
+	"os"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -58,13 +63,19 @@ func (k *stallingKeyring) Load(key string) ([]byte, error) {
 		return nil, err
 	}
 	k.m.mu.Lock()
-	stalled, down, vanish := k.m.stalled, k.m.down, k.m.vanishReads
+	stalled, down, vanish, readErr, onRead := k.m.stalled, k.m.down, k.m.vanishReads, k.m.readErr, k.m.onRead
 	if vanish > 0 {
 		k.m.vanishReads--
 	}
+	k.m.reads++
 	data, ok := k.m.items[key]
 	k.m.mu.Unlock()
+	if onRead != nil {
+		onRead()
+	}
 	switch {
+	case readErr != nil:
+		return nil, fmt.Errorf("credentials not found: %w", readErr)
 	case stalled:
 		return nil, k.latch(readTimeout())
 	case down:
@@ -109,11 +120,14 @@ func (k *stallingKeyring) FallbackWarning() string { return "" }
 type keyringMachine struct {
 	mu          sync.Mutex
 	items       map[string][]byte
-	stalled     bool  // reads time out
-	stallWrites bool  // writes time out
-	down        bool  // the Secret Service is not on the bus
-	vanishReads int   // the next n reads find nothing, as a restarting service can
-	probeErr    error // what a fresh store's probe finds; nil is the keyring
+	stalled     bool   // reads time out
+	stallWrites bool   // writes time out
+	down        bool   // the Secret Service is not on the bus
+	vanishReads int    // the next n reads find nothing, as a restarting service can
+	probeErr    error  // what a fresh store's probe finds; nil is the keyring
+	readErr     error  // what every read fails with, when set
+	onRead      func() // runs inside each read, after the item is looked up
+	reads       int
 	built       []*stallingKeyring
 }
 
@@ -301,6 +315,15 @@ func TestTheHeldTokenIsServedWhileTheKeyringStalls(t *testing.T) {
 	for name, fail := range map[string]func(m *keyringMachine){
 		"timeout":             func(m *keyringMachine) { m.stalled = true },
 		"secret service gone": func(m *keyringMachine) { m.down = true },
+		"bus hung up":         func(m *keyringMachine) { m.readErr = io.EOF },
+		"bus cut mid-reply":   func(m *keyringMachine) { m.readErr = io.ErrUnexpectedEOF },
+		"bus socket reset": func(m *keyringMachine) {
+			m.readErr = &net.OpError{Op: "read", Net: "unix", Err: os.NewSyscallError("read", syscall.ECONNRESET)}
+		},
+		"bus socket refused": func(m *keyringMachine) {
+			m.readErr = &net.OpError{Op: "dial", Net: "unix", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
+		},
+		"bus write broke": func(m *keyringMachine) { m.readErr = os.NewSyscallError("write", syscall.EPIPE) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			store, machine, _ := stallingStore(t)
@@ -418,3 +441,65 @@ func (f *probeFailedStore) Delete(string) error         { return nil }
 func (f *probeFailedStore) MigrateToKeyring() error     { return nil }
 func (f *probeFailedStore) UsingKeyring() bool          { return false }
 func (f *probeFailedStore) FallbackWarning() string     { return "" }
+
+// A keyring that refuses the read has answered: that is not served from
+// memory, and is not reported as an outage (#866).
+func TestARefusedKeyringReadIsNotAnOutage(t *testing.T) {
+	store, machine, _ := stallingStore(t)
+	saveCreds(t, machine, "profile:agent", liveCreds("held-token"))
+	mgr := stallingManager(t, store)
+	_, err := mgr.AccessToken(t.Context())
+	require.NoError(t, err)
+
+	machine.set(func(m *keyringMachine) {
+		m.readErr = &net.OpError{Op: "dial", Net: "unix", Err: os.NewSyscallError("connect", syscall.EACCES)}
+	})
+	_, err = mgr.AccessToken(t.Context())
+	require.Error(t, err)
+	assert.False(t, KeyringUnavailable(err), "%v", err)
+	assert.False(t, keyringDidNotAnswer(fmt.Errorf("credentials not found: %w", os.NewSyscallError("connect", syscall.EACCES))), "a permission error is an answer")
+	assert.True(t, errors.Is(os.NewSyscallError("connect", syscall.EACCES), fs.ErrPermission))
+}
+
+// A delete that lands while a read is in flight wins: the read must not put
+// back the credential the delete removed.
+func TestAReadRacingADeleteDoesNotRestoreTheCredential(t *testing.T) {
+	store, machine, _ := stallingStore(t)
+	saveCreds(t, machine, "profile:agent", liveCreds("token"))
+	_, err := store.Load("profile:agent")
+	require.NoError(t, err)
+
+	var once sync.Once
+	machine.set(func(m *keyringMachine) {
+		m.onRead = func() {
+			once.Do(func() { require.NoError(t, store.Delete("profile:agent")) })
+		}
+	})
+	creds, err := store.Load("profile:agent")
+	require.NoError(t, err, "the read looked the item up before the delete")
+	assert.Equal(t, "token", creds.AccessToken)
+	assert.Nil(t, store.heldCredential("profile:agent"), "the deleted credential is not held")
+}
+
+// A caller that gives up during the wait before asking a restarting keyring
+// again gets its cancellation at once, and the keyring is not asked again.
+func TestTheAskAgainWaitEndsWithTheCaller(t *testing.T) {
+	store, machine, _ := stallingStore(t)
+	keyringRestartGrace = time.Minute
+	saveCreds(t, machine, "profile:agent", liveCreds("token"))
+	_, err := store.Load("profile:agent")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	machine.set(func(m *keyringMachine) {
+		m.vanishReads = 1
+		m.reads = 0
+		m.onRead = cancel
+	})
+	start := time.Now()
+	_, err = store.LoadContext(ctx, "profile:agent")
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Less(t, time.Since(start), 5*time.Second, "the wait ends with the caller")
+	machine.set(func(m *keyringMachine) { assert.Equal(t, 1, m.reads, "no second read after the caller left") })
+}

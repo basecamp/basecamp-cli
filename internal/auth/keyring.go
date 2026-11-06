@@ -198,9 +198,10 @@ func (s *Store) LoadContext(ctx context.Context, origin string) (*Credentials, e
 func (s *Store) load(origin string, req lockRequest) (*Credentials, error) {
 	s.warnFallback()
 	var data []byte
+	var gen uint64
 	err := s.withStoreReadLock(req, func() error {
 		var loadErr error
-		data, loadErr = s.read(origin)
+		data, gen, loadErr = s.read(origin, req)
 		return loadErr
 	})
 	if err != nil {
@@ -218,7 +219,7 @@ func (s *Store) load(origin string, req lockRequest) (*Credentials, error) {
 		s.forget(origin)
 		return nil, fmt.Errorf("%w: %w", ErrInvalidCredentials, err)
 	}
-	s.keep(origin, &creds)
+	s.keepRead(origin, &creds, gen)
 	return &creds, nil
 }
 
@@ -279,7 +280,10 @@ func (s *Store) save(under func(func() error) error, origin string, creds *Crede
 // Delete removes credentials for the given origin. Locked for the same
 // reason Save is: the file backend rewrites the whole document.
 func (s *Store) Delete(origin string) error {
+	// Forgotten before and after: a read that began before the delete, or
+	// one that ran beside it, holds nothing once the delete returns.
 	s.forget(origin)
+	defer s.forget(origin)
 	return s.operationError(s.withStoreLock(func() error { return s.ensure().Delete(origin) }))
 }
 
