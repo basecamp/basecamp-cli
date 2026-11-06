@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -592,4 +593,123 @@ func TestConfigUnsetInstructionsNeedsGlobal(t *testing.T) {
 	var outErr *output.Error
 	require.True(t, errors.As(err, &outErr))
 	assert.Contains(t, outErr.Message, "--global")
+}
+
+func TestReadInstructionsFileStopsAtTheLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "big.md")
+	require.NoError(t, os.WriteFile(path, bytes.Repeat([]byte("a"), 10*instructionsMaxBytes), 0o600))
+
+	data, err := readInstructionsBounded(path)
+
+	require.NoError(t, err)
+	assert.Len(t, data, instructionsMaxBytes+1)
+}
+
+func TestInstructionsRedirectsKeepToHTTPS(t *testing.T) {
+	via := []*http.Request{{}}
+	redirect := func(raw string) error {
+		u, err := url.Parse(raw)
+		require.NoError(t, err)
+		return checkInstructionsRedirect(&http.Request{URL: u}, via)
+	}
+
+	assert.NoError(t, redirect("https://example.com/style.md"))
+	assert.NoError(t, redirect("http://localhost:3000/style.md"))
+	assert.Error(t, redirect("http://example.com/style.md"))
+	assert.Error(t, redirect("https://user:secret@example.com/style.md"))
+	assert.Error(t, redirect("ftp://example.com/style.md"))
+
+	via = make([]*http.Request, 10)
+	assert.Error(t, redirect("https://example.com/style.md"))
+}
+
+func TestInstructionsHTTPClientRefusesACleartextRedirect(t *testing.T) {
+	require.NotNil(t, instructionsHTTPClient.CheckRedirect)
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://example.com/style.md", http.StatusFound)
+	}))
+	defer server.Close()
+	client := server.Client()
+	client.CheckRedirect = instructionsHTTPClient.CheckRedirect
+	orig := instructionsHTTPClient
+	instructionsHTTPClient = client
+	t.Cleanup(func() { instructionsHTTPClient = orig })
+
+	_, err := fetchInstructionsHTTPS(context.Background(), server.URL+"/style.md")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "must be https")
+}
+
+// fakeGH puts a gh on PATH that records its arguments and runs body.
+func fakeGH(t *testing.T, body string) (argsFile string) {
+	t.Helper()
+	dir := t.TempDir()
+	argsFile = filepath.Join(dir, "args")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argsFile + "\n" + body + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "gh"), []byte(script), 0o700)) //nolint:gosec // G306: a test executable
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return argsFile
+}
+
+func TestInstructionsGHIsPinnedToGitHub(t *testing.T) {
+	args := fakeGH(t, "echo hello")
+	src, err := parseInstructionsSource("https://github.com/o/r/blob/main/style.md")
+	require.NoError(t, err)
+
+	out, err := instructionsGH(context.Background(), src)
+
+	require.NoError(t, err)
+	assert.Equal(t, "hello\n", string(out))
+	got, err := os.ReadFile(args)
+	require.NoError(t, err)
+	assert.Contains(t, string(got), "--hostname\ngithub.com\n")
+}
+
+func TestInstructionsGHStopsAtTheLimit(t *testing.T) {
+	// Finite output, then a hang: reading past the limit fails at the
+	// deadline instead of filling memory.
+	fakeGH(t, "head -c 200000 /dev/zero | tr '\\0' a; exec sleep 30")
+	src, err := parseInstructionsSource("https://github.com/o/r/blob/main/style.md")
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	out, err := instructionsGH(ctx, src)
+
+	require.NoError(t, err)
+	assert.Len(t, out, instructionsMaxBytes+1)
+	assert.NoError(t, ctx.Err(), "the read stopped at the limit, not at the deadline")
+}
+
+func TestInstructionsGHReportsItsError(t *testing.T) {
+	fakeGH(t, "echo 'HTTP 404: Not Found' >&2; exit 1")
+	src, err := parseInstructionsSource("https://github.com/o/r/blob/main/style.md")
+	require.NoError(t, err)
+
+	_, err = instructionsGH(context.Background(), src)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 404")
+}
+
+func TestFetchInstructionsGivesTheFallbackItsOwnDeadline(t *testing.T) {
+	origGH, origTimeout := instructionsGH, instructionsFetchTimeout
+	t.Cleanup(func() { instructionsGH, instructionsFetchTimeout = origGH, origTimeout })
+	instructionsFetchTimeout = 20 * time.Millisecond
+	instructionsGH = func(ctx context.Context, _ instructionsSource) ([]byte, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("from https"))
+	}))
+	defer server.Close()
+	src := instructionsSource{Kind: instructionsKindGitHub, URL: server.URL}
+
+	fetched, err := fetchInstructions(context.Background(), src)
+
+	require.NoError(t, err)
+	assert.Equal(t, "https", fetched.Via)
 }

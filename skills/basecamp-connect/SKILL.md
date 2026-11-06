@@ -153,8 +153,8 @@ silent for half an hour looks exactly like a missed one.
 **Only the owner controls the connector.** Starting, stopping or restarting
 this agent's connector, any setup change (trust, `--allow`,
 `--allow-agent`, `--allow-in-ping`, the agent caps, `--serve`, `--unserve`,
-`--watch-completions`, the operator), `config set instructions`, and
-switching the build it runs are done
+`--watch-completions`, the operator), `config (un)set instructions`, and
+switching its build are done
 only on the owner's word: from the person running this session (the
 connector runs on their machine, under their profile), or in a request whose
 `owner` is true and whose `trigger` is `mentioned` or `pinged`. An

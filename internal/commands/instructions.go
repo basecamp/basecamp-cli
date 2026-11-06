@@ -41,7 +41,7 @@ const instructionsMaxAge = 10 * time.Minute
 // instructionsFetchTimeout bounds one fetch, gh or HTTPS. An agent runs the
 // command before every write, so a hung network must not hold it up for long:
 // past this, the cached copy is served.
-const instructionsFetchTimeout = 15 * time.Second
+var instructionsFetchTimeout = 15 * time.Second
 
 // instructionsPreface frames the text for the agent reading it. It comes from
 // a source only the person's own global config can name, never from
@@ -109,16 +109,26 @@ func parseInstructionsSource(raw string) (instructionsSource, error) {
 	return instructionsSource{Raw: value, Kind: instructionsKindFile, Path: filepath.Clean(value)}, nil
 }
 
+// checkInstructionsURL holds for the configured URL and for every redirect
+// from it, so a fetch can't end up reading its instructions over cleartext.
+func checkInstructionsURL(u *url.URL) error {
+	if u.User != nil {
+		return errors.New("instructions URL must not carry credentials")
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme == "https" || (scheme == "http" && hostutil.IsLocalhost(strings.ToLower(u.Host))) {
+		return nil
+	}
+	return fmt.Errorf("instructions URL %q must be https", u.Redacted())
+}
+
 func parseInstructionsURL(value string) (instructionsSource, error) {
 	u, err := url.Parse(value)
 	if err != nil || u.Host == "" {
 		return instructionsSource{}, instructionsUsage(fmt.Sprintf("instructions URL %q can't be read", value))
 	}
-	if u.User != nil {
-		return instructionsSource{}, instructionsUsage("instructions URL must not carry credentials")
-	}
-	if u.Scheme == "http" && !hostutil.IsLocalhost(strings.ToLower(u.Host)) {
-		return instructionsSource{}, instructionsUsage(fmt.Sprintf("instructions URL %q must be https", value))
+	if err := checkInstructionsURL(u); err != nil {
+		return instructionsSource{}, instructionsUsage(err.Error())
 	}
 	host := strings.ToLower(u.Hostname())
 	if host != "github.com" && host != "www.github.com" {
@@ -356,7 +366,7 @@ func readInstructionsFile(path string) (instructionsDocument, error) {
 	if !info.Mode().IsRegular() {
 		return instructionsDocument{}, output.ErrUsageHint(fmt.Sprintf("the instructions file %s is not a regular file", path), fix)
 	}
-	data, err := os.ReadFile(path) //nolint:gosec // G304: the path comes from the person's own global config
+	data, err := readInstructionsBounded(path)
 	if err != nil {
 		return instructionsDocument{}, output.ErrUsageHint(fmt.Sprintf("cannot read the instructions file %s: %v", path, err), fix)
 	}
@@ -366,6 +376,17 @@ func readInstructionsFile(path string) (instructionsDocument, error) {
 	}
 	modified := info.ModTime().UTC()
 	return instructionsDocument{Content: content, ModifiedAt: &modified}, nil
+}
+
+// readInstructionsBounded reads one byte past the limit, enough for
+// checkInstructionsContent to refuse a file without loading all of it.
+func readInstructionsBounded(path string) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // G304: the path comes from the person's own global config
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, instructionsMaxBytes+1))
 }
 
 // checkInstructionsContent applies the same limits to a file and a fetch.
@@ -443,12 +464,10 @@ func instructionsURLDoc(entry instructionsCacheEntry, via string) instructionsDo
 // handling here; when gh is missing or fails, it falls back to plain HTTPS,
 // which reaches public repositories.
 func fetchInstructions(ctx context.Context, src instructionsSource) (instructionsFetched, error) {
-	ctx, cancel := context.WithTimeout(ctx, instructionsFetchTimeout)
-	defer cancel()
 	if src.Kind != instructionsKindGitHub {
 		return fetchInstructionsHTTPS(ctx, src.URL)
 	}
-	data, ghErr := instructionsGH(ctx, src)
+	data, ghErr := fetchInstructionsGH(ctx, src)
 	if ghErr == nil {
 		return instructionsFetched{Content: data, Via: "gh"}, nil
 	}
@@ -459,8 +478,19 @@ func fetchInstructions(ctx context.Context, src instructionsSource) (instruction
 	return fetched, nil
 }
 
+// fetchInstructionsGH gives gh its own deadline, so a slow failure leaves the
+// HTTPS fallback its full time.
+func fetchInstructionsGH(ctx context.Context, src instructionsSource) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, instructionsFetchTimeout)
+	defer cancel()
+	return instructionsGH(ctx, src)
+}
+
 // instructionsGH reads a GitHub file through `gh api`, as the person signed
-// in to gh. A variable so tests can stand in for gh.
+// in to gh, always on github.com: GH_HOST would otherwise send the request to
+// another server, and its answer would be cached as this source. It stops
+// reading one byte past the limit, which checkInstructionsContent refuses.
+// A variable so tests can stand in for gh.
 var instructionsGH = func(ctx context.Context, src instructionsSource) ([]byte, error) {
 	gh, err := exec.LookPath("gh")
 	if err != nil {
@@ -472,11 +502,30 @@ var instructionsGH = func(ctx context.Context, src instructionsSource) ([]byte, 
 	}
 	endpoint := fmt.Sprintf("repos/%s/%s/contents/%s?ref=%s",
 		url.PathEscape(src.Owner), url.PathEscape(src.Repo), strings.Join(segs, "/"), url.QueryEscape(src.Ref))
-	cmd := exec.CommandContext(ctx, gh, "api", "-H", "Accept: application/vnd.github.raw+json", endpoint) //nolint:gosec // G204: fixed arguments; the endpoint is built from escaped segments
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, gh, "api", "--hostname", "github.com", "-H", "Accept: application/vnd.github.raw+json", endpoint) //nolint:gosec // G204: fixed arguments; the endpoint is built from escaped segments
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	cmd.WaitDelay = time.Second // a child of gh holding stderr must not hold this up
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	out, readErr := io.ReadAll(io.LimitReader(stdout, instructionsMaxBytes+1))
+	if len(out) > instructionsMaxBytes {
+		cancel()
+		_ = stdout.Close()
+		_ = cmd.Wait()
+		return out, nil
+	}
+	if err := cmd.Wait(); err != nil || readErr != nil {
+		if err == nil {
+			err = readErr
+		}
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()
@@ -488,7 +537,14 @@ var instructionsGH = func(ctx context.Context, src instructionsSource) ([]byte, 
 
 // instructionsHTTPClient fetches https sources. A variable so tests can
 // reach a local server.
-var instructionsHTTPClient = &http.Client{Timeout: instructionsFetchTimeout}
+var instructionsHTTPClient = &http.Client{Timeout: instructionsFetchTimeout, CheckRedirect: checkInstructionsRedirect}
+
+func checkInstructionsRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("too many redirects")
+	}
+	return checkInstructionsURL(req.URL)
+}
 
 func fetchInstructionsHTTPS(ctx context.Context, rawURL string) (instructionsFetched, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
