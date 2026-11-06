@@ -85,22 +85,10 @@ type Store struct {
 	inner       credStore
 	warnOnce    sync.Once
 
-	// opts is what inner was built with, kept so a store whose keyring
-	// read timed out can be built again (see readStall).
-	opts credstore.StoreOptions
-
-	// stallMu guards inner once built, and the read-stall state below.
-	stallMu sync.Mutex
-	// stalled is set while inner refuses keyring calls after a timed-out
-	// read, and retryAt is when a fresh store may be tried; stalls counts
-	// consecutive stalls, for the backoff.
-	stalled bool
-	retryAt time.Time
-	stalls  int
-
-	// now is the clock the read-stall backoff reads. Test seam; nil means
-	// time.Now.
-	now func() time.Time
+	// opts is what inner was built with; stall is the keyring-stall
+	// recovery state (keyring_stall.go).
+	opts  credstore.StoreOptions
+	stall keyringStall
 
 	// lockWarnOnce fires the one warning a process gets when credential
 	// locking is impossible on this host (see lock.go).
@@ -172,113 +160,7 @@ func (s *Store) ensure() credStore {
 		s.opts = opts
 		s.inner = newCredStore(opts)
 	})
-	s.stallMu.Lock()
-	defer s.stallMu.Unlock()
-	if s.stalled && !s.clock().Before(s.retryAt) {
-		s.retryStalledLocked()
-	}
-	return s.inner
-}
-
-// A timed-out keyring read is retried, on a backoff, by building the
-// credential store again.
-//
-// credstore refuses every keyring call on a store after one call outlives
-// its bound, for the life of that store: go-keyring cannot cancel the call,
-// and a write or delete whose outcome is unknown must never be overlapped
-// by another. Its documented way out is a new store. For a command that
-// lasts a second that is the next command; for a connector that runs for
-// days it was never, and one slow D-Bus answer on a loaded machine left
-// it without its token until someone restarted it.
-//
-// Only a READ earns the retry. Overlapping an abandoned read with another
-// read, or with a write, cannot change what is stored, so nothing the
-// latch protects is put at risk. A timed-out write or delete keeps the
-// latch for the life of the process, exactly as credstore intends.
-//
-// The fresh store probes the keyring again, and is kept only if that probe
-// found the keyring: a store that fell back to file storage would serve
-// whatever credentials.json holds — possibly nothing, possibly months
-// stale — in place of the keyring this process was using.
-const (
-	readStallRetryBase = 15 * time.Second
-	readStallRetryCap  = 5 * time.Minute
-)
-
-func (s *Store) clock() time.Time {
-	if s.now != nil {
-		return s.now()
-	}
-	return time.Now()
-}
-
-// noteReadResult records how a keyring read went: a read timeout, or the
-// refusal a store gives after one, schedules a retry; anything the keyring
-// actually answered ends the stall.
-func (s *Store) noteReadResult(err error) {
-	s.stallMu.Lock()
-	defer s.stallMu.Unlock()
-	if !readTimedOut(err) {
-		if err == nil || !KeyringUnavailable(err) {
-			s.stalled, s.stalls = false, 0
-		}
-		return
-	}
-	if s.stalled {
-		// Already waiting for a retry: a refusal in the meantime must not
-		// push it further out.
-		return
-	}
-	s.stalled = true
-	s.stalls++
-	s.retryAt = s.clock().Add(readStallBackoff(s.stalls))
-}
-
-// retryStalledLocked builds a fresh store in place of the stalled one and
-// keeps it only if it reached the keyring. Called with stallMu held.
-func (s *Store) retryStalledLocked() {
-	fresh := newCredStore(s.opts)
-	if !fresh.UsingKeyring() {
-		// The keyring is still not answering. Stay on the stalled store,
-		// which refuses rather than reading a fallback file, and wait longer.
-		s.stalls++
-		s.retryAt = s.clock().Add(readStallBackoff(s.stalls))
-		return
-	}
-	s.inner = fresh
-	// Not "recovered" until a read succeeds: the next timeout on the
-	// fresh store starts the backoff from where this one left it.
-	s.stalled = false
-}
-
-// readStallBackoff is the wait before the nth consecutive retry.
-func readStallBackoff(n int) time.Duration {
-	if n < 1 {
-		n = 1
-	}
-	if n > 6 {
-		return readStallRetryCap
-	}
-	return min(readStallRetryBase<<(n-1), readStallRetryCap)
-}
-
-// readTimedOut reports a keyring read that outlived its bound, or a
-// store's refusal of every call after one did. A queued call that was never
-// attempted does not count: it leaves the store usable.
-func readTimedOut(err error) bool {
-	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "keyring read timed out after") && !strings.Contains(msg, "waiting for another operation")
-}
-
-// KeyringUnavailable reports an error that says the OS keyring did not
-// answer in time — this call, an earlier one the store is still refusing
-// over, or the wait behind another call — rather than anything about the
-// credential itself. The credential may be sitting in the keyring, intact.
-func KeyringUnavailable(err error) bool {
-	return err != nil && errors.Is(err, context.DeadlineExceeded) && strings.Contains(err.Error(), "keyring ")
+	return s.current()
 }
 
 // warnFallback prints the keyring fallback warning once per process, on the
@@ -318,23 +200,25 @@ func (s *Store) load(origin string, req lockRequest) (*Credentials, error) {
 	var data []byte
 	err := s.withStoreReadLock(req, func() error {
 		var loadErr error
-		inner := s.ensure()
-		data, loadErr = inner.Load(origin)
-		if inner.UsingKeyring() {
-			s.noteReadResult(loadErr)
-		}
+		data, loadErr = s.read(origin)
 		return loadErr
 	})
 	if err != nil {
+		if errors.Is(err, ErrKeyringUnavailable) {
+			return nil, s.operationError(err)
+		}
 		if isMissingCredential(err) {
+			s.forget(origin)
 			return nil, fmt.Errorf("%w: %w", ErrNoCredential, err)
 		}
 		return nil, s.operationError(err)
 	}
 	var creds Credentials
 	if err := json.Unmarshal(data, &creds); err != nil {
+		s.forget(origin)
 		return nil, fmt.Errorf("%w: %w", ErrInvalidCredentials, err)
 	}
+	s.keep(origin, &creds)
 	return &creds, nil
 }
 
@@ -382,12 +266,20 @@ func (s *Store) save(under func(func() error) error, origin string, creds *Crede
 	if err != nil {
 		return err
 	}
-	return s.operationError(under(func() error { return s.ensure().Save(origin, data) }))
+	err = s.operationError(under(func() error { return s.ensure().Save(origin, data) }))
+	if err != nil {
+		// Whether the write landed is unknown: hold nothing for this key.
+		s.forget(origin)
+		return err
+	}
+	s.keep(origin, creds)
+	return nil
 }
 
 // Delete removes credentials for the given origin. Locked for the same
 // reason Save is: the file backend rewrites the whole document.
 func (s *Store) Delete(origin string) error {
+	s.forget(origin)
 	return s.operationError(s.withStoreLock(func() error { return s.ensure().Delete(origin) }))
 }
 

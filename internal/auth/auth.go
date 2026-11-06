@@ -117,12 +117,6 @@ type Manager struct {
 
 	mu sync.Mutex
 
-	// held is the last credential this Manager read or renewed, under
-	// heldKey, kept to serve while the OS keyring is not answering (see
-	// storedAccessToken). Guarded by mu.
-	held    *Credentials
-	heldKey string
-
 	// kindMu guards kind, which is read while building an error's remedy
 	// and so cannot share the lock the credential operations hold.
 	kindMu sync.Mutex
@@ -313,7 +307,7 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 		}
 		return "", m.unreadable(missing, credKey, err)
 	}
-	m.hold(credKey, creds)
+	m.remember(creds)
 	if !needsRenewal(creds) {
 		return m.servableToken(credKey, creds)
 	}
@@ -335,10 +329,15 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 			// had already answered leaves the store, not this copy,
 			// holding the live credential.
 			if creds, loadErr = m.store.LoadContext(ctx, credKey); loadErr != nil {
-				return m.unreadable("Failed to load renewed credentials for", credKey, loadErr)
+				// The renewal was saved, and the store holds what it saved:
+				// a keyring too slow to read it back still has it.
+				if held := m.heldWhileKeyringStalls(ctx, credKey, loadErr); held != nil {
+					creds = held
+				} else {
+					return m.unreadable("Failed to load renewed credentials for", credKey, loadErr)
+				}
 			}
 		}
-		m.hold(credKey, creds)
 		var tokenErr error
 		token, tokenErr = m.servableToken(credKey, creds)
 		return tokenErr
@@ -349,36 +348,28 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 	return token, nil
 }
 
-// hold keeps creds as the credential this Manager last had in its hands.
-// Called with mu held.
-func (m *Manager) hold(credKey string, creds *Credentials) {
-	m.remember(creds)
-	held := *creds
-	m.held, m.heldKey = &held, credKey
-}
-
 // heldWhileKeyringStalls is the credential to serve when the store could
-// not be read because the OS keyring did not answer in time: the one this
-// Manager last read or renewed, while it is still comfortably inside its
-// lifetime. Nil otherwise — the store spoke, the caller's own wait ended,
-// nothing is held, or what is held is due for renewal, which needs the
-// store. Called with mu held.
+// not be read because the OS keyring did not answer: the one the store last
+// read or wrote for credKey, while it is still comfortably inside its
+// lifetime. Nil otherwise — the store answered, the caller's own wait
+// ended, nothing is held, or what is held is due for renewal, which needs
+// the store.
 //
 // The keyring holds the same credential it did a moment ago; it is only
-// slow to say so. A long-running process — the connector above all —
-// would otherwise lose its token to one slow answer from a loaded desktop
-// session, and keep losing it for as long as the keyring stays slow.
-// Nothing is written: the store remains the record, and the first read
-// that succeeds replaces what is held.
+// slow, or restarting. A long-running process — the connector above all —
+// would otherwise lose its token to one bad moment of a loaded desktop
+// session. Nothing is written: the store remains the record, and the first
+// read that succeeds replaces what is held.
 func (m *Manager) heldWhileKeyringStalls(ctx context.Context, credKey string, err error) *Credentials {
 	if ctx.Err() != nil || !KeyringUnavailable(err) {
 		return nil
 	}
-	if m.held == nil || m.heldKey != credKey || needsRenewal(m.held) {
+	held := m.store.heldCredential(credKey)
+	if held == nil || needsRenewal(held) {
 		return nil
 	}
-	m.remember(m.held)
-	return m.held
+	m.remember(held)
+	return held
 }
 
 // needsRenewal reports whether a stored access token is inside the refresh
@@ -416,9 +407,10 @@ func (m *Manager) unreadable(missing, credKey string, err error) error {
 	case errors.Is(err, ErrNoCredential), errors.Is(err, ErrInvalidCredentials):
 		// The store spoke: nothing is stored, or nothing readable is.
 		// That IS "not authenticated", and a login is the remedy.
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		// The caller's own wait ended. Theirs to report, and the error
-		// must stay matchable as what it is.
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded), errors.Is(err, ErrKeyringUnavailable):
+		// The caller's own wait ended, or the keyring did not answer.
+		// Neither is a statement about the credential, and the error must
+		// stay matchable as what it is.
 		return err
 	default:
 		var e *output.Error

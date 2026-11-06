@@ -15,13 +15,17 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/eventfeed"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-cli/internal/auth"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // The error the auth manager returns while credstore refuses the keyring
 // after a timed-out read, as the connector logged it.
 func keyringLatchedError() error {
 	timeout := fmt.Errorf("keyring read timed out after 10s (the operation may have completed or may still complete): %w", context.DeadlineExceeded)
-	return fmt.Errorf("keyring unavailable after an earlier timeout: %w; to use plaintext credential storage explicitly, set BASECAMP_NO_KEYRING=1", timeout)
+	latched := fmt.Errorf("keyring unavailable after an earlier timeout: %w; to use plaintext credential storage explicitly, set BASECAMP_NO_KEYRING=1", timeout)
+	return errors.Join(latched, auth.ErrKeyringUnavailable)
 }
 
 type stallFeed struct {
@@ -148,4 +152,27 @@ func TestAnAnsweringKeyringEndsTheOutage(t *testing.T) {
 	f.advance(2 * time.Minute)
 	assert.Equal(t, eventfeed.PollTransient, f.pollKind(t), "a new outage starts its own clock")
 	assert.Len(t, f.said(), 2)
+}
+
+// A failure that is not the keyring's — a renewal the server could not
+// serve, after the keyring gave up the credential — also ends the outage:
+// the keyring answered. A later stall gets the full limit, not what is left
+// of the old one.
+func TestAFailureThatIsNotTheKeyringsEndsTheOutage(t *testing.T) {
+	f := keyringStallFeed(t)
+	assert.Equal(t, eventfeed.PollTransient, f.pollKind(t))
+	f.advance(connectKeyringOutageLimit - time.Minute)
+
+	f.mu.Lock()
+	unavailable := output.ErrAPI(http.StatusServiceUnavailable, "minting an agent token: the server answered HTTP 503")
+	unavailable.Retryable = true
+	*f.err = unavailable
+	f.mu.Unlock()
+	_, _ = f.live.Polls().Poll(t.Context(), eventfeed.Cursor{Since: "now"}, eventfeed.Filters{})
+
+	f.mu.Lock()
+	*f.err = keyringLatchedError()
+	f.mu.Unlock()
+	f.advance(2 * time.Minute)
+	assert.Equal(t, eventfeed.PollTransient, f.pollKind(t), "the old outage's clock does not carry over")
 }

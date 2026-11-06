@@ -1376,7 +1376,10 @@ func (t *feedTokens) AccessToken(ctx context.Context) (string, error) {
 	if ctx.Err() == nil && auth.KeyringUnavailable(err) {
 		return token, t.keyringStalled(err)
 	}
-	if err == nil {
+	if ctx.Err() == nil {
+		// The keyring answered — a token, or a failure of something else,
+		// such as a renewal the server refused or could not serve. Either
+		// way this outage is over, and a later one gets its own clock.
 		t.mu.Lock()
 		t.keyringDownSince = time.Time{}
 		t.mu.Unlock()
@@ -1408,7 +1411,7 @@ func (t *feedTokens) keyringStalled(err error) error {
 
 	if down >= connectKeyringOutageLimit {
 		e := output.ErrAPI(0, fmt.Sprintf("The system keyring has not given up the agent's token for %s, so the connector cannot reach Basecamp: %v", down.Round(time.Second), err))
-		e.Hint = "Start the connector again. If the keyring keeps timing out, check the Secret Service (gnome-keyring or KeePassXC) is running and unlocked; BASECAMP_NO_KEYRING=1 stores credentials in a plaintext file instead"
+		e.Hint = "Start the connector again. If this keeps happening, check that the desktop keyring (the Secret Service: gnome-keyring or KeePassXC) is running and unlocked"
 		e.Cause = err
 		return &basecamp.Error{Code: basecamp.CodeAPI, Message: e.Error(), Retryable: false, Cause: e}
 	}
