@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"net"
@@ -12,6 +13,10 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
+	"github.com/zalando/go-keyring"
+
+	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 )
 
 // Riding out a desktop keyring that stops answering.
@@ -50,8 +55,24 @@ func KeyringUnavailable(err error) bool { return errors.Is(err, ErrKeyringUnavai
 
 type keyringUnavailableError struct{ err error }
 
-func (e *keyringUnavailableError) Error() string   { return e.err.Error() }
-func (e *keyringUnavailableError) Unwrap() []error { return []error{e.err, ErrKeyringUnavailable} }
+func (e *keyringUnavailableError) Error() string { return e.err.Error() }
+
+// Unwrap also yields the CLI error a command reports this as: its own code
+// and exit status, retryable, and a hint that never sends anyone to log in
+// again, which would replace the credential the keyring still holds.
+func (e *keyringUnavailableError) Unwrap() []error {
+	return []error{e.err, ErrKeyringUnavailable, &output.Error{
+		Code:      output.CodeKeyringUnavailable,
+		Message:   "The system keyring did not answer in time: " + richtext.SanitizeSingleLine(e.err.Error()),
+		Hint:      keyringUnavailableHint,
+		Retryable: true,
+	}}
+}
+
+// keyringUnavailableHint is the remedy for a keyring that did not answer.
+const keyringUnavailableHint = "Nothing was changed, and a credential in the keyring is still there: try again in a moment. " +
+	"Logging in again would replace it. If the keyring keeps not answering, check that the Secret Service " +
+	"(gnome-keyring or KeePassXC) is running and unlocked, and that the machine is not short of memory or disk."
 
 const (
 	readStallRetryBase = 15 * time.Second
@@ -102,6 +123,12 @@ func (s *Store) current() credStore {
 	k.mu.Lock()
 	inner := s.inner
 	due := k.stalled && !k.retrying && !k.clock().Before(k.retryAt)
+	if due && !inner.UsingKeyring() && probeTimedOutOnSlowness(inner) {
+		// Reads of a store whose probe timed out go to the keyring
+		// directly and retry there, without a write; only a write pays
+		// for a new store (writeStore).
+		due = false
+	}
 	if due {
 		k.retrying = true
 	}
@@ -138,7 +165,23 @@ func (s *Store) read(origin string, req lockRequest) ([]byte, uint64, error) {
 	inner := s.ensure()
 	data, err := inner.Load(origin)
 	if !inner.UsingKeyring() {
-		return data, gen, err
+		if err == nil || !isMissingCredential(err) || !probeTimedOutOnSlowness(inner) {
+			return data, gen, err
+		}
+		// credentials.json has nothing for this key because the keyring
+		// was too slow for the probe — a write and a delete, each of which
+		// a loaded gnome-keyring fsyncs — not because the keyring is
+		// empty. Read the keyring itself, which needs no write, patiently.
+		kdata, kerr := s.readKeyringDirectly(inner, origin)
+		switch {
+		case kerr == nil:
+			return kdata, gen, nil
+		case isMissingCredential(kerr):
+			// The keyring answered: nothing there either.
+			return nil, gen, err
+		default:
+			return nil, gen, &keyringUnavailableError{kerr}
+		}
 	}
 	if err != nil && isMissingCredential(err) && s.holds(origin) {
 		if waitErr := waitOrCancel(keyringRestartGrace, req); waitErr != nil {
@@ -152,6 +195,148 @@ func (s *Store) read(origin string, req lockRequest) ([]byte, uint64, error) {
 		err = &keyringUnavailableError{err}
 	}
 	return data, gen, err
+}
+
+// probeTimedOutOnSlowness reports a file-backed store whose keyring probe
+// ran out of time where that means a slow keyring (probeTimeoutIsSlowness).
+func probeTimedOutOnSlowness(inner credStore) bool {
+	return probeTimeoutIsSlowness() && errors.Is(inner.ProbeError(), context.DeadlineExceeded)
+}
+
+// keyringReadDirect reads key from the OS keyring under service, as
+// credstore stores it ("<service>::<key>"), bounded by timeout. It writes
+// nothing, so it answers where a write probe cannot: a Secret Service that
+// fsyncs its whole keyring file on every write, on a disk under pressure,
+// still answers a lookup in seconds. go-keyring cannot cancel a call, so a
+// read that outlives the bound is abandoned, as credstore abandons its own.
+// Replaceable in tests.
+var keyringReadDirect = func(service, key string, timeout time.Duration) ([]byte, error) {
+	type result struct {
+		secret string
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		secret, err := keyring.Get(service, service+"::"+key)
+		done <- result{secret, err}
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			return nil, fmt.Errorf("credentials not found: %w", r.err)
+		}
+		return []byte(r.secret), nil
+	case <-timer.C:
+		return nil, fmt.Errorf("keyring read timed out after %s: %w", timeout, context.DeadlineExceeded)
+	}
+}
+
+// readKeyringDirectly is a read of key from the keyring, for a store whose
+// probe timed out (probeTimedOutOnSlowness), on slowKeyringTimeout. One
+// the keyring did not answer starts the stall backoff, and a read inside
+// the backoff is refused at once rather than paying the bound again.
+func (s *Store) readKeyringDirectly(inner credStore, key string) ([]byte, error) {
+	k := &s.stall
+	k.mu.Lock()
+	if k.stalled && k.clock().Before(k.retryAt) {
+		k.mu.Unlock()
+		return nil, slowKeyringError(inner.ProbeError())
+	}
+	service := s.opts.ServiceName
+	k.mu.Unlock()
+
+	data, err := keyringReadDirect(service, key, slowKeyringTimeout)
+
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if err != nil && keyringDidNotAnswer(err) {
+		if s.inner == inner {
+			k.stalled = true
+			k.stalls++
+			k.retryAt = k.clock().Add(readStallBackoff(k.stalls))
+		}
+		return nil, slowKeyringError(err)
+	}
+	if s.inner == inner {
+		k.stalled, k.stalls = false, 0
+	}
+	return data, err
+}
+
+// writeStore is the store a write or delete goes to. Where the probe timed
+// out on a slow keyring (probeTimedOutOnSlowness), that is never
+// credentials.json: a slow keyring is not an absent one, and a credential
+// written in plaintext beside it would be read in its place. The write
+// needs the keyring, so this is where its write probe is paid, patiently.
+func (s *Store) writeStore() (credStore, error) {
+	inner := s.ensure()
+	if inner.UsingKeyring() || !probeTimedOutOnSlowness(inner) {
+		return inner, nil
+	}
+	slow, err := s.reachSlowKeyring(inner)
+	if slow == nil {
+		return nil, &keyringUnavailableError{err}
+	}
+	return slow, nil
+}
+
+// reachSlowKeyring replaces inner, a file-backed store whose probe timed
+// out, with one built on slowKeyringTimeout, and returns it if its probe
+// reached the keyring. It returns nil, with why, when the patient probe
+// failed too, or when one did recently and its backoff has not run out:
+// a store that keeps missing pays the long probe once per backoff, not
+// once per read. Later retries (current) are built patient as well.
+func (s *Store) reachSlowKeyring(inner credStore) (credStore, error) {
+	k := &s.stall
+	k.mu.Lock()
+	if s.inner != inner {
+		replaced := s.inner
+		k.mu.Unlock()
+		if replaced.UsingKeyring() {
+			return replaced, nil
+		}
+		return nil, slowKeyringError(replaced.ProbeError())
+	}
+	if k.retrying || (k.stalled && k.clock().Before(k.retryAt)) {
+		k.mu.Unlock()
+		return nil, slowKeyringError(inner.ProbeError())
+	}
+	k.retrying = true
+	opts := s.opts
+	opts.ProbeTimeout = max(opts.ProbeTimeout, slowKeyringTimeout)
+	opts.OperationTimeout = max(opts.OperationTimeout, slowKeyringTimeout)
+	k.mu.Unlock()
+
+	fresh := newCredStore(opts)
+
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.retrying = false
+	s.opts = opts
+	if s.inner != inner {
+		return nil, slowKeyringError(inner.ProbeError())
+	}
+	if !fresh.UsingKeyring() {
+		k.stalled = true
+		k.stalls++
+		k.retryAt = k.clock().Add(readStallBackoff(k.stalls))
+		return nil, slowKeyringError(fresh.ProbeError())
+	}
+	s.inner = fresh
+	k.stalled, k.stalls = false, 0
+	return fresh, nil
+}
+
+// slowKeyringError is the read error for a keyring that did not answer even
+// the patient probe. It is never a missing credential: the keyring may hold
+// one, and nothing here could ask it.
+func slowKeyringError(probeErr error) error {
+	if probeErr == nil {
+		probeErr = context.DeadlineExceeded
+	}
+	return fmt.Errorf("the system keyring did not answer in time, so the credential it may hold was not read: %w", probeErr)
 }
 
 // waitOrCancel waits d, or returns the caller's cancellation if it comes

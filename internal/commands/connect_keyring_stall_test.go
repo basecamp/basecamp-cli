@@ -203,3 +203,34 @@ func TestAStartWaitsOutASilentKeyring(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, waits, 2, "each silence is waited out")
 }
+
+// A starting connector's first credential read waits out a keyring that
+// does not answer, as its token wait does, instead of exiting with a
+// remedy that would send its operator to log in again (2026-11-07).
+func TestConnectStartWaitsOutAKeyringThatDoesNotAnswer(t *testing.T) {
+	var reads int
+	read := connectStartRead(func(context.Context) error {
+		reads++
+		if reads < 3 {
+			return keyringLatchedError()
+		}
+		return nil
+	})
+	var waits []time.Duration
+	var lines []string
+	err := awaitConnectToken(t.Context(), read, connectStartWait{
+		Log:   func(line string) { lines = append(lines, line) },
+		Sleep: func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil },
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 3, reads)
+	assert.Len(t, waits, 2)
+	assert.Len(t, lines, 2)
+
+	// A read the store answered is not waited on.
+	refused := output.ErrAuth("refused")
+	err = awaitConnectToken(t.Context(), connectStartRead(func(context.Context) error { return refused }), connectStartWait{
+		Sleep: func(context.Context, time.Duration) error { t.Fatal("waited on an answer"); return nil },
+	})
+	assert.ErrorIs(t, err, refused)
+}

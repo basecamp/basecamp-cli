@@ -105,6 +105,7 @@ type credStore interface {
 	MigrateToKeyring() error
 	UsingKeyring() bool
 	FallbackWarning() string
+	ProbeError() error
 }
 
 // newCredStore is replaceable in tests to avoid real keyring access.
@@ -134,6 +135,23 @@ var sessionIsHeadless = func() bool {
 // unlock prompt (#800). Other platforms keep their interactive probe
 // unbounded so an unlock prompt is not cut off mid-answer.
 const headlessProbeTimeout = 10 * time.Second
+
+// slowKeyringTimeout is the probe and operation bound of the store built
+// when the first, ten-second probe timed out and credentials.json holds
+// nothing for the key being read. On a loaded machine the Secret Service
+// can take seconds per call (a store and clear measured 3.7s, a search
+// 3.6s, with the daemon waiting on swap), so the probe's several round
+// trips pass ten seconds while the credential sits in the keyring, intact.
+// A miss there is not an answer; a patient look at the keyring is.
+const slowKeyringTimeout = 60 * time.Second
+
+// probeTimeoutIsSlowness reports whether a timed-out probe means a keyring
+// that is slow rather than one this session cannot use. On Linux the bound
+// exists because the Secret Service can stall (#800), so a timeout says
+// nothing about what the keyring holds. Elsewhere the probe is bounded only
+// in a headless session, where a timeout is a locked keychain nobody can
+// unlock and the file fallback is the design (#568). Replaceable in tests.
+var probeTimeoutIsSlowness = func() bool { return runtime.GOOS == "linux" }
 
 // NewStore creates a credential store. The OS keyring is not touched until
 // the first credential operation.
@@ -173,6 +191,12 @@ func (s *Store) ensure() credStore {
 func (s *Store) warnFallback() {
 	inner := s.ensure()
 	s.warnOnce.Do(func() {
+		if !inner.UsingKeyring() && probeTimedOutOnSlowness(inner) {
+			// Not a fallback: reads go to the keyring itself and writes
+			// wait for it (keyring_stall.go). Only the delay is news.
+			fmt.Fprintf(os.Stderr, "warning: the system keyring was slow to answer (%v); waiting longer for it\n", inner.ProbeError())
+			return
+		}
 		if w := inner.FallbackWarning(); w != "" {
 			fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 		}
@@ -267,7 +291,13 @@ func (s *Store) save(under func(func() error) error, origin string, creds *Crede
 	if err != nil {
 		return err
 	}
-	err = s.operationError(under(func() error { return s.ensure().Save(origin, data) }))
+	err = s.operationError(under(func() error {
+		store, err := s.writeStore()
+		if err != nil {
+			return err
+		}
+		return store.Save(origin, data)
+	}))
 	if err != nil {
 		// Whether the write landed is unknown: hold nothing for this key.
 		s.forget(origin)
@@ -284,7 +314,13 @@ func (s *Store) Delete(origin string) error {
 	// one that ran beside it, holds nothing once the delete returns.
 	s.forget(origin)
 	defer s.forget(origin)
-	return s.operationError(s.withStoreLock(func() error { return s.ensure().Delete(origin) }))
+	return s.operationError(s.withStoreLock(func() error {
+		store, err := s.writeStore()
+		if err != nil {
+			return err
+		}
+		return store.Delete(origin)
+	}))
 }
 
 // MigrateToKeyring migrates credentials from file to keyring. It reads

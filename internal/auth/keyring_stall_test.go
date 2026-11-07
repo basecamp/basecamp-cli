@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"testing"
@@ -23,6 +24,7 @@ import (
 	"github.com/basecamp/cli/credstore"
 
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 func readTimeout() error {
@@ -60,6 +62,11 @@ func (k *stallingKeyring) latch(err error) error {
 }
 
 func (k *stallingKeyring) Load(key string) ([]byte, error) {
+	if k.probeErr != nil {
+		// Fell back to credentials.json, which holds nothing: what
+		// credstore's file backend says for a miss after a failed probe.
+		return nil, fmt.Errorf("credentials not found for %s: system keyring unavailable (%w), fell back to credentials.json", key, k.probeErr)
+	}
 	if err := k.refused(); err != nil {
 		return nil, err
 	}
@@ -116,28 +123,55 @@ func (k *stallingKeyring) Delete(key string) error {
 func (k *stallingKeyring) MigrateToKeyring() error { return nil }
 func (k *stallingKeyring) UsingKeyring() bool      { return k.probeErr == nil }
 func (k *stallingKeyring) FallbackWarning() string { return "" }
+func (k *stallingKeyring) ProbeError() error       { return k.probeErr }
 
 // keyringMachine is the OS keyring every store a test builds talks to.
 type keyringMachine struct {
 	mu          sync.Mutex
 	items       map[string][]byte
-	stalled     bool   // reads time out
-	stallWrites bool   // writes time out
-	down        bool   // the Secret Service is not on the bus
-	vanishReads int    // the next n reads find nothing, as a restarting service can
-	probeErr    error  // what a fresh store's probe finds; nil is the keyring
+	stalled     bool          // reads time out
+	stallWrites bool          // writes time out
+	down        bool          // the Secret Service is not on the bus
+	vanishReads int           // the next n reads find nothing, as a restarting service can
+	probeErr    error         // what a fresh store's probe finds; nil is the keyring
+	probeNeeds  time.Duration // a probe bounded shorter than this times out
+	probeBounds []time.Duration
+	directReads int    // reads that went to the keyring without a store
 	readErr     error  // what every read fails with, when set
 	onRead      func() // runs inside each read, after the item is looked up
 	reads       int
 	built       []*stallingKeyring
 }
 
-func (m *keyringMachine) newStore(credstore.StoreOptions) credStore {
+func (m *keyringMachine) newStore(opts credstore.StoreOptions) credStore {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	k := &stallingKeyring{m: m, probeErr: m.probeErr}
+	m.probeBounds = append(m.probeBounds, opts.ProbeTimeout)
+	if k.probeErr == nil && m.probeNeeds > 0 && opts.ProbeTimeout < m.probeNeeds {
+		k.probeErr = fmt.Errorf("keyring probe timed out after %s: %w", opts.ProbeTimeout, context.DeadlineExceeded)
+	}
 	m.built = append(m.built, k)
 	return k
+}
+
+// readDirect is keyringReadDirect against the machine: a read with no
+// store and no probe.
+func (m *keyringMachine) readDirect(service, key string, timeout time.Duration) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.directReads++
+	if service != "basecamp" {
+		return nil, fmt.Errorf("service %q", service)
+	}
+	switch data, ok := m.items[key]; {
+	case m.stalled:
+		return nil, fmt.Errorf("keyring read timed out after %s: %w", timeout, context.DeadlineExceeded)
+	case !ok:
+		return nil, fmt.Errorf("credentials not found: %w", keyring.ErrNotFound)
+	default:
+		return data, nil
+	}
 }
 
 func (m *keyringMachine) set(fn func(m *keyringMachine)) {
@@ -169,6 +203,9 @@ func stallingStore(t *testing.T) (*Store, *keyringMachine, *fakeClock) {
 	t.Setenv("BASECAMP_NO_KEYRING", "")
 	machine := &keyringMachine{items: map[string][]byte{}}
 	swapNewCredStore(t, machine.newStore)
+	origDirect := keyringReadDirect
+	keyringReadDirect = machine.readDirect
+	t.Cleanup(func() { keyringReadDirect = origDirect })
 	orig := keyringRestartGrace
 	keyringRestartGrace = time.Millisecond
 	t.Cleanup(func() { keyringRestartGrace = orig })
@@ -420,21 +457,126 @@ func TestTheHeldTokenIsServedOnlyForAKeyringStall(t *testing.T) {
 		require.Error(t, err, "and is not served from memory by a later stall")
 	})
 
-	t.Run("file backend after a timed-out probe", func(t *testing.T) {
-		probeTimeout := fmt.Errorf("keyring probe timed out after 10s: %w", context.DeadlineExceeded)
+	t.Run("file backend after a failed probe", func(t *testing.T) {
+		probeFailed := errors.New("The name org.freedesktop.secrets was not provided by any .service files")
 		swapNewCredStore(t, func(credstore.StoreOptions) credStore {
-			return &probeFailedStore{err: fmt.Errorf("credentials not found for profile:agent: system keyring unavailable (%w)", probeTimeout)}
+			return &probeFailedStore{err: fmt.Errorf("credentials not found for profile:agent: system keyring unavailable (%w)", probeFailed), probeErr: probeFailed}
 		})
 		t.Setenv("BASECAMP_NO_KEYRING", "")
 		store := NewStore(t.TempDir())
 		_, err := store.Load("profile:agent")
 		require.Error(t, err)
-		assert.False(t, KeyringUnavailable(err), "a file backend's miss is not a keyring outage: %v", err)
+		assert.False(t, KeyringUnavailable(err), "a probe the keyring answered makes a file miss a miss: %v", err)
+		assert.ErrorIs(t, err, ErrNoCredential)
 	})
 }
 
+// slowProbe makes timed-out probes mean a slow keyring, as on Linux, or a
+// keychain nobody in this session can unlock, as on headless macOS.
+func slowProbe(t *testing.T, slowness bool) {
+	t.Helper()
+	orig := probeTimeoutIsSlowness
+	probeTimeoutIsSlowness = func() bool { return slowness }
+	t.Cleanup(func() { probeTimeoutIsSlowness = orig })
+}
+
+// The 2026-11-07 failure: on a machine under I/O pressure gnome-keyring
+// fsyncs its whole keyring file on every write, so the probe — a write and
+// a delete — took past its ten seconds while a lookup still answered in
+// under four. The store fell back to a credentials.json holding nothing
+// for the profile, and `basecamp connect` said the profile "holds no
+// credential", sending its operator to log in again, which would have
+// replaced the credential sitting in the keyring. A slow keyring is not an
+// absent one: the read must reach it, and without a write.
+func TestASlowKeyringProbeDoesNotMakeAStoredCredentialMissing(t *testing.T) {
+	slowProbe(t, true)
+	store, machine, _ := stallingStore(t)
+	saveCreds(t, machine, "profile:chef", liveCreds("keyring-token"))
+	machine.set(func(m *keyringMachine) { m.probeNeeds = 20 * time.Second })
+
+	creds, err := store.Load("profile:chef")
+	require.NoError(t, err, "the credential is in the keyring; only the write probe was too slow for its bound")
+	assert.NotErrorIs(t, err, ErrNoCredential)
+	assert.Equal(t, "keyring-token", creds.AccessToken)
+	assert.Equal(t, 1, machine.directReads)
+	assert.Equal(t, 1, machine.stores(), "the read paid no second write probe")
+
+	// A write needs the keyring: it goes there, after a patient probe,
+	// and never to credentials.json.
+	require.NoError(t, store.Save("profile:chef", liveCreds("renewed")))
+	assert.True(t, store.UsingKeyring())
+	require.Len(t, machine.probeBounds, 2)
+	assert.Equal(t, headlessProbeTimeout, machine.probeBounds[0])
+	assert.Equal(t, slowKeyringTimeout, machine.probeBounds[1])
+	creds, err = store.Load("profile:chef")
+	require.NoError(t, err)
+	assert.Equal(t, "renewed", creds.AccessToken)
+	_, statErr := os.Stat(filepath.Join(store.fallbackDir, "credentials.json"))
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "nothing written in plaintext")
+}
+
+// A keyring that answers that it holds nothing has answered: a miss.
+func TestASlowKeyringThatHoldsNothingIsAMiss(t *testing.T) {
+	slowProbe(t, true)
+	store, machine, _ := stallingStore(t)
+	machine.set(func(m *keyringMachine) { m.probeNeeds = 20 * time.Second })
+	_, err := store.Load("profile:chef")
+	require.ErrorIs(t, err, ErrNoCredential)
+	assert.False(t, KeyringUnavailable(err))
+}
+
+// When the keyring does not answer the read either, it is a keyring that
+// did not answer: never "no credential", never a login remedy, its own
+// try-again exit status, and the long read is paid once per backoff.
+func TestAKeyringThatDoesNotAnswerIsUnavailableNotMissing(t *testing.T) {
+	slowProbe(t, true)
+	store, machine, clock := stallingStore(t)
+	saveCreds(t, machine, "profile:chef", liveCreds("keyring-token"))
+	machine.set(func(m *keyringMachine) { m.probeNeeds = 2 * slowKeyringTimeout; m.stalled = true })
+
+	_, err := store.Load("profile:chef")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrNoCredential)
+	assert.True(t, KeyringUnavailable(err), "%v", err)
+	cliErr := output.AsError(err)
+	assert.Equal(t, output.CodeKeyringUnavailable, cliErr.Code)
+	assert.Equal(t, output.ExitRateLimit, output.ExitCodeFor(cliErr.Code))
+	assert.True(t, cliErr.Retryable)
+	assert.NotContains(t, cliErr.Hint, "auth login")
+	assert.NotContains(t, cliErr.Message, "not found")
+
+	_, err = store.Load("profile:chef")
+	assert.True(t, KeyringUnavailable(err), "%v", err)
+	assert.Equal(t, 1, machine.directReads, "no second long read inside the backoff")
+
+	// Nor does a write fall back to plaintext.
+	err = store.Save("profile:chef", liveCreds("new"))
+	assert.True(t, KeyringUnavailable(err), "%v", err)
+	_, statErr := os.Stat(filepath.Join(store.fallbackDir, "credentials.json"))
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "nothing written in plaintext")
+
+	machine.set(func(m *keyringMachine) { m.stalled = false })
+	clock.advance(readStallRetryCap)
+	creds, err := store.Load("profile:chef")
+	require.NoError(t, err, "the read after the backoff reaches the keyring")
+	assert.Equal(t, "keyring-token", creds.AccessToken)
+}
+
+// Headless macOS keeps the #568 design: a timed-out probe there is a locked
+// keychain nobody can unlock, the file is the store, and a miss is a miss.
+func TestATimedOutProbeOnHeadlessMacOSStillFallsBackToTheFile(t *testing.T) {
+	slowProbe(t, false)
+	store, machine, _ := stallingStore(t)
+	machine.set(func(m *keyringMachine) { m.probeNeeds = 20 * time.Second })
+
+	_, err := store.Load("profile:chef")
+	require.ErrorIs(t, err, ErrNoCredential)
+	assert.False(t, KeyringUnavailable(err))
+	assert.Equal(t, 1, machine.stores(), "no patient probe")
+}
+
 // probeFailedStore is a store on the file backend after a failed probe.
-type probeFailedStore struct{ err error }
+type probeFailedStore struct{ err, probeErr error }
 
 func (f *probeFailedStore) Load(string) ([]byte, error) { return nil, f.err }
 func (f *probeFailedStore) Save(string, []byte) error   { return nil }
@@ -442,6 +584,7 @@ func (f *probeFailedStore) Delete(string) error         { return nil }
 func (f *probeFailedStore) MigrateToKeyring() error     { return nil }
 func (f *probeFailedStore) UsingKeyring() bool          { return false }
 func (f *probeFailedStore) FallbackWarning() string     { return "" }
+func (f *probeFailedStore) ProbeError() error           { return nil }
 
 // A keyring that refuses the read has answered: that is not served from
 // memory, and is not reported as an outage (#866).

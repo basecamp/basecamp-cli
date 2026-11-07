@@ -1189,6 +1189,9 @@ func credentialKindOf(ctx context.Context, mgr *auth.Manager) (string, error) {
 	switch {
 	case errors.Is(err, auth.ErrNoCredential):
 		return "", nil
+	case auth.KeyringUnavailable(err):
+		// Not a statement about the credential, and no login remedy.
+		return "", err
 	case err != nil:
 		return "", output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
 	case creds.OAuthType == "agent":

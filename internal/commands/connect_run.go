@@ -224,16 +224,30 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if !accountIDsEqual(account, file.AccountID) {
 		return output.ErrUsage(fmt.Sprintf("connect.json was set up in account %s, and profile %q is bound to account %s", file.AccountID, name, account))
 	}
-	kind, err := connectCredentialKind(ctx, app)
+	logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
+	// The first credential read waits out a keyring that does not answer,
+	// as the token wait below does: a slow keyring says nothing about the
+	// credential, and the connector starts once the keyring answers.
+	var kind string
+	var creds *auth.Credentials
+	readSignals, stopReadSignals := connector.NotifyShutdown()
+	err = awaitConnectToken(ctx, connectStartRead(func(ctx context.Context) error {
+		var err error
+		if kind, err = connectCredentialKind(ctx, app); err != nil || kind == "" {
+			return err
+		}
+		creds, err = app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
+		if err != nil && !auth.KeyringUnavailable(err) {
+			return output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
+		}
+		return err
+	}), connectStartWait{Log: func(line string) { logger.Warn(line) }, Signals: readSignals})
+	stopReadSignals()
 	if err != nil {
 		return err
 	}
 	if kind == "" {
 		return output.ErrAuth(fmt.Sprintf("Profile %q holds no credential", name))
-	}
-	creds, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
-	if err != nil {
-		return output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
 	}
 	// A look at the lock first, under the agent connect.json names: a
 	// second connector for an agent already running says so now, not after
@@ -249,7 +263,6 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return err
 	}
 
-	logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
 	tokens := &managerTokens{mgr: app.Auth}
 	// Every read below needs a token first. One the running feed would
 	// wait for is waited for here too, rather than ending the start.
@@ -802,3 +815,10 @@ func connectActorTypes(policy admission.Policy) []string {
 	}
 	return []string{"person"}
 }
+
+// connectStartRead is a start-up credential read in the shape the start's
+// token wait takes, so a keyring that does not answer is waited out on the
+// same rule (tokenRetry) rather than ending the start.
+type connectStartRead func(ctx context.Context) error
+
+func (r connectStartRead) AccessToken(ctx context.Context) (string, error) { return "", r(ctx) }
