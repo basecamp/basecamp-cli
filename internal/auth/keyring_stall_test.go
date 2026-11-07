@@ -155,6 +155,10 @@ func (k *stallingKeyring) Delete(key string) error {
 		return err
 	}
 	k.m.mu.Lock()
+	if writeErr := k.m.writeErr; writeErr != nil {
+		k.m.mu.Unlock()
+		return writeErr
+	}
 	if _, ok := k.m.items[key]; !ok {
 		k.m.mu.Unlock()
 		return fmt.Errorf("credentials not found: %w", keyring.ErrNotFound)
@@ -179,7 +183,7 @@ type keyringMachine struct {
 	items         map[string][]byte
 	stalled       bool          // reads time out
 	stallWrites   bool          // writes time out
-	writeErr      error         // what every keyring write fails with, when set
+	writeErr      error         // what every keyring save and delete fails with, when set
 	down          bool          // the Secret Service is not on the bus
 	vanishReads   int           // the next n reads find nothing, as a restarting service can
 	probeErr      error         // what a fresh store's probe finds; nil is the keyring
@@ -793,6 +797,7 @@ func TestAFailedKeyringWriteKeepsServingThePlaintextCopy(t *testing.T) {
 
 	machine.set(func(m *keyringMachine) { m.writeErr = fmt.Errorf("keyring write: %w", io.EOF) })
 	require.Error(t, store.Save("profile:chef", liveCreds("renewed")))
+	require.Error(t, store.Delete("profile:chef"))
 	machine.set(func(m *keyringMachine) { m.writeErr = nil })
 
 	creds, err := store.Load("profile:chef")
