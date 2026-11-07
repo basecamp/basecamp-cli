@@ -783,6 +783,18 @@ func TestAFailedPlaintextCleanupDoesNotServeTheOldCopy(t *testing.T) {
 	// And the copy is gone for other processes too, which read the file
 	// first and know nothing of this one's.
 	machine.set(func(m *keyringMachine) { assert.NotContains(t, m.file, "profile:other") })
+
+	// Where that copy cannot be removed, the caller hears both.
+	store2, machine2, _ := stallingStore(t)
+	machine2.set(func(m *keyringMachine) {
+		m.probeNeeds = 20 * time.Second
+		m.file = map[string][]byte{"profile:other": stale}
+		m.fileDeleteErr = errors.New("read-only file system")
+		m.stallWrites = true
+	})
+	err = store2.Save("profile:other", liveCreds("renewed"))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.ErrorContains(t, err, "could not be removed")
 }
 
 // Only a dispatched write that timed out may land. One refused under an

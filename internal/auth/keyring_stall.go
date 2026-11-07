@@ -457,8 +457,12 @@ func (s *Store) mutate(key string, deleting bool, abandoned func() error, op fun
 	// write replaces, and another process, which knows nothing of
 	// keyringOwns, would otherwise read it first. The timeout is still
 	// what the caller is told.
-	if err := file.Delete(key); err != nil && !mayLand {
-		return fmt.Errorf("the system keyring has the change, but the older plaintext copy in credentials.json, which would be read in its place, could not be removed: %w", err)
+	if err := file.Delete(key); err != nil {
+		removeErr := fmt.Errorf("the older plaintext copy in credentials.json, which would be read in its place, could not be removed: %w", err)
+		if mayLand {
+			return errors.Join(opErr, removeErr)
+		}
+		return fmt.Errorf("the system keyring has the change, but %w", removeErr)
 	}
 	return opErr
 }
