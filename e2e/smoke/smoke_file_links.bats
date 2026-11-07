@@ -31,7 +31,7 @@ setup_file() {
   assert_success
   assert_json_value '.data.title' 'Smoke cloud file renamed'
   assert_json_value '.data.service.code' 'other'
-  assert_output_contains 'Kept'
+  assert_json_value '.data.description | contains("Kept")' 'true'
 }
 
 @test "files google-docs create adds a Google document" {

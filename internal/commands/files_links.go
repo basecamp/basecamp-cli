@@ -9,7 +9,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
 // Cloud files and Google documents are links to outside files that sit in
@@ -82,8 +84,9 @@ func linkFolder(cmd *cobra.Command, app *appctx.App, project, vaultID string) (s
 }
 
 // linkDescription converts a --description value (Markdown, or - for stdin)
-// to the rich text Basecamp stores. An empty value stays empty.
-func linkDescription(cmd *cobra.Command, value string) (string, error) {
+// to the rich text Basecamp stores, uploading any local images it names. An
+// empty value stays empty.
+func linkDescription(cmd *cobra.Command, app *appctx.App, value string) (string, error) {
 	desc, err := resolveContentValue(cmd, value, -1, "--description")
 	if err != nil {
 		return "", err
@@ -91,15 +94,32 @@ func linkDescription(cmd *cobra.Command, value string) (string, error) {
 	if desc == "" {
 		return "", nil
 	}
-	return richTextToHTML(cmd, desc), nil
+	return resolveLocalImages(cmd, app, richTextToHTML(cmd, desc))
 }
 
-// linkItemID reads a cloud file's or Google document's ID, or the ID in its
-// Basecamp URL.
-func linkItemID(arg, what string) (int64, error) {
-	idStr, _, err := extractWithProject(arg)
-	if err != nil {
-		return 0, err
+// linkIDArg reads a cloud file's or Google document's ID, or the ID in its
+// Basecamp URL, as doorIDArg does: a URL must be on a trusted Basecamp host,
+// name one record of urlType, and name the configured account, whose place
+// it takes when none is configured.
+func linkIDArg(app *appctx.App, arg, urlType, what, hint string) (int64, error) {
+	idStr := arg
+	if urlarg.IsURL(arg) {
+		if !hostutil.IsTrustedBasecampHost(arg, app.Config.BaseURL) {
+			return 0, output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
+		}
+		parsed := urlarg.Parse(arg)
+		if parsed == nil || parsed.IsCollection || parsed.Type != urlType || parsed.RecordingID == "" {
+			return 0, output.ErrUsageHint("The URL does not name one "+what, hint)
+		}
+		if parsed.AccountID != "" {
+			switch {
+			case app.Config.AccountID == "":
+				app.Config.AccountID = parsed.AccountID
+			case !accountIDsEqual(parsed.AccountID, app.Config.AccountID):
+				return 0, output.ErrUsage(fmt.Sprintf("URL account %s does not match the configured account %s", parsed.AccountID, app.Config.AccountID))
+			}
+		}
+		idStr = parsed.RecordingID
 	}
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -206,10 +226,6 @@ nobody. --description is Markdown, converted to rich text (- reads stdin).
 				return err
 			}
 
-			desc, err := linkDescription(cmd, description)
-			if err != nil {
-				return err
-			}
 			subs, err := applySubscribeFlags(cmd.Context(), app.Names, subscribe, cmd.Flags().Changed("subscribe"), noSubscribe)
 			if err != nil {
 				return err
@@ -220,6 +236,11 @@ nobody. --description is Markdown, converted to rich text (- reads stdin).
 				return err
 			}
 			vis, err := resolveVaultClientVisibility(cmd, app, *vaultID, vaultIDNum, visibleToClients)
+			if err != nil {
+				return err
+			}
+			// Local images upload only once the folder is known to take them.
+			desc, err := linkDescription(cmd, app, description)
 			if err != nil {
 				return err
 			}
@@ -292,12 +313,12 @@ a known one (dropbox.com, figma.com, ...); otherwise the service stays as it is.
 			if err := rejectEmptyLinkFlags(cmd, "url", "title", "service"); err != nil {
 				return err
 			}
-			cloudFileID, err := linkItemID(args[0], "cloud file")
+			app := appctx.FromContext(cmd.Context())
+			cloudFileID, err := linkIDArg(app, args[0], "cloud_files", "cloud file",
+				"Pass the cloud file's ID, or its URL (…/buckets/<project>/cloud_files/<id>); basecamp files list --in <project> lists them")
 			if err != nil {
 				return err
 			}
-
-			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -326,7 +347,7 @@ a known one (dropbox.com, figma.com, ...); otherwise the service stays as it is.
 				req.Title = title
 			}
 			if cmd.Flags().Changed("description") {
-				if req.Description, err = linkDescription(cmd, description); err != nil {
+				if req.Description, err = linkDescription(cmd, app, description); err != nil {
 					return err
 				}
 			}
@@ -446,10 +467,6 @@ converted to rich text (- reads stdin).
 				return err
 			}
 
-			desc, err := linkDescription(cmd, description)
-			if err != nil {
-				return err
-			}
 			subs, err := applySubscribeFlags(cmd.Context(), app.Names, subscribe, cmd.Flags().Changed("subscribe"), noSubscribe)
 			if err != nil {
 				return err
@@ -460,6 +477,11 @@ converted to rich text (- reads stdin).
 				return err
 			}
 			vis, err := resolveVaultClientVisibility(cmd, app, *vaultID, vaultIDNum, visibleToClients)
+			if err != nil {
+				return err
+			}
+			// Local images upload only once the folder is known to take them.
+			desc, err := linkDescription(cmd, app, description)
 			if err != nil {
 				return err
 			}
@@ -551,12 +573,12 @@ subscribers alone.
 			if err := rejectSubscribeConflict(cmd.Flags().Changed("subscribe"), noSubscribe, subscribe); err != nil {
 				return err
 			}
-			docID, err := linkItemID(args[0], "Google document")
+			app := appctx.FromContext(cmd.Context())
+			docID, err := linkIDArg(app, args[0], "google_documents", "Google document",
+				"Pass the Google document's ID, or its URL (…/buckets/<project>/google_documents/<id>); basecamp files list --in <project> lists them")
 			if err != nil {
 				return err
 			}
-
-			app := appctx.FromContext(cmd.Context())
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -593,7 +615,7 @@ subscribers alone.
 				req.Title = title
 			}
 			if cmd.Flags().Changed("description") {
-				if req.Description, err = linkDescription(cmd, description); err != nil {
+				if req.Description, err = linkDescription(cmd, app, description); err != nil {
 					return err
 				}
 			}

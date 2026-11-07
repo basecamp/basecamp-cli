@@ -95,6 +95,7 @@ level1=(
   "$SMOKE_DIR"/smoke_timesheet_write.bats
   "$SMOKE_DIR"/smoke_messages_write.bats
   "$SMOKE_DIR"/smoke_files_write.bats
+  "$SMOKE_DIR"/smoke_file_links.bats
   "$SMOKE_DIR"/smoke_cards_write.bats
   "$SMOKE_DIR"/smoke_comments.bats
   "$SMOKE_DIR"/smoke_campfire.bats

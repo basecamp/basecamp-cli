@@ -342,3 +342,70 @@ func TestInferGoogleDocumentType(t *testing.T) {
 		assert.Equal(t, want, inferGoogleDocumentType(raw), raw)
 	}
 }
+
+func TestLinkUpdatesTakeTheirOwnBasecampURL(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args []string
+		path string
+	}{
+		"cloud file": {
+			args: []string{"cloud-files", "update", "https://3.basecamp.com/99999/buckets/123/cloud_files/456", "--title", "Plan (final)"},
+			path: "/99999/cloud_files/456",
+		},
+		"Google document": {
+			args: []string{"google-docs", "update", "https://3.basecamp.com/99999/buckets/123/vaults/777/google_documents/789", "--title", "Spec (final)"},
+			path: "/99999/google_documents/789",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := cloudFileJSON
+			if tc.path == "/99999/google_documents/789" {
+				body = googleDocJSON
+			}
+			app, transport := setupRecordingTestApp(t,
+				stubRoute{method: http.MethodGet, path: tc.path, status: http.StatusOK, body: body},
+				stubRoute{method: http.MethodPut, path: tc.path, status: http.StatusOK, body: body},
+			)
+
+			err := executeRecordingCommand(NewFilesCmd(), app, tc.args...)
+			require.NoError(t, err)
+			assert.Equal(t, tc.path, transport.last(t).Path)
+		})
+	}
+}
+
+func TestLinkUpdatesRefuseAnotherURLBeforeAnyRequest(t *testing.T) {
+	for name, args := range map[string][]string{
+		"a Google document's URL to cloud-files": {"cloud-files", "update", "https://3.basecamp.com/99999/buckets/123/google_documents/789", "--title", "X"},
+		"a cloud file's URL to google-docs":      {"google-docs", "update", "https://3.basecamp.com/99999/buckets/123/cloud_files/456", "--title", "X"},
+		"a look-alike host":                      {"cloud-files", "update", "https://evil.example/99999/buckets/123/cloud_files/456", "--title", "X"},
+		"another account":                        {"cloud-files", "update", "https://3.basecamp.com/11111/buckets/123/cloud_files/456", "--title", "X"},
+		"a collection":                           {"google-docs", "update", "https://3.basecamp.com/99999/buckets/123/vaults/777", "--title", "X"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			app, transport := setupRecordingTestApp(t)
+
+			err := executeRecordingCommand(NewFilesCmd(), app, args...)
+			require.Error(t, err)
+			var e *output.Error
+			require.True(t, errors.As(err, &e), "expected *output.Error, got %T: %v", err, err)
+			assert.Equal(t, output.CodeUsage, e.Code)
+			assert.Empty(t, transport.recorded())
+		})
+	}
+}
+
+func TestCloudFilesUpdateResolvesLocalImagesInTheDescription(t *testing.T) {
+	app, transport := setupRecordingTestApp(t,
+		stubRoute{method: http.MethodGet, path: "/99999/cloud_files/456", status: http.StatusOK, body: cloudFileJSON},
+		stubRoute{method: http.MethodPut, path: "/99999/cloud_files/456", status: http.StatusOK, body: cloudFileJSON},
+	)
+
+	// A local image that isn't there is refused rather than sent as a path.
+	err := executeRecordingCommand(NewFilesCmd(), app, "cloud-files", "update", "456",
+		"--description", "![preview](./no-such-preview.png)")
+	require.Error(t, err)
+	for _, req := range transport.recorded() {
+		assert.NotEqual(t, http.MethodPut, req.Method, "nothing is written")
+	}
+}
