@@ -171,6 +171,30 @@ func (s *Store) current() credStore {
 func (s *Store) read(origin string, req lockRequest) ([]byte, uint64, error) {
 	gen := s.generation(origin)
 	inner := s.ensure()
+	s.stall.mu.Lock()
+	file := s.stall.slowFile
+	s.stall.mu.Unlock()
+	if file != nil && file != inner {
+		// A write reached a slow keyring (reachSlowKeyring). A credential
+		// it has not written since keeps the copy in credentials.json the
+		// timed-out probe fell back to, and that copy is read first, as it
+		// was before the switch: storage moving must not change which copy
+		// an untouched profile gets, nor hand back an older keyring entry
+		// whose refresh token the file's copy replaced. Every write removes
+		// the copy, after which the keyring is the only one.
+		fdata, ferr := file.Load(origin)
+		switch {
+		case ferr == nil:
+			return fdata, gen, nil
+		case !isMissingCredential(ferr):
+			// Unreadable is not absent: say so, not "not logged in". It is
+			// no keyring outage either: a truncated file's
+			// io.ErrUnexpectedEOF must not be read as a bus that went away.
+			// And what is held for key is no longer known to be stored.
+			s.forget(origin)
+			return nil, gen, fmt.Errorf("reading credentials.json: %w", ferr)
+		}
+	}
 	data, err := inner.Load(origin)
 	if !inner.UsingKeyring() {
 		if err == nil || !isMissingCredential(err) || !probeTimedOutOnSlowness(inner) {
@@ -208,31 +232,6 @@ func (s *Store) read(origin string, req lockRequest) ([]byte, uint64, error) {
 		}
 		inner = s.ensure()
 		data, err = inner.Load(origin)
-	}
-	if err != nil && isMissingCredential(err) {
-		// After a write reached a slow keyring (reachSlowKeyring), a
-		// credential nobody has written since still lives only in the
-		// credentials.json the timed-out probe fell back to. It stays
-		// readable there until a write moves it into the keyring.
-		s.stall.mu.Lock()
-		file := s.stall.slowFile
-		s.stall.mu.Unlock()
-		if file != nil && file != inner {
-			fdata, ferr := file.Load(origin)
-			switch {
-			case ferr == nil:
-				data, err = fdata, nil
-			case !isMissingCredential(ferr):
-				// Unreadable is not absent: say so, not "not logged in".
-				// The keyring answered (a miss), so this is no outage: a
-				// truncated file's io.ErrUnexpectedEOF must not be read
-				// as a bus that went away. Nor is anything held for key
-				// still known to be stored: a later stall must not serve it.
-				s.noteRead(inner, nil)
-				s.forget(origin)
-				return nil, gen, fmt.Errorf("reading credentials.json: %w", ferr)
-			}
-		}
 	}
 	s.noteRead(inner, err)
 	if err != nil && keyringDidNotAnswer(err) {

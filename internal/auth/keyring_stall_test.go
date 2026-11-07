@@ -661,6 +661,14 @@ func TestUntouchedFileCredentialsStayReadableAfterTheSwitch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "file-only-token", creds.AccessToken)
 
+	// Where the keyring also holds an older entry for it (one an earlier
+	// fallback's refresh replaced in the file), the switch does not bring
+	// that older entry back: the file's copy is read, as before the switch.
+	saveCreds(t, machine, "profile:other", liveCreds("retired-keyring-token"))
+	creds, err = store.Load("profile:other")
+	require.NoError(t, err)
+	assert.Equal(t, "file-only-token", creds.AccessToken)
+
 	_, err = store.Load("profile:missing")
 	require.ErrorIs(t, err, ErrNoCredential)
 	require.True(t, store.holds("profile:other"))
