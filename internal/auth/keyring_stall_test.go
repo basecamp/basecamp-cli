@@ -666,6 +666,15 @@ func TestUntouchedFileCredentialsStayReadableAfterTheSwitch(t *testing.T) {
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, ErrNoCredential)
 	assert.ErrorContains(t, err, "unexpected end of JSON input")
+
+	// Nor as a keyring outage, though a truncated file fails with the
+	// io.ErrUnexpectedEOF a dropped bus connection also gives.
+	machine.set(func(m *keyringMachine) { m.fileErr = fmt.Errorf("decode credentials.json: %w", io.ErrUnexpectedEOF) })
+	_, err = store.Load("profile:other")
+	require.Error(t, err)
+	assert.False(t, KeyringUnavailable(err), "%v", err)
+	assert.NotErrorIs(t, err, ErrNoCredential)
+	assert.False(t, store.stall.stalled, "the keyring answered: no backoff")
 }
 
 // A restarting Secret Service can answer a direct read with nothing for a

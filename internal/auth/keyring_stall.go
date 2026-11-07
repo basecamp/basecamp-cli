@@ -224,7 +224,11 @@ func (s *Store) read(origin string, req lockRequest) ([]byte, uint64, error) {
 				data, err = fdata, nil
 			case !isMissingCredential(ferr):
 				// Unreadable is not absent: say so, not "not logged in".
-				err = ferr
+				// The keyring answered (a miss), so this is no outage: a
+				// truncated file's io.ErrUnexpectedEOF must not be read
+				// as a bus that went away.
+				s.noteRead(inner, nil)
+				return nil, gen, fmt.Errorf("reading credentials.json: %w", ferr)
 			}
 		}
 	}
