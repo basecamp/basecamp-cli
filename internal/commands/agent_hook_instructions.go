@@ -20,7 +20,7 @@ import (
 // reads the profile the post goes out as. No instructions set says nothing.
 func instructionsNotice(cmd *cobra.Command) string {
 	app := appctx.FromContext(cmd.Context())
-	if app == nil || app.Config == nil || len(instructionsLayers(app)) == 0 {
+	if app == nil || app.Config == nil || !anyInstructionsConfigured(app) {
 		return ""
 	}
 	return "Your operator set instructions for anything an agent writes to Basecamp on this computer. " +
@@ -28,4 +28,22 @@ func instructionsNotice(cmd *cobra.Command) string {
 		"`basecamp instructions`, with `-P <profile>` when the post goes out as a profile other than the default, " +
 		"and follow what it prints. This holds when you run the basecamp CLI yourself and when you hand your " +
 		"text to a script or tool that posts it. If the command fails, say so in what you post."
+}
+
+// anyInstructionsConfigured reports whether any post could go out under
+// instructions: the baseline, the active profile's, or another profile's. The
+// hook can't know which profile a session will post as, and a session that
+// starts on a profile with none can still post with `-P` as one that has
+// some, so a source set on any profile counts. It reads only the configured
+// sources, never their contents.
+func anyInstructionsConfigured(app *appctx.App) bool {
+	if len(instructionsLayers(app)) > 0 {
+		return true
+	}
+	for _, profile := range app.Config.Profiles {
+		if profile != nil && profile.Instructions != "" {
+			return true
+		}
+	}
+	return false
 }

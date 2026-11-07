@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -43,7 +44,9 @@ func TestAgentHookPointsAtInstructionsWhenSet(t *testing.T) {
 		assert.Equal(t, "SessionStart", event)
 		assert.Contains(t, context, "`basecamp instructions`", source)
 		assert.Contains(t, context, "script or tool that posts it", source)
-		assert.NotContains(t, output, "systemMessage", "the pointer is for the model, not the user")
+		var reply map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal([]byte(output), &reply), source)
+		assert.NotContains(t, reply, "systemMessage", "the pointer is for the model, not the user")
 	}
 }
 
@@ -53,6 +56,30 @@ func TestAgentHookPointsAtProfileInstructions(t *testing.T) {
 
 	_, context := hookSpecificOutput(t, runAgentHookWithConfig(t, cfg, sessionStartPayload))
 	assert.Contains(t, context, "`basecamp instructions`")
+}
+
+// A session that starts on a profile with no instructions can still post as
+// one that has some, so instructions set on any configured profile count.
+func TestAgentHookPointsAtAnotherProfilesInstructions(t *testing.T) {
+	cfg := config.Default()
+	cfg.Profiles = map[string]*config.ProfileConfig{
+		"human": {BaseURL: "https://3.basecampapi.com"},
+		"agent": {BaseURL: "https://3.basecampapi.com", Instructions: "/home/u/agent-voice.md"},
+	}
+	require.Empty(t, cfg.ProfileInstructions, "the active profile has none of its own")
+
+	_, context := hookSpecificOutput(t, runAgentHookWithConfig(t, cfg, sessionStartPayload))
+	assert.Contains(t, context, "`basecamp instructions`")
+	assert.Contains(t, context, "-P <profile>")
+}
+
+func TestAgentHookSilentWhenNoProfileHasInstructions(t *testing.T) {
+	cfg := config.Default()
+	cfg.Profiles = map[string]*config.ProfileConfig{
+		"human": {BaseURL: "https://3.basecampapi.com"},
+		"agent": {BaseURL: "https://3.basecampapi.com"},
+	}
+	assert.Empty(t, runAgentHookWithConfig(t, cfg, sessionStartPayload))
 }
 
 func TestAgentHookSilentWithoutInstructions(t *testing.T) {

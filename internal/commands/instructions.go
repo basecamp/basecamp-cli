@@ -256,8 +256,8 @@ and, on top of it, a profile's own (an agent's voice, say) with:
   basecamp config set instructions <path-or-url> --global --for-profile <name>
 
 Agents run this before they write to Basecamp and follow what it prints
-(the Claude Code and Codex plugins tell each session to, when instructions
-are set):
+(when instructions are set, the Claude Code and Codex plugins tell each
+session to run it):
 the baseline first, then the active profile's, which wins where the two
 differ. These are defaults: a project's AGENTS.md wins on how posts look
 in that project, the operator's own instructions win on voice, and an
