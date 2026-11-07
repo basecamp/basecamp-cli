@@ -334,7 +334,13 @@ func (s *Store) MigrateToKeyring() error {
 }
 
 // UsingKeyring returns true if the store is using the system keyring.
-func (s *Store) UsingKeyring() bool { return s.ensure().UsingKeyring() }
+func (s *Store) UsingKeyring() bool {
+	inner := s.ensure()
+	// A probe that timed out on a slow keyring left a file-backed store,
+	// but credentials are still read from, and written to, the keyring
+	// (readKeyringDirectly, reachSlowKeyring): report where they live.
+	return inner.UsingKeyring() || probeTimedOutOnSlowness(inner)
+}
 
 // operationError offers the file-storage remedy only while the keyring is the
 // store in use. After a failed initial probe the store is already on the file

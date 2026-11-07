@@ -636,6 +636,31 @@ func TestAWriteToASlowKeyringRemovesThePlaintextCopy(t *testing.T) {
 	machine.set(func(m *keyringMachine) { assert.NotContains(t, m.file, "profile:other") })
 }
 
+// After a write moves this process onto the slow keyring, a credential
+// only credentials.json held (no write has moved it yet) stays readable,
+// and storage is reported as the keyring throughout.
+func TestUntouchedFileCredentialsStayReadableAfterTheSwitch(t *testing.T) {
+	slowProbe(t, true)
+	store, machine, _ := stallingStore(t)
+	other, err := json.Marshal(liveCreds("file-only-token"))
+	require.NoError(t, err)
+	machine.set(func(m *keyringMachine) {
+		m.probeNeeds = 20 * time.Second
+		m.file = map[string][]byte{"profile:other": other}
+	})
+	assert.True(t, store.UsingKeyring(), "a slow keyring is still where credentials live")
+
+	require.NoError(t, store.Save("profile:chef", liveCreds("renewed")))
+	assert.True(t, store.UsingKeyring())
+
+	creds, err := store.Load("profile:other")
+	require.NoError(t, err)
+	assert.Equal(t, "file-only-token", creds.AccessToken)
+
+	_, err = store.Load("profile:missing")
+	require.ErrorIs(t, err, ErrNoCredential)
+}
+
 // A restarting Secret Service can answer a direct read with nothing for a
 // credential it gave this process a moment ago: asked again before the
 // miss is believed, as a store read is.

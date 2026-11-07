@@ -209,6 +209,20 @@ func (s *Store) read(origin string, req lockRequest) ([]byte, uint64, error) {
 		inner = s.ensure()
 		data, err = inner.Load(origin)
 	}
+	if err != nil && isMissingCredential(err) {
+		// After a write reached a slow keyring (reachSlowKeyring), a
+		// credential nobody has written since still lives only in the
+		// credentials.json the timed-out probe fell back to. It stays
+		// readable there until a write moves it into the keyring.
+		s.stall.mu.Lock()
+		file := s.stall.slowFile
+		s.stall.mu.Unlock()
+		if file != nil && file != inner {
+			if fdata, ferr := file.Load(origin); ferr == nil {
+				data, err = fdata, nil
+			}
+		}
+	}
 	s.noteRead(inner, err)
 	if err != nil && keyringDidNotAnswer(err) {
 		err = &keyringUnavailableError{err}
@@ -236,7 +250,10 @@ var keyringReadDirect = func(service, key string, timeout time.Duration) ([]byte
 	// One that has been blocked past readStallRetryCap is given up on, and
 	// a fresh lookup may reach a keyring that has since recovered: at most
 	// one abandoned lookup per readStallRetryCap.
-	now := time.Now().UnixNano()
+	now := int64(time.Since(processStart))
+	if now == 0 {
+		now = 1 // zero means none runs
+	}
 	started := directGetStarted.Load()
 	if started != 0 && time.Duration(now-started) < readStallRetryCap {
 		return nil, fmt.Errorf("keyring read timed out after %s, still waiting on an earlier lookup: %w", timeout, context.DeadlineExceeded)
@@ -277,9 +294,13 @@ func (s *Store) hasPlaintextBeside() bool {
 }
 
 // directGetStarted is when the running direct go-keyring lookup started,
-// in Unix nanoseconds, including one its caller has given up on; zero
-// while none runs.
+// as nanoseconds since processStart on the monotonic clock (a wall-clock
+// step cannot age or freeze it), including one its caller has given up
+// on; zero while none runs.
 var directGetStarted atomic.Int64
+
+// processStart anchors directGetStarted to the monotonic clock.
+var processStart = time.Now()
 
 // readKeyringDirectly is a read of key from the keyring, for a store whose
 // probe timed out (probeTimedOutOnSlowness), on slowKeyringTimeout. One
