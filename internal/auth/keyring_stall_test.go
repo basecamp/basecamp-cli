@@ -909,6 +909,23 @@ func TestPlaintextCleanupStaysLockedAndReportsUnreadableFiles(t *testing.T) {
 	close(release)
 	require.NoError(t, <-saved)
 
+	// Reads too: one may fall back to credentials.json, so it waits out a
+	// writer rewriting it.
+	held, release = make(chan struct{}), make(chan struct{})
+	loaded := make(chan error, 1)
+	go func() {
+		_ = other.withStoreFileLock(func() error { close(held); <-release; return nil })
+	}()
+	<-held
+	go func() { _, err := store.Load("profile:chef"); loaded <- err }()
+	select {
+	case err := <-loaded:
+		t.Fatalf("the read did not wait for the store lock: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(release)
+	require.NoError(t, <-loaded)
+
 	machine.set(func(m *keyringMachine) { m.fileErr = errors.New("unexpected end of JSON input") })
 	err := store.Save("profile:chef", liveCreds("second"))
 	require.Error(t, err)

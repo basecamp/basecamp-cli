@@ -233,7 +233,9 @@ func (s *Store) withStoreLock(fn func() error) error {
 // "Not authenticated for profile:" this package exists to stop. On a
 // keyring-backed store there is nothing to wait for.
 func (s *Store) withStoreReadLock(req lockRequest, fn func() error) error {
-	if s.ensure().UsingKeyring() {
+	// A store that moved onto a slow keyring still reads credentials.json
+	// for what no write has moved yet (read), so it locks like the file.
+	if s.ensure().UsingKeyring() && !s.hasPlaintextBeside() {
 		if err := lockCause(req.cause); err != nil {
 			return err
 		}
