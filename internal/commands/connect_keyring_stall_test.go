@@ -219,13 +219,15 @@ func TestConnectStartWaitsOutAKeyringThatDoesNotAnswer(t *testing.T) {
 	var waits []time.Duration
 	var lines []string
 	err := awaitConnectToken(t.Context(), read, connectStartWait{
-		Log:   func(line string) { lines = append(lines, line) },
-		Sleep: func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil },
+		Log:     func(line string) { lines = append(lines, line) },
+		Sleep:   func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil },
+		Waiting: "the agent's credential from the system keyring",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, 3, reads)
 	assert.Len(t, waits, 2)
-	assert.Len(t, lines, 2)
+	require.Len(t, lines, 2)
+	assert.Contains(t, lines[0], "could not get the agent's credential from the system keyring yet")
 
 	// A read the store answered is not waited on.
 	refused := output.ErrAuth("refused")

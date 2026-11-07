@@ -241,7 +241,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			return output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
 		}
 		return err
-	}), connectStartWait{Log: func(line string) { logger.Warn(line) }, Signals: readSignals})
+	}), connectStartWait{Log: func(line string) { logger.Warn(line) }, Signals: readSignals, Waiting: "the agent's credential from the system keyring"})
 	stopReadSignals()
 	select {
 	case sig, ok := <-readSignals:

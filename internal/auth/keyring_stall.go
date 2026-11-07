@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -229,12 +230,19 @@ func probeTimedOutOnSlowness(inner credStore) bool {
 // read that outlives the bound is abandoned, as credstore abandons its own.
 // Replaceable in tests.
 var keyringReadDirect = func(service, key string, timeout time.Duration) ([]byte, error) {
+	// At most one abandoned lookup per process: while one is still blocked
+	// in go-keyring, a new one is not started, so a Secret Service that
+	// never answers cannot pile up goroutines and bus calls.
+	if !directGetIdle.CompareAndSwap(true, false) {
+		return nil, fmt.Errorf("keyring read timed out after %s, still waiting on an earlier lookup: %w", timeout, context.DeadlineExceeded)
+	}
 	type result struct {
 		secret string
 		err    error
 	}
 	done := make(chan result, 1)
 	go func() {
+		defer directGetIdle.Store(true)
 		secret, err := keyring.Get(service, service+"::"+key)
 		done <- result{secret, err}
 	}()
@@ -250,6 +258,10 @@ var keyringReadDirect = func(service, key string, timeout time.Duration) ([]byte
 		return nil, fmt.Errorf("keyring read timed out after %s: %w", timeout, context.DeadlineExceeded)
 	}
 }
+
+// directGetIdle is false while a direct go-keyring lookup is running,
+// including one its caller has given up on.
+var directGetIdle = func() *atomic.Bool { b := &atomic.Bool{}; b.Store(true); return b }()
 
 // readKeyringDirectly is a read of key from the keyring, for a store whose
 // probe timed out (probeTimedOutOnSlowness), on slowKeyringTimeout. One
