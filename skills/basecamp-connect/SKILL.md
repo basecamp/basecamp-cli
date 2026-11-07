@@ -650,8 +650,9 @@ basecamp config set instructions '<path-or-url>' --global
 basecamp instructions --refresh     # check it reads, and show it
 ```
 
-Subagents run `basecamp instructions` before they write, so it takes effect
-with no restart. `basecamp config unset instructions --global` removes it.
+Subagents run `basecamp instructions` before they write, and the plugin's
+session-start hook tells every other agent session on this computer to run
+it before it writes to Basecamp, so it takes effect with no restart. `basecamp config unset instructions --global` removes it.
 
 ## When the connector stops
 
