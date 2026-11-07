@@ -39,10 +39,11 @@ func writeTimeout() error {
 // keyring. Like credstore, once a call times out it refuses every later
 // call for the life of the store.
 type stallingKeyring struct {
-	m        *keyringMachine
-	mu       sync.Mutex
-	latched  error
-	probeErr error
+	m         *keyringMachine
+	mu        sync.Mutex
+	latched   error
+	probeErr  error
+	forceFile bool
 }
 
 func (k *stallingKeyring) refused() error {
@@ -62,20 +63,27 @@ func (k *stallingKeyring) latch(err error) error {
 }
 
 func (k *stallingKeyring) Load(key string) ([]byte, error) {
-	if k.probeErr != nil {
+	if k.onFile() {
 		// Fell back to credentials.json: a miss there is what credstore's
 		// file backend says after a failed probe.
 		k.m.mu.Lock()
 		data, ok := k.m.file[key]
 		fileErr := k.m.fileErr
 		k.m.mu.Unlock()
-		if fileErr != nil {
+		switch {
+		case fileErr != nil && k.probeErr != nil:
+			// As credstore: the probe's failure is appended to every
+			// file error of a store that fell back.
+			return nil, fmt.Errorf("%w: system keyring unavailable (%w), fell back to credentials.json", fileErr, k.probeErr)
+		case fileErr != nil:
 			return nil, fileErr
-		}
-		if ok {
+		case ok:
 			return data, nil
+		case k.probeErr != nil:
+			return nil, fmt.Errorf("credentials not found for %s: system keyring unavailable (%w), fell back to credentials.json", key, k.probeErr)
+		default:
+			return nil, fmt.Errorf("credentials not found for %s", key)
 		}
-		return nil, fmt.Errorf("credentials not found for %s: system keyring unavailable (%w), fell back to credentials.json", key, k.probeErr)
 	}
 	if err := k.refused(); err != nil {
 		return nil, err
@@ -105,7 +113,7 @@ func (k *stallingKeyring) Load(key string) ([]byte, error) {
 }
 
 func (k *stallingKeyring) Save(key string, data []byte) error {
-	if k.probeErr != nil {
+	if k.onFile() {
 		k.m.mu.Lock()
 		defer k.m.mu.Unlock()
 		if k.m.file == nil {
@@ -130,7 +138,7 @@ func (k *stallingKeyring) Save(key string, data []byte) error {
 }
 
 func (k *stallingKeyring) Delete(key string) error {
-	if k.probeErr != nil {
+	if k.onFile() {
 		k.m.mu.Lock()
 		defer k.m.mu.Unlock()
 		if k.m.fileDeleteErr != nil {
@@ -153,7 +161,11 @@ func (k *stallingKeyring) Delete(key string) error {
 }
 
 func (k *stallingKeyring) MigrateToKeyring() error { return nil }
-func (k *stallingKeyring) UsingKeyring() bool      { return k.probeErr == nil }
+func (k *stallingKeyring) UsingKeyring() bool      { return !k.onFile() }
+
+// onFile is credentials.json in use: a failed probe, or file storage asked
+// for outright (ForceFile).
+func (k *stallingKeyring) onFile() bool            { return k.probeErr != nil || k.forceFile }
 func (k *stallingKeyring) FallbackWarning() string { return "" }
 func (k *stallingKeyring) ProbeError() error       { return k.probeErr }
 
@@ -183,6 +195,9 @@ type keyringMachine struct {
 func (m *keyringMachine) newStore(opts credstore.StoreOptions) credStore {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if opts.ForceFile {
+		return &stallingKeyring{m: m, forceFile: true}
+	}
 	k := &stallingKeyring{m: m, probeErr: m.probeErr}
 	m.probeBounds = append(m.probeBounds, opts.ProbeTimeout)
 	if k.probeErr == nil && m.probeNeeds > 0 && opts.ProbeTimeout < m.probeNeeds {
@@ -684,6 +699,10 @@ func TestUntouchedFileCredentialsStayReadableAfterTheSwitch(t *testing.T) {
 	assert.NotErrorIs(t, err, ErrNoCredential)
 	assert.ErrorContains(t, err, "unexpected end of JSON input")
 	assert.False(t, store.holds("profile:other"), "a later stall must not serve what could not be read")
+	// Nor does it carry the timed-out probe's deadline, which credstore
+	// appends to every file error of a store that fell back: callers retry
+	// a timeout.
+	assert.NotErrorIs(t, err, context.DeadlineExceeded)
 
 	// Nor as a keyring outage, though a truncated file fails with the
 	// io.ErrUnexpectedEOF a dropped bus connection also gives.

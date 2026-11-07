@@ -497,7 +497,13 @@ func (s *Store) reachSlowKeyring(inner credStore) (credStore, error) {
 		k.retryAt = k.clock().Add(readStallBackoff(k.stalls))
 		return nil, slowKeyringError(probeErr)
 	}
-	k.slowFile = inner
+	// The plaintext file is kept as a probe-free store: one built on the
+	// failed probe appends its deadline to every file error, and an
+	// unreadable credentials.json would then look like a keyring timeout
+	// to every caller that retries one.
+	fileOpts := s.opts
+	fileOpts.ForceFile = true
+	k.slowFile = newCredStore(fileOpts)
 	s.inner = fresh
 	k.stalled, k.stalls = false, 0
 	return fresh, nil
