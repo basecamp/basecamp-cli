@@ -818,6 +818,9 @@ func TestALatchedWriteDoesNotHandAKeyToTheKeyring(t *testing.T) {
 	owned := store.stall.keyringOwns["profile:chef"]
 	store.stall.mu.Unlock()
 	assert.False(t, owned, "a refused write hands nothing to the keyring")
+	creds, err := store.Load("profile:chef")
+	require.NoError(t, err)
+	assert.Equal(t, "current-file-token", creds.AccessToken)
 }
 
 // A write that failed outright, without timing out, did not land: the
