@@ -417,12 +417,15 @@ func (s *Store) mutate(key string, deleting bool, abandoned func() error, op fun
 	if file == nil || file == store {
 		return opErr
 	}
-	if opErr == nil || (deleting && isMissingCredential(opErr)) || keyringDidNotAnswer(opErr) {
+	if opErr == nil || (deleting && isMissingCredential(opErr)) || errors.Is(opErr, context.DeadlineExceeded) {
 		// The keyring holds the change (or, for a delete, nothing): from
 		// here it is this key's only copy, whatever the cleanup below does.
-		// So too after a write the keyring did not answer in time: it may
-		// still land, and the plaintext copy is the one it replaces — a
-		// spent refresh token, or a credential being deleted.
+		// So too after a write that timed out: it may still land, and the
+		// plaintext copy is the one it replaces (a spent refresh token, a
+		// credential being deleted). credstore latches that store, so the
+		// key reads as unavailable until a fresh store answers (#1006).
+		// A write that failed outright (a dropped bus) did not land, and
+		// the plaintext copy stays the current one.
 		s.stall.mu.Lock()
 		if s.stall.keyringOwns == nil {
 			s.stall.keyringOwns = map[string]bool{}

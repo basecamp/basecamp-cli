@@ -126,6 +126,10 @@ func (k *stallingKeyring) Save(key string, data []byte) error {
 		return err
 	}
 	k.m.mu.Lock()
+	if writeErr := k.m.writeErr; writeErr != nil {
+		k.m.mu.Unlock()
+		return writeErr
+	}
 	stallWrites := k.m.stallWrites
 	if !stallWrites {
 		k.m.items[key] = data
@@ -175,6 +179,7 @@ type keyringMachine struct {
 	items         map[string][]byte
 	stalled       bool          // reads time out
 	stallWrites   bool          // writes time out
+	writeErr      error         // what every keyring write fails with, when set
 	down          bool          // the Secret Service is not on the bus
 	vanishReads   int           // the next n reads find nothing, as a restarting service can
 	probeErr      error         // what a fresh store's probe finds; nil is the keyring
@@ -770,6 +775,29 @@ func TestAFailedPlaintextCleanupDoesNotServeTheOldCopy(t *testing.T) {
 	_, err = store.Load("profile:other")
 	require.Error(t, err)
 	assert.True(t, KeyringUnavailable(err), "%v", err)
+}
+
+// A write that failed outright, without timing out, did not land: the
+// plaintext copy is still the current credential and is still read.
+func TestAFailedKeyringWriteKeepsServingThePlaintextCopy(t *testing.T) {
+	slowProbe(t, true)
+	store, machine, _ := stallingStore(t)
+	current, err := json.Marshal(liveCreds("current-file-token"))
+	require.NoError(t, err)
+	machine.set(func(m *keyringMachine) {
+		m.probeNeeds = 20 * time.Second
+		m.file = map[string][]byte{"profile:chef": current}
+	})
+	require.NoError(t, store.Save("profile:moved", liveCreds("t")))
+	saveCreds(t, machine, "profile:chef", liveCreds("retired-keyring-token"))
+
+	machine.set(func(m *keyringMachine) { m.writeErr = fmt.Errorf("keyring write: %w", io.EOF) })
+	require.Error(t, store.Save("profile:chef", liveCreds("renewed")))
+	machine.set(func(m *keyringMachine) { m.writeErr = nil })
+
+	creds, err := store.Load("profile:chef")
+	require.NoError(t, err)
+	assert.Equal(t, "current-file-token", creds.AccessToken)
 }
 
 // A restarting Secret Service can answer a direct read with nothing for a
