@@ -133,6 +133,9 @@ func (k *stallingKeyring) Delete(key string) error {
 	if k.probeErr != nil {
 		k.m.mu.Lock()
 		defer k.m.mu.Unlock()
+		if k.m.fileDeleteErr != nil {
+			return k.m.fileDeleteErr
+		}
 		delete(k.m.file, key)
 		return nil
 	}
@@ -156,24 +159,25 @@ func (k *stallingKeyring) ProbeError() error       { return k.probeErr }
 
 // keyringMachine is the OS keyring every store a test builds talks to.
 type keyringMachine struct {
-	mu          sync.Mutex
-	items       map[string][]byte
-	stalled     bool          // reads time out
-	stallWrites bool          // writes time out
-	down        bool          // the Secret Service is not on the bus
-	vanishReads int           // the next n reads find nothing, as a restarting service can
-	probeErr    error         // what a fresh store's probe finds; nil is the keyring
-	probeNeeds  time.Duration // a probe bounded shorter than this times out
-	probeBounds []time.Duration
-	directReads int               // reads that went to the keyring without a store
-	file        map[string][]byte // credentials.json, as a fallen-back store sees it
-	directBlock chan struct{}     // a direct read waits for this, when set
-	fileErr     error             // what reading credentials.json fails with, when set
-	readErr     error             // what every read fails with, when set
-	onRead      func()            // runs inside each read, after the item is looked up
-	onBuild     func()            // runs as each store is built, after the first
-	reads       int
-	built       []*stallingKeyring
+	mu            sync.Mutex
+	items         map[string][]byte
+	stalled       bool          // reads time out
+	stallWrites   bool          // writes time out
+	down          bool          // the Secret Service is not on the bus
+	vanishReads   int           // the next n reads find nothing, as a restarting service can
+	probeErr      error         // what a fresh store's probe finds; nil is the keyring
+	probeNeeds    time.Duration // a probe bounded shorter than this times out
+	probeBounds   []time.Duration
+	directReads   int               // reads that went to the keyring without a store
+	file          map[string][]byte // credentials.json, as a fallen-back store sees it
+	directBlock   chan struct{}     // a direct read waits for this, when set
+	fileErr       error             // what reading credentials.json fails with, when set
+	fileDeleteErr error             // what removing from credentials.json fails with, when set
+	readErr       error             // what every read fails with, when set
+	onRead        func()            // runs inside each read, after the item is looked up
+	onBuild       func()            // runs as each store is built, after the first
+	reads         int
+	built         []*stallingKeyring
 }
 
 func (m *keyringMachine) newStore(opts credstore.StoreOptions) credStore {
@@ -708,6 +712,30 @@ func TestASaveCanceledWhileReachingASlowKeyringIsAbandoned(t *testing.T) {
 		assert.NotContains(t, m.items, "profile:chef")
 		assert.NotContains(t, m.file, "profile:chef")
 	})
+}
+
+// A write that reached the keyring but could not remove the key's plaintext
+// copy reports that, and the copy is not read in place of the keyring's.
+func TestAFailedPlaintextCleanupDoesNotServeTheOldCopy(t *testing.T) {
+	slowProbe(t, true)
+	store, machine, _ := stallingStore(t)
+	stale, err := json.Marshal(liveCreds("stale-file-token"))
+	require.NoError(t, err)
+	machine.set(func(m *keyringMachine) {
+		m.probeNeeds = 20 * time.Second
+		m.file = map[string][]byte{"profile:chef": stale}
+		m.fileDeleteErr = errors.New("read-only file system")
+	})
+
+	err = store.Save("profile:chef", liveCreds("renewed"))
+	require.ErrorContains(t, err, "could not be removed")
+	creds, err := store.Load("profile:chef")
+	require.NoError(t, err)
+	assert.Equal(t, "renewed", creds.AccessToken)
+
+	require.Error(t, store.Delete("profile:chef"))
+	_, err = store.Load("profile:chef")
+	require.ErrorIs(t, err, ErrNoCredential)
 }
 
 // A restarting Secret Service can answer a direct read with nothing for a

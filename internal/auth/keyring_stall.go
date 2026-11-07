@@ -108,6 +108,10 @@ type keyringStall struct {
 	// into, kept once a patient probe replaced it, so every later write
 	// can remove the key's plaintext copy beside the keyring (mutate).
 	slowFile credStore
+	// keyringOwns names the keys a write moved to the keyring after the
+	// switch: read goes to the keyring for them even if their plaintext
+	// copy could not be removed, so a failed cleanup cannot serve it.
+	keyringOwns map[string]bool
 	// directReading is set while a direct keyring read is in flight.
 	directReading bool
 
@@ -172,9 +176,9 @@ func (s *Store) read(origin string, req lockRequest) ([]byte, uint64, error) {
 	gen := s.generation(origin)
 	inner := s.ensure()
 	s.stall.mu.Lock()
-	file := s.stall.slowFile
+	file, owned := s.stall.slowFile, s.stall.keyringOwns[origin]
 	s.stall.mu.Unlock()
-	if file != nil && file != inner {
+	if file != nil && file != inner && !owned {
 		// A write reached a slow keyring (reachSlowKeyring). A credential
 		// it has not written since keeps the copy in credentials.json the
 		// timed-out probe fell back to, and that copy is read first, as it
@@ -412,6 +416,16 @@ func (s *Store) mutate(key string, deleting bool, abandoned func() error, op fun
 	s.stall.mu.Unlock()
 	if file == nil || file == store {
 		return opErr
+	}
+	if opErr == nil || (deleting && isMissingCredential(opErr)) {
+		// The keyring holds the change (or, for a delete, nothing): from
+		// here it is this key's only copy, whatever the cleanup below does.
+		s.stall.mu.Lock()
+		if s.stall.keyringOwns == nil {
+			s.stall.keyringOwns = map[string]bool{}
+		}
+		s.stall.keyringOwns[key] = true
+		s.stall.mu.Unlock()
 	}
 	if _, loadErr := file.Load(key); loadErr != nil {
 		keyringMiss := deleting && opErr != nil && isMissingCredential(opErr)
