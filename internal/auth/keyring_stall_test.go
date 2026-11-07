@@ -755,6 +755,21 @@ func TestAFailedPlaintextCleanupDoesNotServeTheOldCopy(t *testing.T) {
 	require.Error(t, store.Delete("profile:chef"))
 	_, err = store.Load("profile:chef")
 	require.ErrorIs(t, err, ErrNoCredential)
+
+	// A write the keyring does not answer in time may still land: the
+	// plaintext copy it replaces is not served meanwhile either.
+	machine.set(func(m *keyringMachine) {
+		m.file["profile:other"] = stale
+		m.stallWrites = true
+	})
+	err = store.Save("profile:other", liveCreds("renewed"))
+	require.Error(t, err)
+	machine.set(func(m *keyringMachine) { m.stallWrites = false })
+	// The store waits out its timed-out write (#1006) rather than reading
+	// the plaintext copy that write replaced.
+	_, err = store.Load("profile:other")
+	require.Error(t, err)
+	assert.True(t, KeyringUnavailable(err), "%v", err)
 }
 
 // A restarting Secret Service can answer a direct read with nothing for a

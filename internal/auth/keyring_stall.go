@@ -417,9 +417,12 @@ func (s *Store) mutate(key string, deleting bool, abandoned func() error, op fun
 	if file == nil || file == store {
 		return opErr
 	}
-	if opErr == nil || (deleting && isMissingCredential(opErr)) {
+	if opErr == nil || (deleting && isMissingCredential(opErr)) || keyringDidNotAnswer(opErr) {
 		// The keyring holds the change (or, for a delete, nothing): from
 		// here it is this key's only copy, whatever the cleanup below does.
+		// So too after a write the keyring did not answer in time: it may
+		// still land, and the plaintext copy is the one it replaces — a
+		// spent refresh token, or a credential being deleted.
 		s.stall.mu.Lock()
 		if s.stall.keyringOwns == nil {
 			s.stall.keyringOwns = map[string]bool{}
