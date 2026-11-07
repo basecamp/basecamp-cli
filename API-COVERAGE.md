@@ -6,12 +6,16 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 59 | 226 |
+| ✅ Implemented | 61 | 232 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **63** | **238** |
+| **Total tracked** | **65** | **244** |
 
-**226 of 226 tracked in-scope endpoints.** Listing, reading, creating, updating and
+**232 of 232 tracked in-scope endpoints.** Adding and editing a link to a cloud file or a
+Google document in Docs & Files (`POST /buckets/:id/vaults/:id/cloud_files.json`,
+`PUT /cloud_files/:id`, and their `google_documents` counterparts, in the
+SDK's `CloudFiles` and `GoogleDocuments` services; `files show` already read both) lands as
+`files cloud-files` and `files google-docs`. Listing, reading, creating, updating and
 deleting a project's external links (`GET`/`POST /buckets/:id/dock/doors.json`,
 `GET`/`PUT`/`DELETE /dock/doors/:id`, added by
 [bc3#14314](https://github.com/basecamp/bc3/pull/14314) and modelled by the
@@ -276,6 +280,8 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | vaults | 8 | `files`, `vaults` | ✅ | BC4 | - | list, show, create |
 | vaults (move) | 1 | `files move` | ✅ | BC5 | - | `POST /recordings/:id/filing.json`: moves a document, upload or folder into another folder in the same project, in place (same id and comments). `--to` takes a folder ID or URL; `--position` is 1-indexed. Flat route, so no `--in`. Moves and copies into another project go through recordings (moves, copies) with `--to-project`/`--to-folder` |
 | documents | 8 | `files`, `docs` | ✅ | BC4 | - | list, show, create, update. Create supports `--subscribe`/`--no-subscribe`, `--visible-to-clients` (root vault only) |
+| cloud_files | 3 | `files cloud-files`, `files show` | ✅ | BC5 | - | A link to a file in Dropbox, Box, OneDrive or another service, filed in Docs & Files: show (`files show`), create (`POST /vaults/:id/cloud_files.json`; `--service` inferred from the URL's host, else `other`; `--subscribe`/`--no-subscribe`, `--visible-to-clients` at the root vault), update (`PUT /cloud_files/:id`, a full replace: the command reads the cloud file and sends back every field not given). Update has no `--subscribe`: Basecamp applies subscriptions on update only to drafts, and a cloud file is never one |
+| google_documents | 3 | `files google-docs`, `files show` | ✅ | BC5 | - | A link to a Google Doc, Sheet or Slides file in Docs & Files: show (`files show`), create (`POST /vaults/:id/google_documents.json`; `--type` doc, sheet, slide or other, inferred from a docs.google.com URL; published unless `--draft`; `--subscribe`/`--no-subscribe`, `--visible-to-clients`), update (`PUT /google_documents/:id`, a full replace like cloud files; `--publish` publishes a draft, and `--subscribe` applies only while it is one) |
 | attachments | 1 | `uploads`, `attachments` | ✅ | BC4 | - | Upload via `attach`; list embedded attachments via `attachments list` (parses `<bc-attachment>` from content) |
 | embeds | 2 | `embeds` | ✅ | BC5 | - | create, show. Rich-text commands also embed a URL that stands alone on its line in Markdown content, through the same create |
 | **Schedule** |

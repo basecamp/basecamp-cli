@@ -49,6 +49,8 @@ Each project has a root folder containing documents, uploads, and subfolders.`,
 		newFoldersCmd(&project, &vaultID),
 		newUploadsCmd(&project, &vaultID),
 		newDocsCmd(&project, &vaultID),
+		newCloudFilesCmd(&project, &vaultID),
+		newGoogleDocsCmd(&project, &vaultID),
 		newFilesShowCmd(),
 		newFilesVersionsCmd(&project),
 		newFilesReplaceCmd(&project),
@@ -1546,7 +1548,20 @@ You can pass either an item ID or a Basecamp URL:
 			summary := fmt.Sprintf("%s: %s", detectedType, title)
 
 			var breadcrumbs []output.Breadcrumb
-			if detectedType != "cloud_file" && detectedType != "google_document" {
+			switch detectedType {
+			case "cloud_file":
+				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+					Action:      "update",
+					Cmd:         fmt.Sprintf("basecamp files cloud-files update %s --title \"New title\"", itemIDStr),
+					Description: "Update cloud file",
+				})
+			case "google_document":
+				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+					Action:      "update",
+					Cmd:         fmt.Sprintf("basecamp files google-docs update %s --title \"New title\"", itemIDStr),
+					Description: "Update Google document",
+				})
+			default:
 				breadcrumbs = append(breadcrumbs, output.Breadcrumb{
 					Action:      "update",
 					Cmd:         fmt.Sprintf("basecamp files update %s --in %s", itemIDStr, recordProject(bucket)),

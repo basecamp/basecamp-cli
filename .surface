@@ -141,6 +141,8 @@ ARG basecamp config trust 00 [path]
 ARG basecamp config unset 00 <key>
 ARG basecamp config untrust 00 [path]
 ARG basecamp docs archive 00 <id|url>
+ARG basecamp docs cloud-files create 00 [title]
+ARG basecamp docs cloud-files update 00 <id|url>
 ARG basecamp docs copy 00 <id|url>...
 ARG basecamp docs doc create 00 <title>
 ARG basecamp docs doc create 01 [content]
@@ -151,6 +153,8 @@ ARG basecamp docs documents create 01 [content]
 ARG basecamp docs download 00 <upload-id|url>
 ARG basecamp docs folder create 00 <name>
 ARG basecamp docs folders create 00 <name>
+ARG basecamp docs google-docs create 00 [title]
+ARG basecamp docs google-docs update 00 <id|url>
 ARG basecamp docs move 00 <id|url>...
 ARG basecamp docs new-version 00 <upload-id|url>
 ARG basecamp docs new-version 01 <file>
@@ -166,6 +170,8 @@ ARG basecamp docs vault create 00 <name>
 ARG basecamp docs vaults create 00 <name>
 ARG basecamp docs versions 00 <upload_id|url>
 ARG basecamp documents archive 00 <id|url>
+ARG basecamp documents cloud-files create 00 [title]
+ARG basecamp documents cloud-files update 00 <id|url>
 ARG basecamp documents copy 00 <id|url>...
 ARG basecamp documents doc create 00 <title>
 ARG basecamp documents doc create 01 [content]
@@ -176,6 +182,8 @@ ARG basecamp documents documents create 01 [content]
 ARG basecamp documents download 00 <upload-id|url>
 ARG basecamp documents folder create 00 <name>
 ARG basecamp documents folders create 00 <name>
+ARG basecamp documents google-docs create 00 [title]
+ARG basecamp documents google-docs update 00 <id|url>
 ARG basecamp documents move 00 <id|url>...
 ARG basecamp documents new-version 00 <upload-id|url>
 ARG basecamp documents new-version 01 <file>
@@ -202,6 +210,8 @@ ARG basecamp external-links delete 00 <id|url>
 ARG basecamp external-links show 00 <id|url>
 ARG basecamp external-links update 00 <id|url>
 ARG basecamp file archive 00 <id|url>
+ARG basecamp file cloud-files create 00 [title]
+ARG basecamp file cloud-files update 00 <id|url>
 ARG basecamp file copy 00 <id|url>...
 ARG basecamp file doc create 00 <title>
 ARG basecamp file doc create 01 [content]
@@ -212,6 +222,8 @@ ARG basecamp file documents create 01 [content]
 ARG basecamp file download 00 <upload-id|url>
 ARG basecamp file folder create 00 <name>
 ARG basecamp file folders create 00 <name>
+ARG basecamp file google-docs create 00 [title]
+ARG basecamp file google-docs update 00 <id|url>
 ARG basecamp file move 00 <id|url>...
 ARG basecamp file new-version 00 <upload-id|url>
 ARG basecamp file new-version 01 <file>
@@ -227,6 +239,8 @@ ARG basecamp file vault create 00 <name>
 ARG basecamp file vaults create 00 <name>
 ARG basecamp file versions 00 <upload_id|url>
 ARG basecamp files archive 00 <id|url>
+ARG basecamp files cloud-files create 00 [title]
+ARG basecamp files cloud-files update 00 <id|url>
 ARG basecamp files copy 00 <id|url>...
 ARG basecamp files doc create 00 <title>
 ARG basecamp files doc create 01 [content]
@@ -237,6 +251,8 @@ ARG basecamp files documents create 01 [content]
 ARG basecamp files download 00 <upload-id|url>
 ARG basecamp files folder create 00 <name>
 ARG basecamp files folders create 00 <name>
+ARG basecamp files google-docs create 00 [title]
+ARG basecamp files google-docs update 00 <id|url>
 ARG basecamp files move 00 <id|url>...
 ARG basecamp files new-version 00 <upload-id|url>
 ARG basecamp files new-version 01 <file>
@@ -253,6 +269,8 @@ ARG basecamp files vaults create 00 <name>
 ARG basecamp files versions 00 <upload_id|url>
 ARG basecamp filings show 00 <filing_id>
 ARG basecamp folders archive 00 <id|url>
+ARG basecamp folders cloud-files create 00 [title]
+ARG basecamp folders cloud-files update 00 <id|url>
 ARG basecamp folders copy 00 <id|url>...
 ARG basecamp folders doc create 00 <title>
 ARG basecamp folders doc create 01 [content]
@@ -263,6 +281,8 @@ ARG basecamp folders documents create 01 [content]
 ARG basecamp folders download 00 <upload-id|url>
 ARG basecamp folders folder create 00 <name>
 ARG basecamp folders folders create 00 <name>
+ARG basecamp folders google-docs create 00 [title]
+ARG basecamp folders google-docs update 00 <id|url>
 ARG basecamp folders move 00 <id|url>...
 ARG basecamp folders new-version 00 <upload-id|url>
 ARG basecamp folders new-version 01 <file>
@@ -519,6 +539,8 @@ ARG basecamp uploads show 00 <id|url>
 ARG basecamp url 00 <url>
 ARG basecamp url parse 00 <url>
 ARG basecamp vault archive 00 <id|url>
+ARG basecamp vault cloud-files create 00 [title]
+ARG basecamp vault cloud-files update 00 <id|url>
 ARG basecamp vault copy 00 <id|url>...
 ARG basecamp vault doc create 00 <title>
 ARG basecamp vault doc create 01 [content]
@@ -529,6 +551,8 @@ ARG basecamp vault documents create 01 [content]
 ARG basecamp vault download 00 <upload-id|url>
 ARG basecamp vault folder create 00 <name>
 ARG basecamp vault folders create 00 <name>
+ARG basecamp vault google-docs create 00 [title]
+ARG basecamp vault google-docs update 00 <id|url>
 ARG basecamp vault move 00 <id|url>...
 ARG basecamp vault new-version 00 <upload-id|url>
 ARG basecamp vault new-version 01 <file>
@@ -544,6 +568,8 @@ ARG basecamp vault vault create 00 <name>
 ARG basecamp vault vaults create 00 <name>
 ARG basecamp vault versions 00 <upload_id|url>
 ARG basecamp vaults archive 00 <id|url>
+ARG basecamp vaults cloud-files create 00 [title]
+ARG basecamp vaults cloud-files update 00 <id|url>
 ARG basecamp vaults copy 00 <id|url>...
 ARG basecamp vaults doc create 00 <title>
 ARG basecamp vaults doc create 01 [content]
@@ -554,6 +580,8 @@ ARG basecamp vaults documents create 01 [content]
 ARG basecamp vaults download 00 <upload-id|url>
 ARG basecamp vaults folder create 00 <name>
 ARG basecamp vaults folders create 00 <name>
+ARG basecamp vaults google-docs create 00 [title]
+ARG basecamp vaults google-docs update 00 <id|url>
 ARG basecamp vaults move 00 <id|url>...
 ARG basecamp vaults new-version 00 <upload-id|url>
 ARG basecamp vaults new-version 01 <file>
@@ -769,6 +797,9 @@ CMD basecamp config unset
 CMD basecamp config untrust
 CMD basecamp docs
 CMD basecamp docs archive
+CMD basecamp docs cloud-files
+CMD basecamp docs cloud-files create
+CMD basecamp docs cloud-files update
 CMD basecamp docs copy
 CMD basecamp docs doc
 CMD basecamp docs doc create
@@ -786,6 +817,9 @@ CMD basecamp docs folder list
 CMD basecamp docs folders
 CMD basecamp docs folders create
 CMD basecamp docs folders list
+CMD basecamp docs google-docs
+CMD basecamp docs google-docs create
+CMD basecamp docs google-docs update
 CMD basecamp docs list
 CMD basecamp docs move
 CMD basecamp docs new-version
@@ -810,6 +844,9 @@ CMD basecamp docs versions
 CMD basecamp doctor
 CMD basecamp documents
 CMD basecamp documents archive
+CMD basecamp documents cloud-files
+CMD basecamp documents cloud-files create
+CMD basecamp documents cloud-files update
 CMD basecamp documents copy
 CMD basecamp documents doc
 CMD basecamp documents doc create
@@ -827,6 +864,9 @@ CMD basecamp documents folder list
 CMD basecamp documents folders
 CMD basecamp documents folders create
 CMD basecamp documents folders list
+CMD basecamp documents google-docs
+CMD basecamp documents google-docs create
+CMD basecamp documents google-docs update
 CMD basecamp documents list
 CMD basecamp documents move
 CMD basecamp documents new-version
@@ -870,6 +910,9 @@ CMD basecamp external-links show
 CMD basecamp external-links update
 CMD basecamp file
 CMD basecamp file archive
+CMD basecamp file cloud-files
+CMD basecamp file cloud-files create
+CMD basecamp file cloud-files update
 CMD basecamp file copy
 CMD basecamp file doc
 CMD basecamp file doc create
@@ -887,6 +930,9 @@ CMD basecamp file folder list
 CMD basecamp file folders
 CMD basecamp file folders create
 CMD basecamp file folders list
+CMD basecamp file google-docs
+CMD basecamp file google-docs create
+CMD basecamp file google-docs update
 CMD basecamp file list
 CMD basecamp file move
 CMD basecamp file new-version
@@ -910,6 +956,9 @@ CMD basecamp file vaults list
 CMD basecamp file versions
 CMD basecamp files
 CMD basecamp files archive
+CMD basecamp files cloud-files
+CMD basecamp files cloud-files create
+CMD basecamp files cloud-files update
 CMD basecamp files copy
 CMD basecamp files doc
 CMD basecamp files doc create
@@ -927,6 +976,9 @@ CMD basecamp files folder list
 CMD basecamp files folders
 CMD basecamp files folders create
 CMD basecamp files folders list
+CMD basecamp files google-docs
+CMD basecamp files google-docs create
+CMD basecamp files google-docs update
 CMD basecamp files list
 CMD basecamp files move
 CMD basecamp files new-version
@@ -952,6 +1004,9 @@ CMD basecamp filings
 CMD basecamp filings show
 CMD basecamp folders
 CMD basecamp folders archive
+CMD basecamp folders cloud-files
+CMD basecamp folders cloud-files create
+CMD basecamp folders cloud-files update
 CMD basecamp folders copy
 CMD basecamp folders doc
 CMD basecamp folders doc create
@@ -969,6 +1024,9 @@ CMD basecamp folders folder list
 CMD basecamp folders folders
 CMD basecamp folders folders create
 CMD basecamp folders folders list
+CMD basecamp folders google-docs
+CMD basecamp folders google-docs create
+CMD basecamp folders google-docs update
 CMD basecamp folders list
 CMD basecamp folders move
 CMD basecamp folders new-version
@@ -1313,6 +1371,9 @@ CMD basecamp url
 CMD basecamp url parse
 CMD basecamp vault
 CMD basecamp vault archive
+CMD basecamp vault cloud-files
+CMD basecamp vault cloud-files create
+CMD basecamp vault cloud-files update
 CMD basecamp vault copy
 CMD basecamp vault doc
 CMD basecamp vault doc create
@@ -1330,6 +1391,9 @@ CMD basecamp vault folder list
 CMD basecamp vault folders
 CMD basecamp vault folders create
 CMD basecamp vault folders list
+CMD basecamp vault google-docs
+CMD basecamp vault google-docs create
+CMD basecamp vault google-docs update
 CMD basecamp vault list
 CMD basecamp vault move
 CMD basecamp vault new-version
@@ -1353,6 +1417,9 @@ CMD basecamp vault vaults list
 CMD basecamp vault versions
 CMD basecamp vaults
 CMD basecamp vaults archive
+CMD basecamp vaults cloud-files
+CMD basecamp vaults cloud-files create
+CMD basecamp vaults cloud-files update
 CMD basecamp vaults copy
 CMD basecamp vaults doc
 CMD basecamp vaults doc create
@@ -1370,6 +1437,9 @@ CMD basecamp vaults folder list
 CMD basecamp vaults folders
 CMD basecamp vaults folders create
 CMD basecamp vaults folders list
+CMD basecamp vaults google-docs
+CMD basecamp vaults google-docs create
+CMD basecamp vaults google-docs update
 CMD basecamp vaults list
 CMD basecamp vaults move
 CMD basecamp vaults new-version
@@ -5794,6 +5864,88 @@ FLAG basecamp docs archive --styled type=bool
 FLAG basecamp docs archive --todolist type=string
 FLAG basecamp docs archive --vault type=string
 FLAG basecamp docs archive --verbose type=count
+FLAG basecamp docs cloud-files --account type=string
+FLAG basecamp docs cloud-files --agent type=bool
+FLAG basecamp docs cloud-files --cache-dir type=string
+FLAG basecamp docs cloud-files --count type=bool
+FLAG basecamp docs cloud-files --folder type=string
+FLAG basecamp docs cloud-files --help type=bool
+FLAG basecamp docs cloud-files --hints type=bool
+FLAG basecamp docs cloud-files --ids-only type=bool
+FLAG basecamp docs cloud-files --in type=string
+FLAG basecamp docs cloud-files --jq type=string
+FLAG basecamp docs cloud-files --json type=bool
+FLAG basecamp docs cloud-files --markdown type=bool
+FLAG basecamp docs cloud-files --md type=bool
+FLAG basecamp docs cloud-files --no-hints type=bool
+FLAG basecamp docs cloud-files --no-stats type=bool
+FLAG basecamp docs cloud-files --profile type=string
+FLAG basecamp docs cloud-files --project type=string
+FLAG basecamp docs cloud-files --quiet type=bool
+FLAG basecamp docs cloud-files --stats type=bool
+FLAG basecamp docs cloud-files --styled type=bool
+FLAG basecamp docs cloud-files --todolist type=string
+FLAG basecamp docs cloud-files --vault type=string
+FLAG basecamp docs cloud-files --verbose type=count
+FLAG basecamp docs cloud-files create --account type=string
+FLAG basecamp docs cloud-files create --agent type=bool
+FLAG basecamp docs cloud-files create --cache-dir type=string
+FLAG basecamp docs cloud-files create --count type=bool
+FLAG basecamp docs cloud-files create --description type=string
+FLAG basecamp docs cloud-files create --folder type=string
+FLAG basecamp docs cloud-files create --format type=string
+FLAG basecamp docs cloud-files create --help type=bool
+FLAG basecamp docs cloud-files create --hints type=bool
+FLAG basecamp docs cloud-files create --ids-only type=bool
+FLAG basecamp docs cloud-files create --in type=string
+FLAG basecamp docs cloud-files create --jq type=string
+FLAG basecamp docs cloud-files create --json type=bool
+FLAG basecamp docs cloud-files create --markdown type=bool
+FLAG basecamp docs cloud-files create --md type=bool
+FLAG basecamp docs cloud-files create --no-hints type=bool
+FLAG basecamp docs cloud-files create --no-stats type=bool
+FLAG basecamp docs cloud-files create --no-subscribe type=bool
+FLAG basecamp docs cloud-files create --profile type=string
+FLAG basecamp docs cloud-files create --project type=string
+FLAG basecamp docs cloud-files create --quiet type=bool
+FLAG basecamp docs cloud-files create --service type=string
+FLAG basecamp docs cloud-files create --stats type=bool
+FLAG basecamp docs cloud-files create --styled type=bool
+FLAG basecamp docs cloud-files create --subscribe type=string
+FLAG basecamp docs cloud-files create --title type=string
+FLAG basecamp docs cloud-files create --todolist type=string
+FLAG basecamp docs cloud-files create --url type=string
+FLAG basecamp docs cloud-files create --vault type=string
+FLAG basecamp docs cloud-files create --verbose type=count
+FLAG basecamp docs cloud-files create --visible-to-clients type=bool
+FLAG basecamp docs cloud-files update --account type=string
+FLAG basecamp docs cloud-files update --agent type=bool
+FLAG basecamp docs cloud-files update --cache-dir type=string
+FLAG basecamp docs cloud-files update --count type=bool
+FLAG basecamp docs cloud-files update --description type=string
+FLAG basecamp docs cloud-files update --folder type=string
+FLAG basecamp docs cloud-files update --format type=string
+FLAG basecamp docs cloud-files update --help type=bool
+FLAG basecamp docs cloud-files update --hints type=bool
+FLAG basecamp docs cloud-files update --ids-only type=bool
+FLAG basecamp docs cloud-files update --in type=string
+FLAG basecamp docs cloud-files update --jq type=string
+FLAG basecamp docs cloud-files update --json type=bool
+FLAG basecamp docs cloud-files update --markdown type=bool
+FLAG basecamp docs cloud-files update --md type=bool
+FLAG basecamp docs cloud-files update --no-hints type=bool
+FLAG basecamp docs cloud-files update --no-stats type=bool
+FLAG basecamp docs cloud-files update --profile type=string
+FLAG basecamp docs cloud-files update --project type=string
+FLAG basecamp docs cloud-files update --quiet type=bool
+FLAG basecamp docs cloud-files update --service type=string
+FLAG basecamp docs cloud-files update --stats type=bool
+FLAG basecamp docs cloud-files update --styled type=bool
+FLAG basecamp docs cloud-files update --title type=string
+FLAG basecamp docs cloud-files update --todolist type=string
+FLAG basecamp docs cloud-files update --url type=string
+FLAG basecamp docs cloud-files update --vault type=string
+FLAG basecamp docs cloud-files update --verbose type=count
 FLAG basecamp docs copy --account type=string
 FLAG basecamp docs copy --agent type=bool
 FLAG basecamp docs copy --cache-dir type=string
@@ -6237,6 +6389,92 @@ FLAG basecamp docs folders list --styled type=bool
 FLAG basecamp docs folders list --todolist type=string
 FLAG basecamp docs folders list --vault type=string
 FLAG basecamp docs folders list --verbose type=count
+FLAG basecamp docs google-docs --account type=string
+FLAG basecamp docs google-docs --agent type=bool
+FLAG basecamp docs google-docs --cache-dir type=string
+FLAG basecamp docs google-docs --count type=bool
+FLAG basecamp docs google-docs --folder type=string
+FLAG basecamp docs google-docs --help type=bool
+FLAG basecamp docs google-docs --hints type=bool
+FLAG basecamp docs google-docs --ids-only type=bool
+FLAG basecamp docs google-docs --in type=string
+FLAG basecamp docs google-docs --jq type=string
+FLAG basecamp docs google-docs --json type=bool
+FLAG basecamp docs google-docs --markdown type=bool
+FLAG basecamp docs google-docs --md type=bool
+FLAG basecamp docs google-docs --no-hints type=bool
+FLAG basecamp docs google-docs --no-stats type=bool
+FLAG basecamp docs google-docs --profile type=string
+FLAG basecamp docs google-docs --project type=string
+FLAG basecamp docs google-docs --quiet type=bool
+FLAG basecamp docs google-docs --stats type=bool
+FLAG basecamp docs google-docs --styled type=bool
+FLAG basecamp docs google-docs --todolist type=string
+FLAG basecamp docs google-docs --vault type=string
+FLAG basecamp docs google-docs --verbose type=count
+FLAG basecamp docs google-docs create --account type=string
+FLAG basecamp docs google-docs create --agent type=bool
+FLAG basecamp docs google-docs create --cache-dir type=string
+FLAG basecamp docs google-docs create --count type=bool
+FLAG basecamp docs google-docs create --description type=string
+FLAG basecamp docs google-docs create --draft type=bool
+FLAG basecamp docs google-docs create --folder type=string
+FLAG basecamp docs google-docs create --format type=string
+FLAG basecamp docs google-docs create --help type=bool
+FLAG basecamp docs google-docs create --hints type=bool
+FLAG basecamp docs google-docs create --ids-only type=bool
+FLAG basecamp docs google-docs create --in type=string
+FLAG basecamp docs google-docs create --jq type=string
+FLAG basecamp docs google-docs create --json type=bool
+FLAG basecamp docs google-docs create --markdown type=bool
+FLAG basecamp docs google-docs create --md type=bool
+FLAG basecamp docs google-docs create --no-hints type=bool
+FLAG basecamp docs google-docs create --no-stats type=bool
+FLAG basecamp docs google-docs create --no-subscribe type=bool
+FLAG basecamp docs google-docs create --profile type=string
+FLAG basecamp docs google-docs create --project type=string
+FLAG basecamp docs google-docs create --quiet type=bool
+FLAG basecamp docs google-docs create --stats type=bool
+FLAG basecamp docs google-docs create --styled type=bool
+FLAG basecamp docs google-docs create --subscribe type=string
+FLAG basecamp docs google-docs create --title type=string
+FLAG basecamp docs google-docs create --todolist type=string
+FLAG basecamp docs google-docs create --type type=string
+FLAG basecamp docs google-docs create --url type=string
+FLAG basecamp docs google-docs create --vault type=string
+FLAG basecamp docs google-docs create --verbose type=count
+FLAG basecamp docs google-docs create --visible-to-clients type=bool
+FLAG basecamp docs google-docs update --account type=string
+FLAG basecamp docs google-docs update --agent type=bool
+FLAG basecamp docs google-docs update --cache-dir type=string
+FLAG basecamp docs google-docs update --count type=bool
+FLAG basecamp docs google-docs update --description type=string
+FLAG basecamp docs google-docs update --folder type=string
+FLAG basecamp docs google-docs update --format type=string
+FLAG basecamp docs google-docs update --help type=bool
+FLAG basecamp docs google-docs update --hints type=bool
+FLAG basecamp docs google-docs update --ids-only type=bool
+FLAG basecamp docs google-docs update --in type=string
+FLAG basecamp docs google-docs update --jq type=string
+FLAG basecamp docs google-docs update --json type=bool
+FLAG basecamp docs google-docs update --markdown type=bool
+FLAG basecamp docs google-docs update --md type=bool
+FLAG basecamp docs google-docs update --no-hints type=bool
+FLAG basecamp docs google-docs update --no-stats type=bool
+FLAG basecamp docs google-docs update --no-subscribe type=bool
+FLAG basecamp docs google-docs update --profile type=string
+FLAG basecamp docs google-docs update --project type=string
+FLAG basecamp docs google-docs update --publish type=bool
+FLAG basecamp docs google-docs update --quiet type=bool
+FLAG basecamp docs google-docs update --stats type=bool
+FLAG basecamp docs google-docs update --styled type=bool
+FLAG basecamp docs google-docs update --subscribe type=string
+FLAG basecamp docs google-docs update --title type=string
+FLAG basecamp docs google-docs update --todolist type=string
+FLAG basecamp docs google-docs update --type type=string
+FLAG basecamp docs google-docs update --url type=string
+FLAG basecamp docs google-docs update --vault type=string
+FLAG basecamp docs google-docs update --verbose type=count
 FLAG basecamp docs list --account type=string
 FLAG basecamp docs list --agent type=bool
 FLAG basecamp docs list --all type=bool
@@ -6845,6 +7083,88 @@ FLAG basecamp documents archive --styled type=bool
 FLAG basecamp documents archive --todolist type=string
 FLAG basecamp documents archive --vault type=string
 FLAG basecamp documents archive --verbose type=count
+FLAG basecamp documents cloud-files --account type=string
+FLAG basecamp documents cloud-files --agent type=bool
+FLAG basecamp documents cloud-files --cache-dir type=string
+FLAG basecamp documents cloud-files --count type=bool
+FLAG basecamp documents cloud-files --folder type=string
+FLAG basecamp documents cloud-files --help type=bool
+FLAG basecamp documents cloud-files --hints type=bool
+FLAG basecamp documents cloud-files --ids-only type=bool
+FLAG basecamp documents cloud-files --in type=string
+FLAG basecamp documents cloud-files --jq type=string
+FLAG basecamp documents cloud-files --json type=bool
+FLAG basecamp documents cloud-files --markdown type=bool
+FLAG basecamp documents cloud-files --md type=bool
+FLAG basecamp documents cloud-files --no-hints type=bool
+FLAG basecamp documents cloud-files --no-stats type=bool
+FLAG basecamp documents cloud-files --profile type=string
+FLAG basecamp documents cloud-files --project type=string
+FLAG basecamp documents cloud-files --quiet type=bool
+FLAG basecamp documents cloud-files --stats type=bool
+FLAG basecamp documents cloud-files --styled type=bool
+FLAG basecamp documents cloud-files --todolist type=string
+FLAG basecamp documents cloud-files --vault type=string
+FLAG basecamp documents cloud-files --verbose type=count
+FLAG basecamp documents cloud-files create --account type=string
+FLAG basecamp documents cloud-files create --agent type=bool
+FLAG basecamp documents cloud-files create --cache-dir type=string
+FLAG basecamp documents cloud-files create --count type=bool
+FLAG basecamp documents cloud-files create --description type=string
+FLAG basecamp documents cloud-files create --folder type=string
+FLAG basecamp documents cloud-files create --format type=string
+FLAG basecamp documents cloud-files create --help type=bool
+FLAG basecamp documents cloud-files create --hints type=bool
+FLAG basecamp documents cloud-files create --ids-only type=bool
+FLAG basecamp documents cloud-files create --in type=string
+FLAG basecamp documents cloud-files create --jq type=string
+FLAG basecamp documents cloud-files create --json type=bool
+FLAG basecamp documents cloud-files create --markdown type=bool
+FLAG basecamp documents cloud-files create --md type=bool
+FLAG basecamp documents cloud-files create --no-hints type=bool
+FLAG basecamp documents cloud-files create --no-stats type=bool
+FLAG basecamp documents cloud-files create --no-subscribe type=bool
+FLAG basecamp documents cloud-files create --profile type=string
+FLAG basecamp documents cloud-files create --project type=string
+FLAG basecamp documents cloud-files create --quiet type=bool
+FLAG basecamp documents cloud-files create --service type=string
+FLAG basecamp documents cloud-files create --stats type=bool
+FLAG basecamp documents cloud-files create --styled type=bool
+FLAG basecamp documents cloud-files create --subscribe type=string
+FLAG basecamp documents cloud-files create --title type=string
+FLAG basecamp documents cloud-files create --todolist type=string
+FLAG basecamp documents cloud-files create --url type=string
+FLAG basecamp documents cloud-files create --vault type=string
+FLAG basecamp documents cloud-files create --verbose type=count
+FLAG basecamp documents cloud-files create --visible-to-clients type=bool
+FLAG basecamp documents cloud-files update --account type=string
+FLAG basecamp documents cloud-files update --agent type=bool
+FLAG basecamp documents cloud-files update --cache-dir type=string
+FLAG basecamp documents cloud-files update --count type=bool
+FLAG basecamp documents cloud-files update --description type=string
+FLAG basecamp documents cloud-files update --folder type=string
+FLAG basecamp documents cloud-files update --format type=string
+FLAG basecamp documents cloud-files update --help type=bool
+FLAG basecamp documents cloud-files update --hints type=bool
+FLAG basecamp documents cloud-files update --ids-only type=bool
+FLAG basecamp documents cloud-files update --in type=string
+FLAG basecamp documents cloud-files update --jq type=string
+FLAG basecamp documents cloud-files update --json type=bool
+FLAG basecamp documents cloud-files update --markdown type=bool
+FLAG basecamp documents cloud-files update --md type=bool
+FLAG basecamp documents cloud-files update --no-hints type=bool
+FLAG basecamp documents cloud-files update --no-stats type=bool
+FLAG basecamp documents cloud-files update --profile type=string
+FLAG basecamp documents cloud-files update --project type=string
+FLAG basecamp documents cloud-files update --quiet type=bool
+FLAG basecamp documents cloud-files update --service type=string
+FLAG basecamp documents cloud-files update --stats type=bool
+FLAG basecamp documents cloud-files update --styled type=bool
+FLAG basecamp documents cloud-files update --title type=string
+FLAG basecamp documents cloud-files update --todolist type=string
+FLAG basecamp documents cloud-files update --url type=string
+FLAG basecamp documents cloud-files update --vault type=string
+FLAG basecamp documents cloud-files update --verbose type=count
 FLAG basecamp documents copy --account type=string
 FLAG basecamp documents copy --agent type=bool
 FLAG basecamp documents copy --cache-dir type=string
@@ -7288,6 +7608,92 @@ FLAG basecamp documents folders list --styled type=bool
 FLAG basecamp documents folders list --todolist type=string
 FLAG basecamp documents folders list --vault type=string
 FLAG basecamp documents folders list --verbose type=count
+FLAG basecamp documents google-docs --account type=string
+FLAG basecamp documents google-docs --agent type=bool
+FLAG basecamp documents google-docs --cache-dir type=string
+FLAG basecamp documents google-docs --count type=bool
+FLAG basecamp documents google-docs --folder type=string
+FLAG basecamp documents google-docs --help type=bool
+FLAG basecamp documents google-docs --hints type=bool
+FLAG basecamp documents google-docs --ids-only type=bool
+FLAG basecamp documents google-docs --in type=string
+FLAG basecamp documents google-docs --jq type=string
+FLAG basecamp documents google-docs --json type=bool
+FLAG basecamp documents google-docs --markdown type=bool
+FLAG basecamp documents google-docs --md type=bool
+FLAG basecamp documents google-docs --no-hints type=bool
+FLAG basecamp documents google-docs --no-stats type=bool
+FLAG basecamp documents google-docs --profile type=string
+FLAG basecamp documents google-docs --project type=string
+FLAG basecamp documents google-docs --quiet type=bool
+FLAG basecamp documents google-docs --stats type=bool
+FLAG basecamp documents google-docs --styled type=bool
+FLAG basecamp documents google-docs --todolist type=string
+FLAG basecamp documents google-docs --vault type=string
+FLAG basecamp documents google-docs --verbose type=count
+FLAG basecamp documents google-docs create --account type=string
+FLAG basecamp documents google-docs create --agent type=bool
+FLAG basecamp documents google-docs create --cache-dir type=string
+FLAG basecamp documents google-docs create --count type=bool
+FLAG basecamp documents google-docs create --description type=string
+FLAG basecamp documents google-docs create --draft type=bool
+FLAG basecamp documents google-docs create --folder type=string
+FLAG basecamp documents google-docs create --format type=string
+FLAG basecamp documents google-docs create --help type=bool
+FLAG basecamp documents google-docs create --hints type=bool
+FLAG basecamp documents google-docs create --ids-only type=bool
+FLAG basecamp documents google-docs create --in type=string
+FLAG basecamp documents google-docs create --jq type=string
+FLAG basecamp documents google-docs create --json type=bool
+FLAG basecamp documents google-docs create --markdown type=bool
+FLAG basecamp documents google-docs create --md type=bool
+FLAG basecamp documents google-docs create --no-hints type=bool
+FLAG basecamp documents google-docs create --no-stats type=bool
+FLAG basecamp documents google-docs create --no-subscribe type=bool
+FLAG basecamp documents google-docs create --profile type=string
+FLAG basecamp documents google-docs create --project type=string
+FLAG basecamp documents google-docs create --quiet type=bool
+FLAG basecamp documents google-docs create --stats type=bool
+FLAG basecamp documents google-docs create --styled type=bool
+FLAG basecamp documents google-docs create --subscribe type=string
+FLAG basecamp documents google-docs create --title type=string
+FLAG basecamp documents google-docs create --todolist type=string
+FLAG basecamp documents google-docs create --type type=string
+FLAG basecamp documents google-docs create --url type=string
+FLAG basecamp documents google-docs create --vault type=string
+FLAG basecamp documents google-docs create --verbose type=count
+FLAG basecamp documents google-docs create --visible-to-clients type=bool
+FLAG basecamp documents google-docs update --account type=string
+FLAG basecamp documents google-docs update --agent type=bool
+FLAG basecamp documents google-docs update --cache-dir type=string
+FLAG basecamp documents google-docs update --count type=bool
+FLAG basecamp documents google-docs update --description type=string
+FLAG basecamp documents google-docs update --folder type=string
+FLAG basecamp documents google-docs update --format type=string
+FLAG basecamp documents google-docs update --help type=bool
+FLAG basecamp documents google-docs update --hints type=bool
+FLAG basecamp documents google-docs update --ids-only type=bool
+FLAG basecamp documents google-docs update --in type=string
+FLAG basecamp documents google-docs update --jq type=string
+FLAG basecamp documents google-docs update --json type=bool
+FLAG basecamp documents google-docs update --markdown type=bool
+FLAG basecamp documents google-docs update --md type=bool
+FLAG basecamp documents google-docs update --no-hints type=bool
+FLAG basecamp documents google-docs update --no-stats type=bool
+FLAG basecamp documents google-docs update --no-subscribe type=bool
+FLAG basecamp documents google-docs update --profile type=string
+FLAG basecamp documents google-docs update --project type=string
+FLAG basecamp documents google-docs update --publish type=bool
+FLAG basecamp documents google-docs update --quiet type=bool
+FLAG basecamp documents google-docs update --stats type=bool
+FLAG basecamp documents google-docs update --styled type=bool
+FLAG basecamp documents google-docs update --subscribe type=string
+FLAG basecamp documents google-docs update --title type=string
+FLAG basecamp documents google-docs update --todolist type=string
+FLAG basecamp documents google-docs update --type type=string
+FLAG basecamp documents google-docs update --url type=string
+FLAG basecamp documents google-docs update --vault type=string
+FLAG basecamp documents google-docs update --verbose type=count
 FLAG basecamp documents list --account type=string
 FLAG basecamp documents list --agent type=bool
 FLAG basecamp documents list --all type=bool
@@ -8336,6 +8742,88 @@ FLAG basecamp file archive --styled type=bool
 FLAG basecamp file archive --todolist type=string
 FLAG basecamp file archive --vault type=string
 FLAG basecamp file archive --verbose type=count
+FLAG basecamp file cloud-files --account type=string
+FLAG basecamp file cloud-files --agent type=bool
+FLAG basecamp file cloud-files --cache-dir type=string
+FLAG basecamp file cloud-files --count type=bool
+FLAG basecamp file cloud-files --folder type=string
+FLAG basecamp file cloud-files --help type=bool
+FLAG basecamp file cloud-files --hints type=bool
+FLAG basecamp file cloud-files --ids-only type=bool
+FLAG basecamp file cloud-files --in type=string
+FLAG basecamp file cloud-files --jq type=string
+FLAG basecamp file cloud-files --json type=bool
+FLAG basecamp file cloud-files --markdown type=bool
+FLAG basecamp file cloud-files --md type=bool
+FLAG basecamp file cloud-files --no-hints type=bool
+FLAG basecamp file cloud-files --no-stats type=bool
+FLAG basecamp file cloud-files --profile type=string
+FLAG basecamp file cloud-files --project type=string
+FLAG basecamp file cloud-files --quiet type=bool
+FLAG basecamp file cloud-files --stats type=bool
+FLAG basecamp file cloud-files --styled type=bool
+FLAG basecamp file cloud-files --todolist type=string
+FLAG basecamp file cloud-files --vault type=string
+FLAG basecamp file cloud-files --verbose type=count
+FLAG basecamp file cloud-files create --account type=string
+FLAG basecamp file cloud-files create --agent type=bool
+FLAG basecamp file cloud-files create --cache-dir type=string
+FLAG basecamp file cloud-files create --count type=bool
+FLAG basecamp file cloud-files create --description type=string
+FLAG basecamp file cloud-files create --folder type=string
+FLAG basecamp file cloud-files create --format type=string
+FLAG basecamp file cloud-files create --help type=bool
+FLAG basecamp file cloud-files create --hints type=bool
+FLAG basecamp file cloud-files create --ids-only type=bool
+FLAG basecamp file cloud-files create --in type=string
+FLAG basecamp file cloud-files create --jq type=string
+FLAG basecamp file cloud-files create --json type=bool
+FLAG basecamp file cloud-files create --markdown type=bool
+FLAG basecamp file cloud-files create --md type=bool
+FLAG basecamp file cloud-files create --no-hints type=bool
+FLAG basecamp file cloud-files create --no-stats type=bool
+FLAG basecamp file cloud-files create --no-subscribe type=bool
+FLAG basecamp file cloud-files create --profile type=string
+FLAG basecamp file cloud-files create --project type=string
+FLAG basecamp file cloud-files create --quiet type=bool
+FLAG basecamp file cloud-files create --service type=string
+FLAG basecamp file cloud-files create --stats type=bool
+FLAG basecamp file cloud-files create --styled type=bool
+FLAG basecamp file cloud-files create --subscribe type=string
+FLAG basecamp file cloud-files create --title type=string
+FLAG basecamp file cloud-files create --todolist type=string
+FLAG basecamp file cloud-files create --url type=string
+FLAG basecamp file cloud-files create --vault type=string
+FLAG basecamp file cloud-files create --verbose type=count
+FLAG basecamp file cloud-files create --visible-to-clients type=bool
+FLAG basecamp file cloud-files update --account type=string
+FLAG basecamp file cloud-files update --agent type=bool
+FLAG basecamp file cloud-files update --cache-dir type=string
+FLAG basecamp file cloud-files update --count type=bool
+FLAG basecamp file cloud-files update --description type=string
+FLAG basecamp file cloud-files update --folder type=string
+FLAG basecamp file cloud-files update --format type=string
+FLAG basecamp file cloud-files update --help type=bool
+FLAG basecamp file cloud-files update --hints type=bool
+FLAG basecamp file cloud-files update --ids-only type=bool
+FLAG basecamp file cloud-files update --in type=string
+FLAG basecamp file cloud-files update --jq type=string
+FLAG basecamp file cloud-files update --json type=bool
+FLAG basecamp file cloud-files update --markdown type=bool
+FLAG basecamp file cloud-files update --md type=bool
+FLAG basecamp file cloud-files update --no-hints type=bool
+FLAG basecamp file cloud-files update --no-stats type=bool
+FLAG basecamp file cloud-files update --profile type=string
+FLAG basecamp file cloud-files update --project type=string
+FLAG basecamp file cloud-files update --quiet type=bool
+FLAG basecamp file cloud-files update --service type=string
+FLAG basecamp file cloud-files update --stats type=bool
+FLAG basecamp file cloud-files update --styled type=bool
+FLAG basecamp file cloud-files update --title type=string
+FLAG basecamp file cloud-files update --todolist type=string
+FLAG basecamp file cloud-files update --url type=string
+FLAG basecamp file cloud-files update --vault type=string
+FLAG basecamp file cloud-files update --verbose type=count
 FLAG basecamp file copy --account type=string
 FLAG basecamp file copy --agent type=bool
 FLAG basecamp file copy --cache-dir type=string
@@ -8779,6 +9267,92 @@ FLAG basecamp file folders list --styled type=bool
 FLAG basecamp file folders list --todolist type=string
 FLAG basecamp file folders list --vault type=string
 FLAG basecamp file folders list --verbose type=count
+FLAG basecamp file google-docs --account type=string
+FLAG basecamp file google-docs --agent type=bool
+FLAG basecamp file google-docs --cache-dir type=string
+FLAG basecamp file google-docs --count type=bool
+FLAG basecamp file google-docs --folder type=string
+FLAG basecamp file google-docs --help type=bool
+FLAG basecamp file google-docs --hints type=bool
+FLAG basecamp file google-docs --ids-only type=bool
+FLAG basecamp file google-docs --in type=string
+FLAG basecamp file google-docs --jq type=string
+FLAG basecamp file google-docs --json type=bool
+FLAG basecamp file google-docs --markdown type=bool
+FLAG basecamp file google-docs --md type=bool
+FLAG basecamp file google-docs --no-hints type=bool
+FLAG basecamp file google-docs --no-stats type=bool
+FLAG basecamp file google-docs --profile type=string
+FLAG basecamp file google-docs --project type=string
+FLAG basecamp file google-docs --quiet type=bool
+FLAG basecamp file google-docs --stats type=bool
+FLAG basecamp file google-docs --styled type=bool
+FLAG basecamp file google-docs --todolist type=string
+FLAG basecamp file google-docs --vault type=string
+FLAG basecamp file google-docs --verbose type=count
+FLAG basecamp file google-docs create --account type=string
+FLAG basecamp file google-docs create --agent type=bool
+FLAG basecamp file google-docs create --cache-dir type=string
+FLAG basecamp file google-docs create --count type=bool
+FLAG basecamp file google-docs create --description type=string
+FLAG basecamp file google-docs create --draft type=bool
+FLAG basecamp file google-docs create --folder type=string
+FLAG basecamp file google-docs create --format type=string
+FLAG basecamp file google-docs create --help type=bool
+FLAG basecamp file google-docs create --hints type=bool
+FLAG basecamp file google-docs create --ids-only type=bool
+FLAG basecamp file google-docs create --in type=string
+FLAG basecamp file google-docs create --jq type=string
+FLAG basecamp file google-docs create --json type=bool
+FLAG basecamp file google-docs create --markdown type=bool
+FLAG basecamp file google-docs create --md type=bool
+FLAG basecamp file google-docs create --no-hints type=bool
+FLAG basecamp file google-docs create --no-stats type=bool
+FLAG basecamp file google-docs create --no-subscribe type=bool
+FLAG basecamp file google-docs create --profile type=string
+FLAG basecamp file google-docs create --project type=string
+FLAG basecamp file google-docs create --quiet type=bool
+FLAG basecamp file google-docs create --stats type=bool
+FLAG basecamp file google-docs create --styled type=bool
+FLAG basecamp file google-docs create --subscribe type=string
+FLAG basecamp file google-docs create --title type=string
+FLAG basecamp file google-docs create --todolist type=string
+FLAG basecamp file google-docs create --type type=string
+FLAG basecamp file google-docs create --url type=string
+FLAG basecamp file google-docs create --vault type=string
+FLAG basecamp file google-docs create --verbose type=count
+FLAG basecamp file google-docs create --visible-to-clients type=bool
+FLAG basecamp file google-docs update --account type=string
+FLAG basecamp file google-docs update --agent type=bool
+FLAG basecamp file google-docs update --cache-dir type=string
+FLAG basecamp file google-docs update --count type=bool
+FLAG basecamp file google-docs update --description type=string
+FLAG basecamp file google-docs update --folder type=string
+FLAG basecamp file google-docs update --format type=string
+FLAG basecamp file google-docs update --help type=bool
+FLAG basecamp file google-docs update --hints type=bool
+FLAG basecamp file google-docs update --ids-only type=bool
+FLAG basecamp file google-docs update --in type=string
+FLAG basecamp file google-docs update --jq type=string
+FLAG basecamp file google-docs update --json type=bool
+FLAG basecamp file google-docs update --markdown type=bool
+FLAG basecamp file google-docs update --md type=bool
+FLAG basecamp file google-docs update --no-hints type=bool
+FLAG basecamp file google-docs update --no-stats type=bool
+FLAG basecamp file google-docs update --no-subscribe type=bool
+FLAG basecamp file google-docs update --profile type=string
+FLAG basecamp file google-docs update --project type=string
+FLAG basecamp file google-docs update --publish type=bool
+FLAG basecamp file google-docs update --quiet type=bool
+FLAG basecamp file google-docs update --stats type=bool
+FLAG basecamp file google-docs update --styled type=bool
+FLAG basecamp file google-docs update --subscribe type=string
+FLAG basecamp file google-docs update --title type=string
+FLAG basecamp file google-docs update --todolist type=string
+FLAG basecamp file google-docs update --type type=string
+FLAG basecamp file google-docs update --url type=string
+FLAG basecamp file google-docs update --vault type=string
+FLAG basecamp file google-docs update --verbose type=count
 FLAG basecamp file list --account type=string
 FLAG basecamp file list --agent type=bool
 FLAG basecamp file list --all type=bool
@@ -9366,6 +9940,88 @@ FLAG basecamp files archive --styled type=bool
 FLAG basecamp files archive --todolist type=string
 FLAG basecamp files archive --vault type=string
 FLAG basecamp files archive --verbose type=count
+FLAG basecamp files cloud-files --account type=string
+FLAG basecamp files cloud-files --agent type=bool
+FLAG basecamp files cloud-files --cache-dir type=string
+FLAG basecamp files cloud-files --count type=bool
+FLAG basecamp files cloud-files --folder type=string
+FLAG basecamp files cloud-files --help type=bool
+FLAG basecamp files cloud-files --hints type=bool
+FLAG basecamp files cloud-files --ids-only type=bool
+FLAG basecamp files cloud-files --in type=string
+FLAG basecamp files cloud-files --jq type=string
+FLAG basecamp files cloud-files --json type=bool
+FLAG basecamp files cloud-files --markdown type=bool
+FLAG basecamp files cloud-files --md type=bool
+FLAG basecamp files cloud-files --no-hints type=bool
+FLAG basecamp files cloud-files --no-stats type=bool
+FLAG basecamp files cloud-files --profile type=string
+FLAG basecamp files cloud-files --project type=string
+FLAG basecamp files cloud-files --quiet type=bool
+FLAG basecamp files cloud-files --stats type=bool
+FLAG basecamp files cloud-files --styled type=bool
+FLAG basecamp files cloud-files --todolist type=string
+FLAG basecamp files cloud-files --vault type=string
+FLAG basecamp files cloud-files --verbose type=count
+FLAG basecamp files cloud-files create --account type=string
+FLAG basecamp files cloud-files create --agent type=bool
+FLAG basecamp files cloud-files create --cache-dir type=string
+FLAG basecamp files cloud-files create --count type=bool
+FLAG basecamp files cloud-files create --description type=string
+FLAG basecamp files cloud-files create --folder type=string
+FLAG basecamp files cloud-files create --format type=string
+FLAG basecamp files cloud-files create --help type=bool
+FLAG basecamp files cloud-files create --hints type=bool
+FLAG basecamp files cloud-files create --ids-only type=bool
+FLAG basecamp files cloud-files create --in type=string
+FLAG basecamp files cloud-files create --jq type=string
+FLAG basecamp files cloud-files create --json type=bool
+FLAG basecamp files cloud-files create --markdown type=bool
+FLAG basecamp files cloud-files create --md type=bool
+FLAG basecamp files cloud-files create --no-hints type=bool
+FLAG basecamp files cloud-files create --no-stats type=bool
+FLAG basecamp files cloud-files create --no-subscribe type=bool
+FLAG basecamp files cloud-files create --profile type=string
+FLAG basecamp files cloud-files create --project type=string
+FLAG basecamp files cloud-files create --quiet type=bool
+FLAG basecamp files cloud-files create --service type=string
+FLAG basecamp files cloud-files create --stats type=bool
+FLAG basecamp files cloud-files create --styled type=bool
+FLAG basecamp files cloud-files create --subscribe type=string
+FLAG basecamp files cloud-files create --title type=string
+FLAG basecamp files cloud-files create --todolist type=string
+FLAG basecamp files cloud-files create --url type=string
+FLAG basecamp files cloud-files create --vault type=string
+FLAG basecamp files cloud-files create --verbose type=count
+FLAG basecamp files cloud-files create --visible-to-clients type=bool
+FLAG basecamp files cloud-files update --account type=string
+FLAG basecamp files cloud-files update --agent type=bool
+FLAG basecamp files cloud-files update --cache-dir type=string
+FLAG basecamp files cloud-files update --count type=bool
+FLAG basecamp files cloud-files update --description type=string
+FLAG basecamp files cloud-files update --folder type=string
+FLAG basecamp files cloud-files update --format type=string
+FLAG basecamp files cloud-files update --help type=bool
+FLAG basecamp files cloud-files update --hints type=bool
+FLAG basecamp files cloud-files update --ids-only type=bool
+FLAG basecamp files cloud-files update --in type=string
+FLAG basecamp files cloud-files update --jq type=string
+FLAG basecamp files cloud-files update --json type=bool
+FLAG basecamp files cloud-files update --markdown type=bool
+FLAG basecamp files cloud-files update --md type=bool
+FLAG basecamp files cloud-files update --no-hints type=bool
+FLAG basecamp files cloud-files update --no-stats type=bool
+FLAG basecamp files cloud-files update --profile type=string
+FLAG basecamp files cloud-files update --project type=string
+FLAG basecamp files cloud-files update --quiet type=bool
+FLAG basecamp files cloud-files update --service type=string
+FLAG basecamp files cloud-files update --stats type=bool
+FLAG basecamp files cloud-files update --styled type=bool
+FLAG basecamp files cloud-files update --title type=string
+FLAG basecamp files cloud-files update --todolist type=string
+FLAG basecamp files cloud-files update --url type=string
+FLAG basecamp files cloud-files update --vault type=string
+FLAG basecamp files cloud-files update --verbose type=count
 FLAG basecamp files copy --account type=string
 FLAG basecamp files copy --agent type=bool
 FLAG basecamp files copy --cache-dir type=string
@@ -9809,6 +10465,92 @@ FLAG basecamp files folders list --styled type=bool
 FLAG basecamp files folders list --todolist type=string
 FLAG basecamp files folders list --vault type=string
 FLAG basecamp files folders list --verbose type=count
+FLAG basecamp files google-docs --account type=string
+FLAG basecamp files google-docs --agent type=bool
+FLAG basecamp files google-docs --cache-dir type=string
+FLAG basecamp files google-docs --count type=bool
+FLAG basecamp files google-docs --folder type=string
+FLAG basecamp files google-docs --help type=bool
+FLAG basecamp files google-docs --hints type=bool
+FLAG basecamp files google-docs --ids-only type=bool
+FLAG basecamp files google-docs --in type=string
+FLAG basecamp files google-docs --jq type=string
+FLAG basecamp files google-docs --json type=bool
+FLAG basecamp files google-docs --markdown type=bool
+FLAG basecamp files google-docs --md type=bool
+FLAG basecamp files google-docs --no-hints type=bool
+FLAG basecamp files google-docs --no-stats type=bool
+FLAG basecamp files google-docs --profile type=string
+FLAG basecamp files google-docs --project type=string
+FLAG basecamp files google-docs --quiet type=bool
+FLAG basecamp files google-docs --stats type=bool
+FLAG basecamp files google-docs --styled type=bool
+FLAG basecamp files google-docs --todolist type=string
+FLAG basecamp files google-docs --vault type=string
+FLAG basecamp files google-docs --verbose type=count
+FLAG basecamp files google-docs create --account type=string
+FLAG basecamp files google-docs create --agent type=bool
+FLAG basecamp files google-docs create --cache-dir type=string
+FLAG basecamp files google-docs create --count type=bool
+FLAG basecamp files google-docs create --description type=string
+FLAG basecamp files google-docs create --draft type=bool
+FLAG basecamp files google-docs create --folder type=string
+FLAG basecamp files google-docs create --format type=string
+FLAG basecamp files google-docs create --help type=bool
+FLAG basecamp files google-docs create --hints type=bool
+FLAG basecamp files google-docs create --ids-only type=bool
+FLAG basecamp files google-docs create --in type=string
+FLAG basecamp files google-docs create --jq type=string
+FLAG basecamp files google-docs create --json type=bool
+FLAG basecamp files google-docs create --markdown type=bool
+FLAG basecamp files google-docs create --md type=bool
+FLAG basecamp files google-docs create --no-hints type=bool
+FLAG basecamp files google-docs create --no-stats type=bool
+FLAG basecamp files google-docs create --no-subscribe type=bool
+FLAG basecamp files google-docs create --profile type=string
+FLAG basecamp files google-docs create --project type=string
+FLAG basecamp files google-docs create --quiet type=bool
+FLAG basecamp files google-docs create --stats type=bool
+FLAG basecamp files google-docs create --styled type=bool
+FLAG basecamp files google-docs create --subscribe type=string
+FLAG basecamp files google-docs create --title type=string
+FLAG basecamp files google-docs create --todolist type=string
+FLAG basecamp files google-docs create --type type=string
+FLAG basecamp files google-docs create --url type=string
+FLAG basecamp files google-docs create --vault type=string
+FLAG basecamp files google-docs create --verbose type=count
+FLAG basecamp files google-docs create --visible-to-clients type=bool
+FLAG basecamp files google-docs update --account type=string
+FLAG basecamp files google-docs update --agent type=bool
+FLAG basecamp files google-docs update --cache-dir type=string
+FLAG basecamp files google-docs update --count type=bool
+FLAG basecamp files google-docs update --description type=string
+FLAG basecamp files google-docs update --folder type=string
+FLAG basecamp files google-docs update --format type=string
+FLAG basecamp files google-docs update --help type=bool
+FLAG basecamp files google-docs update --hints type=bool
+FLAG basecamp files google-docs update --ids-only type=bool
+FLAG basecamp files google-docs update --in type=string
+FLAG basecamp files google-docs update --jq type=string
+FLAG basecamp files google-docs update --json type=bool
+FLAG basecamp files google-docs update --markdown type=bool
+FLAG basecamp files google-docs update --md type=bool
+FLAG basecamp files google-docs update --no-hints type=bool
+FLAG basecamp files google-docs update --no-stats type=bool
+FLAG basecamp files google-docs update --no-subscribe type=bool
+FLAG basecamp files google-docs update --profile type=string
+FLAG basecamp files google-docs update --project type=string
+FLAG basecamp files google-docs update --publish type=bool
+FLAG basecamp files google-docs update --quiet type=bool
+FLAG basecamp files google-docs update --stats type=bool
+FLAG basecamp files google-docs update --styled type=bool
+FLAG basecamp files google-docs update --subscribe type=string
+FLAG basecamp files google-docs update --title type=string
+FLAG basecamp files google-docs update --todolist type=string
+FLAG basecamp files google-docs update --type type=string
+FLAG basecamp files google-docs update --url type=string
+FLAG basecamp files google-docs update --vault type=string
+FLAG basecamp files google-docs update --verbose type=count
 FLAG basecamp files list --account type=string
 FLAG basecamp files list --agent type=bool
 FLAG basecamp files list --all type=bool
@@ -10438,6 +11180,88 @@ FLAG basecamp folders archive --styled type=bool
 FLAG basecamp folders archive --todolist type=string
 FLAG basecamp folders archive --vault type=string
 FLAG basecamp folders archive --verbose type=count
+FLAG basecamp folders cloud-files --account type=string
+FLAG basecamp folders cloud-files --agent type=bool
+FLAG basecamp folders cloud-files --cache-dir type=string
+FLAG basecamp folders cloud-files --count type=bool
+FLAG basecamp folders cloud-files --folder type=string
+FLAG basecamp folders cloud-files --help type=bool
+FLAG basecamp folders cloud-files --hints type=bool
+FLAG basecamp folders cloud-files --ids-only type=bool
+FLAG basecamp folders cloud-files --in type=string
+FLAG basecamp folders cloud-files --jq type=string
+FLAG basecamp folders cloud-files --json type=bool
+FLAG basecamp folders cloud-files --markdown type=bool
+FLAG basecamp folders cloud-files --md type=bool
+FLAG basecamp folders cloud-files --no-hints type=bool
+FLAG basecamp folders cloud-files --no-stats type=bool
+FLAG basecamp folders cloud-files --profile type=string
+FLAG basecamp folders cloud-files --project type=string
+FLAG basecamp folders cloud-files --quiet type=bool
+FLAG basecamp folders cloud-files --stats type=bool
+FLAG basecamp folders cloud-files --styled type=bool
+FLAG basecamp folders cloud-files --todolist type=string
+FLAG basecamp folders cloud-files --vault type=string
+FLAG basecamp folders cloud-files --verbose type=count
+FLAG basecamp folders cloud-files create --account type=string
+FLAG basecamp folders cloud-files create --agent type=bool
+FLAG basecamp folders cloud-files create --cache-dir type=string
+FLAG basecamp folders cloud-files create --count type=bool
+FLAG basecamp folders cloud-files create --description type=string
+FLAG basecamp folders cloud-files create --folder type=string
+FLAG basecamp folders cloud-files create --format type=string
+FLAG basecamp folders cloud-files create --help type=bool
+FLAG basecamp folders cloud-files create --hints type=bool
+FLAG basecamp folders cloud-files create --ids-only type=bool
+FLAG basecamp folders cloud-files create --in type=string
+FLAG basecamp folders cloud-files create --jq type=string
+FLAG basecamp folders cloud-files create --json type=bool
+FLAG basecamp folders cloud-files create --markdown type=bool
+FLAG basecamp folders cloud-files create --md type=bool
+FLAG basecamp folders cloud-files create --no-hints type=bool
+FLAG basecamp folders cloud-files create --no-stats type=bool
+FLAG basecamp folders cloud-files create --no-subscribe type=bool
+FLAG basecamp folders cloud-files create --profile type=string
+FLAG basecamp folders cloud-files create --project type=string
+FLAG basecamp folders cloud-files create --quiet type=bool
+FLAG basecamp folders cloud-files create --service type=string
+FLAG basecamp folders cloud-files create --stats type=bool
+FLAG basecamp folders cloud-files create --styled type=bool
+FLAG basecamp folders cloud-files create --subscribe type=string
+FLAG basecamp folders cloud-files create --title type=string
+FLAG basecamp folders cloud-files create --todolist type=string
+FLAG basecamp folders cloud-files create --url type=string
+FLAG basecamp folders cloud-files create --vault type=string
+FLAG basecamp folders cloud-files create --verbose type=count
+FLAG basecamp folders cloud-files create --visible-to-clients type=bool
+FLAG basecamp folders cloud-files update --account type=string
+FLAG basecamp folders cloud-files update --agent type=bool
+FLAG basecamp folders cloud-files update --cache-dir type=string
+FLAG basecamp folders cloud-files update --count type=bool
+FLAG basecamp folders cloud-files update --description type=string
+FLAG basecamp folders cloud-files update --folder type=string
+FLAG basecamp folders cloud-files update --format type=string
+FLAG basecamp folders cloud-files update --help type=bool
+FLAG basecamp folders cloud-files update --hints type=bool
+FLAG basecamp folders cloud-files update --ids-only type=bool
+FLAG basecamp folders cloud-files update --in type=string
+FLAG basecamp folders cloud-files update --jq type=string
+FLAG basecamp folders cloud-files update --json type=bool
+FLAG basecamp folders cloud-files update --markdown type=bool
+FLAG basecamp folders cloud-files update --md type=bool
+FLAG basecamp folders cloud-files update --no-hints type=bool
+FLAG basecamp folders cloud-files update --no-stats type=bool
+FLAG basecamp folders cloud-files update --profile type=string
+FLAG basecamp folders cloud-files update --project type=string
+FLAG basecamp folders cloud-files update --quiet type=bool
+FLAG basecamp folders cloud-files update --service type=string
+FLAG basecamp folders cloud-files update --stats type=bool
+FLAG basecamp folders cloud-files update --styled type=bool
+FLAG basecamp folders cloud-files update --title type=string
+FLAG basecamp folders cloud-files update --todolist type=string
+FLAG basecamp folders cloud-files update --url type=string
+FLAG basecamp folders cloud-files update --vault type=string
+FLAG basecamp folders cloud-files update --verbose type=count
 FLAG basecamp folders copy --account type=string
 FLAG basecamp folders copy --agent type=bool
 FLAG basecamp folders copy --cache-dir type=string
@@ -10881,6 +11705,92 @@ FLAG basecamp folders folders list --styled type=bool
 FLAG basecamp folders folders list --todolist type=string
 FLAG basecamp folders folders list --vault type=string
 FLAG basecamp folders folders list --verbose type=count
+FLAG basecamp folders google-docs --account type=string
+FLAG basecamp folders google-docs --agent type=bool
+FLAG basecamp folders google-docs --cache-dir type=string
+FLAG basecamp folders google-docs --count type=bool
+FLAG basecamp folders google-docs --folder type=string
+FLAG basecamp folders google-docs --help type=bool
+FLAG basecamp folders google-docs --hints type=bool
+FLAG basecamp folders google-docs --ids-only type=bool
+FLAG basecamp folders google-docs --in type=string
+FLAG basecamp folders google-docs --jq type=string
+FLAG basecamp folders google-docs --json type=bool
+FLAG basecamp folders google-docs --markdown type=bool
+FLAG basecamp folders google-docs --md type=bool
+FLAG basecamp folders google-docs --no-hints type=bool
+FLAG basecamp folders google-docs --no-stats type=bool
+FLAG basecamp folders google-docs --profile type=string
+FLAG basecamp folders google-docs --project type=string
+FLAG basecamp folders google-docs --quiet type=bool
+FLAG basecamp folders google-docs --stats type=bool
+FLAG basecamp folders google-docs --styled type=bool
+FLAG basecamp folders google-docs --todolist type=string
+FLAG basecamp folders google-docs --vault type=string
+FLAG basecamp folders google-docs --verbose type=count
+FLAG basecamp folders google-docs create --account type=string
+FLAG basecamp folders google-docs create --agent type=bool
+FLAG basecamp folders google-docs create --cache-dir type=string
+FLAG basecamp folders google-docs create --count type=bool
+FLAG basecamp folders google-docs create --description type=string
+FLAG basecamp folders google-docs create --draft type=bool
+FLAG basecamp folders google-docs create --folder type=string
+FLAG basecamp folders google-docs create --format type=string
+FLAG basecamp folders google-docs create --help type=bool
+FLAG basecamp folders google-docs create --hints type=bool
+FLAG basecamp folders google-docs create --ids-only type=bool
+FLAG basecamp folders google-docs create --in type=string
+FLAG basecamp folders google-docs create --jq type=string
+FLAG basecamp folders google-docs create --json type=bool
+FLAG basecamp folders google-docs create --markdown type=bool
+FLAG basecamp folders google-docs create --md type=bool
+FLAG basecamp folders google-docs create --no-hints type=bool
+FLAG basecamp folders google-docs create --no-stats type=bool
+FLAG basecamp folders google-docs create --no-subscribe type=bool
+FLAG basecamp folders google-docs create --profile type=string
+FLAG basecamp folders google-docs create --project type=string
+FLAG basecamp folders google-docs create --quiet type=bool
+FLAG basecamp folders google-docs create --stats type=bool
+FLAG basecamp folders google-docs create --styled type=bool
+FLAG basecamp folders google-docs create --subscribe type=string
+FLAG basecamp folders google-docs create --title type=string
+FLAG basecamp folders google-docs create --todolist type=string
+FLAG basecamp folders google-docs create --type type=string
+FLAG basecamp folders google-docs create --url type=string
+FLAG basecamp folders google-docs create --vault type=string
+FLAG basecamp folders google-docs create --verbose type=count
+FLAG basecamp folders google-docs create --visible-to-clients type=bool
+FLAG basecamp folders google-docs update --account type=string
+FLAG basecamp folders google-docs update --agent type=bool
+FLAG basecamp folders google-docs update --cache-dir type=string
+FLAG basecamp folders google-docs update --count type=bool
+FLAG basecamp folders google-docs update --description type=string
+FLAG basecamp folders google-docs update --folder type=string
+FLAG basecamp folders google-docs update --format type=string
+FLAG basecamp folders google-docs update --help type=bool
+FLAG basecamp folders google-docs update --hints type=bool
+FLAG basecamp folders google-docs update --ids-only type=bool
+FLAG basecamp folders google-docs update --in type=string
+FLAG basecamp folders google-docs update --jq type=string
+FLAG basecamp folders google-docs update --json type=bool
+FLAG basecamp folders google-docs update --markdown type=bool
+FLAG basecamp folders google-docs update --md type=bool
+FLAG basecamp folders google-docs update --no-hints type=bool
+FLAG basecamp folders google-docs update --no-stats type=bool
+FLAG basecamp folders google-docs update --no-subscribe type=bool
+FLAG basecamp folders google-docs update --profile type=string
+FLAG basecamp folders google-docs update --project type=string
+FLAG basecamp folders google-docs update --publish type=bool
+FLAG basecamp folders google-docs update --quiet type=bool
+FLAG basecamp folders google-docs update --stats type=bool
+FLAG basecamp folders google-docs update --styled type=bool
+FLAG basecamp folders google-docs update --subscribe type=string
+FLAG basecamp folders google-docs update --title type=string
+FLAG basecamp folders google-docs update --todolist type=string
+FLAG basecamp folders google-docs update --type type=string
+FLAG basecamp folders google-docs update --url type=string
+FLAG basecamp folders google-docs update --vault type=string
+FLAG basecamp folders google-docs update --verbose type=count
 FLAG basecamp folders list --account type=string
 FLAG basecamp folders list --agent type=bool
 FLAG basecamp folders list --all type=bool
@@ -18892,6 +19802,88 @@ FLAG basecamp vault archive --styled type=bool
 FLAG basecamp vault archive --todolist type=string
 FLAG basecamp vault archive --vault type=string
 FLAG basecamp vault archive --verbose type=count
+FLAG basecamp vault cloud-files --account type=string
+FLAG basecamp vault cloud-files --agent type=bool
+FLAG basecamp vault cloud-files --cache-dir type=string
+FLAG basecamp vault cloud-files --count type=bool
+FLAG basecamp vault cloud-files --folder type=string
+FLAG basecamp vault cloud-files --help type=bool
+FLAG basecamp vault cloud-files --hints type=bool
+FLAG basecamp vault cloud-files --ids-only type=bool
+FLAG basecamp vault cloud-files --in type=string
+FLAG basecamp vault cloud-files --jq type=string
+FLAG basecamp vault cloud-files --json type=bool
+FLAG basecamp vault cloud-files --markdown type=bool
+FLAG basecamp vault cloud-files --md type=bool
+FLAG basecamp vault cloud-files --no-hints type=bool
+FLAG basecamp vault cloud-files --no-stats type=bool
+FLAG basecamp vault cloud-files --profile type=string
+FLAG basecamp vault cloud-files --project type=string
+FLAG basecamp vault cloud-files --quiet type=bool
+FLAG basecamp vault cloud-files --stats type=bool
+FLAG basecamp vault cloud-files --styled type=bool
+FLAG basecamp vault cloud-files --todolist type=string
+FLAG basecamp vault cloud-files --vault type=string
+FLAG basecamp vault cloud-files --verbose type=count
+FLAG basecamp vault cloud-files create --account type=string
+FLAG basecamp vault cloud-files create --agent type=bool
+FLAG basecamp vault cloud-files create --cache-dir type=string
+FLAG basecamp vault cloud-files create --count type=bool
+FLAG basecamp vault cloud-files create --description type=string
+FLAG basecamp vault cloud-files create --folder type=string
+FLAG basecamp vault cloud-files create --format type=string
+FLAG basecamp vault cloud-files create --help type=bool
+FLAG basecamp vault cloud-files create --hints type=bool
+FLAG basecamp vault cloud-files create --ids-only type=bool
+FLAG basecamp vault cloud-files create --in type=string
+FLAG basecamp vault cloud-files create --jq type=string
+FLAG basecamp vault cloud-files create --json type=bool
+FLAG basecamp vault cloud-files create --markdown type=bool
+FLAG basecamp vault cloud-files create --md type=bool
+FLAG basecamp vault cloud-files create --no-hints type=bool
+FLAG basecamp vault cloud-files create --no-stats type=bool
+FLAG basecamp vault cloud-files create --no-subscribe type=bool
+FLAG basecamp vault cloud-files create --profile type=string
+FLAG basecamp vault cloud-files create --project type=string
+FLAG basecamp vault cloud-files create --quiet type=bool
+FLAG basecamp vault cloud-files create --service type=string
+FLAG basecamp vault cloud-files create --stats type=bool
+FLAG basecamp vault cloud-files create --styled type=bool
+FLAG basecamp vault cloud-files create --subscribe type=string
+FLAG basecamp vault cloud-files create --title type=string
+FLAG basecamp vault cloud-files create --todolist type=string
+FLAG basecamp vault cloud-files create --url type=string
+FLAG basecamp vault cloud-files create --vault type=string
+FLAG basecamp vault cloud-files create --verbose type=count
+FLAG basecamp vault cloud-files create --visible-to-clients type=bool
+FLAG basecamp vault cloud-files update --account type=string
+FLAG basecamp vault cloud-files update --agent type=bool
+FLAG basecamp vault cloud-files update --cache-dir type=string
+FLAG basecamp vault cloud-files update --count type=bool
+FLAG basecamp vault cloud-files update --description type=string
+FLAG basecamp vault cloud-files update --folder type=string
+FLAG basecamp vault cloud-files update --format type=string
+FLAG basecamp vault cloud-files update --help type=bool
+FLAG basecamp vault cloud-files update --hints type=bool
+FLAG basecamp vault cloud-files update --ids-only type=bool
+FLAG basecamp vault cloud-files update --in type=string
+FLAG basecamp vault cloud-files update --jq type=string
+FLAG basecamp vault cloud-files update --json type=bool
+FLAG basecamp vault cloud-files update --markdown type=bool
+FLAG basecamp vault cloud-files update --md type=bool
+FLAG basecamp vault cloud-files update --no-hints type=bool
+FLAG basecamp vault cloud-files update --no-stats type=bool
+FLAG basecamp vault cloud-files update --profile type=string
+FLAG basecamp vault cloud-files update --project type=string
+FLAG basecamp vault cloud-files update --quiet type=bool
+FLAG basecamp vault cloud-files update --service type=string
+FLAG basecamp vault cloud-files update --stats type=bool
+FLAG basecamp vault cloud-files update --styled type=bool
+FLAG basecamp vault cloud-files update --title type=string
+FLAG basecamp vault cloud-files update --todolist type=string
+FLAG basecamp vault cloud-files update --url type=string
+FLAG basecamp vault cloud-files update --vault type=string
+FLAG basecamp vault cloud-files update --verbose type=count
 FLAG basecamp vault copy --account type=string
 FLAG basecamp vault copy --agent type=bool
 FLAG basecamp vault copy --cache-dir type=string
@@ -19335,6 +20327,92 @@ FLAG basecamp vault folders list --styled type=bool
 FLAG basecamp vault folders list --todolist type=string
 FLAG basecamp vault folders list --vault type=string
 FLAG basecamp vault folders list --verbose type=count
+FLAG basecamp vault google-docs --account type=string
+FLAG basecamp vault google-docs --agent type=bool
+FLAG basecamp vault google-docs --cache-dir type=string
+FLAG basecamp vault google-docs --count type=bool
+FLAG basecamp vault google-docs --folder type=string
+FLAG basecamp vault google-docs --help type=bool
+FLAG basecamp vault google-docs --hints type=bool
+FLAG basecamp vault google-docs --ids-only type=bool
+FLAG basecamp vault google-docs --in type=string
+FLAG basecamp vault google-docs --jq type=string
+FLAG basecamp vault google-docs --json type=bool
+FLAG basecamp vault google-docs --markdown type=bool
+FLAG basecamp vault google-docs --md type=bool
+FLAG basecamp vault google-docs --no-hints type=bool
+FLAG basecamp vault google-docs --no-stats type=bool
+FLAG basecamp vault google-docs --profile type=string
+FLAG basecamp vault google-docs --project type=string
+FLAG basecamp vault google-docs --quiet type=bool
+FLAG basecamp vault google-docs --stats type=bool
+FLAG basecamp vault google-docs --styled type=bool
+FLAG basecamp vault google-docs --todolist type=string
+FLAG basecamp vault google-docs --vault type=string
+FLAG basecamp vault google-docs --verbose type=count
+FLAG basecamp vault google-docs create --account type=string
+FLAG basecamp vault google-docs create --agent type=bool
+FLAG basecamp vault google-docs create --cache-dir type=string
+FLAG basecamp vault google-docs create --count type=bool
+FLAG basecamp vault google-docs create --description type=string
+FLAG basecamp vault google-docs create --draft type=bool
+FLAG basecamp vault google-docs create --folder type=string
+FLAG basecamp vault google-docs create --format type=string
+FLAG basecamp vault google-docs create --help type=bool
+FLAG basecamp vault google-docs create --hints type=bool
+FLAG basecamp vault google-docs create --ids-only type=bool
+FLAG basecamp vault google-docs create --in type=string
+FLAG basecamp vault google-docs create --jq type=string
+FLAG basecamp vault google-docs create --json type=bool
+FLAG basecamp vault google-docs create --markdown type=bool
+FLAG basecamp vault google-docs create --md type=bool
+FLAG basecamp vault google-docs create --no-hints type=bool
+FLAG basecamp vault google-docs create --no-stats type=bool
+FLAG basecamp vault google-docs create --no-subscribe type=bool
+FLAG basecamp vault google-docs create --profile type=string
+FLAG basecamp vault google-docs create --project type=string
+FLAG basecamp vault google-docs create --quiet type=bool
+FLAG basecamp vault google-docs create --stats type=bool
+FLAG basecamp vault google-docs create --styled type=bool
+FLAG basecamp vault google-docs create --subscribe type=string
+FLAG basecamp vault google-docs create --title type=string
+FLAG basecamp vault google-docs create --todolist type=string
+FLAG basecamp vault google-docs create --type type=string
+FLAG basecamp vault google-docs create --url type=string
+FLAG basecamp vault google-docs create --vault type=string
+FLAG basecamp vault google-docs create --verbose type=count
+FLAG basecamp vault google-docs create --visible-to-clients type=bool
+FLAG basecamp vault google-docs update --account type=string
+FLAG basecamp vault google-docs update --agent type=bool
+FLAG basecamp vault google-docs update --cache-dir type=string
+FLAG basecamp vault google-docs update --count type=bool
+FLAG basecamp vault google-docs update --description type=string
+FLAG basecamp vault google-docs update --folder type=string
+FLAG basecamp vault google-docs update --format type=string
+FLAG basecamp vault google-docs update --help type=bool
+FLAG basecamp vault google-docs update --hints type=bool
+FLAG basecamp vault google-docs update --ids-only type=bool
+FLAG basecamp vault google-docs update --in type=string
+FLAG basecamp vault google-docs update --jq type=string
+FLAG basecamp vault google-docs update --json type=bool
+FLAG basecamp vault google-docs update --markdown type=bool
+FLAG basecamp vault google-docs update --md type=bool
+FLAG basecamp vault google-docs update --no-hints type=bool
+FLAG basecamp vault google-docs update --no-stats type=bool
+FLAG basecamp vault google-docs update --no-subscribe type=bool
+FLAG basecamp vault google-docs update --profile type=string
+FLAG basecamp vault google-docs update --project type=string
+FLAG basecamp vault google-docs update --publish type=bool
+FLAG basecamp vault google-docs update --quiet type=bool
+FLAG basecamp vault google-docs update --stats type=bool
+FLAG basecamp vault google-docs update --styled type=bool
+FLAG basecamp vault google-docs update --subscribe type=string
+FLAG basecamp vault google-docs update --title type=string
+FLAG basecamp vault google-docs update --todolist type=string
+FLAG basecamp vault google-docs update --type type=string
+FLAG basecamp vault google-docs update --url type=string
+FLAG basecamp vault google-docs update --vault type=string
+FLAG basecamp vault google-docs update --verbose type=count
 FLAG basecamp vault list --account type=string
 FLAG basecamp vault list --agent type=bool
 FLAG basecamp vault list --all type=bool
@@ -19922,6 +21000,88 @@ FLAG basecamp vaults archive --styled type=bool
 FLAG basecamp vaults archive --todolist type=string
 FLAG basecamp vaults archive --vault type=string
 FLAG basecamp vaults archive --verbose type=count
+FLAG basecamp vaults cloud-files --account type=string
+FLAG basecamp vaults cloud-files --agent type=bool
+FLAG basecamp vaults cloud-files --cache-dir type=string
+FLAG basecamp vaults cloud-files --count type=bool
+FLAG basecamp vaults cloud-files --folder type=string
+FLAG basecamp vaults cloud-files --help type=bool
+FLAG basecamp vaults cloud-files --hints type=bool
+FLAG basecamp vaults cloud-files --ids-only type=bool
+FLAG basecamp vaults cloud-files --in type=string
+FLAG basecamp vaults cloud-files --jq type=string
+FLAG basecamp vaults cloud-files --json type=bool
+FLAG basecamp vaults cloud-files --markdown type=bool
+FLAG basecamp vaults cloud-files --md type=bool
+FLAG basecamp vaults cloud-files --no-hints type=bool
+FLAG basecamp vaults cloud-files --no-stats type=bool
+FLAG basecamp vaults cloud-files --profile type=string
+FLAG basecamp vaults cloud-files --project type=string
+FLAG basecamp vaults cloud-files --quiet type=bool
+FLAG basecamp vaults cloud-files --stats type=bool
+FLAG basecamp vaults cloud-files --styled type=bool
+FLAG basecamp vaults cloud-files --todolist type=string
+FLAG basecamp vaults cloud-files --vault type=string
+FLAG basecamp vaults cloud-files --verbose type=count
+FLAG basecamp vaults cloud-files create --account type=string
+FLAG basecamp vaults cloud-files create --agent type=bool
+FLAG basecamp vaults cloud-files create --cache-dir type=string
+FLAG basecamp vaults cloud-files create --count type=bool
+FLAG basecamp vaults cloud-files create --description type=string
+FLAG basecamp vaults cloud-files create --folder type=string
+FLAG basecamp vaults cloud-files create --format type=string
+FLAG basecamp vaults cloud-files create --help type=bool
+FLAG basecamp vaults cloud-files create --hints type=bool
+FLAG basecamp vaults cloud-files create --ids-only type=bool
+FLAG basecamp vaults cloud-files create --in type=string
+FLAG basecamp vaults cloud-files create --jq type=string
+FLAG basecamp vaults cloud-files create --json type=bool
+FLAG basecamp vaults cloud-files create --markdown type=bool
+FLAG basecamp vaults cloud-files create --md type=bool
+FLAG basecamp vaults cloud-files create --no-hints type=bool
+FLAG basecamp vaults cloud-files create --no-stats type=bool
+FLAG basecamp vaults cloud-files create --no-subscribe type=bool
+FLAG basecamp vaults cloud-files create --profile type=string
+FLAG basecamp vaults cloud-files create --project type=string
+FLAG basecamp vaults cloud-files create --quiet type=bool
+FLAG basecamp vaults cloud-files create --service type=string
+FLAG basecamp vaults cloud-files create --stats type=bool
+FLAG basecamp vaults cloud-files create --styled type=bool
+FLAG basecamp vaults cloud-files create --subscribe type=string
+FLAG basecamp vaults cloud-files create --title type=string
+FLAG basecamp vaults cloud-files create --todolist type=string
+FLAG basecamp vaults cloud-files create --url type=string
+FLAG basecamp vaults cloud-files create --vault type=string
+FLAG basecamp vaults cloud-files create --verbose type=count
+FLAG basecamp vaults cloud-files create --visible-to-clients type=bool
+FLAG basecamp vaults cloud-files update --account type=string
+FLAG basecamp vaults cloud-files update --agent type=bool
+FLAG basecamp vaults cloud-files update --cache-dir type=string
+FLAG basecamp vaults cloud-files update --count type=bool
+FLAG basecamp vaults cloud-files update --description type=string
+FLAG basecamp vaults cloud-files update --folder type=string
+FLAG basecamp vaults cloud-files update --format type=string
+FLAG basecamp vaults cloud-files update --help type=bool
+FLAG basecamp vaults cloud-files update --hints type=bool
+FLAG basecamp vaults cloud-files update --ids-only type=bool
+FLAG basecamp vaults cloud-files update --in type=string
+FLAG basecamp vaults cloud-files update --jq type=string
+FLAG basecamp vaults cloud-files update --json type=bool
+FLAG basecamp vaults cloud-files update --markdown type=bool
+FLAG basecamp vaults cloud-files update --md type=bool
+FLAG basecamp vaults cloud-files update --no-hints type=bool
+FLAG basecamp vaults cloud-files update --no-stats type=bool
+FLAG basecamp vaults cloud-files update --profile type=string
+FLAG basecamp vaults cloud-files update --project type=string
+FLAG basecamp vaults cloud-files update --quiet type=bool
+FLAG basecamp vaults cloud-files update --service type=string
+FLAG basecamp vaults cloud-files update --stats type=bool
+FLAG basecamp vaults cloud-files update --styled type=bool
+FLAG basecamp vaults cloud-files update --title type=string
+FLAG basecamp vaults cloud-files update --todolist type=string
+FLAG basecamp vaults cloud-files update --url type=string
+FLAG basecamp vaults cloud-files update --vault type=string
+FLAG basecamp vaults cloud-files update --verbose type=count
 FLAG basecamp vaults copy --account type=string
 FLAG basecamp vaults copy --agent type=bool
 FLAG basecamp vaults copy --cache-dir type=string
@@ -20365,6 +21525,92 @@ FLAG basecamp vaults folders list --styled type=bool
 FLAG basecamp vaults folders list --todolist type=string
 FLAG basecamp vaults folders list --vault type=string
 FLAG basecamp vaults folders list --verbose type=count
+FLAG basecamp vaults google-docs --account type=string
+FLAG basecamp vaults google-docs --agent type=bool
+FLAG basecamp vaults google-docs --cache-dir type=string
+FLAG basecamp vaults google-docs --count type=bool
+FLAG basecamp vaults google-docs --folder type=string
+FLAG basecamp vaults google-docs --help type=bool
+FLAG basecamp vaults google-docs --hints type=bool
+FLAG basecamp vaults google-docs --ids-only type=bool
+FLAG basecamp vaults google-docs --in type=string
+FLAG basecamp vaults google-docs --jq type=string
+FLAG basecamp vaults google-docs --json type=bool
+FLAG basecamp vaults google-docs --markdown type=bool
+FLAG basecamp vaults google-docs --md type=bool
+FLAG basecamp vaults google-docs --no-hints type=bool
+FLAG basecamp vaults google-docs --no-stats type=bool
+FLAG basecamp vaults google-docs --profile type=string
+FLAG basecamp vaults google-docs --project type=string
+FLAG basecamp vaults google-docs --quiet type=bool
+FLAG basecamp vaults google-docs --stats type=bool
+FLAG basecamp vaults google-docs --styled type=bool
+FLAG basecamp vaults google-docs --todolist type=string
+FLAG basecamp vaults google-docs --vault type=string
+FLAG basecamp vaults google-docs --verbose type=count
+FLAG basecamp vaults google-docs create --account type=string
+FLAG basecamp vaults google-docs create --agent type=bool
+FLAG basecamp vaults google-docs create --cache-dir type=string
+FLAG basecamp vaults google-docs create --count type=bool
+FLAG basecamp vaults google-docs create --description type=string
+FLAG basecamp vaults google-docs create --draft type=bool
+FLAG basecamp vaults google-docs create --folder type=string
+FLAG basecamp vaults google-docs create --format type=string
+FLAG basecamp vaults google-docs create --help type=bool
+FLAG basecamp vaults google-docs create --hints type=bool
+FLAG basecamp vaults google-docs create --ids-only type=bool
+FLAG basecamp vaults google-docs create --in type=string
+FLAG basecamp vaults google-docs create --jq type=string
+FLAG basecamp vaults google-docs create --json type=bool
+FLAG basecamp vaults google-docs create --markdown type=bool
+FLAG basecamp vaults google-docs create --md type=bool
+FLAG basecamp vaults google-docs create --no-hints type=bool
+FLAG basecamp vaults google-docs create --no-stats type=bool
+FLAG basecamp vaults google-docs create --no-subscribe type=bool
+FLAG basecamp vaults google-docs create --profile type=string
+FLAG basecamp vaults google-docs create --project type=string
+FLAG basecamp vaults google-docs create --quiet type=bool
+FLAG basecamp vaults google-docs create --stats type=bool
+FLAG basecamp vaults google-docs create --styled type=bool
+FLAG basecamp vaults google-docs create --subscribe type=string
+FLAG basecamp vaults google-docs create --title type=string
+FLAG basecamp vaults google-docs create --todolist type=string
+FLAG basecamp vaults google-docs create --type type=string
+FLAG basecamp vaults google-docs create --url type=string
+FLAG basecamp vaults google-docs create --vault type=string
+FLAG basecamp vaults google-docs create --verbose type=count
+FLAG basecamp vaults google-docs create --visible-to-clients type=bool
+FLAG basecamp vaults google-docs update --account type=string
+FLAG basecamp vaults google-docs update --agent type=bool
+FLAG basecamp vaults google-docs update --cache-dir type=string
+FLAG basecamp vaults google-docs update --count type=bool
+FLAG basecamp vaults google-docs update --description type=string
+FLAG basecamp vaults google-docs update --folder type=string
+FLAG basecamp vaults google-docs update --format type=string
+FLAG basecamp vaults google-docs update --help type=bool
+FLAG basecamp vaults google-docs update --hints type=bool
+FLAG basecamp vaults google-docs update --ids-only type=bool
+FLAG basecamp vaults google-docs update --in type=string
+FLAG basecamp vaults google-docs update --jq type=string
+FLAG basecamp vaults google-docs update --json type=bool
+FLAG basecamp vaults google-docs update --markdown type=bool
+FLAG basecamp vaults google-docs update --md type=bool
+FLAG basecamp vaults google-docs update --no-hints type=bool
+FLAG basecamp vaults google-docs update --no-stats type=bool
+FLAG basecamp vaults google-docs update --no-subscribe type=bool
+FLAG basecamp vaults google-docs update --profile type=string
+FLAG basecamp vaults google-docs update --project type=string
+FLAG basecamp vaults google-docs update --publish type=bool
+FLAG basecamp vaults google-docs update --quiet type=bool
+FLAG basecamp vaults google-docs update --stats type=bool
+FLAG basecamp vaults google-docs update --styled type=bool
+FLAG basecamp vaults google-docs update --subscribe type=string
+FLAG basecamp vaults google-docs update --title type=string
+FLAG basecamp vaults google-docs update --todolist type=string
+FLAG basecamp vaults google-docs update --type type=string
+FLAG basecamp vaults google-docs update --url type=string
+FLAG basecamp vaults google-docs update --vault type=string
+FLAG basecamp vaults google-docs update --verbose type=count
 FLAG basecamp vaults list --account type=string
 FLAG basecamp vaults list --agent type=bool
 FLAG basecamp vaults list --all type=bool
@@ -21381,6 +22627,9 @@ SUB basecamp config unset
 SUB basecamp config untrust
 SUB basecamp docs
 SUB basecamp docs archive
+SUB basecamp docs cloud-files
+SUB basecamp docs cloud-files create
+SUB basecamp docs cloud-files update
 SUB basecamp docs copy
 SUB basecamp docs doc
 SUB basecamp docs doc create
@@ -21398,6 +22647,9 @@ SUB basecamp docs folder list
 SUB basecamp docs folders
 SUB basecamp docs folders create
 SUB basecamp docs folders list
+SUB basecamp docs google-docs
+SUB basecamp docs google-docs create
+SUB basecamp docs google-docs update
 SUB basecamp docs list
 SUB basecamp docs move
 SUB basecamp docs new-version
@@ -21422,6 +22674,9 @@ SUB basecamp docs versions
 SUB basecamp doctor
 SUB basecamp documents
 SUB basecamp documents archive
+SUB basecamp documents cloud-files
+SUB basecamp documents cloud-files create
+SUB basecamp documents cloud-files update
 SUB basecamp documents copy
 SUB basecamp documents doc
 SUB basecamp documents doc create
@@ -21439,6 +22694,9 @@ SUB basecamp documents folder list
 SUB basecamp documents folders
 SUB basecamp documents folders create
 SUB basecamp documents folders list
+SUB basecamp documents google-docs
+SUB basecamp documents google-docs create
+SUB basecamp documents google-docs update
 SUB basecamp documents list
 SUB basecamp documents move
 SUB basecamp documents new-version
@@ -21482,6 +22740,9 @@ SUB basecamp external-links show
 SUB basecamp external-links update
 SUB basecamp file
 SUB basecamp file archive
+SUB basecamp file cloud-files
+SUB basecamp file cloud-files create
+SUB basecamp file cloud-files update
 SUB basecamp file copy
 SUB basecamp file doc
 SUB basecamp file doc create
@@ -21499,6 +22760,9 @@ SUB basecamp file folder list
 SUB basecamp file folders
 SUB basecamp file folders create
 SUB basecamp file folders list
+SUB basecamp file google-docs
+SUB basecamp file google-docs create
+SUB basecamp file google-docs update
 SUB basecamp file list
 SUB basecamp file move
 SUB basecamp file new-version
@@ -21522,6 +22786,9 @@ SUB basecamp file vaults list
 SUB basecamp file versions
 SUB basecamp files
 SUB basecamp files archive
+SUB basecamp files cloud-files
+SUB basecamp files cloud-files create
+SUB basecamp files cloud-files update
 SUB basecamp files copy
 SUB basecamp files doc
 SUB basecamp files doc create
@@ -21539,6 +22806,9 @@ SUB basecamp files folder list
 SUB basecamp files folders
 SUB basecamp files folders create
 SUB basecamp files folders list
+SUB basecamp files google-docs
+SUB basecamp files google-docs create
+SUB basecamp files google-docs update
 SUB basecamp files list
 SUB basecamp files move
 SUB basecamp files new-version
@@ -21564,6 +22834,9 @@ SUB basecamp filings
 SUB basecamp filings show
 SUB basecamp folders
 SUB basecamp folders archive
+SUB basecamp folders cloud-files
+SUB basecamp folders cloud-files create
+SUB basecamp folders cloud-files update
 SUB basecamp folders copy
 SUB basecamp folders doc
 SUB basecamp folders doc create
@@ -21581,6 +22854,9 @@ SUB basecamp folders folder list
 SUB basecamp folders folders
 SUB basecamp folders folders create
 SUB basecamp folders folders list
+SUB basecamp folders google-docs
+SUB basecamp folders google-docs create
+SUB basecamp folders google-docs update
 SUB basecamp folders list
 SUB basecamp folders move
 SUB basecamp folders new-version
@@ -21925,6 +23201,9 @@ SUB basecamp url
 SUB basecamp url parse
 SUB basecamp vault
 SUB basecamp vault archive
+SUB basecamp vault cloud-files
+SUB basecamp vault cloud-files create
+SUB basecamp vault cloud-files update
 SUB basecamp vault copy
 SUB basecamp vault doc
 SUB basecamp vault doc create
@@ -21942,6 +23221,9 @@ SUB basecamp vault folder list
 SUB basecamp vault folders
 SUB basecamp vault folders create
 SUB basecamp vault folders list
+SUB basecamp vault google-docs
+SUB basecamp vault google-docs create
+SUB basecamp vault google-docs update
 SUB basecamp vault list
 SUB basecamp vault move
 SUB basecamp vault new-version
@@ -21965,6 +23247,9 @@ SUB basecamp vault vaults list
 SUB basecamp vault versions
 SUB basecamp vaults
 SUB basecamp vaults archive
+SUB basecamp vaults cloud-files
+SUB basecamp vaults cloud-files create
+SUB basecamp vaults cloud-files update
 SUB basecamp vaults copy
 SUB basecamp vaults doc
 SUB basecamp vaults doc create
@@ -21982,6 +23267,9 @@ SUB basecamp vaults folder list
 SUB basecamp vaults folders
 SUB basecamp vaults folders create
 SUB basecamp vaults folders list
+SUB basecamp vaults google-docs
+SUB basecamp vaults google-docs create
+SUB basecamp vaults google-docs update
 SUB basecamp vaults list
 SUB basecamp vaults move
 SUB basecamp vaults new-version
