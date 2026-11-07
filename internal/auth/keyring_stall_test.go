@@ -781,6 +781,45 @@ func TestAFailedPlaintextCleanupDoesNotServeTheOldCopy(t *testing.T) {
 	assert.True(t, KeyringUnavailable(err), "%v", err)
 }
 
+// Only a dispatched write that timed out may land. One refused under an
+// earlier timeout's latch, or queued behind another call and never
+// attempted, did not reach the keyring.
+func TestOnlyADispatchedWriteThatTimedOutMayLand(t *testing.T) {
+	assert.True(t, mutationMayLand(writeTimeout()))
+	assert.True(t, mutationMayLand(fmt.Errorf("keyring delete timed out after 10s (the operation may have completed or may still complete): %w", context.DeadlineExceeded)))
+	assert.False(t, mutationMayLand(fmt.Errorf("keyring unavailable after an earlier timeout: %w", readTimeout())))
+	assert.False(t, mutationMayLand(fmt.Errorf("keyring unavailable after an earlier timeout: %w", writeTimeout())))
+	assert.False(t, mutationMayLand(fmt.Errorf("keyring write timed out after 10s waiting for another operation (not attempted): %w", context.DeadlineExceeded)))
+	assert.False(t, mutationMayLand(fmt.Errorf("keyring write: %w", io.EOF)))
+}
+
+// A write refused under an earlier read timeout's latch was never
+// attempted: another profile's plaintext copy is still the one read.
+func TestALatchedWriteDoesNotHandAKeyToTheKeyring(t *testing.T) {
+	slowProbe(t, true)
+	store, machine, _ := stallingStore(t)
+	current, err := json.Marshal(liveCreds("current-file-token"))
+	require.NoError(t, err)
+	machine.set(func(m *keyringMachine) {
+		m.probeNeeds = 20 * time.Second
+		m.file = map[string][]byte{"profile:chef": current}
+	})
+	require.NoError(t, store.Save("profile:moved", liveCreds("t")))
+	saveCreds(t, machine, "profile:chef", liveCreds("retired-keyring-token"))
+
+	// A read times out and latches the store; the save behind it is refused.
+	machine.set(func(m *keyringMachine) { m.stalled = true })
+	_, err = store.Load("profile:moved")
+	require.Error(t, err)
+	machine.set(func(m *keyringMachine) { m.stalled = false })
+	require.Error(t, store.Save("profile:chef", liveCreds("renewed")))
+
+	store.stall.mu.Lock()
+	owned := store.stall.keyringOwns["profile:chef"]
+	store.stall.mu.Unlock()
+	assert.False(t, owned, "a refused write hands nothing to the keyring")
+}
+
 // A write that failed outright, without timing out, did not land: the
 // plaintext copy is still the current credential and is still read.
 func TestAFailedKeyringWriteKeepsServingThePlaintextCopy(t *testing.T) {

@@ -417,7 +417,7 @@ func (s *Store) mutate(key string, deleting bool, abandoned func() error, op fun
 	if file == nil || file == store {
 		return opErr
 	}
-	if opErr == nil || (deleting && isMissingCredential(opErr)) || errors.Is(opErr, context.DeadlineExceeded) {
+	if opErr == nil || (deleting && isMissingCredential(opErr)) || mutationMayLand(opErr) {
 		// The keyring holds the change (or, for a delete, nothing): from
 		// here it is this key's only copy, whatever the cleanup below does.
 		// So too after a write that timed out: it may still land, and the
@@ -454,6 +454,20 @@ func (s *Store) mutate(key string, deleting bool, abandoned func() error, op fun
 		return fmt.Errorf("the system keyring has the change, but the older plaintext copy in credentials.json, which would be read in its place, could not be removed: %w", err)
 	}
 	return nil
+}
+
+// mutationMayLand reports a keyring write or delete that was dispatched and
+// timed out, credstore's "keyring write timed out ... (the operation may have
+// completed or may still complete)". Not one refused under an earlier
+// timeout's latch, nor one that timed out queued behind another operation
+// ("not attempted"): those never reached the keyring.
+func mutationMayLand(err error) bool {
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	msg := err.Error()
+	return (strings.HasPrefix(msg, "keyring write timed out") || strings.HasPrefix(msg, "keyring delete timed out")) &&
+		strings.Contains(msg, "may still complete")
 }
 
 // reachSlowKeyring replaces inner, a file-backed store whose probe timed
