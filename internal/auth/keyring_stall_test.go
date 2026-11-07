@@ -63,8 +63,14 @@ func (k *stallingKeyring) latch(err error) error {
 
 func (k *stallingKeyring) Load(key string) ([]byte, error) {
 	if k.probeErr != nil {
-		// Fell back to credentials.json, which holds nothing: what
-		// credstore's file backend says for a miss after a failed probe.
+		// Fell back to credentials.json: a miss there is what credstore's
+		// file backend says after a failed probe.
+		k.m.mu.Lock()
+		data, ok := k.m.file[key]
+		k.m.mu.Unlock()
+		if ok {
+			return data, nil
+		}
 		return nil, fmt.Errorf("credentials not found for %s: system keyring unavailable (%w), fell back to credentials.json", key, k.probeErr)
 	}
 	if err := k.refused(); err != nil {
@@ -95,6 +101,15 @@ func (k *stallingKeyring) Load(key string) ([]byte, error) {
 }
 
 func (k *stallingKeyring) Save(key string, data []byte) error {
+	if k.probeErr != nil {
+		k.m.mu.Lock()
+		defer k.m.mu.Unlock()
+		if k.m.file == nil {
+			k.m.file = map[string][]byte{}
+		}
+		k.m.file[key] = data
+		return nil
+	}
 	if err := k.refused(); err != nil {
 		return err
 	}
@@ -111,10 +126,20 @@ func (k *stallingKeyring) Save(key string, data []byte) error {
 }
 
 func (k *stallingKeyring) Delete(key string) error {
+	if k.probeErr != nil {
+		k.m.mu.Lock()
+		defer k.m.mu.Unlock()
+		delete(k.m.file, key)
+		return nil
+	}
 	if err := k.refused(); err != nil {
 		return err
 	}
 	k.m.mu.Lock()
+	if _, ok := k.m.items[key]; !ok {
+		k.m.mu.Unlock()
+		return fmt.Errorf("credentials not found: %w", keyring.ErrNotFound)
+	}
 	delete(k.m.items, key)
 	k.m.mu.Unlock()
 	return nil
@@ -136,9 +161,11 @@ type keyringMachine struct {
 	probeErr    error         // what a fresh store's probe finds; nil is the keyring
 	probeNeeds  time.Duration // a probe bounded shorter than this times out
 	probeBounds []time.Duration
-	directReads int    // reads that went to the keyring without a store
-	readErr     error  // what every read fails with, when set
-	onRead      func() // runs inside each read, after the item is looked up
+	directReads int               // reads that went to the keyring without a store
+	file        map[string][]byte // credentials.json, as a fallen-back store sees it
+	directBlock chan struct{}     // a direct read waits for this, when set
+	readErr     error             // what every read fails with, when set
+	onRead      func()            // runs inside each read, after the item is looked up
 	reads       int
 	built       []*stallingKeyring
 }
@@ -159,15 +186,27 @@ func (m *keyringMachine) newStore(opts credstore.StoreOptions) credStore {
 // store and no probe.
 func (m *keyringMachine) readDirect(service, key string, timeout time.Duration) ([]byte, error) {
 	m.mu.Lock()
+	block := m.directBlock
+	m.mu.Unlock()
+	if block != nil {
+		<-block
+	}
+	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.directReads++
 	if service != "basecamp" {
 		return nil, fmt.Errorf("service %q", service)
 	}
+	vanish := m.vanishReads > 0
+	if vanish {
+		m.vanishReads--
+	}
 	switch data, ok := m.items[key]; {
+	case m.readErr != nil:
+		return nil, fmt.Errorf("credentials not found: %w", m.readErr)
 	case m.stalled:
 		return nil, fmt.Errorf("keyring read timed out after %s: %w", timeout, context.DeadlineExceeded)
-	case !ok:
+	case !ok || vanish:
 		return nil, fmt.Errorf("credentials not found: %w", keyring.ErrNotFound)
 	default:
 		return data, nil
@@ -559,6 +598,112 @@ func TestAKeyringThatDoesNotAnswerIsUnavailableNotMissing(t *testing.T) {
 	clock.advance(readStallRetryCap)
 	creds, err := store.Load("profile:chef")
 	require.NoError(t, err, "the read after the backoff reaches the keyring")
+	assert.Equal(t, "keyring-token", creds.AccessToken)
+}
+
+// After a probe timeout, reads still serve credentials.json first, so a
+// write that goes to the keyring must not leave the key's plaintext copy
+// behind to be read in its place: a spent refresh token replayed, or a
+// logged-out credential back.
+func TestAWriteToASlowKeyringRemovesThePlaintextCopy(t *testing.T) {
+	slowProbe(t, true)
+	store, machine, _ := stallingStore(t)
+	stale, err := json.Marshal(liveCreds("stale-file-token"))
+	require.NoError(t, err)
+	machine.set(func(m *keyringMachine) {
+		m.probeNeeds = 20 * time.Second
+		m.file = map[string][]byte{"profile:chef": stale, "profile:other": stale}
+	})
+
+	require.NoError(t, store.Save("profile:chef", liveCreds("renewed")))
+	machine.set(func(m *keyringMachine) {
+		assert.NotContains(t, m.file, "profile:chef", "the stale plaintext copy is gone")
+		assert.Contains(t, m.file, "profile:other", "other keys are left alone")
+		assert.Contains(t, m.items, "profile:chef")
+	})
+
+	// A delete of a key only the file held removes it, though the keyring
+	// has nothing to delete.
+	require.NoError(t, store.Delete("profile:other"))
+	machine.set(func(m *keyringMachine) { assert.NotContains(t, m.file, "profile:other") })
+}
+
+// A restarting Secret Service can answer a direct read with nothing for a
+// credential it gave this process a moment ago: asked again before the
+// miss is believed, as a store read is.
+func TestADirectReadMissOfAHeldCredentialIsAskedAgain(t *testing.T) {
+	slowProbe(t, true)
+	store, machine, _ := stallingStore(t)
+	saveCreds(t, machine, "profile:chef", liveCreds("keyring-token"))
+	machine.set(func(m *keyringMachine) { m.probeNeeds = 20 * time.Second })
+	_, err := store.Load("profile:chef")
+	require.NoError(t, err)
+
+	machine.set(func(m *keyringMachine) { m.vanishReads = 1 })
+	creds, err := store.Load("profile:chef")
+	require.NoError(t, err)
+	assert.Equal(t, "keyring-token", creds.AccessToken)
+	assert.Equal(t, 3, machine.directReads)
+}
+
+// A refusal is an answer (#866), on the direct read and on the patient
+// probe alike: reported as itself, not as an outage to wait out.
+func TestARefusalAfterASlowProbeIsNotAnOutage(t *testing.T) {
+	slowProbe(t, true)
+	store, machine, _ := stallingStore(t)
+	refused := &net.OpError{Op: "dial", Net: "unix", Err: os.NewSyscallError("connect", syscall.EACCES)}
+	machine.set(func(m *keyringMachine) { m.probeNeeds = 20 * time.Second; m.readErr = refused })
+	_, err := store.Load("profile:chef")
+	require.Error(t, err)
+	assert.False(t, KeyringUnavailable(err), "%v", err)
+	assert.NotErrorIs(t, err, ErrNoCredential)
+
+	machine.set(func(m *keyringMachine) { m.probeNeeds = 0; m.probeErr = fmt.Errorf("probe: %w", refused) })
+	err = store.Save("profile:chef", liveCreds("t"))
+	require.Error(t, err)
+	assert.False(t, KeyringUnavailable(err), "%v", err)
+	assert.False(t, store.stall.stalled, "no backoff for an answer")
+}
+
+// A caller that stops waiting is not held for the long read, and while
+// one long read is in flight, others are refused at once rather than each
+// starting their own.
+func TestADirectReadIsCancelableAndOneAtATime(t *testing.T) {
+	slowProbe(t, true)
+	store, machine, _ := stallingStore(t)
+	saveCreds(t, machine, "profile:chef", liveCreds("keyring-token"))
+	release := make(chan struct{})
+	machine.set(func(m *keyringMachine) { m.probeNeeds = 20 * time.Second; m.directBlock = release })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	result := make(chan error, 1)
+	go func() { _, err := store.LoadContext(ctx, "profile:chef"); result <- err }()
+	require.Eventually(t, func() bool {
+		store.stall.mu.Lock()
+		defer store.stall.mu.Unlock()
+		return store.stall.directReading
+	}, time.Second, time.Millisecond)
+
+	_, err := store.Load("profile:chef")
+	assert.True(t, KeyringUnavailable(err), "a second reader is refused while the first reads: %v", err)
+
+	cancel()
+	select {
+	case err := <-result:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("a canceled caller waited for the keyring")
+	}
+
+	close(release)
+	require.Eventually(t, func() bool {
+		store.stall.mu.Lock()
+		defer store.stall.mu.Unlock()
+		return !store.stall.directReading
+	}, time.Second, time.Millisecond)
+	machine.set(func(m *keyringMachine) { m.directBlock = nil })
+	creds, err := store.Load("profile:chef")
+	require.NoError(t, err)
 	assert.Equal(t, "keyring-token", creds.AccessToken)
 }
 

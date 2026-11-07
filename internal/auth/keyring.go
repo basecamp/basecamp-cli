@@ -292,11 +292,7 @@ func (s *Store) save(under func(func() error) error, origin string, creds *Crede
 		return err
 	}
 	err = s.operationError(under(func() error {
-		store, err := s.writeStore()
-		if err != nil {
-			return err
-		}
-		return store.Save(origin, data)
+		return s.mutate(origin, false, func(store credStore) error { return store.Save(origin, data) })
 	}))
 	if err != nil {
 		// Whether the write landed is unknown: hold nothing for this key.
@@ -315,11 +311,7 @@ func (s *Store) Delete(origin string) error {
 	s.forget(origin)
 	defer s.forget(origin)
 	return s.operationError(s.withStoreLock(func() error {
-		store, err := s.writeStore()
-		if err != nil {
-			return err
-		}
-		return store.Delete(origin)
+		return s.mutate(origin, true, func(store credStore) error { return store.Delete(origin) })
 	}))
 }
 

@@ -243,6 +243,14 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return err
 	}), connectStartWait{Log: func(line string) { logger.Warn(line) }, Signals: readSignals})
 	stopReadSignals()
+	select {
+	case sig, ok := <-readSignals:
+		// Delivered after the wait had finished, before the stop took.
+		if ok {
+			return connectStoppedBySignal(sig)
+		}
+	default:
+	}
 	if err != nil {
 		return err
 	}

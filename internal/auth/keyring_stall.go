@@ -103,6 +103,13 @@ type keyringStall struct {
 	held map[string]Credentials
 	gen  map[string]uint64
 
+	// slowFile is the file-backed store a slow keyring's probe timed out
+	// into, kept once a patient probe replaced it, so every later write
+	// can remove the key's plaintext copy beside the keyring (mutate).
+	slowFile credStore
+	// directReading is set while a direct keyring read is in flight.
+	directReading bool
+
 	// now is the backoff's clock. Test seam; nil means time.Now.
 	now func() time.Time
 }
@@ -172,15 +179,26 @@ func (s *Store) read(origin string, req lockRequest) ([]byte, uint64, error) {
 		// was too slow for the probe — a write and a delete, each of which
 		// a loaded gnome-keyring fsyncs — not because the keyring is
 		// empty. Read the keyring itself, which needs no write, patiently.
-		kdata, kerr := s.readKeyringDirectly(inner, origin)
+		kdata, kerr := s.readKeyringDirectly(inner, origin, req)
+		if kerr != nil && isMissingCredential(kerr) && s.holds(origin) {
+			// As below: a restarting Secret Service can answer with
+			// nothing before it has loaded its collection.
+			if waitErr := waitOrCancel(keyringRestartGrace, req); waitErr != nil {
+				return nil, gen, waitErr
+			}
+			kdata, kerr = s.readKeyringDirectly(inner, origin, req)
+		}
 		switch {
 		case kerr == nil:
 			return kdata, gen, nil
 		case isMissingCredential(kerr):
 			// The keyring answered: nothing there either.
 			return nil, gen, err
-		default:
+		case keyringDidNotAnswer(kerr):
 			return nil, gen, &keyringUnavailableError{kerr}
+		default:
+			// Answered, with a refusal: reported as what it is (#866).
+			return nil, gen, kerr
 		}
 	}
 	if err != nil && isMissingCredential(err) && s.holds(origin) {
@@ -237,32 +255,58 @@ var keyringReadDirect = func(service, key string, timeout time.Duration) ([]byte
 // probe timed out (probeTimedOutOnSlowness), on slowKeyringTimeout. One
 // the keyring did not answer starts the stall backoff, and a read inside
 // the backoff is refused at once rather than paying the bound again.
-func (s *Store) readKeyringDirectly(inner credStore, key string) ([]byte, error) {
+func (s *Store) readKeyringDirectly(inner credStore, key string, req lockRequest) ([]byte, error) {
+	if err := lockCause(req.cause); err != nil {
+		return nil, err
+	}
 	k := &s.stall
 	k.mu.Lock()
-	if k.stalled && k.clock().Before(k.retryAt) {
+	if k.directReading || (k.stalled && k.clock().Before(k.retryAt)) {
+		// One long read at a time: others are refused at once, as a
+		// stalled store refuses, rather than each waiting out the bound.
 		k.mu.Unlock()
 		return nil, slowKeyringError(inner.ProbeError())
 	}
+	k.directReading = true
 	service := s.opts.ServiceName
 	k.mu.Unlock()
 
-	data, err := keyringReadDirect(service, key, slowKeyringTimeout)
-
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	if err != nil && keyringDidNotAnswer(err) {
+	type result struct {
+		data []byte
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		data, err := keyringReadDirect(service, key, slowKeyringTimeout)
+		k.mu.Lock()
+		k.directReading = false
 		if s.inner == inner {
-			k.stalled = true
-			k.stalls++
-			k.retryAt = k.clock().Add(readStallBackoff(k.stalls))
+			switch {
+			case err != nil && keyringDidNotAnswer(err):
+				k.stalled = true
+				k.stalls++
+				k.retryAt = k.clock().Add(readStallBackoff(k.stalls))
+			default:
+				k.stalled, k.stalls = false, 0
+			}
 		}
-		return nil, slowKeyringError(err)
+		k.mu.Unlock()
+		done <- result{data, err}
+	}()
+	// A caller that stops waiting is not held for the bound; the read
+	// finishes on its own, and keeps others out until it does.
+	select {
+	case r := <-done:
+		if r.err != nil && keyringDidNotAnswer(r.err) {
+			return nil, slowKeyringError(r.err)
+		}
+		return r.data, r.err
+	case <-req.done:
+		if err := lockCause(req.cause); err != nil {
+			return nil, err
+		}
+		return nil, context.Canceled
 	}
-	if s.inner == inner {
-		k.stalled, k.stalls = false, 0
-	}
-	return data, err
 }
 
 // writeStore is the store a write or delete goes to. Where the probe timed
@@ -276,10 +320,48 @@ func (s *Store) writeStore() (credStore, error) {
 		return inner, nil
 	}
 	slow, err := s.reachSlowKeyring(inner)
-	if slow == nil {
+	switch {
+	case slow != nil:
+		return slow, nil
+	case keyringDidNotAnswer(err):
 		return nil, &keyringUnavailableError{err}
+	default:
+		return nil, err
 	}
-	return slow, nil
+}
+
+// mutate runs a save or delete of key on writeStore. When that moved the
+// write from credentials.json to the keyring, the key's plaintext copy is
+// removed after it: reads after a probe timeout still serve the file first,
+// so a copy left behind would be read in place of what was just written —
+// a spent refresh token replayed, or a logged-out credential back.
+func (s *Store) mutate(key string, deleting bool, op func(credStore) error) error {
+	store, err := s.writeStore()
+	if err != nil {
+		return err
+	}
+	opErr := op(store)
+	s.stall.mu.Lock()
+	file := s.stall.slowFile
+	s.stall.mu.Unlock()
+	if file == nil || file == store {
+		return opErr
+	}
+	if _, loadErr := file.Load(key); loadErr != nil {
+		// No plaintext copy (or none readable to remove).
+		return opErr
+	}
+	if deleting && opErr != nil && isMissingCredential(opErr) {
+		// Only the plaintext copy existed; removing it is the delete.
+		opErr = nil
+	}
+	if opErr != nil {
+		return opErr
+	}
+	if err := file.Delete(key); err != nil {
+		return fmt.Errorf("the system keyring has the change, but the older plaintext copy in credentials.json, which would be read in its place, could not be removed: %w", err)
+	}
+	return nil
 }
 
 // reachSlowKeyring replaces inner, a file-backed store whose probe timed
@@ -319,11 +401,17 @@ func (s *Store) reachSlowKeyring(inner credStore) (credStore, error) {
 		return nil, slowKeyringError(inner.ProbeError())
 	}
 	if !fresh.UsingKeyring() {
+		probeErr := fresh.ProbeError()
+		if probeErr != nil && !keyringDidNotAnswer(probeErr) {
+			// Answered, with a refusal: no outage to wait out (#866).
+			return nil, probeErr
+		}
 		k.stalled = true
 		k.stalls++
 		k.retryAt = k.clock().Add(readStallBackoff(k.stalls))
-		return nil, slowKeyringError(fresh.ProbeError())
+		return nil, slowKeyringError(probeErr)
 	}
+	k.slowFile = inner
 	s.inner = fresh
 	k.stalled, k.stalls = false, 0
 	return fresh, nil
