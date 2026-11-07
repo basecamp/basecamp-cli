@@ -650,8 +650,12 @@ basecamp config set instructions '<path-or-url>' --global
 basecamp instructions --refresh     # check it reads, and show it
 ```
 
-Subagents run `basecamp instructions` before they write, so it takes effect
-with no restart. `basecamp config unset instructions --global` removes it.
+Subagents run `basecamp instructions` before they write, so for them it
+takes effect with no restart. The plugin's session-start hook also tells
+every other Claude Code or Codex session on this computer that runs the
+plugin to run it before it writes to Basecamp; a session already running
+when you set it gets that pointer at its next start or compaction.
+`basecamp config unset instructions --global` removes it.
 
 ## When the connector stops
 

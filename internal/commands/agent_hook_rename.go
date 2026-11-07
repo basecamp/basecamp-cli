@@ -42,21 +42,26 @@ func pluginRenameNotice(cmd *cobra.Command) string {
 }
 
 // emitSessionStartNotices writes the SessionStart hook's one JSON reply: the
-// rename or version notice, shown to the user and to the model, and after a
-// compaction the connector's reload instruction, to the model only. Nothing
-// to say writes nothing.
+// rename or version notice, shown to the user and to the model; after a
+// compaction the connector's reload instruction; and, when the operator set
+// instructions, the pointer to them, both to the model only. Nothing to say
+// writes nothing.
 func emitSessionStartNotices(cmd *cobra.Command, input agentHookInput) {
 	notice := pluginRenameNotice(cmd)
 	if notice == "" {
 		notice = pluginVersionNotice(cmd)
 	}
 	reload := connectorReloadNotice(input)
+	instructions := instructionsNotice(cmd)
 	var contexts []string
 	if notice != "" {
 		contexts = append(contexts, "Mention this to the user once: "+notice)
 	}
 	if reload != "" {
 		contexts = append(contexts, reload)
+	}
+	if instructions != "" {
+		contexts = append(contexts, instructions)
 	}
 	if len(contexts) == 0 {
 		return
