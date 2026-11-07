@@ -236,3 +236,23 @@ func TestConnectStartWaitsOutAKeyringThatDoesNotAnswer(t *testing.T) {
 	})
 	assert.ErrorIs(t, err, refused)
 }
+
+// The start waits out a silent keyring for connectKeyringOutageLimit, as
+// the running feed does, and then ends with the reason instead of waiting
+// unseen for a keyring that may never answer again.
+func TestConnectStartGivesUpOnAKeyringSilentPastTheOutageLimit(t *testing.T) {
+	clock := time.Date(2026, 11, 7, 15, 0, 0, 0, time.UTC)
+	read := keyringBoundedStartRead(func() time.Time { return clock }, func(context.Context) error { return keyringLatchedError() })
+	err := read(t.Context())
+	assert.True(t, auth.KeyringUnavailable(err), "inside the limit it is waited out: %v", err)
+
+	clock = clock.Add(connectKeyringOutageLimit)
+	err = read(t.Context())
+	require.Error(t, err)
+	assert.False(t, auth.KeyringUnavailable(err), "past the limit the start ends")
+	_, retry := tokenRetry(err)
+	assert.False(t, retry)
+	e := output.AsError(err)
+	assert.Equal(t, output.CodeKeyringUnavailable, e.Code)
+	assert.NotContains(t, e.Hint, "auth login")
+}

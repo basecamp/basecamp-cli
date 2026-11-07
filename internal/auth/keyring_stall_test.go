@@ -519,9 +519,12 @@ func TestTheHeldTokenIsServedOnlyForAKeyringStall(t *testing.T) {
 // keychain nobody in this session can unlock, as on headless macOS.
 func slowProbe(t *testing.T, slowness bool) {
 	t.Helper()
-	orig := probeTimeoutIsSlowness
+	orig, origHeadless := probeTimeoutIsSlowness, sessionIsHeadless
 	probeTimeoutIsSlowness = func() bool { return slowness }
-	t.Cleanup(func() { probeTimeoutIsSlowness = orig })
+	// The probe is bounded on every platform the test runs on, as it is on
+	// Linux and in a headless macOS session.
+	sessionIsHeadless = func() bool { return true }
+	t.Cleanup(func() { probeTimeoutIsSlowness, sessionIsHeadless = orig, origHeadless })
 }
 
 // The 2026-11-07 failure: on a machine under I/O pressure gnome-keyring
@@ -864,8 +867,29 @@ func TestPlaintextCleanupStaysLockedAndReportsUnreadableFiles(t *testing.T) {
 	require.True(t, store.UsingKeyring())
 	assert.True(t, store.hasPlaintextBeside(), "the file lock is still taken for writes")
 
+	// Serialized for real: another holder of the whole-store lock (as
+	// another process would hold it) keeps the write waiting.
+	other := NewStore(store.fallbackDir)
+	held, release, saved := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		_ = other.withStoreFileLock(func() error { close(held); <-release; return nil })
+	}()
+	<-held
+	go func() { saved <- store.Save("profile:chef", liveCreds("waited")) }()
+	select {
+	case err := <-saved:
+		t.Fatalf("the write did not wait for the store lock: %v", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(release)
+	require.NoError(t, <-saved)
+
 	machine.set(func(m *keyringMachine) { m.fileErr = errors.New("unexpected end of JSON input") })
 	err := store.Save("profile:chef", liveCreds("second"))
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "could not be checked")
+	// A delete the keyring has nothing for does not hide an unchecked file.
+	err = store.Delete("profile:nobody")
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "could not be checked")
 }

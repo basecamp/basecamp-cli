@@ -233,7 +233,15 @@ var keyringReadDirect = func(service, key string, timeout time.Duration) ([]byte
 	// At most one abandoned lookup per process: while one is still blocked
 	// in go-keyring, a new one is not started, so a Secret Service that
 	// never answers cannot pile up goroutines and bus calls.
-	if !directGetIdle.CompareAndSwap(true, false) {
+	// One that has been blocked past readStallRetryCap is given up on, and
+	// a fresh lookup may reach a keyring that has since recovered: at most
+	// one abandoned lookup per readStallRetryCap.
+	now := time.Now().UnixNano()
+	started := directGetStarted.Load()
+	if started != 0 && time.Duration(now-started) < readStallRetryCap {
+		return nil, fmt.Errorf("keyring read timed out after %s, still waiting on an earlier lookup: %w", timeout, context.DeadlineExceeded)
+	}
+	if !directGetStarted.CompareAndSwap(started, now) {
 		return nil, fmt.Errorf("keyring read timed out after %s, still waiting on an earlier lookup: %w", timeout, context.DeadlineExceeded)
 	}
 	type result struct {
@@ -242,7 +250,7 @@ var keyringReadDirect = func(service, key string, timeout time.Duration) ([]byte
 	}
 	done := make(chan result, 1)
 	go func() {
-		defer directGetIdle.Store(true)
+		defer directGetStarted.CompareAndSwap(now, 0)
 		secret, err := keyring.Get(service, service+"::"+key)
 		done <- result{secret, err}
 	}()
@@ -268,9 +276,10 @@ func (s *Store) hasPlaintextBeside() bool {
 	return s.stall.slowFile != nil
 }
 
-// directGetIdle is false while a direct go-keyring lookup is running,
-// including one its caller has given up on.
-var directGetIdle = func() *atomic.Bool { b := &atomic.Bool{}; b.Store(true); return b }()
+// directGetStarted is when the running direct go-keyring lookup started,
+// in Unix nanoseconds, including one its caller has given up on; zero
+// while none runs.
+var directGetStarted atomic.Int64
 
 // readKeyringDirectly is a read of key from the keyring, for a store whose
 // probe timed out (probeTimedOutOnSlowness), on slowKeyringTimeout. One
@@ -369,8 +378,9 @@ func (s *Store) mutate(key string, deleting bool, op func(credStore) error) erro
 		return opErr
 	}
 	if _, loadErr := file.Load(key); loadErr != nil {
-		if isMissingCredential(loadErr) || opErr != nil {
-			// No plaintext copy, or the keyring write already failed.
+		keyringMiss := deleting && opErr != nil && isMissingCredential(opErr)
+		if isMissingCredential(loadErr) || (opErr != nil && !keyringMiss) {
+			// No plaintext copy, or the keyring operation already failed.
 			return opErr
 		}
 		// A copy may be there and could not be checked: the change is
