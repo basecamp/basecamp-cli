@@ -272,7 +272,7 @@ func isMissingCredential(err error) bool {
 // two processes saving DIFFERENT keys at once would otherwise drop one of
 // them. See lock.go.
 func (s *Store) Save(origin string, creds *Credentials) error {
-	return s.save(s.withStoreLock, origin, creds)
+	return s.save(s.withStoreLock, nil, origin, creds)
 }
 
 // SaveContext is Save for a caller that can be canceled: the wait for the
@@ -281,18 +281,21 @@ func (s *Store) Save(origin string, creds *Credentials) error {
 // frees up. A login uses it so a Ctrl-C between its last check and the
 // write cannot store the credential the person stopped.
 func (s *Store) SaveContext(ctx context.Context, origin string, creds *Credentials) error {
-	return s.save(func(fn func() error) error { return s.withStoreLockContext(ctx, fn) }, origin, creds)
+	return s.save(func(fn func() error) error { return s.withStoreLockContext(ctx, fn) }, ctx.Err, origin, creds)
 }
 
 // save marshals creds and writes them under the lock the caller chose.
-func (s *Store) save(under func(func() error) error, origin string, creds *Credentials) error {
+// abandoned, when set, is asked again once the store to write to is known:
+// reaching a slow keyring can take a minute, and a caller that stopped
+// meanwhile must not have its credential written after all.
+func (s *Store) save(under func(func() error) error, abandoned func() error, origin string, creds *Credentials) error {
 	s.warnFallback()
 	data, err := json.Marshal(creds)
 	if err != nil {
 		return err
 	}
 	err = s.operationError(under(func() error {
-		return s.mutate(origin, false, func(store credStore) error { return store.Save(origin, data) })
+		return s.mutate(origin, false, abandoned, func(store credStore) error { return store.Save(origin, data) })
 	}))
 	if err != nil {
 		// Whether the write landed is unknown: hold nothing for this key.
@@ -311,7 +314,7 @@ func (s *Store) Delete(origin string) error {
 	s.forget(origin)
 	defer s.forget(origin)
 	return s.operationError(s.withStoreLock(func() error {
-		return s.mutate(origin, true, func(store credStore) error { return store.Delete(origin) })
+		return s.mutate(origin, true, nil, func(store credStore) error { return store.Delete(origin) })
 	}))
 }
 

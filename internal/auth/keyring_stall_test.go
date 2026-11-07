@@ -171,6 +171,7 @@ type keyringMachine struct {
 	fileErr     error             // what reading credentials.json fails with, when set
 	readErr     error             // what every read fails with, when set
 	onRead      func()            // runs inside each read, after the item is looked up
+	onBuild     func()            // runs as each store is built, after the first
 	reads       int
 	built       []*stallingKeyring
 }
@@ -182,6 +183,9 @@ func (m *keyringMachine) newStore(opts credstore.StoreOptions) credStore {
 	m.probeBounds = append(m.probeBounds, opts.ProbeTimeout)
 	if k.probeErr == nil && m.probeNeeds > 0 && opts.ProbeTimeout < m.probeNeeds {
 		k.probeErr = fmt.Errorf("keyring probe timed out after %s: %w", opts.ProbeTimeout, context.DeadlineExceeded)
+	}
+	if m.onBuild != nil && len(m.built) > 0 {
+		m.onBuild()
 	}
 	m.built = append(m.built, k)
 	return k
@@ -659,6 +663,7 @@ func TestUntouchedFileCredentialsStayReadableAfterTheSwitch(t *testing.T) {
 
 	_, err = store.Load("profile:missing")
 	require.ErrorIs(t, err, ErrNoCredential)
+	require.True(t, store.holds("profile:other"))
 
 	// A file that cannot be read is reported as that, not as "not logged in".
 	machine.set(func(m *keyringMachine) { m.fileErr = errors.New("unexpected end of JSON input") })
@@ -666,6 +671,7 @@ func TestUntouchedFileCredentialsStayReadableAfterTheSwitch(t *testing.T) {
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, ErrNoCredential)
 	assert.ErrorContains(t, err, "unexpected end of JSON input")
+	assert.False(t, store.holds("profile:other"), "a later stall must not serve what could not be read")
 
 	// Nor as a keyring outage, though a truncated file fails with the
 	// io.ErrUnexpectedEOF a dropped bus connection also gives.
@@ -675,6 +681,25 @@ func TestUntouchedFileCredentialsStayReadableAfterTheSwitch(t *testing.T) {
 	assert.False(t, KeyringUnavailable(err), "%v", err)
 	assert.NotErrorIs(t, err, ErrNoCredential)
 	assert.False(t, store.stall.stalled, "the keyring answered: no backoff")
+}
+
+// Reaching a slow keyring for a write can take a minute: a caller that
+// stops meanwhile does not have its credential written after all.
+func TestASaveCanceledWhileReachingASlowKeyringIsAbandoned(t *testing.T) {
+	slowProbe(t, true)
+	store, machine, _ := stallingStore(t)
+	machine.set(func(m *keyringMachine) { m.probeNeeds = 20 * time.Second })
+	require.True(t, store.UsingKeyring())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	machine.set(func(m *keyringMachine) { m.onBuild = cancel })
+	err := store.SaveContext(ctx, "profile:chef", liveCreds("stopped"))
+	require.ErrorIs(t, err, context.Canceled)
+	machine.set(func(m *keyringMachine) {
+		assert.NotContains(t, m.items, "profile:chef")
+		assert.NotContains(t, m.file, "profile:chef")
+	})
 }
 
 // A restarting Secret Service can answer a direct read with nothing for a

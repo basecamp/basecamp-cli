@@ -226,8 +226,10 @@ func (s *Store) read(origin string, req lockRequest) ([]byte, uint64, error) {
 				// Unreadable is not absent: say so, not "not logged in".
 				// The keyring answered (a miss), so this is no outage: a
 				// truncated file's io.ErrUnexpectedEOF must not be read
-				// as a bus that went away.
+				// as a bus that went away. Nor is anything held for key
+				// still known to be stored: a later stall must not serve it.
 				s.noteRead(inner, nil)
+				s.forget(origin)
 				return nil, gen, fmt.Errorf("reading credentials.json: %w", ferr)
 			}
 		}
@@ -395,10 +397,15 @@ func (s *Store) writeStore() (credStore, error) {
 // removed after it: reads after a probe timeout still serve the file first,
 // so a copy left behind would be read in place of what was just written —
 // a spent refresh token replayed, or a logged-out credential back.
-func (s *Store) mutate(key string, deleting bool, op func(credStore) error) error {
+func (s *Store) mutate(key string, deleting bool, abandoned func() error, op func(credStore) error) error {
 	store, err := s.writeStore()
 	if err != nil {
 		return err
+	}
+	if abandoned != nil {
+		if err := abandoned(); err != nil {
+			return err
+		}
 	}
 	opErr := op(store)
 	s.stall.mu.Lock()
