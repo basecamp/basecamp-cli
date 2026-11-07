@@ -164,7 +164,7 @@ Box, Figma, OneDrive, ...) kept in a project's Docs & Files.
   basecamp files cloud-files create --url https://www.dropbox.com/s/abc/plan.pdf --in MyProject
   basecamp files cloud-files update 12345 --title "Plan (final)"
 
-files show reads one; files list lists them with the folder's other items.`,
+files show reads one, by the ID create prints or its Basecamp URL.`,
 		Annotations: map[string]string{
 			"agent_notes": "create needs --url and --in <project>; --service is inferred from the URL's host, other when unknown.\n" +
 				"--subscribe/--no-subscribe on create choose who is subscribed and notified; omitted, Basecamp's default applies.\n" +
@@ -222,6 +222,9 @@ nobody. --description is Markdown, converted to rich text (- reads stdin).
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			// Taken before the account is resolved or adopted from a URL, so
+			// the follow-ups name the account this run used.
+			scope := newFollowUpScope(app)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -262,12 +265,12 @@ nobody. --description is Markdown, converted to rich text (- reads stdin).
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp files show %d --type cloud_file --in %s", cloudFile.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp files show %d --type cloud_file --in %s%s", cloudFile.ID, resolvedProjectID, scope.args(app.Config.AccountID)),
 						Description: "View cloud file",
 					},
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("basecamp files cloud-files update %d --title \"New title\"", cloudFile.ID),
+						Cmd:         fmt.Sprintf("basecamp files cloud-files update %d --title \"New title\"%s", cloudFile.ID, scope.args(app.Config.AccountID)),
 						Description: "Update cloud file",
 					},
 				),
@@ -314,8 +317,11 @@ a known one (dropbox.com, figma.com, ...); otherwise the service stays as it is.
 				return err
 			}
 			app := appctx.FromContext(cmd.Context())
+			// Taken before the account is resolved or adopted from a URL, so
+			// the follow-ups name the account this run used.
+			scope := newFollowUpScope(app)
 			cloudFileID, err := linkIDArg(app, args[0], "cloud_files", "cloud file",
-				"Pass the cloud file's ID, or its URL (…/buckets/<project>/cloud_files/<id>); basecamp files list --in <project> lists them")
+				"Pass the cloud file's ID, or its URL (…/buckets/<project>/cloud_files/<id>); create prints the ID")
 			if err != nil {
 				return err
 			}
@@ -361,7 +367,7 @@ a known one (dropbox.com, figma.com, ...); otherwise the service stays as it is.
 				output.WithSummary(fmt.Sprintf("Updated cloud file #%d: %s → %s", cloudFile.ID, cloudFile.Title, cloudFile.URL)),
 				output.WithBreadcrumbs(output.Breadcrumb{
 					Action:      "show",
-					Cmd:         fmt.Sprintf("basecamp files show %d --type cloud_file", cloudFile.ID),
+					Cmd:         fmt.Sprintf("basecamp files show %d --type cloud_file%s", cloudFile.ID, scope.args(app.Config.AccountID)),
 					Description: "View cloud file",
 				}),
 			)
@@ -388,7 +394,7 @@ func newGoogleDocsCmd(project, vaultID *string) *cobra.Command {
   basecamp files google-docs create --url https://docs.google.com/document/d/abc/edit --in MyProject
   basecamp files google-docs update 12345 --title "Spec (final)"
 
-files show reads one; files list lists them with the folder's other items.`,
+files show reads one, by the ID create prints or its Basecamp URL.`,
 		Annotations: map[string]string{
 			"agent_notes": "create needs --url and --in <project>; --type (doc, sheet, slide, other) is inferred from a docs.google.com URL.\n" +
 				"create publishes unless --draft; --subscribe/--no-subscribe choose who is subscribed and notified.\n" +
@@ -463,6 +469,9 @@ converted to rich text (- reads stdin).
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			// Taken before the account is resolved or adopted from a URL, so
+			// the follow-ups name the account this run used.
+			scope := newFollowUpScope(app)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -511,12 +520,12 @@ converted to rich text (- reads stdin).
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "show",
-						Cmd:         fmt.Sprintf("basecamp files show %d --type google_document --in %s", doc.ID, resolvedProjectID),
+						Cmd:         fmt.Sprintf("basecamp files show %d --type google_document --in %s%s", doc.ID, resolvedProjectID, scope.args(app.Config.AccountID)),
 						Description: "View Google document",
 					},
 					output.Breadcrumb{
 						Action:      "update",
-						Cmd:         fmt.Sprintf("basecamp files google-docs update %d --title \"New title\"", doc.ID),
+						Cmd:         fmt.Sprintf("basecamp files google-docs update %d --title \"New title\"%s", doc.ID, scope.args(app.Config.AccountID)),
 						Description: "Update Google document",
 					},
 				),
@@ -574,8 +583,11 @@ subscribers alone.
 				return err
 			}
 			app := appctx.FromContext(cmd.Context())
+			// Taken before the account is resolved or adopted from a URL, so
+			// the follow-ups name the account this run used.
+			scope := newFollowUpScope(app)
 			docID, err := linkIDArg(app, args[0], "google_documents", "Google document",
-				"Pass the Google document's ID, or its URL (…/buckets/<project>/google_documents/<id>); basecamp files list --in <project> lists them")
+				"Pass the Google document's ID, or its URL (…/buckets/<project>/google_documents/<id>); create prints the ID")
 			if err != nil {
 				return err
 			}
@@ -632,7 +644,7 @@ subscribers alone.
 				output.WithSummary(fmt.Sprintf("Updated Google %s #%d: %s", doc.DocumentType, doc.ID, doc.Title)),
 				output.WithBreadcrumbs(output.Breadcrumb{
 					Action:      "show",
-					Cmd:         fmt.Sprintf("basecamp files show %d --type google_document", doc.ID),
+					Cmd:         fmt.Sprintf("basecamp files show %d --type google_document%s", doc.ID, scope.args(app.Config.AccountID)),
 					Description: "View Google document",
 				}),
 			)

@@ -441,3 +441,38 @@ func TestGoogleDocsCreateUploadsALocalImageInTheDescription(t *testing.T) {
 	assert.Contains(t, description, `sgid="sgid-preview"`, "the image is uploaded and attached")
 	assert.NotContains(t, description, "<img", "not sent as a local path")
 }
+
+// A follow-up copied into a fresh shell must act where this command did, so
+// it names the active profile and an account that came from the URL.
+func TestLinkUpdateFollowUpsCarryTheProfileAndAccount(t *testing.T) {
+	const cloudFileURL = "https://3.basecamp.com/99999/buckets/123/cloud_files/456"
+	cases := map[string]struct {
+		arg      string
+		profile  string
+		inherit  bool
+		followUp string
+	}{
+		"account from config":       {arg: "456", inherit: true, followUp: "basecamp files show 456 --type cloud_file"},
+		"profile, config account":   {arg: "456", profile: "staging", inherit: true, followUp: "basecamp files show 456 --type cloud_file --profile staging"},
+		"profile, account from URL": {arg: cloudFileURL, profile: "staging", followUp: "basecamp files show 456 --type cloud_file --profile staging --account 99999"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			app, _ := setupRecordingTestApp(t,
+				stubRoute{method: http.MethodGet, path: "/99999/cloud_files/456", status: http.StatusOK, body: cloudFileJSON},
+				stubRoute{method: http.MethodPut, path: "/99999/cloud_files/456", status: http.StatusOK, body: cloudFileJSON})
+			app.Config.ActiveProfile = c.profile
+			app.Config.Sources = map[string]string{}
+			if !c.inherit {
+				app.Config.AccountID = ""
+			}
+			buf := captureSpotlightOutput(app)
+
+			require.NoError(t, executeRecordingCommand(NewFilesCmd(), app, "cloud-files", "update", c.arg, "--title", "X"))
+
+			assert.Contains(t, decodeSpotlightEnvelope(t, buf).Breadcrumbs, output.Breadcrumb{
+				Action: "show", Cmd: c.followUp, Description: "View cloud file",
+			})
+		})
+	}
+}
