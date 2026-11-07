@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -408,4 +410,34 @@ func TestCloudFilesUpdateResolvesLocalImagesInTheDescription(t *testing.T) {
 	for _, req := range transport.recorded() {
 		assert.NotEqual(t, http.MethodPut, req.Method, "nothing is written")
 	}
+}
+
+func TestGoogleDocsCreateUploadsALocalImageInTheDescription(t *testing.T) {
+	dir := t.TempDir()
+	png := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0}
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "preview.png"), png, 0o644))
+	t.Chdir(dir)
+
+	app, transport := setupRecordingTestApp(t, projectsRoute(), stubRoute{
+		method: http.MethodPost,
+		path:   "/99999/attachments.json",
+		status: http.StatusCreated,
+		body:   `{"attachable_sgid":"sgid-preview"}`,
+	}, stubRoute{
+		method: http.MethodPost,
+		path:   "/99999/buckets/123/vaults/555/google_documents.json",
+		status: http.StatusCreated,
+		body:   googleDocJSON,
+	})
+
+	err := executeRecordingCommand(NewFilesCmd(), app, "google-docs", "create", "Spec",
+		"--url", "https://docs.google.com/document/d/abc/edit", "--description", "![preview](./preview.png)",
+		"--folder", "555", "--in", "123")
+	require.NoError(t, err)
+
+	last := transport.last(t)
+	assert.Equal(t, "/99999/buckets/123/vaults/555/google_documents.json", last.Path)
+	description, _ := sentBody(t, last.Body)["description"].(string)
+	assert.Contains(t, description, `sgid="sgid-preview"`, "the image is uploaded and attached")
+	assert.NotContains(t, description, "<img", "not sent as a local path")
 }
