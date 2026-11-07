@@ -659,6 +659,13 @@ func TestUntouchedFileCredentialsStayReadableAfterTheSwitch(t *testing.T) {
 
 	_, err = store.Load("profile:missing")
 	require.ErrorIs(t, err, ErrNoCredential)
+
+	// A file that cannot be read is reported as that, not as "not logged in".
+	machine.set(func(m *keyringMachine) { m.fileErr = errors.New("unexpected end of JSON input") })
+	_, err = store.Load("profile:other")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrNoCredential)
+	assert.ErrorContains(t, err, "unexpected end of JSON input")
 }
 
 // A restarting Secret Service can answer a direct read with nothing for a
@@ -911,19 +918,18 @@ func TestPlaintextCleanupStaysLockedAndReportsUnreadableFiles(t *testing.T) {
 
 	// Reads too: one may fall back to credentials.json, so it waits out a
 	// writer rewriting it.
-	held, release = make(chan struct{}), make(chan struct{})
-	loaded := make(chan error, 1)
+	readHeld, readRelease, loaded := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 	go func() {
-		_ = other.withStoreFileLock(func() error { close(held); <-release; return nil })
+		_ = other.withStoreFileLock(func() error { close(readHeld); <-readRelease; return nil })
 	}()
-	<-held
+	<-readHeld
 	go func() { _, err := store.Load("profile:chef"); loaded <- err }()
 	select {
 	case err := <-loaded:
 		t.Fatalf("the read did not wait for the store lock: %v", err)
 	case <-time.After(150 * time.Millisecond):
 	}
-	close(release)
+	close(readRelease)
 	require.NoError(t, <-loaded)
 
 	machine.set(func(m *keyringMachine) { m.fileErr = errors.New("unexpected end of JSON input") })

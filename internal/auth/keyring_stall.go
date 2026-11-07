@@ -218,8 +218,13 @@ func (s *Store) read(origin string, req lockRequest) ([]byte, uint64, error) {
 		file := s.stall.slowFile
 		s.stall.mu.Unlock()
 		if file != nil && file != inner {
-			if fdata, ferr := file.Load(origin); ferr == nil {
+			fdata, ferr := file.Load(origin)
+			switch {
+			case ferr == nil:
 				data, err = fdata, nil
+			case !isMissingCredential(ferr):
+				// Unreadable is not absent: say so, not "not logged in".
+				err = ferr
 			}
 		}
 	}
