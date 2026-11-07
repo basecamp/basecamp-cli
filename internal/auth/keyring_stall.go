@@ -259,6 +259,15 @@ var keyringReadDirect = func(service, key string, timeout time.Duration) ([]byte
 	}
 }
 
+// hasPlaintextBeside reports a keyring store that replaced a slow keyring's
+// file fallback (slowFile): writes still rewrite credentials.json to remove
+// a key's plaintext copy, so they keep the whole-store file lock.
+func (s *Store) hasPlaintextBeside() bool {
+	s.stall.mu.Lock()
+	defer s.stall.mu.Unlock()
+	return s.stall.slowFile != nil
+}
+
 // directGetIdle is false while a direct go-keyring lookup is running,
 // including one its caller has given up on.
 var directGetIdle = func() *atomic.Bool { b := &atomic.Bool{}; b.Store(true); return b }()
@@ -360,8 +369,13 @@ func (s *Store) mutate(key string, deleting bool, op func(credStore) error) erro
 		return opErr
 	}
 	if _, loadErr := file.Load(key); loadErr != nil {
-		// No plaintext copy (or none readable to remove).
-		return opErr
+		if isMissingCredential(loadErr) || opErr != nil {
+			// No plaintext copy, or the keyring write already failed.
+			return opErr
+		}
+		// A copy may be there and could not be checked: the change is
+		// not known to be the one later reads will see.
+		return fmt.Errorf("the system keyring has the change, but credentials.json, whose copy would be read in its place, could not be checked: %w", loadErr)
 	}
 	if deleting && opErr != nil && isMissingCredential(opErr) {
 		// Only the plaintext copy existed; removing it is the delete.

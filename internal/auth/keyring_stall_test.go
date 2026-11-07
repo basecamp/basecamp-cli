@@ -67,7 +67,11 @@ func (k *stallingKeyring) Load(key string) ([]byte, error) {
 		// file backend says after a failed probe.
 		k.m.mu.Lock()
 		data, ok := k.m.file[key]
+		fileErr := k.m.fileErr
 		k.m.mu.Unlock()
+		if fileErr != nil {
+			return nil, fileErr
+		}
 		if ok {
 			return data, nil
 		}
@@ -164,6 +168,7 @@ type keyringMachine struct {
 	directReads int               // reads that went to the keyring without a store
 	file        map[string][]byte // credentials.json, as a fallen-back store sees it
 	directBlock chan struct{}     // a direct read waits for this, when set
+	fileErr     error             // what reading credentials.json fails with, when set
 	readErr     error             // what every read fails with, when set
 	onRead      func()            // runs inside each read, after the item is looked up
 	reads       int
@@ -845,4 +850,22 @@ func TestARenewedTokenIsServedWhenItsReadBackStalls(t *testing.T) {
 	assert.Equal(t, "minted-1", token)
 	machine.set(func(m *keyringMachine) { assert.Equal(t, 3, m.reads, "the read-back was attempted") })
 	assert.Len(t, as.tokenCalls(), 1)
+}
+
+// After the switch to the keyring, a write still rewrites credentials.json
+// to remove a plaintext copy, so it keeps the whole-store file lock; and a
+// file that cannot be checked is reported, not taken for "no copy".
+func TestPlaintextCleanupStaysLockedAndReportsUnreadableFiles(t *testing.T) {
+	slowProbe(t, true)
+	store, machine, _ := stallingStore(t)
+	machine.set(func(m *keyringMachine) { m.probeNeeds = 20 * time.Second })
+	assert.False(t, store.hasPlaintextBeside())
+	require.NoError(t, store.Save("profile:chef", liveCreds("first")))
+	require.True(t, store.UsingKeyring())
+	assert.True(t, store.hasPlaintextBeside(), "the file lock is still taken for writes")
+
+	machine.set(func(m *keyringMachine) { m.fileErr = errors.New("unexpected end of JSON input") })
+	err := store.Save("profile:chef", liveCreds("second"))
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "could not be checked")
 }

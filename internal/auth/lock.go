@@ -216,7 +216,7 @@ func Held(h HeldCredential) (creds *Credentials, key string, held bool) {
 // nothing here long enough to want to interrupt, and the wait is bounded
 // either way.
 func (s *Store) withStoreLock(fn func() error) error {
-	if s.ensure().UsingKeyring() {
+	if s.ensure().UsingKeyring() && !s.hasPlaintextBeside() {
 		return fn()
 	}
 	return s.withStoreFileLock(fn)
@@ -256,7 +256,7 @@ func (s *Store) withStoreReadLock(req lockRequest, fn func() error) error {
 // the person presses Ctrl-C, and without the second check it would go on
 // to store the credential they stopped as soon as the holder released.
 func (s *Store) withStoreLockContext(ctx context.Context, fn func() error) error {
-	if s.ensure().UsingKeyring() {
+	if s.ensure().UsingKeyring() && !s.hasPlaintextBeside() {
 		// No lock to take, so make the check lockFile would have made.
 		if err := ctx.Err(); err != nil {
 			return err
