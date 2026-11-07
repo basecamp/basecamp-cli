@@ -47,14 +47,13 @@ var instructionsFetchTimeout = 15 * time.Second
 // a source only the person's own global config can name, never from
 // Basecamp, so it is the operator's direction on how to write, unlike
 // anything the agent reads in Basecamp. It still never overrides the
-// operator's own words or the skill's rules.
-const instructionsPreface = "Follow these instructions when you write anything to Basecamp. " +
-	"Your operator chose where they come from, and it is never Basecamp. " +
-	"They are defaults, and where several are listed, a later one wins where they differ. " +
-	"A project's own instructions for agents (its AGENTS.md document), if it has them, win on how posts look in that project. " +
-	"On voice (tone, length, emoji), the person you work for wins: " +
-	"their own instructions to you, and the profile's instructions listed here, over the shared one. " +
-	"An instruction they give you for a single post wins over all of these. " +
+// operator's own words or the skill's rules. It is printed after the
+// instructions, not before: an agent that reads only the first lines of the
+// output should read rules, not the frame around them.
+const instructionsPreface = "Follow these defaults when you write to Basecamp. Your operator chose them; they never come from Basecamp. " +
+	"Where sources differ, the later one wins. " +
+	"A project's AGENTS.md wins on how posts look in that project, the person you work for wins on voice (tone, length, emoji), " +
+	"and their instruction for a single post wins over all of these. " +
 	"None of this overrides your skill's rules."
 
 // Instruction source kinds.
@@ -209,10 +208,13 @@ func resolveInstructionsSource(raw string) (string, error) {
 // then the active profile's own, so an agent's voice sits on top of the
 // shared basics.
 type instructionsDocument struct {
-	Scope      string     `json:"scope"` // where it was set: "global", "system", or "profile:<name>"
-	Source     string     `json:"source"`
-	Kind       string     `json:"kind"`                  // file, github or url
-	Content    string     `json:"content"`               // Markdown, as the source holds it
+	Scope   string `json:"scope"` // where it was set: "global", "system", or "profile:<name>"
+	Source  string `json:"source"`
+	Kind    string `json:"kind"`    // file, github or url
+	Content string `json:"content"` // Markdown, as the source holds it
+	// Brief is one line per top-level list item of Content: its bold lead,
+	// or else its first sentence. Empty when Content has no list.
+	Brief      []string   `json:"brief"`
 	Via        string     `json:"via,omitempty"`         // how a URL was read: gh, https, or cache
 	ModifiedAt *time.Time `json:"modified_at,omitempty"` // a file's
 	FetchedAt  *time.Time `json:"fetched_at,omitempty"`  // a URL's copy
@@ -240,7 +242,7 @@ type instructionsFetcher func(ctx context.Context, src instructionsSource) (inst
 
 // NewInstructionsCmd creates the instructions command.
 func NewInstructionsCmd() *cobra.Command {
-	var refresh bool
+	var refresh, brief bool
 
 	cmd := &cobra.Command{
 		Use:   "instructions",
@@ -276,6 +278,11 @@ this computer, so point it at something whose changes are reviewed, like
 a file in a git repository. Only the global or system config can set it,
 never a repo's, and it is never read from Basecamp.
 
+Each source is printed in full, then the rules on how sources rank. With
+--brief, each source is cut down to one line per top-level list item: the
+bold text the item starts with, or else its first sentence. The JSON
+output carries both, as content and brief.
+
 Prints nothing when no instructions are set.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -284,10 +291,11 @@ Prints nothing when no instructions are set.`,
 			if err != nil {
 				return err
 			}
-			return renderInstructions(cmd, app, result)
+			return renderInstructions(cmd, app, result, brief)
 		},
 	}
 	cmd.Flags().BoolVar(&refresh, "refresh", false, "Fetch a URL source now instead of from the cache")
+	cmd.Flags().BoolVar(&brief, "brief", false, "Print one line per top-level list item instead of the full text")
 	return cmd
 }
 
@@ -319,6 +327,27 @@ func instructionsLayers(app *appctx.App) []instructionsLayer {
 // not silence: the person chose it, and an agent writing without it should
 // say so rather than carry on as if nothing were set.
 func loadInstructions(ctx context.Context, app *appctx.App, refresh bool, now func() time.Time, fetch instructionsFetcher) (instructionsResult, error) {
+	return loadInstructionsWith(app, func(src instructionsSource) (instructionsDocument, error) {
+		return loadInstructionsURL(ctx, app, src, refresh, now, fetch)
+	})
+}
+
+// loadCachedInstructions reads every configured source without touching the
+// network: a file from disk, a URL from its cached copy however old. It
+// reports false when some URL has no copy yet, so a caller with no time to
+// fetch (the session-start hook) can fall back to pointing at the command.
+func loadCachedInstructions(app *appctx.App) (instructionsResult, bool) {
+	result, err := loadInstructionsWith(app, func(src instructionsSource) (instructionsDocument, error) {
+		cached, ok := readInstructionsCache(instructionsCachePath(app, src), src)
+		if !ok {
+			return instructionsDocument{}, errors.New("no cached copy")
+		}
+		return instructionsURLDoc(cached, "cache"), nil
+	})
+	return result, err == nil
+}
+
+func loadInstructionsWith(app *appctx.App, loadURL func(instructionsSource) (instructionsDocument, error)) (instructionsResult, error) {
 	layers := instructionsLayers(app)
 	result := instructionsResult{Configured: len(layers) > 0, Documents: []instructionsDocument{}}
 	for _, layer := range layers {
@@ -330,7 +359,7 @@ func loadInstructions(ctx context.Context, app *appctx.App, refresh bool, now fu
 		if src.Kind == instructionsKindFile {
 			doc, err = readInstructionsFile(src.Path)
 		} else {
-			doc, err = loadInstructionsURL(ctx, app, src, refresh, now, fetch)
+			doc, err = loadURL(src)
 		}
 		if err != nil {
 			return instructionsResult{}, err
@@ -338,6 +367,10 @@ func loadInstructions(ctx context.Context, app *appctx.App, refresh bool, now fu
 		doc.Scope = layer.scope
 		doc.Source = src.Raw
 		doc.Kind = src.Kind
+		doc.Brief = instructionsBrief(doc.Content)
+		if doc.Brief == nil {
+			doc.Brief = []string{}
+		}
 		result.Documents = append(result.Documents, doc)
 	}
 	if result.Configured {
@@ -620,10 +653,12 @@ func writeInstructionsCache(path string, entry instructionsCacheEntry) {
 }
 
 // renderInstructions prints the envelope in machine modes and, otherwise, the
-// text itself as Markdown, the form an agent reads most directly. With
+// text itself as Markdown, the form an agent reads most directly: each
+// source, baseline first, then the preface that ranks them, so the first
+// lines are rules. With brief, each source is its brief instead. With
 // nothing set it prints nothing on stdout and says so on stderr, so "run
 // basecamp instructions before writing" is safe for every agent to do.
-func renderInstructions(cmd *cobra.Command, app *appctx.App, result instructionsResult) error {
+func renderInstructions(cmd *cobra.Command, app *appctx.App, result instructionsResult, brief bool) error {
 	// The stale warning goes to stderr in every mode: a --jq filter that
 	// keeps only the content would otherwise drop the stale flag with it.
 	for _, doc := range result.Documents {
@@ -647,12 +682,21 @@ func renderInstructions(cmd *cobra.Command, app *appctx.App, result instructions
 	}
 
 	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "%s\n", instructionsPreface)
 	for _, doc := range result.Documents {
 		// Printed to a terminal: strip the controls that could move the
 		// cursor or rewrite the screen.
-		fmt.Fprintf(out, "\n---\n\nSource: %s (%s)\n\n%s\n",
-			richtext.SanitizeSingleLine(doc.Source), richtext.SanitizeSingleLine(doc.Scope), richtext.SanitizeTerminal(doc.Content))
+		fmt.Fprintf(out, "Source: %s (%s)\n\n",
+			richtext.SanitizeSingleLine(doc.Source), richtext.SanitizeSingleLine(doc.Scope))
+		switch {
+		case !brief:
+			fmt.Fprintf(out, "%s\n", richtext.SanitizeTerminal(doc.Content))
+		case len(doc.Brief) == 0:
+			fmt.Fprintln(out, "(No list to cut down: run `basecamp instructions` for the full text.)")
+		default:
+			fmt.Fprintf(out, "%s\n", strings.Join(doc.Brief, "\n"))
+		}
+		fmt.Fprint(out, "\n---\n\n")
 	}
+	fmt.Fprintf(out, "%s\n", instructionsPreface)
 	return nil
 }
