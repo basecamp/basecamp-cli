@@ -104,6 +104,7 @@ func (f *fallenBackStore) Delete(string) error         { return nil }
 func (f *fallenBackStore) MigrateToKeyring() error     { return nil }
 func (f *fallenBackStore) UsingKeyring() bool          { return false }
 func (f *fallenBackStore) FallbackWarning() string     { return f.warning }
+func (f *fallenBackStore) ProbeError() error           { return nil }
 
 type timedOutKeyringStore struct{ fallenBackStore }
 

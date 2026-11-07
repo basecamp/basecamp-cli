@@ -224,20 +224,9 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if !accountIDsEqual(account, file.AccountID) {
 		return output.ErrUsage(fmt.Sprintf("connect.json was set up in account %s, and profile %q is bound to account %s", file.AccountID, name, account))
 	}
-	kind, err := connectCredentialKind(ctx, app)
-	if err != nil {
-		return err
-	}
-	if kind == "" {
-		return output.ErrAuth(fmt.Sprintf("Profile %q holds no credential", name))
-	}
-	creds, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
-	if err != nil {
-		return output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
-	}
 	// A look at the lock first, under the agent connect.json names: a
 	// second connector for an agent already running says so now, not after
-	// waiting out a rate limit for a token it would never use. Only a look:
+	// waiting out a silent keyring or a rate limit for a credential it would never use. Only a look:
 	// until the credential is proven to be that agent, holding its lock
 	// through the wait could keep the agent's real connector from starting.
 	// The lock is taken for the run once the identity is verified.
@@ -248,8 +237,40 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if err := connectLockFree(stateDir, file.AccountID, file.Agent.PersonID); err != nil {
 		return err
 	}
-
 	logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
+	// The first credential read waits out a keyring that does not answer,
+	// as the token wait below does: a slow keyring says nothing about the
+	// credential, and the connector starts once the keyring answers.
+	var kind string
+	var creds *auth.Credentials
+	readSignals, stopReadSignals := connector.NotifyShutdown()
+	err = awaitConnectToken(ctx, keyringBoundedStartRead(time.Now, func(ctx context.Context) error {
+		var err error
+		if kind, err = connectCredentialKind(ctx, app); err != nil || kind == "" {
+			return err
+		}
+		creds, err = app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
+		if err != nil && !auth.KeyringUnavailable(err) {
+			return output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
+		}
+		return err
+	}), connectStartWait{Log: func(line string) { logger.Warn(line) }, Signals: readSignals, Waiting: "the agent's credential from the system keyring"})
+	stopReadSignals()
+	select {
+	case sig, ok := <-readSignals:
+		// Delivered after the wait had finished, before the stop took.
+		if ok {
+			return connectStoppedBySignal(sig)
+		}
+	default:
+	}
+	if err != nil {
+		return err
+	}
+	if kind == "" {
+		return output.ErrAuth(fmt.Sprintf("Profile %q holds no credential", name))
+	}
+
 	tokens := &managerTokens{mgr: app.Auth}
 	// Every read below needs a token first. One the running feed would
 	// wait for is waited for here too, rather than ending the start.
@@ -801,4 +822,40 @@ func connectActorTypes(policy admission.Policy) []string {
 		return []string{"agent", "person"}
 	}
 	return []string{"person"}
+}
+
+// connectStartRead is a start-up credential read in the shape the start's
+// token wait takes, so a keyring that does not answer is waited out on the
+// same rule (tokenRetry) rather than ending the start.
+type connectStartRead func(ctx context.Context) error
+
+func (r connectStartRead) AccessToken(ctx context.Context) (string, error) { return "", r(ctx) }
+
+// keyringBoundedStartRead is read as a connectStartRead that waits out a
+// keyring that does not answer for connectKeyringOutageLimit, as the
+// running feed does, and then ends the start with the reason rather than
+// waiting unseen for a keyring that may never answer again.
+func keyringBoundedStartRead(now func() time.Time, read func(context.Context) error) connectStartRead {
+	var downSince time.Time
+	return func(ctx context.Context) error {
+		err := read(ctx)
+		if ctx.Err() != nil || !auth.KeyringUnavailable(err) {
+			downSince = time.Time{}
+			return err
+		}
+		if downSince.IsZero() {
+			downSince = now()
+		}
+		if down := now().Sub(downSince); down >= connectKeyringOutageLimit {
+			return &output.Error{
+				Code:    output.CodeKeyringUnavailable,
+				Message: fmt.Sprintf("The system keyring has not given up the agent's credential for %s, so the connector cannot start: %s", down.Round(time.Second), output.AsError(err).Message),
+				Hint: "Nothing was changed, and the credential is still in the keyring: start the connector again. " +
+					"If this keeps happening, check that the desktop keyring (the Secret Service: gnome-keyring or KeePassXC) is running and unlocked.",
+				// Neither retryable nor wrapping the outage: the start's
+				// wait must end on it (tokenRetry), not wait again.
+			}
+		}
+		return err
+	}
 }

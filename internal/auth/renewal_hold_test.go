@@ -505,6 +505,7 @@ type unreadableStore struct{ credStore }
 
 func (unreadableStore) Load(string) ([]byte, error) { return nil, errors.New("the keychain is locked") }
 func (unreadableStore) FallbackWarning() string     { return "" }
+func (unreadableStore) ProbeError() error           { return nil }
 func (unreadableStore) UsingKeyring() bool          { return true }
 
 // TestARateLimitWithAnUnreadableBodyIsStillHeld: a 429's status and

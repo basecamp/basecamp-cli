@@ -256,6 +256,7 @@ func (s lockedCredStore) Delete(string) error         { return s.err }
 func (lockedCredStore) MigrateToKeyring() error       { return nil }
 func (lockedCredStore) UsingKeyring() bool            { return false }
 func (lockedCredStore) FallbackWarning() string       { return "" }
+func (lockedCredStore) ProbeError() error             { return nil }
 
 // A store that cannot be read is not "not logged in": the credential may be
 // there, live on both sides, so the failure is the answer.
