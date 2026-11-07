@@ -769,6 +769,7 @@ func TestAFailedPlaintextCleanupDoesNotServeTheOldCopy(t *testing.T) {
 	// plaintext copy it replaces is not served meanwhile either.
 	machine.set(func(m *keyringMachine) {
 		m.file["profile:other"] = stale
+		m.fileDeleteErr = nil
 		m.stallWrites = true
 	})
 	err = store.Save("profile:other", liveCreds("renewed"))
@@ -779,6 +780,9 @@ func TestAFailedPlaintextCleanupDoesNotServeTheOldCopy(t *testing.T) {
 	_, err = store.Load("profile:other")
 	require.Error(t, err)
 	assert.True(t, KeyringUnavailable(err), "%v", err)
+	// And the copy is gone for other processes too, which read the file
+	// first and know nothing of this one's.
+	machine.set(func(m *keyringMachine) { assert.NotContains(t, m.file, "profile:other") })
 }
 
 // Only a dispatched write that timed out may land. One refused under an

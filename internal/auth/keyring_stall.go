@@ -417,7 +417,8 @@ func (s *Store) mutate(key string, deleting bool, abandoned func() error, op fun
 	if file == nil || file == store {
 		return opErr
 	}
-	if opErr == nil || (deleting && isMissingCredential(opErr)) || mutationMayLand(opErr) {
+	mayLand := mutationMayLand(opErr)
+	if opErr == nil || (deleting && isMissingCredential(opErr)) || mayLand {
 		// The keyring holds the change (or, for a delete, nothing): from
 		// here it is this key's only copy, whatever the cleanup below does.
 		// So too after a write that timed out: it may still land, and the
@@ -436,6 +437,8 @@ func (s *Store) mutate(key string, deleting bool, abandoned func() error, op fun
 	if _, loadErr := file.Load(key); loadErr != nil {
 		keyringMiss := deleting && opErr != nil && isMissingCredential(opErr)
 		if isMissingCredential(loadErr) || (opErr != nil && !keyringMiss) {
+			// (A timed-out write's error is what its caller is told
+			// whether or not the file could be checked.)
 			// No plaintext copy, or the keyring operation already failed.
 			return opErr
 		}
@@ -447,13 +450,17 @@ func (s *Store) mutate(key string, deleting bool, abandoned func() error, op fun
 		// Only the plaintext copy existed; removing it is the delete.
 		opErr = nil
 	}
-	if opErr != nil {
+	if opErr != nil && !mayLand {
 		return opErr
 	}
-	if err := file.Delete(key); err != nil {
+	// After a write that timed out the copy goes too: it is the one that
+	// write replaces, and another process, which knows nothing of
+	// keyringOwns, would otherwise read it first. The timeout is still
+	// what the caller is told.
+	if err := file.Delete(key); err != nil && !mayLand {
 		return fmt.Errorf("the system keyring has the change, but the older plaintext copy in credentials.json, which would be read in its place, could not be removed: %w", err)
 	}
-	return nil
+	return opErr
 }
 
 // mutationMayLand reports a keyring write or delete that was dispatched and
