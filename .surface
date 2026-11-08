@@ -1114,6 +1114,7 @@ CMD basecamp project list
 CMD basecamp project logo
 CMD basecamp project logo remove
 CMD basecamp project logo set
+CMD basecamp project recent
 CMD basecamp project show
 CMD basecamp project trash
 CMD basecamp project update
@@ -1128,6 +1129,7 @@ CMD basecamp projects list
 CMD basecamp projects logo
 CMD basecamp projects logo remove
 CMD basecamp projects logo set
+CMD basecamp projects recent
 CMD basecamp projects show
 CMD basecamp projects trash
 CMD basecamp projects update
@@ -14233,6 +14235,27 @@ FLAG basecamp project logo set --stats type=bool
 FLAG basecamp project logo set --styled type=bool
 FLAG basecamp project logo set --todolist type=string
 FLAG basecamp project logo set --verbose type=count
+FLAG basecamp project recent --account type=string
+FLAG basecamp project recent --agent type=bool
+FLAG basecamp project recent --cache-dir type=string
+FLAG basecamp project recent --count type=bool
+FLAG basecamp project recent --help type=bool
+FLAG basecamp project recent --hints type=bool
+FLAG basecamp project recent --ids-only type=bool
+FLAG basecamp project recent --in type=string
+FLAG basecamp project recent --jq type=string
+FLAG basecamp project recent --json type=bool
+FLAG basecamp project recent --markdown type=bool
+FLAG basecamp project recent --md type=bool
+FLAG basecamp project recent --no-hints type=bool
+FLAG basecamp project recent --no-stats type=bool
+FLAG basecamp project recent --profile type=string
+FLAG basecamp project recent --project type=string
+FLAG basecamp project recent --quiet type=bool
+FLAG basecamp project recent --stats type=bool
+FLAG basecamp project recent --styled type=bool
+FLAG basecamp project recent --todolist type=string
+FLAG basecamp project recent --verbose type=count
 FLAG basecamp project show --account type=string
 FLAG basecamp project show --agent type=bool
 FLAG basecamp project show --all type=bool
@@ -14538,6 +14561,27 @@ FLAG basecamp projects logo set --stats type=bool
 FLAG basecamp projects logo set --styled type=bool
 FLAG basecamp projects logo set --todolist type=string
 FLAG basecamp projects logo set --verbose type=count
+FLAG basecamp projects recent --account type=string
+FLAG basecamp projects recent --agent type=bool
+FLAG basecamp projects recent --cache-dir type=string
+FLAG basecamp projects recent --count type=bool
+FLAG basecamp projects recent --help type=bool
+FLAG basecamp projects recent --hints type=bool
+FLAG basecamp projects recent --ids-only type=bool
+FLAG basecamp projects recent --in type=string
+FLAG basecamp projects recent --jq type=string
+FLAG basecamp projects recent --json type=bool
+FLAG basecamp projects recent --markdown type=bool
+FLAG basecamp projects recent --md type=bool
+FLAG basecamp projects recent --no-hints type=bool
+FLAG basecamp projects recent --no-stats type=bool
+FLAG basecamp projects recent --profile type=string
+FLAG basecamp projects recent --project type=string
+FLAG basecamp projects recent --quiet type=bool
+FLAG basecamp projects recent --stats type=bool
+FLAG basecamp projects recent --styled type=bool
+FLAG basecamp projects recent --todolist type=string
+FLAG basecamp projects recent --verbose type=count
 FLAG basecamp projects show --account type=string
 FLAG basecamp projects show --agent type=bool
 FLAG basecamp projects show --all type=bool
@@ -21727,6 +21771,7 @@ SUB basecamp project list
 SUB basecamp project logo
 SUB basecamp project logo remove
 SUB basecamp project logo set
+SUB basecamp project recent
 SUB basecamp project show
 SUB basecamp project trash
 SUB basecamp project update
@@ -21741,6 +21786,7 @@ SUB basecamp projects list
 SUB basecamp projects logo
 SUB basecamp projects logo remove
 SUB basecamp projects logo set
+SUB basecamp projects recent
 SUB basecamp projects show
 SUB basecamp projects trash
 SUB basecamp projects update
