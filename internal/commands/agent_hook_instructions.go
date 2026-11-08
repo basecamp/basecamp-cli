@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -44,10 +45,16 @@ func instructionsNotice(cmd *cobra.Command) string {
 	return pointer
 }
 
+// instructionsGistMaxRunes bounds the gist. A hook's additionalContext is
+// capped at 10,000 characters and the gist shares it with the pointer and
+// the other SessionStart notices; a cut-off gist would drop the later
+// sources, which win, so one that doesn't fit isn't sent at all.
+const instructionsGistMaxRunes = 6000
+
 // instructionsGist is the brief of the active profile's sources, read
-// without the network, or "" when some source has no copy yet or none has a
-// list to cut down. A source with no list is left out of it; the header
-// sends the reader to the command for the full text either way.
+// without the network, or "": when some source has no copy yet, when some
+// source has no list to cut down (a gist without it would read as the whole
+// of the rules), or when it is too long to fit the hook's context.
 func instructionsGist(app *appctx.App) string {
 	result, ok := loadCachedInstructions(instructionsHookApp(app))
 	if !ok || len(result.Documents) == 0 {
@@ -56,17 +63,18 @@ func instructionsGist(app *appctx.App) string {
 	var lines []string
 	for _, doc := range result.Documents {
 		if len(doc.Brief) == 0 {
-			continue
+			return ""
 		}
 		if len(result.Documents) > 1 {
 			lines = append(lines, "From "+richtext.SanitizeSingleLine(doc.Scope)+":")
 		}
 		lines = append(lines, doc.Brief...)
 	}
-	if len(lines) == 0 {
+	gist := "The gist (run the command for the full text):\n" + strings.Join(lines, "\n")
+	if utf8.RuneCountInString(gist) > instructionsGistMaxRunes {
 		return ""
 	}
-	return "The gist (run the command for the full text):\n" + strings.Join(lines, "\n")
+	return gist
 }
 
 // anyInstructionsConfigured reports whether any post could go out under

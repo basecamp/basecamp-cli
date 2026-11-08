@@ -207,6 +207,35 @@ func TestAgentHookPointerAloneWhenNothingIsAList(t *testing.T) {
 	assert.NotContains(t, context, "The gist")
 }
 
+// One source with no list would leave its rules out of a gist built from
+// the others, the later, winning source included: the pointer goes alone.
+func TestAgentHookPointerAloneWhenOneSourceIsNotAList(t *testing.T) {
+	cfg := config.Default()
+	cfg.Instructions = writeInstructions(t, "house.md", "- **Lead with the point.** Then the rest.")
+	cfg.ActiveProfile = "marie"
+	cfg.ProfileInstructions = writeInstructions(t, "marie.md", "Sign off as Marie. Always.")
+
+	_, context := hookSpecificOutput(t, runAgentHookWithConfig(t, cfg, sessionStartPayload))
+	assert.Contains(t, context, "`basecamp instructions`")
+	assert.NotContains(t, context, "The gist")
+}
+
+// A gist too long for the hook's context isn't cut off, which would drop the
+// later sources: the pointer goes alone.
+func TestAgentHookPointerAloneWhenTheGistIsTooLong(t *testing.T) {
+	var rules strings.Builder
+	for range 60 {
+		rules.WriteString("- " + strings.Repeat("word ", 39) + "end.\n")
+	}
+	cfg := config.Default()
+	cfg.Instructions = writeInstructions(t, "house.md", rules.String())
+
+	_, context := hookSpecificOutput(t, runAgentHookWithConfig(t, cfg, sessionStartPayload))
+	assert.Contains(t, context, "`basecamp instructions`")
+	assert.NotContains(t, context, "The gist")
+	assert.Less(t, len(context), 10000)
+}
+
 // The command keeps a profile's cached copy under profiles/<name>, so that
 // is where the hook looks for it, while its own state stays where it was.
 func TestAgentHookReadsTheProfilesCache(t *testing.T) {

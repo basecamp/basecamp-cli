@@ -110,6 +110,26 @@ func TestInstructionsBrief(t *testing.T) {
 			"```\n- not an item\n```\n\n- Real.\n\n~~~md\n1. also not\n~~~",
 			[]string{"- Real."},
 		},
+		"a shorter fence inside a longer one stays code": {
+			"````md\n```\n- not an item\n```\n- still code\n````\n\n- Real.",
+			[]string{"- Real."},
+		},
+		"a fence with text after it doesn't close": {
+			"```\n```not a close\n- still code\n```\n- Real.",
+			[]string{"- Real."},
+		},
+		"a closing fence of the other character doesn't close": {
+			"~~~\n```\n- still code\n~~~\n- Real.",
+			[]string{"- Real."},
+		},
+		"an indented heading or break inside an item keeps it open": {
+			"- **Top.** Body.\n\n  ## Inside\n\n  - Nested.\n\n  ---\n\n  - Nested too.\n- Next.",
+			[]string{"- Top.", "- Next."},
+		},
+		"a #tag is text, not a heading": {
+			"- Lead with\n#tag in it. Then more.",
+			[]string{"- Lead with #tag in it."},
+		},
 		"thematic breaks are not bullets": {
 			"---\n\n* * *\n\n- Real.",
 			[]string{"- Real."},

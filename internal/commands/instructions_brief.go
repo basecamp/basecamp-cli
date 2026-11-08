@@ -22,6 +22,11 @@ var (
 	// like a bullet but are rules.
 	instructionsThematicBreak = regexp.MustCompile(`^ {0,3}([-*_])( *[-*_]){2,} *$`)
 	instructionsSentenceEnd   = regexp.MustCompile(`[.!?]["')\]]*(\s|$)`)
+	// instructionsATXHeading matches a heading line stripped of its
+	// indentation: one to six # and then a space or the end, so #tag is text.
+	instructionsATXHeading = regexp.MustCompile(`^#{1,6}(\s|$)`)
+	// instructionsFenceOpen matches the run that opens a fenced code block.
+	instructionsFenceOpen = regexp.MustCompile("^(`{3,}|~{3,})")
 )
 
 // instructionsBrief reduces Markdown instructions to one line per top-level
@@ -34,10 +39,10 @@ func instructionsBrief(content string) []string {
 		brief   []string
 		marker  string
 		text    []string
-		open    bool // a top-level item is open
-		collect bool // still reading its first paragraph
-		indent  int  // where the open item's content starts
-		fence   string
+		open    bool   // a top-level item is open
+		collect bool   // still reading its first paragraph
+		indent  int    // where the open item's content starts
+		fence   string // the run that opened the code block we're in
 	)
 	flush := func() {
 		if open {
@@ -54,13 +59,15 @@ func instructionsBrief(content string) []string {
 		lineIndent := len(line) - len(strings.TrimLeft(line, " "))
 
 		if fence != "" {
-			if strings.HasPrefix(trimmed, fence) {
+			// Only a run of the same character, at least as long, and
+			// nothing after it closes the block.
+			if len(trimmed) >= len(fence) && strings.Trim(trimmed, fence[:1]) == "" {
 				fence = ""
 			}
 			continue
 		}
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			fence = trimmed[:3]
+		if m := instructionsFenceOpen.FindString(trimmed); m != "" {
+			fence = m
 			if open && lineIndent < indent {
 				flush()
 			}
@@ -72,6 +79,10 @@ func instructionsBrief(content string) []string {
 			continue
 		}
 		if instructionsThematicBreak.MatchString(line) {
+			if open && lineIndent >= indent {
+				collect = false // inside the item: it stays open
+				continue
+			}
 			flush()
 			continue
 		}
@@ -95,7 +106,11 @@ func instructionsBrief(content string) []string {
 				continue
 			}
 		}
-		if strings.HasPrefix(trimmed, "#") {
+		if instructionsATXHeading.MatchString(trimmed) {
+			if open && lineIndent >= indent {
+				collect = false // inside the item: it stays open
+				continue
+			}
 			flush()
 			continue
 		}
