@@ -153,8 +153,11 @@ func TestShowNullRefetchKeepsSparseRecording(t *testing.T) {
 		}
 		return 200, `null`
 	}}
-	_, stdout, _, err := runShowCmdCapture(t, transport, output.FormatJSON, "789", "--no-comments")
+	reqs, stdout, _, err := runShowCmdCapture(t, transport, output.FormatJSON, "789", "--no-comments")
 	require.NoError(t, err)
+	require.Len(t, reqs, 2)
+	assert.True(t, strings.HasSuffix(reqs[0], "/recordings/789.json"))
+	assert.True(t, strings.HasSuffix(reqs[1], "/todos/789.json"))
 	data := decodeShowJSONDataMap(t, decodeShowJSONEnvelope(t, stdout).Data)
 	assert.JSONEq(t, `"Sparse title"`, string(data["title"]))
 }
