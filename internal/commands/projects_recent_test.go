@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -63,4 +64,29 @@ func TestProjectsRecentRejectsArgumentsBeforeRequest(t *testing.T) {
 	}))
 	require.Error(t, executeCommand(NewProjectsCmd(), app, "recent", "unexpected"))
 	assert.Zero(t, requests)
+}
+
+func TestProjectsRecentWithoutApp(t *testing.T) {
+	cmd := newProjectsRecentCmd()
+	cmd.SetContext(context.Background())
+	require.ErrorContains(t, cmd.RunE(cmd, nil), "app not initialized")
+}
+
+func TestProjectsRecentShowBreadcrumb(t *testing.T) {
+	app, out := setupProjectsMockApp(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return jsonResponse(http.StatusOK, `[{"id":2,"name":"Zebra"}]`, http.Header{"Content-Type": {"application/json"}}), nil
+	}))
+	app.Flags.Hints = true
+
+	require.NoError(t, executeCommand(NewProjectsCmd(), app, "recent"))
+	var envelope struct {
+		Breadcrumbs []struct {
+			Action string `json:"action"`
+			Cmd    string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope))
+	require.Len(t, envelope.Breadcrumbs, 1)
+	assert.Equal(t, "show", envelope.Breadcrumbs[0].Action)
+	assert.Equal(t, "basecamp projects show <id>", envelope.Breadcrumbs[0].Cmd)
 }

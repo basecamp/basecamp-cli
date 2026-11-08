@@ -82,6 +82,9 @@ func newProjectsRecentCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -92,6 +95,11 @@ func newProjectsRecentCmd() *cobra.Command {
 			return app.OK(projects,
 				output.WithEntity("project"),
 				output.WithSummary(fmt.Sprintf("%d recent projects", len(projects))),
+				output.WithBreadcrumbs(output.Breadcrumb{
+					Action:      "show",
+					Cmd:         "basecamp projects show <id>",
+					Description: "Show project details",
+				}),
 			)
 		},
 	}
