@@ -12044,6 +12044,7 @@ FLAG basecamp inbox --types type=stringSlice
 FLAG basecamp inbox --verbose type=count
 FLAG basecamp instructions --account type=string
 FLAG basecamp instructions --agent type=bool
+FLAG basecamp instructions --brief type=bool
 FLAG basecamp instructions --cache-dir type=string
 FLAG basecamp instructions --count type=bool
 FLAG basecamp instructions --help type=bool

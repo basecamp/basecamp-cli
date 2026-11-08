@@ -40,11 +40,11 @@ func instructionsTestApp(t *testing.T, path string) *appctx.App {
 	return app
 }
 
-func runInstructionsCommand(t *testing.T, app *appctx.App) (string, string, error) {
+func runInstructionsCommand(t *testing.T, app *appctx.App, args ...string) (string, string, error) {
 	t.Helper()
 	cmd := NewInstructionsCmd()
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
-	cmd.SetArgs(nil)
+	cmd.SetArgs(args)
 	cmd.SetContext(appctx.WithApp(context.Background(), app))
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
@@ -149,8 +149,8 @@ func TestLoadInstructionsRefusesWhatCannotBeASource(t *testing.T) {
 	}
 }
 
-// Run plainly, the command prints the preface that bounds the files'
-// authority, then each file as Markdown with where it came from.
+// Run plainly, the command prints each file as Markdown with where it came
+// from, then the preface that bounds the files' authority.
 func TestInstructionsCommandPrintsMarkdown(t *testing.T) {
 	path := writeInstructions(t, "style.md", "# House style\n\n- Lead with the answer.\n")
 	app := instructionsTestApp(t, path)
@@ -158,9 +158,48 @@ func TestInstructionsCommandPrintsMarkdown(t *testing.T) {
 
 	stdout, _, err := runInstructionsCommand(t, app)
 	require.NoError(t, err)
-	assert.True(t, strings.HasPrefix(stdout, instructionsPreface), stdout)
-	assert.Contains(t, stdout, "Source: "+path+" (global)")
-	assert.Contains(t, stdout, "# House style\n\n- Lead with the answer.")
+	assert.True(t, strings.HasPrefix(stdout, "Source: "+path+" (global)\n\n# House style\n\n- Lead with the answer."), stdout)
+	assert.True(t, strings.HasSuffix(stdout, "\n---\n\n"+instructionsPreface+"\n"), stdout)
+}
+
+// The rules come before the frame around them, baseline then profile, so an
+// agent that reads only the first lines (through head, say) reads rules.
+func TestInstructionsCommandPrintsRulesBeforeThePreface(t *testing.T) {
+	house := writeInstructions(t, "house.md", "1. **Lead with the point.** Then the rest.")
+	app := instructionsTestApp(t, house)
+	app.Config.ActiveProfile = "marie"
+	marie := writeInstructions(t, "marie.md", "Sign off as Marie.")
+	app.Config.ProfileInstructions = marie
+	app.Flags.JSON = false
+
+	stdout, _, err := runInstructionsCommand(t, app)
+	require.NoError(t, err)
+	lines := strings.Split(stdout, "\n")
+	assert.Equal(t, []string{"Source: " + house + " (global)", "", "1. **Lead with the point.** Then the rest."}, lines[:3])
+	houseAt := strings.Index(stdout, "Lead with the point.")
+	marieAt := strings.Index(stdout, "Sign off as Marie.")
+	prefaceAt := strings.Index(stdout, instructionsPreface)
+	assert.True(t, houseAt < marieAt && marieAt < prefaceAt, stdout)
+	assert.Contains(t, stdout, "Source: "+marie+" (profile:marie)")
+}
+
+// --brief prints each source's brief in place of its text, and says so when
+// a source has no list to cut down.
+func TestInstructionsCommandBrief(t *testing.T) {
+	house := writeInstructions(t, "house.md", instructionsStyleFixture)
+	app := instructionsTestApp(t, house)
+	app.Config.ActiveProfile = "marie"
+	app.Config.ProfileInstructions = writeInstructions(t, "marie.md", "Sign off as Marie.")
+	app.Flags.JSON = false
+
+	stdout, _, err := runInstructionsCommand(t, app, "--brief")
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(stdout, "Source: "+house+" (global)\n\n1. Speak only when it helps someone.\n2. Keep private context private.\n"), stdout)
+	assert.Contains(t, stdout, "11. Show what is visual, and check what readers see.\n")
+	assert.NotContains(t, stdout, "Writing in Basecamp")
+	assert.NotContains(t, stdout, "Post when asked")
+	assert.Contains(t, stdout, "(No list to cut down: run `basecamp instructions` for the full text.)")
+	assert.True(t, strings.HasSuffix(stdout, instructionsPreface+"\n"), stdout)
 }
 
 func TestInstructionsCommandStripsTerminalControls(t *testing.T) {
@@ -193,6 +232,7 @@ func TestInstructionsCommandJSON(t *testing.T) {
 	require.Len(t, env.Data.Documents, 1)
 	assert.Equal(t, path, env.Data.Documents[0].Source)
 	assert.Equal(t, "Lead with the answer.", env.Data.Documents[0].Content)
+	assert.Equal(t, []string{}, env.Data.Documents[0].Brief, "no list: an empty brief, not null")
 	assert.NotNil(t, env.Data.Documents[0].ModifiedAt)
 }
 
@@ -542,7 +582,7 @@ func TestInstructionsStaleWarningInMachineOutput(t *testing.T) {
 	stderr := &bytes.Buffer{}
 	cmd.SetErr(stderr)
 
-	require.NoError(t, renderInstructions(cmd, app, result))
+	require.NoError(t, renderInstructions(cmd, app, result, false))
 	assert.Contains(t, stderr.String(), "could not fetch the instructions at "+instructionsTestURL+" (offline)")
 }
 
