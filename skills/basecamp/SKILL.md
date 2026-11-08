@@ -344,11 +344,13 @@ included; in prose, a single newline joins lines into one paragraph. Don't
 hand-write HTML: `--format html` is stored as written, so touching blocks and
 `<br>`-stacked lines read as a wall of text.
 
-Rich-text fields support Mermaid diagrams. Put the source in a fenced code block
-with the language `mermaid`, and Basecamp shows the diagram to people reading
-the post. Previews, emails, and exports show the source, and so does a post
-whose source does not parse. Use one where a picture beats prose. Diagram source
-spans several lines, so pass it on stdin:
+When writing instructions are set, a style check can refuse a rich-text write;
+fix what it lists, or send it with `--as-written`.
+
+Rich-text fields support Mermaid diagrams: put the source in a fenced code
+block with the language `mermaid`. Previews, emails, and exports show the
+source, and so does a post whose source does not parse. Pass the source on
+stdin:
 
 ````bash
 basecamp messages create "Release flow" - --in "<project>" --json <<'EOF'

@@ -562,7 +562,10 @@ List a project's message types with: basecamp messagetypes list --in <project>`,
 
 			// Build SDK request
 			// Convert Markdown content to HTML for Basecamp's rich text fields
-			html := richTextToHTML(cmd, body)
+			html, err := richTextToHTML(cmd, body)
+			if err != nil {
+				return err
+			}
 
 			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
 			html, err = resolveLocalImages(cmd, app, html)
@@ -720,7 +723,10 @@ anything else is a name matched against the message's project. List a project's 
 
 			// Build SDK request
 			// Convert Markdown content to HTML for Basecamp's rich text fields
-			html := richTextToHTML(cmd, body)
+			html, err := richTextToHTML(cmd, body)
+			if err != nil {
+				return err
+			}
 
 			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
 			html, err = resolveLocalImages(cmd, app, html)

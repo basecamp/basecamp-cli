@@ -1383,7 +1383,10 @@ Use - as the content argument to read the todo title from stdin:
 
 			// Process description with Markdown + attachments
 			if description != "" || len(attachFiles) > 0 {
-				descHTML := richTextToHTML(cmd, description)
+				descHTML, convErr := richTextToHTML(cmd, description)
+				if convErr != nil {
+					return convErr
+				}
 
 				// Resolve inline images
 				descHTML, descErr := resolveLocalImages(cmd, app, descHTML)
@@ -1641,7 +1644,11 @@ Set or clear the people notified when the todo is completed:
 			// todo can't orphan uploaded attachments.
 			var descHTML string
 			if !clearDescription && description != "" {
-				descHTML = richTextToHTML(cmd, description)
+				var convErr error
+				descHTML, convErr = richTextToHTML(cmd, description)
+				if convErr != nil {
+					return convErr
+				}
 			}
 
 			var assigneeIDs []int64
@@ -2031,7 +2038,11 @@ Examples:
 			commentHTML := comment
 			var mentionNotice string
 			if comment != "" {
-				commentHTML = richTextToHTML(cmd, comment)
+				var convErr error
+				commentHTML, convErr = richTextToHTML(cmd, comment)
+				if convErr != nil {
+					return convErr
+				}
 				var pipelineErr error
 				commentHTML, pipelineErr = resolveLocalImages(cmd, app, commentHTML)
 				if pipelineErr != nil {

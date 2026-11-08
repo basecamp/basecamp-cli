@@ -145,7 +145,11 @@ a destructive verb deserves its own review, not a rider on a bump.`,
 			// The note is rich text (my_notes.md: content | HTML), so Markdown
 			// is converted like every other content-writing command. Sending the
 			// raw string would store escaped or malformed markup.
-			note, err := app.Account().MyNotes().Update(cmd.Context(), richTextToHTML(cmd, content))
+			html, err := richTextToHTML(cmd, content)
+			if err != nil {
+				return err
+			}
+			note, err := app.Account().MyNotes().Update(cmd.Context(), html)
 			if err != nil {
 				return convertSDKError(err)
 			}

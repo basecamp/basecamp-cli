@@ -544,7 +544,10 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 	// Convert description through rich text pipeline
 	var mentionNotice string
 	if description != "" {
-		description = richTextToHTML(cmd, description)
+		description, err = richTextToHTML(cmd, description)
+		if err != nil {
+			return err
+		}
 		description, err = resolveLocalImages(cmd, app, description)
 		if err != nil {
 			return err
@@ -733,7 +736,10 @@ You can pass either an entry ID or a Basecamp URL:
 			}
 			var mentionNotice string
 			if description != "" {
-				html := richTextToHTML(cmd, description)
+				html, err := richTextToHTML(cmd, description)
+				if err != nil {
+					return err
+				}
 				html, err = resolveLocalImages(cmd, app, html)
 				if err != nil {
 					return err

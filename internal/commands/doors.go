@@ -340,7 +340,11 @@ The link is private to the team unless --visible-to-clients is passed.
 				return err
 			}
 			if desc != "" {
-				desc = richTextToHTML(cmd, desc)
+				var convErr error
+				desc, convErr = richTextToHTML(cmd, desc)
+				if convErr != nil {
+					return convErr
+				}
 			}
 
 			bucketID, resolvedProjectID, err := resolveToolBucketID(cmd, app, *project)
@@ -454,7 +458,11 @@ link private to the team.
 					return err
 				}
 				if desc != "" {
-					desc = richTextToHTML(cmd, desc)
+					var convErr error
+					desc, convErr = richTextToHTML(cmd, desc)
+					if convErr != nil {
+						return convErr
+					}
 				}
 				req.Description = &desc
 			}

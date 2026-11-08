@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 // Rich-text conversion is decided in one place. A command converting content
@@ -259,4 +260,112 @@ func TestNotesSetFormatHTMLSendsContentExactly(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(transport.last(t).Body), &body))
 	assert.Equal(t, passthroughHTML, body.Note.Content)
+}
+
+// runStyledComment posts a comment with writing instructions set (or not) and
+// the agent session detection pinned, so the test reads the same inside an
+// agent's shell and in CI.
+func runStyledComment(t *testing.T, transport *mockCommentWriteTransport, configure func(*appctx.App), agent bool, args ...string) (string, error) {
+	t.Helper()
+	prev := inAgentSession
+	inAgentSession = func() bool { return agent }
+	t.Cleanup(func() { inAgentSession = prev })
+
+	app, _ := setupCommentsWriteTestApp(t, transport)
+	if configure != nil {
+		configure(app)
+	}
+	cmd := NewCommentsCmd()
+	stderr := &bytes.Buffer{}
+	cmd.SetContext(appctx.WithApp(context.Background(), app))
+	cmd.SetArgs(args)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(stderr)
+	err := cmd.Execute()
+	return stderr.String(), err
+}
+
+func withBaselineInstructions(app *appctx.App) {
+	app.Config.Instructions = "https://example.com/basecamp-style.md"
+}
+
+func withProfileInstructions(app *appctx.App) {
+	app.Config.ActiveProfile = "agent"
+	app.Config.ProfileInstructions = "/home/me/style.md"
+}
+
+// The style check sits in richTextToHTML, the door every rich-text write
+// passes. With instructions set it refuses a breaking post inside an agent
+// session, warns outside one, and stays silent with --as-written or when no
+// instructions are set.
+func TestRichTextStyleCheck(t *testing.T) {
+	const rawURL = "See https://example.com/report for the numbers."
+	twoParagraphs := "First point, said plainly.\n\nSecond point, with [the report](https://example.com/report)."
+	longParagraph := strings.TrimSpace(strings.Repeat("word ", 130))
+
+	tests := []struct {
+		name      string
+		configure func(*appctx.App)
+		agent     bool
+		args      []string
+		refused   bool
+		warned    bool
+	}{
+		{"raw URL refused in an agent session", withBaselineInstructions, true,
+			[]string{"create", "789", rawURL}, true, false},
+		{"profile instructions count", withProfileInstructions, true,
+			[]string{"create", "789", rawURL}, true, false},
+		{"one long paragraph refused", withBaselineInstructions, true,
+			[]string{"create", "789", longParagraph}, true, false},
+		{"raw URL warned outside an agent session", withBaselineInstructions, false,
+			[]string{"create", "789", rawURL}, false, true},
+		{"--as-written sends without a word", withBaselineInstructions, true,
+			[]string{"create", "789", rawURL, "--as-written"}, false, false},
+		{"no instructions set: nothing checked", nil, true,
+			[]string{"create", "789", rawURL}, false, false},
+		{"two paragraphs with a linked reference pass", withBaselineInstructions, true,
+			[]string{"create", "789", twoParagraphs}, false, false},
+		{"--format html is checked as given", withBaselineInstructions, true,
+			[]string{"create", "789", "<p>" + rawURL + "</p>", "--format", "html"}, true, false},
+		{"--format html URL alone in a block passes", withBaselineInstructions, true,
+			[]string{"create", "789", "<p>The report:</p><p>https://example.com/report</p>", "--format", "html"}, false, false},
+		{"update is checked too", withBaselineInstructions, true,
+			[]string{"update", "1234", rawURL}, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := &mockCommentWriteTransport{}
+			stderr, err := runStyledComment(t, transport, tt.configure, tt.agent, tt.args...)
+			if tt.refused {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "Not sent")
+				assert.Empty(t, transport.capturedBodies, "a refused write sends nothing")
+				return
+			}
+			require.NoError(t, err)
+			assert.Len(t, transport.capturedBodies, 1)
+			if tt.warned {
+				assert.Contains(t, stderr, "Warning: this breaks the writing instructions")
+				assert.Contains(t, stderr, "never as a raw URL")
+				assert.Contains(t, stderr, "--as-written")
+			} else {
+				assert.Empty(t, stderr)
+			}
+		})
+	}
+}
+
+// The refusal names each finding and the way to send anyway.
+func TestRichTextStyleRefusalNamesFindingsAndEscape(t *testing.T) {
+	transport := &mockCommentWriteTransport{}
+	_, err := runStyledComment(t, transport, withBaselineInstructions, true,
+		"create", "789", "See https://example.com/report. "+strings.Repeat("word ", 130))
+	require.Error(t, err)
+
+	var outErr *output.Error
+	require.ErrorAs(t, err, &outErr)
+	assert.Contains(t, outErr.Message, "never as a raw URL")
+	assert.Contains(t, outErr.Message, "one block of 132 words")
+	assert.Contains(t, outErr.Hint, "--as-written")
+	assert.Contains(t, outErr.Hint, "basecamp instructions")
 }

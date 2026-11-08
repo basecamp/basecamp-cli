@@ -1039,7 +1039,10 @@ as backslash-n.`,
 			}
 
 			// Convert Markdown content to HTML for Basecamp's rich text fields
-			html := richTextToHTML(cmd, content)
+			html, err := richTextToHTML(cmd, content)
+			if err != nil {
+				return err
+			}
 
 			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
 			html, err = resolveLocalImages(cmd, app, html)
@@ -1195,7 +1198,10 @@ busybox-ash) it posts a literal leading $ and keeps \n as backslash-n:
 
 			// Create comments on all recordings
 			// Convert Markdown content to HTML for Basecamp's rich text fields
-			html := richTextToHTML(cmd, content)
+			html, err := richTextToHTML(cmd, content)
+			if err != nil {
+				return err
+			}
 
 			// Resolve inline images (![alt](./path) → upload + <bc-attachment>)
 			html, err = resolveLocalImages(cmd, app, html)

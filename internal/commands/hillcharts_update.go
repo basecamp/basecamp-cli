@@ -154,7 +154,10 @@ func runHillchartsUpdate(cmd *cobra.Command, project, todosetID string, dotArgs 
 
 	var mentionNotice string
 	if strings.TrimSpace(note) != "" {
-		html := richTextToHTML(cmd, note)
+		html, convErr := richTextToHTML(cmd, note)
+		if convErr != nil {
+			return convErr
+		}
 		mentions, err := resolveMentions(cmd.Context(), app.Names, mentionScope(app, resolvedProjectID), html)
 		if err != nil {
 			return err

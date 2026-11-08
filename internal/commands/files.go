@@ -1081,7 +1081,10 @@ func runUploadFile(cmd *cobra.Command, project, vaultID, filePath, description s
 		VisibleToClients: vis,
 	}
 	if description != "" {
-		descHTML := richTextToHTML(cmd, description)
+		descHTML, convErr := richTextToHTML(cmd, description)
+		if convErr != nil {
+			return convErr
+		}
 		descHTML, resolveErr := resolveLocalImages(cmd, app, descHTML)
 		if resolveErr != nil {
 			return resolveErr
@@ -1357,7 +1360,10 @@ Use - as the content argument to read the document body from stdin:
 
 			// Create document using SDK
 			// Convert Markdown content to HTML
-			html := richTextToHTML(cmd, content)
+			html, convErr := richTextToHTML(cmd, content)
+			if convErr != nil {
+				return convErr
+			}
 
 			// Resolve inline images
 			html, imgErr := resolveLocalImages(cmd, app, html)
@@ -1832,7 +1838,11 @@ You can pass either an upload ID or a Basecamp URL:
 			if cmd.Flags().Changed("description") {
 				descHTML := ""
 				if description != "" {
-					descHTML = richTextToHTML(cmd, description)
+					var convErr error
+					descHTML, convErr = richTextToHTML(cmd, description)
+					if convErr != nil {
+						return convErr
+					}
 					if descHTML, err = resolveLocalImages(cmd, app, descHTML); err != nil {
 						return err
 					}
@@ -2077,7 +2087,11 @@ You can pass either an item ID or a Basecamp URL:
 						req.BaseName = title
 					}
 					if nonDocContentSet {
-						descHTML, err := resolveLocalImages(cmd, app, richTextToHTML(cmd, content))
+						descHTML, err := richTextToHTML(cmd, content)
+						if err != nil {
+							return err
+						}
+						descHTML, err = resolveLocalImages(cmd, app, descHTML)
 						if err != nil {
 							return err
 						}
@@ -2139,7 +2153,11 @@ You can pass either an item ID or a Basecamp URL:
 								req.BaseName = title
 							}
 							if nonDocContentSet {
-								descHTML, err := resolveLocalImages(cmd, app, richTextToHTML(cmd, content))
+								descHTML, err := richTextToHTML(cmd, content)
+								if err != nil {
+									return err
+								}
+								descHTML, err = resolveLocalImages(cmd, app, descHTML)
 								if err != nil {
 									return err
 								}
@@ -2215,8 +2233,11 @@ func updateDocument(cmd *cobra.Command, app *appctx.App, itemID int64, existingD
 
 	var docHTML string
 	if setContent && content != "" {
-		docHTML = richTextToHTML(cmd, content)
 		var err error
+		docHTML, err = richTextToHTML(cmd, content)
+		if err != nil {
+			return nil, err
+		}
 		docHTML, err = resolveLocalImages(cmd, app, docHTML)
 		if err != nil {
 			return nil, err

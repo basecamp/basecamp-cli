@@ -1055,7 +1055,10 @@ Use - as the body argument to read the body from stdin:
 			// Convert content through rich text pipeline
 			var mentionNotice string
 			if content != "" {
-				content = richTextToHTML(cmd, content)
+				content, err = richTextToHTML(cmd, content)
+				if err != nil {
+					return err
+				}
 				content, err = resolveLocalImages(cmd, app, content)
 				if err != nil {
 					return err
@@ -1234,7 +1237,10 @@ You can pass either a card ID or a Basecamp URL:
 			var mentionNotice string
 			var html string
 			if content != "" {
-				html = richTextToHTML(cmd, content)
+				html, err = richTextToHTML(cmd, content)
+				if err != nil {
+					return err
+				}
 				html, err = resolveLocalImages(cmd, app, html)
 				if err != nil {
 					return err
