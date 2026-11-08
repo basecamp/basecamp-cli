@@ -122,6 +122,18 @@ func TestInstructionsBrief(t *testing.T) {
 			"~~~\n```\n- still code\n~~~\n- Real.",
 			[]string{"- Real."},
 		},
+		"a fence in an indented code example is text": {
+			"- One.\n\nExample:\n\n    ```\n    - not a fence opener\n\n- Two.",
+			[]string{"- One.", "- Two."},
+		},
+		"an item that opens with a fence": {
+			"- ```\n  - not an item\n  ```\n- Real.",
+			[]string{"- Real."},
+		},
+		"a nested item that opens with a fence": {
+			"- **Top.** Body.\n  - ```\n    - not an item\n    ```\n- Next.",
+			[]string{"- Top.", "- Next."},
+		},
 		"an indented heading or break inside an item keeps it open": {
 			"- **Top.** Body.\n\n  ## Inside\n\n  - Nested.\n\n  ---\n\n  - Nested too.\n- Next.",
 			[]string{"- Top.", "- Next."},

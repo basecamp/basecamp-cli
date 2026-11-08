@@ -66,7 +66,10 @@ func instructionsBrief(content string) []string {
 			}
 			continue
 		}
-		if m := instructionsFenceOpen.FindString(trimmed); m != "" {
+		// A fence opens a block only where its container allows: indented
+		// four or more past it, it is text in an indented code example.
+		fenceable := lineIndent <= 3 || (open && lineIndent >= indent && lineIndent-indent <= 3)
+		if m := instructionsFenceOpen.FindString(trimmed); m != "" && fenceable {
 			fence = m
 			if open && lineIndent < indent {
 				flush()
@@ -87,8 +90,10 @@ func instructionsBrief(content string) []string {
 			continue
 		}
 		if m := instructionsListMarker.FindStringSubmatch(line[lineIndent:]); m != nil {
+			itemText := strings.TrimSpace(line[lineIndent+len(m[0]):])
 			if open && lineIndent >= indent {
 				collect = false // a nested item: not part of the lead
+				fence = instructionsFenceOpen.FindString(itemText)
 				continue
 			}
 			if lineIndent <= 3 {
@@ -102,7 +107,13 @@ func instructionsBrief(content string) []string {
 				if m[2] == "" {
 					indent = lineIndent + len(m[1]) + 1
 				}
-				text = []string{strings.TrimSpace(line[lineIndent+len(m[0]):])}
+				// An item that opens with a fence has no lead in its first
+				// line: the code is not a rule.
+				if fence = instructionsFenceOpen.FindString(itemText); fence != "" {
+					text, collect = nil, false
+					continue
+				}
+				text = []string{itemText}
 				continue
 			}
 		}
