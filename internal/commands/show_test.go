@@ -803,17 +803,23 @@ func TestShowFragmentURLResolvesComment(t *testing.T) {
 func TestShowChatAtURLResolvesLine(t *testing.T) {
 	transport := &showTrackingTransport{
 		responder: func(path string) (int, string) {
-			if strings.Contains(path, "/recordings/") || strings.Contains(path, "/chats/789/lines/111") {
-				return 200, `{"id": 111, "type": "Chat::Lines::Text", "content": "hello", "parent":{"id":789}}`
+			if strings.Contains(path, "/recordings/111.json") {
+				return 200, `{"id":111,"type":"Chat::Lines::Text","parent":{"id":789},"bucket":{"id":456}}`
 			}
-			return 200, `{}`
+			if strings.Contains(path, "/chats/789/lines/111.json") {
+				return 200, `{"id":111,"type":"Chat::Lines::Text","content":"Full chat line","parent":{"id":789},"bucket":{"id":456}}`
+			}
+			return 404, `{}`
 		},
 	}
 
-	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/chats/789@111")
+	reqs, stdout, _, err := runShowCmdCapture(t, transport, output.FormatJSON, "https://3.basecamp.com/99999/buckets/456/chats/789@111", "--no-comments")
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(reqs), 1)
+	require.Len(t, reqs, 2)
 	assert.Contains(t, reqs[0], "/recordings/111.json")
+	assert.Contains(t, reqs[1], "/chats/789/lines/111.json")
+	data := decodeShowJSONDataMap(t, decodeShowJSONEnvelope(t, stdout).Data)
+	assert.JSONEq(t, `"Full chat line"`, string(data["content"]))
 }
 
 func TestShowProjectURLReturnsHelpfulError(t *testing.T) {

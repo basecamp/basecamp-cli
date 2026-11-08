@@ -36,7 +36,8 @@ func TestShowNativeItemAliases(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEmpty(t, reqs)
 			assert.True(t, strings.HasSuffix(reqs[len(reqs)-1], tc.endpoint))
-			assert.Contains(t, stdout, "Full item content")
+			data := decodeShowJSONDataMap(t, decodeShowJSONEnvelope(t, stdout).Data)
+			assert.JSONEq(t, `"Full item content"`, string(data["content"]))
 		})
 	}
 }
@@ -52,6 +53,11 @@ func TestRecordingTypeEndpointColumnSubtypes(t *testing.T) {
 	for _, kind := range []string{"Kanban::Triage", "Kanban::DoneColumn", "Kanban::NotNowColumn"} {
 		assert.Equal(t, "/card_tables/columns/42.json", recordingTypeEndpoint(map[string]any{"type": kind}, "42"))
 	}
+}
+
+func TestRecordingTypeEndpointOnHoldIsNotAColumn(t *testing.T) {
+	// On hold is a section inside a column, not a column recording itself.
+	assert.Empty(t, recordingTypeEndpoint(map[string]any{"type": "Kanban::OnHold"}, "42"))
 }
 
 func TestShowRefusesInvalidItemArguments(t *testing.T) {
@@ -84,6 +90,29 @@ func TestShowRejectsWrongURLProject(t *testing.T) {
 	}}
 	_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/todos/789")
 	require.Error(t, err)
+}
+
+func TestShowRefetchCannotEraseWrongURLProject(t *testing.T) {
+	for _, route := range []string{"chats/123/lines/789", "inbox_forwards/123/replies/789"} {
+		t.Run(route, func(t *testing.T) {
+			wireType := "Chat::Lines::Text"
+			if strings.HasPrefix(route, "inbox_forwards/") {
+				wireType = "Inbox::Reply"
+			}
+			transport := &showTrackingTransport{responder: func(path string) (int, string) {
+				if strings.HasSuffix(path, "/recordings/789.json") {
+					return 200, `{"id":789,"type":"` + wireType + `","parent":{"id":123},"bucket":{"id":999}}`
+				}
+				if strings.HasSuffix(path, "/"+route+".json") {
+					return 200, `{"id":789,"type":"` + wireType + `","parent":{"id":123},"content":"Full content"}`
+				}
+				return 404, `{}`
+			}}
+			_, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/"+route, "--no-comments")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "does not belong to the URL project")
+		})
+	}
 }
 
 func TestShowChatContainerIsNotItsOwnParent(t *testing.T) {

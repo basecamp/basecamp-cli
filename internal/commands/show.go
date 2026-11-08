@@ -264,6 +264,7 @@ You can also pass a Basecamp URL directly:
 			// sparse data). The endpoint is derived from the response's type
 			// field and validated parent/date context — never fetched from the
 			// response URL itself, which could point off-origin.
+			originalBucket := data["bucket"]
 			if needsRefetch {
 				if refetchEndpoint := recordingTypeEndpoint(data, id); refetchEndpoint != "" {
 					refetchResp, refetchErr := app.Account().Get(cmd.Context(), refetchEndpoint)
@@ -286,9 +287,13 @@ You can also pass a Basecamp URL directly:
 			}
 
 			if parsed != nil && parsed.ProjectID != "" {
-				if bucket, ok := data["bucket"].(map[string]any); ok {
-					if bucketID, ok := bucket["id"].(json.Number); ok && !accountIDsEqual(bucketID.String(), parsed.ProjectID) {
-						return output.ErrUsage("Item does not belong to the URL project")
+				// Refetches may omit the bucket carried by the sparse recording.
+				// Check both representations so enrichment cannot erase a mismatch.
+				for _, value := range []any{originalBucket, data["bucket"]} {
+					if bucket, ok := value.(map[string]any); ok {
+						if bucketID, ok := bucket["id"].(json.Number); ok && !accountIDsEqual(bucketID.String(), parsed.ProjectID) {
+							return output.ErrUsage("Item does not belong to the URL project")
+						}
 					}
 				}
 			}
