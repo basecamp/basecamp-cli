@@ -272,7 +272,13 @@ You can also pass a Basecamp URL directly:
 						var richer map[string]any
 						refetchDec := json.NewDecoder(bytes.NewReader(refetchResp.Data))
 						refetchDec.UseNumber()
-						if refetchDec.Decode(&richer) == nil {
+						if refetchDec.Decode(&richer) == nil && richer != nil {
+							// Dedicated responses may omit the sparse recording's parent context.
+							if _, present := richer["parent"]; !present {
+								if parent, available := data["parent"]; available {
+									richer["parent"] = parent
+								}
+							}
 							data = richer
 						}
 					}

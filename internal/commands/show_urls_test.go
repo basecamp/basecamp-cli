@@ -115,6 +115,50 @@ func TestShowRefetchCannotEraseWrongURLProject(t *testing.T) {
 	}
 }
 
+func TestShowNestedURLRetainsSparseParent(t *testing.T) {
+	for _, route := range []string{"chats/123/lines/789", "inbox_forwards/123/replies/789"} {
+		for _, parentField := range []string{"", `,"parent":{"id":999}`, `,"parent":null`} {
+			t.Run(route+parentField, func(t *testing.T) {
+				wireType := "Chat::Lines::Text"
+				if strings.HasPrefix(route, "inbox_forwards/") {
+					wireType = "Inbox::Reply"
+				}
+				transport := &showTrackingTransport{responder: func(path string) (int, string) {
+					if strings.HasSuffix(path, "/recordings/789.json") {
+						return 200, `{"id":789,"type":"` + wireType + `","parent":{"id":123},"bucket":{"id":456}}`
+					}
+					if strings.HasSuffix(path, "/"+route+".json") {
+						return 200, `{"id":789,"type":"` + wireType + `","content":"Full content"` + parentField + `}`
+					}
+					return 404, `{}`
+				}}
+				_, stdout, _, err := runShowCmdCapture(t, transport, output.FormatJSON, "https://3.basecamp.com/99999/buckets/456/"+route, "--no-comments")
+				if parentField != "" {
+					require.Error(t, err)
+					return
+				}
+				require.NoError(t, err)
+				data := decodeShowJSONDataMap(t, decodeShowJSONEnvelope(t, stdout).Data)
+				assert.JSONEq(t, `"Full content"`, string(data["content"]))
+				assert.JSONEq(t, `{"id":123}`, string(data["parent"]))
+			})
+		}
+	}
+}
+
+func TestShowNullRefetchKeepsSparseRecording(t *testing.T) {
+	transport := &showTrackingTransport{responder: func(path string) (int, string) {
+		if strings.HasSuffix(path, "/recordings/789.json") {
+			return 200, `{"id":789,"type":"Todo","title":"Sparse title"}`
+		}
+		return 200, `null`
+	}}
+	_, stdout, _, err := runShowCmdCapture(t, transport, output.FormatJSON, "789", "--no-comments")
+	require.NoError(t, err)
+	data := decodeShowJSONDataMap(t, decodeShowJSONEnvelope(t, stdout).Data)
+	assert.JSONEq(t, `"Sparse title"`, string(data["title"]))
+}
+
 func TestShowChatContainerIsNotItsOwnParent(t *testing.T) {
 	transport := &showTrackingTransport{responder: func(path string) (int, string) {
 		return 200, `{"id":789,"type":"Chat::Transcript","bucket":{"id":456}}`
