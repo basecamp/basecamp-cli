@@ -93,7 +93,9 @@ func instructionsBrief(content string) []string {
 			itemText := strings.TrimSpace(line[lineIndent+len(m[0]):])
 			if open && lineIndent >= indent {
 				collect = false // a nested item: not part of the lead
-				fence = instructionsFenceOpen.FindString(itemText)
+				if fenceable {
+					fence = instructionsFenceOpen.FindString(itemText)
+				}
 				continue
 			}
 			if lineIndent <= 3 {

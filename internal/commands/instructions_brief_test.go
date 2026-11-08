@@ -134,6 +134,10 @@ func TestInstructionsBrief(t *testing.T) {
 			"- **Top.** Body.\n  - ```\n    - not an item\n    ```\n- Next.",
 			[]string{"- Top.", "- Next."},
 		},
+		"a fenced nested item indented as code opens no fence": {
+			"- **Top.** Body.\n\n      - ```\n- Next.",
+			[]string{"- Top.", "- Next."},
+		},
 		"an indented heading or break inside an item keeps it open": {
 			"- **Top.** Body.\n\n  ## Inside\n\n  - Nested.\n\n  ---\n\n  - Nested too.\n- Next.",
 			[]string{"- Top.", "- Next."},
