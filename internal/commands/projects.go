@@ -85,6 +85,7 @@ func newProjectsRecentCmd() *cobra.Command {
 			if app == nil {
 				return fmt.Errorf("app not initialized")
 			}
+			scope := newFollowUpScope(app)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
@@ -97,7 +98,7 @@ func newProjectsRecentCmd() *cobra.Command {
 				output.WithSummary(fmt.Sprintf("%d recent projects", len(projects))),
 				output.WithBreadcrumbs(output.Breadcrumb{
 					Action:      "show",
-					Cmd:         "basecamp projects show <id>",
+					Cmd:         "basecamp projects show <id>" + scope.args(app.Config.AccountID),
 					Description: "Show project details",
 				}),
 			)

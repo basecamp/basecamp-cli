@@ -90,3 +90,26 @@ func TestProjectsRecentShowBreadcrumb(t *testing.T) {
 	assert.Equal(t, "show", envelope.Breadcrumbs[0].Action)
 	assert.Equal(t, "basecamp projects show <id>", envelope.Breadcrumbs[0].Cmd)
 }
+
+func TestProjectsRecentShowBreadcrumbKeepsScope(t *testing.T) {
+	var requested string
+	app, out := setupProjectsMockApp(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requested = req.URL.RequestURI()
+		return jsonResponse(http.StatusOK, `[{"id":2,"name":"Zebra"}]`, http.Header{"Content-Type": {"application/json"}}), nil
+	}))
+	app.Config.ActiveProfile = "staging"
+	app.Config.AccountID = "77777"
+	app.Config.Sources = map[string]string{"account_id": "flag"}
+	app.Flags.Hints = true
+
+	require.NoError(t, executeCommand(NewProjectsCmd(), app, "recent"))
+	assert.Equal(t, "/77777/my/recent_projects.json", requested)
+	var envelope struct {
+		Breadcrumbs []struct {
+			Cmd string `json:"cmd"`
+		} `json:"breadcrumbs"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &envelope))
+	require.Len(t, envelope.Breadcrumbs, 1)
+	assert.Equal(t, "basecamp projects show <id> --profile staging --account 77777", envelope.Breadcrumbs[0].Cmd)
+}
