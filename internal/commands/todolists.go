@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -421,6 +422,16 @@ You can pass either a todolist ID or a Basecamp URL:
 				return err
 			}
 
+			if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+				live, err := app.Account().Todolists().Get(cmd.Context(), todolistID)
+				if err != nil {
+					return time.Time{}, err
+				}
+				return live.UpdatedAt, nil
+			}); err != nil {
+				return err
+			}
+
 			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
 			if projectID == "" && urlProjectID != "" {
@@ -474,6 +485,7 @@ You can pass either a todolist ID or a Basecamp URL:
 
 	allowDash(cmd, "flag:description")
 
+	addBodyGuardFlags(cmd)
 	return cmd
 }
 

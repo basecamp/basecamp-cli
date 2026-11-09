@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -1084,6 +1085,16 @@ edit to rich text.`,
 				return output.ErrUsage("Invalid line ID")
 			}
 
+			if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+				live, err := app.Account().Campfires().GetLine(cmd.Context(), chatIDInt, lineIDInt)
+				if err != nil {
+					return time.Time{}, err
+				}
+				return live.UpdatedAt, nil
+			}); err != nil {
+				return err
+			}
+
 			// Resolve the content into the exact rich-text body we PUT. Chat edits
 			// always render as rich text server-side, so:
 			//   - unset (default): Markdown → HTML unconditionally, then resolve
@@ -1181,6 +1192,7 @@ edit to rich text.`,
 
 	allowDash(cmd, "arg:1", "flag:content")
 
+	addBodyGuardFlags(cmd)
 	return cmd
 }
 

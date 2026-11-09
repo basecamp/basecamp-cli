@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -295,6 +296,15 @@ func newGaugesUpdateCmd() *cobra.Command {
 			req := &basecamp.UpdateGaugeNeedleRequest{
 				Description: basecamp.Ptr(description),
 			}
+			if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+				live, err := app.Account().Gauges().GetNeedle(cmd.Context(), needleID)
+				if err != nil {
+					return time.Time{}, err
+				}
+				return live.UpdatedAt, nil
+			}); err != nil {
+				return err
+			}
 
 			needle, err := app.Account().Gauges().UpdateNeedle(cmd.Context(), needleID, req)
 			if err != nil {
@@ -318,6 +328,7 @@ func newGaugesUpdateCmd() *cobra.Command {
 
 	allowDash(cmd, "flag:description")
 
+	addBodyGuardFlags(cmd)
 	return cmd
 }
 

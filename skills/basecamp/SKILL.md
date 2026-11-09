@@ -409,13 +409,9 @@ operation and the API path and payload are known.
 
 ## Mutations
 
-Before changing Basecamp:
-
-1. Resolve the account, project, container, and item unambiguously.
-2. Inspect leaf help for required positional arguments and visibility or
-   notification behavior.
-3. Make the smallest requested change.
-4. Return the resulting ID/URL and summarize what changed.
-
-For destructive or broad operations, preview when the command offers a dry-run
-and do not expand the user's requested scope.
+Fetch before body replacement; pass its `updated_at` to `--if-unmodified-since`.
+No baseline (even first use) means no protection or remembered version; GET→PUT
+races. Boost is excluded/unchanged. Raw API/MCP/TUI/SDK and other paths stay
+unguarded; use supported typed guards, not `api put`. Check leaf help and
+`docs/body-conflict-guard.md`. Change only requested items; return ID/URL.
+Preview broad/destructive work.

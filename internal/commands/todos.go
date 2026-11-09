@@ -1636,6 +1636,16 @@ Set or clear the people notified when the todo is completed:
 				return err
 			}
 
+			if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+				live, err := app.Account().Todos().Get(cmd.Context(), todoID)
+				if err != nil {
+					return time.Time{}, err
+				}
+				return live.UpdatedAt, nil
+			}); err != nil {
+				return err
+			}
+
 			// Pre-Edit validation and resolution — no todo HTTP happens here.
 			// Image uploads are deferred into the Edit closure so a missing
 			// todo can't orphan uploaded attachments.
@@ -1756,6 +1766,7 @@ Set or clear the people notified when the todo is completed:
 	allowDash(cmd, "flag:description")
 
 	addRichTextFormatFlag(cmd)
+	addBodyGuardFlags(cmd)
 	return cmd
 }
 

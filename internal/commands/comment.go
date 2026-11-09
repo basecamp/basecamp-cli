@@ -1038,6 +1038,16 @@ as backslash-n.`,
 				return err
 			}
 
+			if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+				live, err := app.Account().Comments().Get(cmd.Context(), commentID)
+				if err != nil {
+					return time.Time{}, err
+				}
+				return live.UpdatedAt, nil
+			}); err != nil {
+				return err
+			}
+
 			// Convert Markdown content to HTML for Basecamp's rich text fields
 			html := richTextToHTML(cmd, content)
 
@@ -1084,6 +1094,7 @@ as backslash-n.`,
 	allowDash(cmd, "arg:1+")
 
 	addRichTextFormatFlag(cmd)
+	addBodyGuardFlags(cmd)
 	return cmd
 }
 

@@ -1481,6 +1481,16 @@ You can pass either an answer ID or a Basecamp URL:
 				return output.ErrUsage("Invalid answer ID")
 			}
 
+			if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+				live, err := app.Account().Checkins().GetAnswer(cmd.Context(), answerID)
+				if err != nil {
+					return time.Time{}, err
+				}
+				return live.UpdatedAt, nil
+			}); err != nil {
+				return err
+			}
+
 			answerHTML := richTextToHTML(cmd, content)
 			answerHTML, resolveErr := resolveLocalImages(cmd, app, answerHTML)
 			if resolveErr != nil {
@@ -1528,6 +1538,7 @@ You can pass either an answer ID or a Basecamp URL:
 	allowDash(cmd, "arg:1+")
 
 	addRichTextFormatFlag(cmd)
+	addBodyGuardFlags(cmd)
 	return cmd
 }
 

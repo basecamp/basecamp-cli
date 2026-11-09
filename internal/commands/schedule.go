@@ -692,6 +692,16 @@ You can pass either an entry ID or a Basecamp URL:
 				return err
 			}
 
+			if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+				live, err := app.Account().Schedules().GetEntry(cmd.Context(), entryIDInt)
+				if err != nil {
+					return time.Time{}, err
+				}
+				return live.UpdatedAt, nil
+			}); err != nil {
+				return err
+			}
+
 			// Resolve project - use URL > flag > config, with interactive fallback
 			projectID := *project
 			if projectID == "" && urlProjectID != "" {
@@ -839,6 +849,7 @@ You can pass either an entry ID or a Basecamp URL:
 	allowDash(cmd, "flag:description", "flag:desc")
 
 	addRichTextFormatFlag(cmd)
+	addBodyGuardFlags(cmd)
 	return cmd
 }
 
