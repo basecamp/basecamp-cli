@@ -22,6 +22,9 @@ type scheduleDraftTransport struct {
 }
 
 func (tr *scheduleDraftTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/people") {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`[]`))}, nil
+	}
 	resp, err := tr.mockScheduleCreateTransport.RoundTrip(req)
 	if err != nil || req.Method != http.MethodPost {
 		return resp, err
@@ -104,4 +107,27 @@ func TestScheduleCreateDraftDoesNotWarnInQuietMode(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &entry))
 	assert.Equal(t, "drafted", entry.Status)
+}
+
+func TestScheduleCreateDraftWithUnresolvedMention(t *testing.T) {
+	for _, format := range []output.Format{output.FormatJSON, output.FormatQuiet} {
+		t.Run(fmt.Sprint(format), func(t *testing.T) {
+			tr := &scheduleDraftTransport{}
+			app, _ := newTestAppWithTransport(t, tr)
+			var stdout, stderr bytes.Buffer
+			app.Output = output.New(output.Options{Format: format, Writer: &stdout, ErrWriter: &stderr})
+			require.NoError(t, executeRecordingCommand(NewScheduleCmd(), app, "create", "Event", "--starts-at", "2026-03-04T09:00:00Z", "--ends-at", "2026-03-04T09:30:00Z", "--description", "Ask @Nobody", "--draft"))
+			if format == output.FormatQuiet {
+				assert.Contains(t, stderr.String(), "@Nobody")
+				assert.NotContains(t, stderr.String(), "edit and publish")
+			} else {
+				var result struct {
+					Notice string `json:"notice"`
+				}
+				require.NoError(t, json.Unmarshal(stdout.Bytes(), &result))
+				assert.Contains(t, result.Notice, "@Nobody")
+				assert.Contains(t, result.Notice, "edit and publish")
+			}
+		})
+	}
 }
