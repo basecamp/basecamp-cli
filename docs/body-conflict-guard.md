@@ -34,6 +34,8 @@ These commands accept the opt-in, **whole-record** version check, including thei
 - `gauges update`
 - `timesheet entry update`
 
+The `files update` and `files replace` guards also apply through the file-group aliases: `file`, `docs`, `documents`, `vaults`, `vault`, and `folders`.
+
 The guard is **not global middleware**. Raw `api put`, MCP/TUI and SDK callers, creation commands, other commands that carry a preserved body (for example to-do assignment operations), and other update verbs do not gain protection. **Boost editing is explicitly excluded from this first opt-in safeguard.** `boost update` continues to replace content without this protection and does not accept these guard flags. SDK go/v0.35.0 exposes only `created_at`, not `updated_at`, on Boost; the API representation likewise omits `updated_at`. An ETag is a different baseline contract and is not substituted here. Do not substitute creation time or a parent recording's timestamp. Boost editing is unchanged; adding its version support is separate work. Never treat unguarded paths as protected merely because a guarded typed command exists. Use guarded typed commands for body edits rather than bypassing them with raw API writes.
 
 ## Limits

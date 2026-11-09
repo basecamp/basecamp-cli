@@ -124,13 +124,24 @@ setup_file() {
     --if-unmodified-since "$baseline" -p "$QA_PROJECT" --json
   assert_success
   assert_json_value '.ok' 'true'
-  unchanged=$(basecamp comments show "$comment_id" -p "$QA_PROJECT" --json | jq -c '.data | {content,updated_at}')
+  run_smoke basecamp comments show "$comment_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.content'
+  assert_json_not_null '.data.updated_at'
+  unchanged=$(echo "$output" | jq -c '.data | {content,updated_at}')
 
   run_smoke basecamp comments update "$comment_id" "Must not replace human text" \
     --if-unmodified-since '2000-01-01T00:00:00Z' -p "$QA_PROJECT" --json
   assert_failure
-  [[ "$output" == *conflict* ]] || fail "Expected version conflict"
-  [[ "$(basecamp comments show "$comment_id" -p "$QA_PROJECT" --json | jq -c '.data | {content,updated_at}')" == "$unchanged" ]] || fail "Refusal changed the comment"
+  assert_json_value '.ok' 'false'
+  assert_json_value '.error | contains("update conflict")' 'true'
+  run_smoke basecamp comments show "$comment_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.content'
+  assert_json_not_null '.data.updated_at'
+  [[ "$(echo "$output" | jq -c '.data | {content,updated_at}')" == "$unchanged" ]] || fail "Refusal changed the comment"
 
   run_smoke basecamp comments update "$comment_id" "Explicit override writes" \
     --if-unmodified-since '2000-01-01T00:00:00Z' --force -p "$QA_PROJECT" --json
@@ -138,7 +149,8 @@ setup_file() {
   assert_json_value '.ok' 'true'
   run_smoke basecamp comments show "$comment_id" -p "$QA_PROJECT" --json
   assert_success
-  [[ "$output" == *"Explicit override writes"* ]] || fail "Override not stored"
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.content | contains("Explicit override writes")' 'true'
 }
 
 @test "comments trash trashes a comment" {

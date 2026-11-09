@@ -409,9 +409,9 @@ operation and the API path and payload are known.
 
 ## Mutations
 
-Fetch before body replacement; pass its `updated_at` to `--if-unmodified-since`.
-No baseline (even first use) means no protection or remembered version; GET→PUT
-races. Boost is excluded/unchanged. Raw API/MCP/TUI/SDK and other paths stay
-unguarded; use supported typed guards, not `api put`. Check leaf help and
-`docs/body-conflict-guard.md`. Change only requested items; return ID/URL.
+Resolve account/project/container/item; inspect help, visibility and notifications.
+For guarded updates, fetch the record's `updated_at`; pass it as
+`--if-unmodified-since`. No baseline: unprotected, even first use; no memory.
+GET→PUT races. Boost stays unguarded, as do raw API/MCP/TUI/SDK/other paths.
+Use typed guards, not `api put`. Change only requested items; return ID/URL.
 Preview broad/destructive work.

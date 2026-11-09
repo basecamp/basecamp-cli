@@ -17,6 +17,7 @@ type bodyGuardTransport struct {
 	gets         int
 	getStatus    int
 	detectedType string
+	emptyRecord  bool
 	paths        []string
 }
 
@@ -38,6 +39,9 @@ func (tr *bodyGuardTransport) RoundTrip(r *http.Request) (*http.Response, error)
 		}
 	}
 	body := fmt.Sprintf(`{"id":789,"name":"Synthetic","title":"Synthetic","subject":"Synthetic","content":"preserved human body","description":"preserved human body","updated_at":%s,"completion_subscribers":[],"assignees":[]}`, tr.live)
+	if r.Method == http.MethodGet && tr.emptyRecord {
+		body = "null"
+	}
 	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 }
 
@@ -186,6 +190,22 @@ func TestBodyGuardFilesAutodetection(t *testing.T) {
 					require.ErrorContains(t, err, "conflict")
 					require.Zero(t, tr.writes)
 				}
+			})
+		}
+	}
+}
+
+func TestBodyGuardEmptyLiveRecordRefuses(t *testing.T) {
+	for _, tc := range bodyGuardCommands() {
+		for _, status := range []int{http.StatusOK, http.StatusNoContent} {
+			t.Run(fmt.Sprintf("%s/%d", tc.name, status), func(t *testing.T) {
+				tr := &bodyGuardTransport{live: `null`, emptyRecord: true, getStatus: status}
+				app, _ := newTestAppWithTransport(t, tr)
+				args := append(append([]string{}, tc.args...), "--if-unmodified-since", "2026-11-08T18:00:00Z", "--force")
+				require.NotPanics(t, func() {
+					require.Error(t, executeCommand(tc.newCmd(), app, args...))
+				})
+				require.Zero(t, tr.writes)
 			})
 		}
 	}
