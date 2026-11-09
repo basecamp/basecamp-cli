@@ -632,11 +632,14 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, scope followUpScope,
 		output.WithSummary(resultSummary),
 		output.WithBreadcrumbs(crumbs...),
 	}
+	notice := mentionNotice
 	if draft {
-		mentionNotice = strings.TrimSpace(fmt.Sprintf("Unpublished. Open %s in Basecamp to edit and publish this draft. %s", entry.AppURL, mentionNotice))
+		notice = strings.TrimSpace(fmt.Sprintf("Unpublished. Open %s in Basecamp to edit and publish this draft. %s", entry.AppURL, mentionNotice))
 	}
 	if mentionNotice != "" {
-		respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
+		respOpts = append(respOpts, output.WithDiagnostic(notice))
+	} else if notice != "" {
+		respOpts = append(respOpts, output.WithNotice(notice))
 	}
 	return app.OK(entry, respOpts...)
 }

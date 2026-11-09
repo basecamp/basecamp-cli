@@ -41,7 +41,9 @@ setup_file() {
     assert_json_value '.data.status' "$expected"
     assert_json_not_null '.data.app_url'
     entry_id=$(echo "$output" | jq -r '.data.id')
-    [[ "$mode" != draft ]] || assert_output_contains 'edit and publish'
+    if [[ "$mode" == draft ]]; then
+      [[ "$(echo "$output" | jq -r '.notice // ""')" == *'edit and publish'* ]]
+    fi
 
     run_smoke basecamp schedule show "$entry_id" --no-comments --json
     assert_success

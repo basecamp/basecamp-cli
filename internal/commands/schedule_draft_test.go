@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
 type scheduleDraftTransport struct {
@@ -67,6 +69,7 @@ func TestScheduleCreatePublicationState(t *testing.T) {
 					AppURL string `json:"app_url"`
 				} `json:"data"`
 				Summary     string `json:"summary"`
+				Notice      string `json:"notice"`
 				Breadcrumbs []struct {
 					Cmd string `json:"cmd"`
 				} `json:"breadcrumbs"`
@@ -80,11 +83,25 @@ func TestScheduleCreatePublicationState(t *testing.T) {
 			assert.Contains(t, out.Breadcrumbs[0].Cmd, "--profile alternate --account 99999")
 			if tc.status == "drafted" {
 				assert.Contains(t, out.Summary, "draft")
-				assert.Contains(t, buf.String(), "edit and publish")
+				assert.Contains(t, out.Notice, "edit and publish")
 				assert.Len(t, out.Breadcrumbs, 1, "ordinary listings omit drafts")
 			} else {
 				assert.NotContains(t, out.Summary, "draft")
 			}
 		})
 	}
+}
+
+func TestScheduleCreateDraftDoesNotWarnInQuietMode(t *testing.T) {
+	tr := &scheduleDraftTransport{}
+	app, _ := newTestAppWithTransport(t, tr)
+	var stdout, stderr bytes.Buffer
+	app.Output = output.New(output.Options{Format: output.FormatQuiet, Writer: &stdout, ErrWriter: &stderr})
+	require.NoError(t, executeRecordingCommand(NewScheduleCmd(), app, "create", "Event", "--starts-at", "2026-03-04T09:00:00Z", "--ends-at", "2026-03-04T09:30:00Z", "--draft"))
+	assert.Empty(t, stderr.String())
+	var entry struct {
+		Status string `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &entry))
+	assert.Equal(t, "drafted", entry.Status)
 }
