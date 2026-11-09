@@ -22,6 +22,34 @@ setup_file() {
   echo "$output" | jq -r '.data.id' > "$BATS_FILE_TMPDIR/entry_id"
 }
 
+@test "schedule create saves a draft only when requested" {
+  local mode expected entry_id
+  local flags=()
+  for mode in draft default false; do
+    flags=()
+    expected=active
+    if [[ "$mode" == draft ]]; then
+      flags=(--draft)
+      expected=drafted
+    elif [[ "$mode" == false ]]; then
+      flags=(--draft=false)
+    fi
+    run_smoke basecamp schedule create "CLI smoke publication $mode $(date +%s)" \
+      --starts-at '2026-11-19T14:00:00Z' --ends-at '2026-11-19T14:30:00Z' \
+      --schedule "$QA_SCHEDULE" -p "$QA_PROJECT" --no-subscribe --json "${flags[@]}"
+    assert_success
+    assert_json_value '.data.status' "$expected"
+    assert_json_not_null '.data.app_url'
+    entry_id=$(echo "$output" | jq -r '.data.id')
+    [[ "$mode" != draft ]] || assert_output_contains 'edit and publish'
+
+    run_smoke basecamp schedule show "$entry_id" --no-comments --json
+    assert_success
+    assert_json_value '.data.id' "$entry_id"
+    assert_json_value '.data.status' "$expected"
+  done
+}
+
 @test "schedule update updates a schedule entry" {
   local id_file="$BATS_FILE_TMPDIR/entry_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No schedule entry created in prior test"

@@ -422,11 +422,12 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	var noSubscribe bool
 	var attachFiles []string
 	var visibleToClients bool
+	var draft bool
 
 	cmd := &cobra.Command{
 		Use:   "create <summary>",
 		Short: "Create a schedule entry",
-		Long:  "Create a new entry in the project schedule.",
+		Long:  "Create a published entry in the project schedule. Use --draft to save an unpublished draft, then open its link in Basecamp to edit and publish it.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			entrySummary := summary
@@ -473,11 +474,12 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 			}
 
 			app := appctx.FromContext(cmd.Context())
+			scope := newFollowUpScope(app)
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			return runScheduleCreate(cmd, app, *project, *scheduleID, entrySummary, startsAt, endsAt, description, allDay, notify, visibleToClients, participants, subscribe, noSubscribe, attachFiles)
+			return runScheduleCreate(cmd, app, scope, *project, *scheduleID, entrySummary, startsAt, endsAt, description, allDay, notify, visibleToClients, draft, participants, subscribe, noSubscribe, attachFiles)
 		},
 	}
 
@@ -499,12 +501,13 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the schedule entry visible to clients on the project (omit for the server default; client-authenticated callers always post client-visible)")
+	cmd.Flags().BoolVar(&draft, "draft", false, "Save an unpublished draft (open its link in Basecamp to edit and publish)")
 
 	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
-func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID, summary, startsAt, endsAt, description string, allDay, notify, visibleToClients bool, participants, subscribe string, noSubscribe bool, attachFiles []string) error {
+func runScheduleCreate(cmd *cobra.Command, app *appctx.App, scope followUpScope, project, scheduleID, summary, startsAt, endsAt, description string, allDay, notify, visibleToClients, draft bool, participants, subscribe string, noSubscribe bool, attachFiles []string) error {
 	// Resolve subscription flags early (fail fast on bad input)
 	subs, err := applySubscribeFlags(cmd.Context(), app.Names, subscribe, cmd.Flags().Changed("subscribe"), noSubscribe)
 	if err != nil {
@@ -567,7 +570,12 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 	}
 
 	// Build request
+	status := "active"
+	if draft {
+		status = "drafted"
+	}
 	req := &basecamp.CreateScheduleEntryRequest{
+		Status:        &status,
 		Summary:       summary,
 		StartsAt:      startsAt,
 		EndsAt:        endsAt,
@@ -604,21 +612,28 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 	}
 
 	resultSummary := fmt.Sprintf("Created schedule entry #%d: %s", entry.ID, summary)
+	scopeArgs := scope.args(app.Config.AccountID)
+	crumbs := []output.Breadcrumb{{
+		Action:      "show",
+		Cmd:         fmt.Sprintf("basecamp schedule show %d --project %s%s", entry.ID, resolvedProjectID, scopeArgs),
+		Description: "View entry",
+	}}
+	if draft {
+		resultSummary = fmt.Sprintf("Created draft schedule entry #%d: %s", entry.ID, summary)
+	} else {
+		crumbs = append(crumbs, output.Breadcrumb{
+			Action:      "entries",
+			Cmd:         fmt.Sprintf("basecamp schedule entries --project %s --schedule %d%s", resolvedProjectID, scheduleIDInt, scopeArgs),
+			Description: "View all entries",
+		})
+	}
 
 	respOpts := []output.ResponseOption{
 		output.WithSummary(resultSummary),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{
-				Action:      "show",
-				Cmd:         fmt.Sprintf("basecamp schedule show %d --project %s", entry.ID, resolvedProjectID),
-				Description: "View entry",
-			},
-			output.Breadcrumb{
-				Action:      "entries",
-				Cmd:         fmt.Sprintf("basecamp schedule entries --project %s", resolvedProjectID),
-				Description: "View all entries",
-			},
-		),
+		output.WithBreadcrumbs(crumbs...),
+	}
+	if draft {
+		mentionNotice = strings.TrimSpace(fmt.Sprintf("Unpublished. Open %s in Basecamp to edit and publish this draft. %s", entry.AppURL, mentionNotice))
 	}
 	if mentionNotice != "" {
 		respOpts = append(respOpts, output.WithDiagnostic(mentionNotice))
