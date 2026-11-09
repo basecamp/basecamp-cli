@@ -409,6 +409,11 @@ func Execute() {
 	// Use ExecuteC to get the executed command (for correct context access)
 	executedCmd, err := cmd.ExecuteC()
 
+	// Help of a feedback command that ships dark fails as running it does.
+	if err == nil {
+		err = commands.UnavailableFeedbackHelp(executedCmd)
+	}
+
 	// Bare group command with a positional that matches no subcommand
 	// (e.g. "cards 12345", or "cards 12345 --in X"): Cobra stops at the group
 	// and renders help with a zero exit — so an agent that meant "cards show

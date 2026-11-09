@@ -13,8 +13,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/feedback"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/resilience"
 )
 
 // feedbackStore is a seam so tests can keep detection state in a temp dir.
@@ -126,7 +128,9 @@ The report is sent with your own login and answered with a receipt ID.`,
 				body["error_code"] = c
 			}
 
-			resp, err := account.Post(cmd.Context(), feedback.Path, body)
+			// The 429 here is the person's daily report quota, not
+			// throttling: it must not block every later command.
+			resp, err := account.Post(resilience.WithEndpointQuota(cmd.Context()), feedback.Path, body)
 			if err != nil {
 				return feedbackError(store, key, err)
 			}
@@ -151,11 +155,24 @@ The report is sent with your own login and answered with a receipt ID.`,
 	})
 	allowDash(cmd, "arg:0")
 
-	// While the command is hidden its help says what running it says, so
-	// --help does not describe a feature that is off.
+	// While the command is hidden, a malformed flag gets the same answer as
+	// a well-formed invocation, so no usage error describes a feature that
+	// is off.
+	cmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
+		if c.Hidden {
+			return errFeedbackNotAvailable()
+		}
+		return err
+	})
+
+	// While the command is hidden its help describes nothing. `feedback
+	// --help` prints nothing here and fails as running it does
+	// (UnavailableFeedbackHelp); `help feedback` prints the one line.
 	cmd.SetHelpFunc(func(c *cobra.Command, args []string) {
 		if c.Hidden {
-			fmt.Fprintln(c.OutOrStdout(), feedback.NotAvailable)
+			if help, _ := c.Flags().GetBool("help"); !help {
+				fmt.Fprintln(c.OutOrStdout(), feedback.NotAvailable)
+			}
 			return
 		}
 		if parent := c.Parent(); parent != nil {
@@ -166,6 +183,21 @@ The report is sent with your own login and answered with a receipt ID.`,
 	})
 
 	return cmd
+}
+
+// UnavailableFeedbackHelp returns the not-available error when cmd is the
+// hidden feedback command and --help was asked of it, and nil otherwise.
+// Cobra answers --help itself, with success, so the caller turns that
+// success into this error: help of a feature that is off fails as running
+// it does.
+func UnavailableFeedbackHelp(cmd *cobra.Command) error {
+	if cmd == nil || cmd.Name() != "feedback" || !cmd.Hidden {
+		return nil
+	}
+	if help, _ := cmd.Flags().GetBool("help"); help {
+		return errFeedbackNotAvailable()
+	}
+	return nil
 }
 
 // feedbackError maps a failed submission. A 404 means the feature is off for
@@ -195,9 +227,11 @@ func feedbackError(store *feedback.Store, key string, err error) error {
 
 // RefreshFeedbackDetection renews the cached detection answer for the app's
 // account once it is due (feedback.TTL). It runs after a command that has
-// already talked to Basecamp, so the credential is warm and no keyring read
-// or token refresh happens for it alone, and it is bounded by
-// feedback.RefreshTimeout. A command that made no request adds none.
+// already talked to Basecamp, and uses only the credential that command
+// already read (auth.WithHeldCredentialOnly): no keyring read and no token
+// renewal happen for it alone. It is bounded by feedback.RefreshTimeout. A
+// command that made no request adds none, and a cache directory that cannot
+// be written, where no answer could be kept, gets no probe at all.
 func RefreshFeedbackDetection(cmd *cobra.Command, app *appctx.App) {
 	if app == nil || app.Config == nil || app.SDK == nil || app.Collector == nil {
 		return
@@ -213,14 +247,14 @@ func RefreshFeedbackDetection(cmd *cobra.Command, app *appctx.App) {
 	}
 	store := feedbackStore()
 	key := feedback.Key(app.Config.BaseURL, app.Config.AccountID)
-	if !store.NeedsRefresh(key) {
+	if !store.NeedsRefresh(key) || !store.BeginRefresh(key) {
 		return
 	}
 	parent := cmd.Context()
 	if parent == nil {
 		parent = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(parent, feedback.RefreshTimeout)
+	ctx, cancel := context.WithTimeout(auth.WithHeldCredentialOnly(parent), feedback.RefreshTimeout)
 	defer cancel()
 	_, _ = store.Detect(ctx, app.Account(), key)
 }

@@ -140,23 +140,28 @@ func (s *Store) load() state {
 
 // save writes the state atomically. A concurrent process may lose its own
 // update to this one; that costs one more detection, nothing else.
-func (s *Store) save(st state) {
+func (s *Store) save(st state) error {
 	data, err := json.Marshal(st)
 	if err != nil {
-		return
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
-		return
+		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(s.path), stateFile+".*")
 	if err != nil {
-		return
+		return err
 	}
 	_, werr := tmp.Write(data)
 	cerr := tmp.Close()
-	if werr != nil || cerr != nil || os.Rename(tmp.Name(), s.path) != nil {
+	err = errors.Join(werr, cerr)
+	if err == nil {
+		err = os.Rename(tmp.Name(), s.path)
+	}
+	if err != nil {
 		_ = os.Remove(tmp.Name())
 	}
+	return err
 }
 
 // Advertised reports the cached answer for one account. A stale answer still
@@ -188,16 +193,25 @@ func (s *Store) NeedsRefresh(key string) bool {
 func (s *Store) Record(key string, advertised bool) {
 	st := s.load()
 	st.Accounts[key] = entry{Advertised: advertised, CheckedAt: s.now()}
-	s.save(st)
+	_ = s.save(st)
 }
 
 // recordFailure notes a detection that got no answer, keeping the last one.
-func (s *Store) recordFailure(key string) {
+func (s *Store) recordFailure(key string) error {
 	st := s.load()
 	e := st.Accounts[key]
 	e.AttemptedAt = s.now()
 	st.Accounts[key] = e
-	s.save(st)
+	return s.save(st)
+}
+
+// BeginRefresh notes a detection attempt before it is made, so the failure
+// backoff holds even if the attempt never finishes, and reports whether the
+// note was stored. Where the state cannot be written no answer could be kept
+// either, and every later command would find a refresh due and probe again:
+// a false return means skip the probe.
+func (s *Store) BeginRefresh(key string) bool {
+	return s.recordFailure(key) == nil
 }
 
 // Getter is the slice of the SDK's account client detection needs.
@@ -227,7 +241,7 @@ func (s *Store) Detect(ctx context.Context, api Getter, key string) (bool, error
 		s.Record(key, false)
 		return false, nil
 	default:
-		s.recordFailure(key)
+		_ = s.recordFailure(key)
 		return false, err
 	}
 }

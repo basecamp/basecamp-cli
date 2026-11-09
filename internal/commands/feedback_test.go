@@ -2,11 +2,15 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -16,6 +20,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/feedback"
 	"github.com/basecamp/basecamp-cli/internal/observability"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/resilience"
 )
 
 const feedbackPath = "/99999/feedback.json"
@@ -239,6 +244,55 @@ func TestFeedbackSubmitRateLimited(t *testing.T) {
 	assert.Contains(t, e.Hint, "Try again in 3600 seconds")
 	assert.True(t, e.Retryable)
 	assert.Len(t, requests(transport, http.MethodPost), 1, "a submission is never retried")
+}
+
+// The report quota's 429 must not block the commands after it. Run through
+// the CLI's real gating hooks: the feedback 429 sets no cooldown, while any
+// other endpoint's 429 still does, so the hooks are shown to be wired.
+func TestFeedbackQuotaDoesNotBlockLaterCommands(t *testing.T) {
+	useFeedbackStore(t)
+	limited := submitRoute(http.StatusTooManyRequests, `{"error":"Rate limited"}`)
+	limited.header = http.Header{"Retry-After": []string{"3600"}}
+	throttled := stubRoute{method: http.MethodGet, path: "/99999/projects.json", status: http.StatusTooManyRequests, body: `{}`,
+		header: http.Header{"Retry-After": []string{"60"}}}
+	app, transport := setupRecordingTestApp(t, discoveryRoute(http.StatusOK), limited, throttled)
+
+	resStore := resilience.NewStore(t.TempDir())
+	cfg := resilience.DefaultConfig()
+	app.SDK = basecamp.NewClient(&basecamp.Config{BaseURL: "https://3.basecampapi.com"}, recordingTestTokenProvider{},
+		basecamp.WithTransport(transport),
+		basecamp.WithMaxRetries(1),
+		basecamp.WithHooks(resilience.NewGatingHooksFromConfig(resStore, cfg)),
+	)
+	blocked := func() time.Duration {
+		remaining, err := resilience.NewRateLimiter(resStore, cfg.RateLimiter).RetryAfterRemaining()
+		require.NoError(t, err)
+		return remaining
+	}
+
+	err := executeRecordingCommand(NewFeedbackCmd(), app, "--category", "bug", "x")
+	require.Equal(t, output.CodeRateLimit, output.AsError(err).Code)
+	assert.Zero(t, blocked(), "the report quota sets no cooldown")
+
+	_, _ = app.Account().Get(context.Background(), "/projects.json")
+	assert.Greater(t, blocked(), 30*time.Second, "another endpoint's 429 still does")
+}
+
+// Where the cache cannot be written, no answer could be kept, so every later
+// command would probe again; no probe is made at all.
+func TestRefreshDetectionSkippedWhenTheCacheIsNotWritable(t *testing.T) {
+	t.Setenv(feedback.EnvOverride, "")
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	require.NoError(t, os.WriteFile(blocker, nil, 0o600))
+	store := feedback.NewStore(filepath.Join(blocker, "cache"))
+	saved := feedbackStore
+	feedbackStore = func() *feedback.Store { return store }
+	t.Cleanup(func() { feedbackStore = saved })
+
+	transport, refresh := usedApp(t, discoveryRoute(http.StatusOK))
+	refresh(&cobra.Command{Use: "projects"})
+	refresh(&cobra.Command{Use: "projects"})
+	assert.Empty(t, transport.recorded())
 }
 
 func TestFeedbackDetectionErrorIsReported(t *testing.T) {
