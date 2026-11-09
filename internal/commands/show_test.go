@@ -33,13 +33,14 @@ func TestRecordingTypeEndpoint(t *testing.T) {
 		{"Message", "789", "/messages/789.json"},
 		{"Comment", "100", "/comments/100.json"},
 		{"Kanban::Card", "200", "/card_tables/cards/200.json"},
+		{"Kanban::Board", "201", "/card_tables/201.json"},
 		{"Document", "300", "/documents/300.json"},
 		{"Vault::Document", "301", "/documents/301.json"},
 		{"Schedule::Entry", "400", "/schedule_entries/400.json"},
 		{"Question", "499", "/questions/499.json"},
 		{"Question::Answer", "500", "/question_answers/500.json"},
 		{"Todolist::Todo", "124", "/todos/124.json"},
-		{"Inbox::Forward", "600", "/forwards/600.json"},
+		{"Inbox::Forward", "600", "/inbox_forwards/600.json"},
 		{"Upload", "700", "/uploads/700.json"},
 		{"Vault", "800", "/vaults/800.json"},
 		{"Chat::Transcript", "900", "/chats/900.json"},
@@ -101,6 +102,11 @@ func TestRecordingTypeEndpoint_InboxReply(t *testing.T) {
 	}
 	result := recordingTypeEndpoint(data, "400")
 	assert.Equal(t, "/inbox_forwards/380/replies/400.json", result)
+}
+
+func TestRecordingTypeEndpoint_LocalInboxReply(t *testing.T) {
+	data := map[string]any{"type": "Inbox::Reply", "parent": map[string]any{"id": json.Number("380")}}
+	assert.Equal(t, "/inbox_forwards/380/replies/400.json", recordingTypeEndpoint(data, "400"))
 }
 
 func TestRecordingTypeEndpoint_InboxReplyNoParent(t *testing.T) {
@@ -797,17 +803,23 @@ func TestShowFragmentURLResolvesComment(t *testing.T) {
 func TestShowChatAtURLResolvesLine(t *testing.T) {
 	transport := &showTrackingTransport{
 		responder: func(path string) (int, string) {
-			if strings.Contains(path, "/recordings/") {
-				return 200, `{"id": 111, "type": "Chat::Lines::Text", "content": "hello"}`
+			if strings.Contains(path, "/recordings/111.json") {
+				return 200, `{"id":111,"type":"Chat::Lines::Text","parent":{"id":789},"bucket":{"id":456}}`
 			}
-			return 200, `{}`
+			if strings.Contains(path, "/chats/789/lines/111.json") {
+				return 200, `{"id":111,"type":"Chat::Lines::Text","content":"Full chat line","parent":{"id":789},"bucket":{"id":456}}`
+			}
+			return 404, `{}`
 		},
 	}
 
-	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/chats/789@111")
+	reqs, stdout, _, err := runShowCmdCapture(t, transport, output.FormatJSON, "https://3.basecamp.com/99999/buckets/456/chats/789@111", "--no-comments")
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(reqs), 1)
+	require.Len(t, reqs, 2)
 	assert.Contains(t, reqs[0], "/recordings/111.json")
+	assert.Contains(t, reqs[1], "/chats/789/lines/111.json")
+	data := decodeShowJSONDataMap(t, decodeShowJSONEnvelope(t, stdout).Data)
+	assert.JSONEq(t, `"Full chat line"`, string(data["content"]))
 }
 
 func TestShowProjectURLReturnsHelpfulError(t *testing.T) {
@@ -837,7 +849,7 @@ func TestShowInboxForwardURL(t *testing.T) {
 	reqs, err := runShowCmd(t, transport, "https://3.basecamp.com/99999/buckets/456/inbox_forwards/789")
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(reqs), 1)
-	assert.Contains(t, reqs[0], "/forwards/789.json")
+	assert.Contains(t, reqs[0], "/inbox_forwards/789.json")
 }
 
 func TestShowScheduleEntryOccurrenceURL(t *testing.T) {

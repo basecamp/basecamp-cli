@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -31,6 +32,9 @@ type connectStartWait struct {
 	Sleep   func(ctx context.Context, d time.Duration) error
 	// Exit ends the process on a second signal; os.Exit when nil.
 	Exit func(code int)
+	// Waiting names what the start is waiting for in its log line; empty
+	// means the agent's token.
+	Waiting string
 }
 
 func (w connectStartWait) forceStop(sig os.Signal) {
@@ -126,7 +130,11 @@ func awaitToken(ctx context.Context, tokens basecamp.TokenProvider, w connectSta
 		if wait <= 0 {
 			wait = connectStartBackoff(attempt)
 		}
-		w.log(connectWaitLine(output.AsError(err).Message, serverNamedWait(err), wait))
+		line := connectWaitLine(output.AsError(err).Message, serverNamedWait(err), wait)
+		if w.Waiting != "" {
+			line = strings.Replace(line, "the agent's token", w.Waiting, 1)
+		}
+		w.log(line)
 		if err := sleep(ctx, wait); err != nil {
 			return err
 		}

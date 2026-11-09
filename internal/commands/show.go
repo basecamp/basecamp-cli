@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
@@ -33,7 +35,8 @@ Common types: todo, todolist, message, comment, card, card-table,
   line, people, boosts
 
 Also accepts URL path types directly (e.g. inbox_forwards,
-question_answers, card_tables, columns, steps, todosets).
+question_answers, inbox_replies, card_tables, columns, steps, subtasks,
+google_documents, cloud_files, todosets).
 
 If no type specified, uses generic lookup.
 URLs with #__recording_ fragments resolve the referenced recording.
@@ -66,7 +69,17 @@ You can also pass a Basecamp URL directly:
 
 			// Check if the id is a URL and extract components
 			var occurrenceDate string
-			if parsed := urlarg.Parse(id); parsed != nil {
+			parsed := urlarg.Parse(id)
+			if parsed != nil {
+				if !hostutil.IsTrustedBasecampHost(id, app.Config.BaseURL) {
+					return output.ErrUsage("Expected a trusted Basecamp URL")
+				}
+				if parsed.AccountID != "" {
+					if app.Config.AccountID != "" && !accountIDsEqual(parsed.AccountID, app.Config.AccountID) {
+						return output.ErrUsage("URL account does not match the configured account")
+					}
+					app.Config.AccountID = parsed.AccountID
+				}
 				if parsed.PingID != "" && parsed.Type == "circles" {
 					return showPingURL(cmd, app, parsed)
 				}
@@ -119,6 +132,11 @@ You can also pass a Basecamp URL directly:
 				}
 			}
 
+			// Never send a refused URL (or an arbitrary string) as a recording ID.
+			if n, err := strconv.ParseUint(id, 10, 63); err != nil || n == 0 || strings.TrimLeft(id, "0123456789") != "" {
+				return output.ErrUsage("Expected a positive item ID or a supported Basecamp item URL")
+			}
+
 			// Validate type early (before account check) for better error messages
 			if !isValidRecordType(recordType) {
 				return output.ErrUsageHint(
@@ -142,62 +160,66 @@ You can also pass a Basecamp URL directly:
 			)
 			switch recordType {
 			case "todo", "todos":
-				endpoint = fmt.Sprintf("/todos/%s.json", id)
+				endpoint = canonicalEndpointForType("Todo", id)
 			case "todolist", "todolists":
-				endpoint = fmt.Sprintf("/todolists/%s.json", id)
+				endpoint = canonicalEndpointForType("Todolist", id)
 			case "message", "messages":
-				endpoint = fmt.Sprintf("/messages/%s.json", id)
+				endpoint = canonicalEndpointForType("Message", id)
 			case "comment", "comments":
-				endpoint = fmt.Sprintf("/comments/%s.json", id)
+				endpoint = canonicalEndpointForType("Comment", id)
 			case "card", "cards":
-				endpoint = fmt.Sprintf("/card_tables/cards/%s.json", id)
+				endpoint = canonicalEndpointForType("Kanban::Card", id)
 			case "card-table", "card_table", "cardtable", "card_tables":
-				endpoint = fmt.Sprintf("/card_tables/%s.json", id)
+				endpoint = canonicalEndpointForType("Kanban::Board", id)
+			case "google_documents":
+				endpoint = canonicalEndpointForType("GoogleDocument", id)
+			case "cloud_files":
+				endpoint = canonicalEndpointForType("CloudFile", id)
 			case "document", "documents":
-				endpoint = fmt.Sprintf("/documents/%s.json", id)
+				endpoint = canonicalEndpointForType("Document", id)
 			case "schedule-entry", "schedule_entry", "schedule_entries":
 				if occurrenceDate != "" {
 					endpoint = fmt.Sprintf("/schedule_entries/%s/occurrences/%s.json", id, occurrenceDate)
 				} else {
-					endpoint = fmt.Sprintf("/schedule_entries/%s.json", id)
+					endpoint = canonicalEndpointForType("Schedule::Entry", id)
 				}
 			case "checkin", "check-in", "check_in", "questions":
-				endpoint = fmt.Sprintf("/questions/%s.json", id)
+				endpoint = canonicalEndpointForType("Question", id)
 			case "question_answers":
-				endpoint = fmt.Sprintf("/question_answers/%s.json", id)
+				endpoint = canonicalEndpointForType("Question::Answer", id)
 			case "forward", "forwards", "inbox_forwards":
-				endpoint = fmt.Sprintf("/forwards/%s.json", id)
+				endpoint = canonicalEndpointForType("Inbox::Forward", id)
 			case "upload", "uploads":
-				endpoint = fmt.Sprintf("/uploads/%s.json", id)
+				endpoint = canonicalEndpointForType("Upload", id)
 			case "vault", "vaults":
-				endpoint = fmt.Sprintf("/vaults/%s.json", id)
+				endpoint = canonicalEndpointForType("Vault", id)
 			case "chat", "chats", "campfire", "campfires":
-				endpoint = fmt.Sprintf("/chats/%s.json", id)
+				endpoint = canonicalEndpointForType("Chat::Transcript", id)
 			case "people":
 				endpoint = fmt.Sprintf("/people/%s.json", id)
 			case "boosts":
 				endpoint = fmt.Sprintf("/boosts/%s.json", id)
 			case "columns":
-				endpoint = fmt.Sprintf("/card_tables/columns/%s.json", id)
-			case "steps":
-				endpoint = fmt.Sprintf("/card_tables/steps/%s.json", id)
+				endpoint = canonicalEndpointForType("Kanban::Column", id)
+			case "steps", "subtasks":
+				endpoint = canonicalEndpointForType("Kanban::Step", id)
 			case "todosets":
-				endpoint = fmt.Sprintf("/todosets/%s.json", id)
+				endpoint = canonicalEndpointForType("Todoset", id)
 			case "message_boards":
-				endpoint = fmt.Sprintf("/message_boards/%s.json", id)
+				endpoint = canonicalEndpointForType("Message::Board", id)
 			case "schedules":
-				endpoint = fmt.Sprintf("/schedules/%s.json", id)
+				endpoint = canonicalEndpointForType("Schedule", id)
 			case "questionnaires":
-				endpoint = fmt.Sprintf("/questionnaires/%s.json", id)
+				endpoint = canonicalEndpointForType("Questionnaire", id)
 			case "inboxes":
-				endpoint = fmt.Sprintf("/inboxes/%s.json", id)
+				endpoint = canonicalEndpointForType("Inbox", id)
 			case "line", "lines":
 				// Lines require a parent chat ID for the dedicated endpoint
 				// (/chats/{id}/lines/{id}), which we don't have from a plain
 				// "show line 123" invocation. Use generic recording lookup.
 				endpoint = fmt.Sprintf("/recordings/%s.json", id)
 				needsRefetch = true
-			case "replies":
+			case "replies", "inbox_replies":
 				// Replies require a parent forward ID for the dedicated endpoint
 				// (/inbox_forwards/{id}/replies/{id}), which we don't have from
 				// a plain "show replies 123" invocation. Use generic recording lookup.
@@ -240,7 +262,9 @@ You can also pass a Basecamp URL directly:
 			// For generic recording lookups, re-fetch using the type-specific
 			// endpoint to get full content (the /recordings/ endpoint returns
 			// sparse data). The endpoint is derived from the response's type
-			// field — never from the url field, which could point off-origin.
+			// field and validated parent/date context — never fetched from the
+			// response URL itself, which could point off-origin.
+			originalBucket := data["bucket"]
 			if needsRefetch {
 				if refetchEndpoint := recordingTypeEndpoint(data, id); refetchEndpoint != "" {
 					refetchResp, refetchErr := app.Account().Get(cmd.Context(), refetchEndpoint)
@@ -248,8 +272,33 @@ You can also pass a Basecamp URL directly:
 						var richer map[string]any
 						refetchDec := json.NewDecoder(bytes.NewReader(refetchResp.Data))
 						refetchDec.UseNumber()
-						if refetchDec.Decode(&richer) == nil {
+						if refetchDec.Decode(&richer) == nil && richer != nil {
+							// Dedicated responses may omit the sparse recording's parent context.
+							if _, present := richer["parent"]; !present {
+								if parent, available := data["parent"]; available {
+									richer["parent"] = parent
+								}
+							}
 							data = richer
+						}
+					}
+				}
+			}
+
+			if parsed != nil && parsed.CommentID == "" && parsed.ForwardID != "" && !accountIDsEqual(parentRecordingID(data), parsed.ForwardID) {
+				return output.ErrUsage("Reply does not belong to the URL forward")
+			}
+			if parsed != nil && parsed.CommentID == "" && parsed.Type == "lines" && parsed.CampfireID != "" && !accountIDsEqual(parentRecordingID(data), parsed.CampfireID) {
+				return output.ErrUsage("Line does not belong to the URL chat")
+			}
+
+			if parsed != nil && parsed.ProjectID != "" {
+				// Refetches may omit the bucket carried by the sparse recording.
+				// Check both representations so enrichment cannot erase a mismatch.
+				for _, value := range []any{originalBucket, data["bucket"]} {
+					if bucket, ok := value.(map[string]any); ok {
+						if bucketID, ok := bucket["id"].(json.Number); ok && !accountIDsEqual(bucketID.String(), parsed.ProjectID) {
+							return output.ErrUsage("Item does not belong to the URL project")
 						}
 					}
 				}
@@ -392,13 +441,25 @@ func recordingTypeEndpoint(data map[string]any, id string) string {
 	}
 
 	// Inbox forward replies need the parent forward ID for the nested endpoint.
-	if t == "Inbox::Forward::Reply" {
+	if t == "Inbox::Reply" || t == "Inbox::Forward::Reply" {
 		if parentID := parentRecordingID(data); parentID != "" {
 			return fmt.Sprintf("/inbox_forwards/%s/replies/%s.json", parentID, id)
 		}
 		return ""
 	}
 
+	// An occurrence has no date in its sparse recording fields. Parse only
+	// the route context from its URL, verify the parent, and build a relative
+	// endpoint. Never request the response URL or trust its host.
+	if t == "Schedule::Entry::Occurrence" {
+		rawURL, _ := data["url"].(string)
+		if parsed := urlarg.Parse(rawURL); parsed != nil && parsed.Type == "schedule_entries" && parsed.OccurrenceDate != "" && accountIDsEqual(parsed.RecordingID, parentRecordingID(data)) {
+			if _, err := time.Parse("20060102", parsed.OccurrenceDate); err == nil {
+				return fmt.Sprintf("/schedule_entries/%s/occurrences/%s.json", parsed.RecordingID, parsed.OccurrenceDate)
+			}
+		}
+		return ""
+	}
 	return canonicalEndpointForType(t, id)
 }
 
@@ -418,8 +479,14 @@ func canonicalEndpointForType(recType, id string) string {
 		return fmt.Sprintf("/messages/%s.json", id)
 	case "Comment":
 		return fmt.Sprintf("/comments/%s.json", id)
+	case "Kanban::Board":
+		return fmt.Sprintf("/card_tables/%s.json", id)
 	case "Kanban::Card":
 		return fmt.Sprintf("/card_tables/cards/%s.json", id)
+	case "GoogleDocument":
+		return fmt.Sprintf("/google_documents/%s.json", id)
+	case "CloudFile":
+		return fmt.Sprintf("/cloud_files/%s.json", id)
 	case "Document", "Vault::Document":
 		return fmt.Sprintf("/documents/%s.json", id)
 	case "Schedule::Entry":
@@ -429,7 +496,7 @@ func canonicalEndpointForType(recType, id string) string {
 	case "Question::Answer":
 		return fmt.Sprintf("/question_answers/%s.json", id)
 	case "Inbox::Forward":
-		return fmt.Sprintf("/forwards/%s.json", id)
+		return fmt.Sprintf("/inbox_forwards/%s.json", id)
 	case "Upload":
 		return fmt.Sprintf("/uploads/%s.json", id)
 	case "Vault":
@@ -446,7 +513,7 @@ func canonicalEndpointForType(recType, id string) string {
 		return fmt.Sprintf("/questionnaires/%s.json", id)
 	case "Inbox":
 		return fmt.Sprintf("/inboxes/%s.json", id)
-	case "Kanban::Column":
+	case "Kanban::Column", "Kanban::Triage", "Kanban::DoneColumn", "Kanban::NotNowColumn":
 		return fmt.Sprintf("/card_tables/columns/%s.json", id)
 	case "Kanban::Step":
 		return fmt.Sprintf("/card_tables/steps/%s.json", id)
@@ -506,7 +573,7 @@ func isValidRecordType(t string) bool {
 		"checkin", "check-in", "check_in", "questions", "question_answers",
 		"forward", "forwards", "inbox_forwards", "upload", "uploads",
 		"vault", "vaults", "chat", "chats", "campfire", "campfires",
-		"line", "lines", "replies", "columns", "steps",
+		"line", "lines", "replies", "inbox_replies", "columns", "steps", "subtasks", "google_documents", "cloud_files",
 		"todosets", "message_boards", "schedules", "questionnaires", "inboxes",
 		"people", "boosts":
 		return true

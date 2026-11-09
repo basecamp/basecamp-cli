@@ -653,8 +653,11 @@ basecamp instructions --refresh     # check it reads, and show it
 Subagents run `basecamp instructions` before they write, so for them it
 takes effect with no restart. The plugin's session-start hook also tells
 every other Claude Code or Codex session on this computer that runs the
-plugin to run it before it writes to Basecamp; a session already running
-when you set it gets that pointer at its next start or compaction.
+plugin to run it before it writes to Basecamp. When every source for the
+active profile can be read without the network and each has a list of
+rules to cut down, the gist (one line per rule) follows the pointer. A session
+already running when you set it gets that pointer at its next start or
+compaction.
 `basecamp config unset instructions --global` removes it.
 
 ## When the connector stops

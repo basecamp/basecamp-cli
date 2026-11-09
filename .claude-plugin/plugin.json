@@ -1,6 +1,6 @@
 {
   "name": "basecamp-cli",
-  "version": "0.24.2",
+  "version": "0.25.0",
   "description": "Basecamp integration for Claude Code. Create todos, track work, link code to projects.",
   "author": {
     "name": "37signals",
