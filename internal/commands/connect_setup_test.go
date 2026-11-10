@@ -1680,3 +1680,71 @@ func TestConnectSetupLetsAPersonIntoOnePing(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, f.Pings)
 }
+
+func TestConnectSetupCampfireOptIn(t *testing.T) {
+	s := startConnectSetupServer(t)
+	s.bodies = map[string]any{"/999/chats/8000": map[string]any{"id": 8000, "bucket": map[string]any{"id": setupProject}}}
+	app := connectSetupApp(t, s, "agent")
+	fire := fmt.Sprintf("%d:8000", setupProject)
+	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), "--serve", fmt.Sprint(setupProject), "--listen-campfire", fire)
+	require.NoError(t, err, out)
+	f, err := setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Equal(t, []int64{8000}, f.Projects[setupProject].ListenCampfires)
+	assert.Contains(t, connectShowDisplay("", f, false)[fmt.Sprintf("project_%d", setupProject)], "listens to Campfire 8000 without mentions")
+	out, err = runConnectSetupCmd(t, app, "--serve", fmt.Sprint(setupProject))
+	require.NoError(t, err, out)
+	f, err = setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Equal(t, []int64{8000}, f.Projects[setupProject].ListenCampfires)
+	s.mu.Lock()
+	delete(s.bodies, "/999/chats/8000")
+	s.mu.Unlock()
+	out, err = runConnectSetupCmd(t, app, "--no-listen-campfire", fire)
+	require.NoError(t, err, out)
+	f, err = setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Empty(t, f.Projects[setupProject].ListenCampfires)
+}
+
+func TestConnectSetupCampfireFlagsRefuseBadInput(t *testing.T) {
+	for _, raw := range []string{"", "123", "0:8000", "123:0", "123:-1", "123:8000:9", "abc:8000"} {
+		_, err := (&connectSetupFlags{listenCampfires: []string{raw}}).changes()
+		require.Error(t, err, raw)
+	}
+	_, err := (&connectSetupFlags{listenCampfires: []string{"123:8000"}, unlistenCampfires: []string{"123:8000"}}).changes()
+	require.ErrorContains(t, err, "both")
+}
+
+func TestConnectSetupRefusesAnUnverifiedCampfire(t *testing.T) {
+	for name, body := range map[string]any{
+		"missing":         nil,
+		"another project": map[string]any{"id": 8000, "bucket": map[string]any{"id": setupProject2}},
+		"no project":      map[string]any{"id": 8000},
+		"another id":      map[string]any{"id": 9000, "bucket": map[string]any{"id": setupProject}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := startConnectSetupServer(t)
+			if body != nil {
+				s.bodies = map[string]any{"/999/chats/8000": body}
+			}
+			app := connectSetupApp(t, s, "agent")
+			out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), "--serve", fmt.Sprint(setupProject))
+			require.NoError(t, err, out)
+			path := connectSetupPath(t, "agent")
+			before, err := os.ReadFile(path)
+			require.NoError(t, err)
+			out, err = runConnectSetupCmd(t, app, "--listen-campfire", fmt.Sprintf("%d:8000", setupProject))
+			require.Error(t, err, out)
+			assert.Contains(t, err.Error(), "Campfire 8000")
+			if body != nil {
+				assert.Contains(t, err.Error(), "was not returned in project")
+			} else {
+				assert.Contains(t, err.Error(), "HTTP 404")
+			}
+			after, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, before, after)
+		})
+	}
+}

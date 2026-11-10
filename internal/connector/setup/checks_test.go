@@ -28,6 +28,7 @@ type fakeReader struct {
 	mintErr       error
 	projectErr    map[int64]error
 	projectPplErr map[int64]error
+	campfireErr   map[int64]error
 	pings         map[int64]Ping
 	pingErr       error
 }
@@ -56,6 +57,10 @@ func (f *fakeReader) Project(_ context.Context, id int64) error {
 }
 func (f *fakeReader) ProjectPeople(_ context.Context, id int64) error {
 	return f.projectPplErr[id]
+}
+
+func (f *fakeReader) Campfire(_ context.Context, _, id int64) error {
+	return f.campfireErr[id]
 }
 
 func status(code int) error {

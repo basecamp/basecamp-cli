@@ -34,3 +34,6 @@ CMD basecamp connect shadow promote
 CMD basecamp connect show
 CMD basecamp connect status
 FLAG basecamp --unserve
+# Per-Campfire policy flags on the hidden connect setup command.
+FLAG basecamp --listen-campfire
+FLAG basecamp --no-listen-campfire
