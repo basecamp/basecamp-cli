@@ -204,3 +204,14 @@ func TestCredentialNamesTheTokenWithoutHoldingIt(t *testing.T) {
 	t.Setenv("BASECAMP_TOKEN", "secret-two")
 	assert.NotEqual(t, one, Credential("profile:staff"))
 }
+
+func TestAnswerFromTheFutureIsDue(t *testing.T) {
+	now := time.Now()
+	s := newTestStore(t, &now)
+	key := Key("", "1", "")
+	s.Record(key, true)
+	require.NoError(t, s.recordFailure(key))
+
+	now = now.Add(-time.Hour)
+	assert.True(t, s.NeedsRefresh(key), "a clock set back since can't hold the answer")
+}

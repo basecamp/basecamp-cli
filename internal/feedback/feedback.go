@@ -199,10 +199,17 @@ func (s *Store) AnyAdvertised() bool {
 }
 
 // NeedsRefresh reports whether the account's answer is due for a detection.
+// A time in the future, from a clock set back since, counts as due, so a
+// wrong clock can't hold the cached answer until it catches up.
 func (s *Store) NeedsRefresh(key string) bool {
 	e := s.load().Accounts[key]
 	now := s.now()
-	return now.Sub(e.CheckedAt) >= TTL && now.Sub(e.AttemptedAt) >= retryAfterFailure
+	return elapsed(now, e.CheckedAt, TTL) && elapsed(now, e.AttemptedAt, retryAfterFailure)
+}
+
+func elapsed(now, at time.Time, wait time.Duration) bool {
+	age := now.Sub(at)
+	return age >= wait || age < 0
 }
 
 // Record stores a detection answer for the account.

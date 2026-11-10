@@ -414,8 +414,8 @@ func TestFeedbackHint(t *testing.T) {
 	})
 }
 
-// The hint is descriptive, never an instruction, and names a command that
-// exists.
+// The hint is descriptive, never an instruction. The exact wording is pinned
+// here.
 func TestFeedbackHintWording(t *testing.T) {
 	assert.Equal(t, "If this looks like a problem with Basecamp, `basecamp feedback` reports it to the Basecamp team.", feedback.Hint)
 }
