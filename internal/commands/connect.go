@@ -422,7 +422,8 @@ person's new message in that Campfire a request without an @mention, like a
 public Ping. Other Campfires still require mentions. Existing trust rules
 apply; other agents still need mentions and remain capped.
 --no-listen-campfire <project-id>:<campfire-id> restores mentions. Both flags
-are repeatable and require a served project. Find the Campfire id with
+are repeatable and require a served project. Setup checks that the agent can
+read the Campfire and that it belongs to that project. Find the Campfire id with
 basecamp chat list --project <project-id>. Restart after changing this setting.
 
 The list is this profile's own. When two connections of one agent serve the

@@ -55,6 +55,8 @@ type Reader interface {
 	Project(ctx context.Context, id int64) error
 	// ProjectPeople reads a project's people.
 	ProjectPeople(ctx context.Context, id int64) error
+	// Campfire verifies a readable Campfire belongs to the named project.
+	Campfire(ctx context.Context, projectID, campfireID int64) error
 	// Ping reads a Ping the reader is in.
 	Ping(ctx context.Context, id int64) (Ping, error)
 }
@@ -134,6 +136,18 @@ func (r SDKReader) Project(ctx context.Context, id int64) error {
 func (r SDKReader) ProjectPeople(ctx context.Context, id int64) error {
 	_, err := r.Client.People().ListProjectPeople(ctx, id, nil)
 	return err
+}
+
+// Campfire implements Reader.
+func (r SDKReader) Campfire(ctx context.Context, projectID, campfireID int64) error {
+	fire, err := r.Client.Campfires().Get(ctx, campfireID)
+	if err != nil {
+		return err
+	}
+	if fire == nil || fire.ID != campfireID || fire.Bucket == nil || fire.Bucket.ID != projectID {
+		return fmt.Errorf("Campfire %d was not returned in project %d", campfireID, projectID)
+	}
+	return nil
 }
 
 // Ping implements Reader.
@@ -419,6 +433,16 @@ func ProjectChecks(ctx context.Context, r Reader, f File, firstSetup bool) []Che
 	checks := make([]Check, 0, len(ids))
 	for _, id := range ids {
 		checks = append(checks, projectCheck(ctx, r, f.Agent.Kind, id))
+		fires := slices.Clone(f.Projects[id].ListenCampfires)
+		slices.Sort(fires)
+		for _, fire := range fires {
+			c := Check{Name: fmt.Sprintf("Campfire %d in project %d", fire, id), Status: StatusPass, Message: "Readable by the agent in this project"}
+			if err := r.Campfire(ctx, id, fire); err != nil {
+				c.Status, c.Message = StatusFail, "Could not verify the Campfire in this project: "+ErrorText(err)
+				c.Hint = fmt.Sprintf("Check the Campfire id with basecamp chat list --project %d, or remove the setting with basecamp connect setup -P %s --no-listen-campfire %d:%d.", id, richtext.ShellQuote(f.Profile), id, fire)
+			}
+			checks = append(checks, c)
+		}
 	}
 	return checks
 }

@@ -69,7 +69,7 @@ var (
 // eventChatLineCreated is the one type a Ping's lines arrive as.
 const eventChatLineCreated = "chat.line.created"
 
-// V1Matrix returns the trigger matrix: version 1, plus boosted. Every other cataloged type
+// V1Matrix returns the connector's trigger matrix. Every other cataloged type
 // is discarded as not_in_matrix. A fresh copy each call, so no caller can
 // widen another's.
 func V1Matrix() Matrix {

@@ -557,7 +557,8 @@ For a small Campfire intended as a public conversation with the agent, use
 `basecamp connect setup -P '<profile>' --listen-campfire <project-id>:<campfire-id>`.
 The project must already be served (or pass `--serve <project-id>` too).
 Find the Campfire with `basecamp chat list --project <project-id> -P '<profile>' --json`.
-Every trusted person's new line there becomes a `campfire` request, with
+Setup checks that the agent can read that Campfire and that it belongs to
+that project. Every trusted person's new line there becomes a `campfire` request, with
 acknowledgement and replies in that Campfire. Existing trust rules apply;
 other agents still need mentions and remain capped. Other Campfires keep
 requiring mentions. The repeatable `--no-listen-campfire <project-id>:<campfire-id>`
