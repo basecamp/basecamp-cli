@@ -340,9 +340,11 @@ in portable commands.
 Basecamp shows blocks flush together unless a blank line in the Markdown
 separates them. Leave one between every two blocks, headings and lists
 too; in prose, a single newline joins lines into one paragraph. Don't
-hand-write HTML: `--format html` is stored as written, blocks touching. To
-fold, wrap Markdown in `<details><summary>What</summary>` and `</details>`,
-each alone on a line, blank lines around.
+hand-write HTML: `--format html` is stored as written, blocks touching. A
+fold is the exception, and it stays Markdown: write
+`<details><summary>What</summary>` and `</details>` each alone on a line,
+blank lines around. The conversion keeps those tags and converts the Markdown
+between them, so a fold needs no `--format html`.
 
 Rich-text fields support Mermaid diagrams. Put the source in a fenced code block
 with the language `mermaid`, and Basecamp shows the diagram to people reading
