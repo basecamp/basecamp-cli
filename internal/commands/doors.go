@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -443,6 +444,16 @@ link private to the team.
 				return err
 			}
 
+			if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+				live, err := app.Account().Doors().Get(cmd.Context(), doorID)
+				if err != nil {
+					return time.Time{}, err
+				}
+				return live.UpdatedAt, nil
+			}); err != nil {
+				return err
+			}
+
 			req := &basecamp.UpdateDoorRequest{
 				Service: service,
 				URL:     linkURL,
@@ -486,6 +497,7 @@ link private to the team.
 		},
 	}
 
+	addBodyGuardFlags(cmd)
 	cmd.Flags().StringVar(&linkURL, "url", "", "New address")
 	cmd.Flags().StringVar(&title, "title", "", "New title")
 	cmd.Flags().StringVar(&service, "service", "", "New service code (figma, github, notion, other, ...)")

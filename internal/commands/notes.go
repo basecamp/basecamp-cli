@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -143,6 +144,18 @@ a destructive verb deserves its own review, not a rider on a bump.`,
 			}
 
 			// The note is rich text (my_notes.md: content | HTML), so Markdown
+			if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+				live, err := app.Account().MyNotes().Get(cmd.Context())
+				if err != nil {
+					return time.Time{}, err
+				}
+				if live.UpdatedAt == nil {
+					return time.Time{}, nil
+				}
+				return *live.UpdatedAt, nil
+			}); err != nil {
+				return err
+			}
 			// is converted like every other content-writing command. Sending the
 			// raw string would store escaped or malformed markup.
 			note, err := app.Account().MyNotes().Update(cmd.Context(), richTextToHTML(cmd, content))
@@ -168,6 +181,7 @@ a destructive verb deserves its own review, not a rider on a bump.`,
 	allowDash(cmd, "arg:0", "flag:file")
 
 	addRichTextFormatFlag(cmd)
+	addBodyGuardFlags(cmd)
 	return cmd
 }
 

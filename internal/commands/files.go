@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -1824,6 +1825,16 @@ You can pass either an upload ID or a Basecamp URL:
 				return output.ErrUsage(fmt.Sprintf("URL is for account %s, but this session uses account %s", parsedURL.AccountID, app.Config.AccountID))
 			}
 
+			if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+				live, err := app.Account().Uploads().Get(cmd.Context(), uploadID)
+				if err != nil {
+					return time.Time{}, err
+				}
+				return live.UpdatedAt, nil
+			}); err != nil {
+				return err
+			}
+
 			// Resolve the description first: its local-image references can
 			// fail deterministically, and staging a large replacement before
 			// finding that out wastes the whole transfer. A nil Description
@@ -1892,6 +1903,7 @@ You can pass either an upload ID or a Basecamp URL:
 		},
 	}
 
+	addBodyGuardFlags(cmd)
 	cmd.Flags().StringVar(&description, "description", "", "New description (Markdown); omit to carry the current one forward; use - to read from stdin")
 	cmd.Flags().StringVar(&baseName, "base-name", "", "Rename the file (without extension); omit to keep the uploaded file's name")
 
@@ -2058,6 +2070,15 @@ You can pass either an item ID or a Basecamp URL:
 				switch itemType {
 				case "vault", "folder":
 					req := &basecamp.UpdateVaultRequest{Title: title}
+					if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+						live, err := app.Account().Vaults().Get(cmd.Context(), itemID)
+						if err != nil {
+							return time.Time{}, err
+						}
+						return live.UpdatedAt, nil
+					}); err != nil {
+						return err
+					}
 					vault, err := app.Account().Vaults().Update(cmd.Context(), itemID, req)
 					if err != nil {
 						return convertSDKError(err)
@@ -2073,6 +2094,15 @@ You can pass either an item ID or a Basecamp URL:
 					detectedType = "document"
 				case "upload", "file":
 					req := &basecamp.UpdateUploadRequest{}
+					if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+						live, err := app.Account().Uploads().Get(cmd.Context(), itemID)
+						if err != nil {
+							return time.Time{}, err
+						}
+						return live.UpdatedAt, nil
+					}); err != nil {
+						return err
+					}
 					if nonDocTitleSet {
 						req.BaseName = title
 					}
@@ -2121,6 +2151,15 @@ You can pass either an item ID or a Basecamp URL:
 							return noChanges(cmd)
 						}
 						req := &basecamp.UpdateVaultRequest{Title: title}
+						if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+							live, err := app.Account().Vaults().Get(cmd.Context(), itemID)
+							if err != nil {
+								return time.Time{}, err
+							}
+							return live.UpdatedAt, nil
+						}); err != nil {
+							return err
+						}
 						vault, err := app.Account().Vaults().Update(cmd.Context(), itemID, req)
 						if err != nil {
 							return convertSDKError(err)
@@ -2135,6 +2174,15 @@ You can pass either an item ID or a Basecamp URL:
 								return noChanges(cmd)
 							}
 							req := &basecamp.UpdateUploadRequest{}
+							if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+								live, err := app.Account().Uploads().Get(cmd.Context(), itemID)
+								if err != nil {
+									return time.Time{}, err
+								}
+								return live.UpdatedAt, nil
+							}); err != nil {
+								return err
+							}
 							if nonDocTitleSet {
 								req.BaseName = title
 							}
@@ -2186,10 +2234,20 @@ You can pass either an item ID or a Basecamp URL:
 	allowDash(cmd, "flag:content")
 
 	addRichTextFormatFlag(cmd)
+	addBodyGuardFlags(cmd)
 	return cmd
 }
 
 func updateDocument(cmd *cobra.Command, app *appctx.App, itemID int64, existingDoc *basecamp.Document, setTitle, setContent bool, title, content string) (*basecamp.Document, error) {
+	if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+		live, err := app.Account().Documents().Get(cmd.Context(), itemID)
+		if err != nil {
+			return time.Time{}, err
+		}
+		return live.UpdatedAt, nil
+	}); err != nil {
+		return nil, err
+	}
 	// setTitle/setContent are caller-computed effective flags: they're true when
 	// the user provided either a non-whitespace value or an explicit empty
 	// string. Whitespace-only values arrive as setTitle=false/setContent=false

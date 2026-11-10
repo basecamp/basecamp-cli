@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -710,6 +711,16 @@ anything else is a name matched against the message's project. List a project's 
 				return err
 			}
 
+			if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+				live, err := app.Account().Messages().Get(cmd.Context(), messageID)
+				if err != nil {
+					return time.Time{}, err
+				}
+				return live.UpdatedAt, nil
+			}); err != nil {
+				return err
+			}
+
 			var categoryID int64
 			if categoryChanged {
 				categoryID, err = resolveUpdatedMessageCategory(cmd.Context(), app, messageID, category)
@@ -773,6 +784,7 @@ anything else is a name matched against the message's project. List a project's 
 	allowDash(cmd, "flag:body")
 
 	addRichTextFormatFlag(cmd)
+	addBodyGuardFlags(cmd)
 	return cmd
 }
 

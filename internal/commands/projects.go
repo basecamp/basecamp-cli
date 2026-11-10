@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -352,6 +353,16 @@ Examples:
 				return err
 			}
 
+			if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+				live, err := app.Account().Projects().Get(cmd.Context(), projectID)
+				if err != nil {
+					return time.Time{}, err
+				}
+				return live.UpdatedAt, nil
+			}); err != nil {
+				return err
+			}
+
 			// For update, we need to provide name (required by SDK)
 			// If only description is provided, we need to fetch current name first
 			updateName := name
@@ -394,6 +405,7 @@ Examples:
 
 	allowDash(cmd, "flag:description")
 
+	addBodyGuardFlags(cmd)
 	return cmd
 }
 

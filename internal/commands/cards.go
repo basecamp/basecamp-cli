@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -1226,6 +1227,16 @@ You can pass either a card ID or a Basecamp URL:
 				return err
 			}
 
+			if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+				live, err := app.Account().Cards().Get(cmd.Context(), cardID)
+				if err != nil {
+					return time.Time{}, err
+				}
+				return live.UpdatedAt, nil
+			}); err != nil {
+				return err
+			}
+
 			req := &basecamp.UpdateCardRequest{}
 			if title != "" {
 				req.Title = &title
@@ -1308,6 +1319,7 @@ You can pass either a card ID or a Basecamp URL:
 	allowDash(cmd, "flag:body")
 
 	addRichTextFormatFlag(cmd)
+	addBodyGuardFlags(cmd)
 	return cmd
 }
 

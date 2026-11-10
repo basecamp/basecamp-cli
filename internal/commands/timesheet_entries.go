@@ -234,6 +234,15 @@ cleared through the API, only replaced.
 				}
 			}
 
+			if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+				live, err := app.Account().Timesheet().Get(cmd.Context(), entryID)
+				if err != nil {
+					return time.Time{}, err
+				}
+				return live.UpdatedAt, nil
+			}); err != nil {
+				return err
+			}
 			entry, err := app.Account().Timesheet().Update(cmd.Context(), entryID, req)
 			if err != nil {
 				return convertSDKError(err)
@@ -251,6 +260,7 @@ cleared through the API, only replaced.
 	cmd.Flags().StringVar(&description, "description", "", "Note about the work")
 	cmd.Flags().StringVar(&person, "person", "", `Person the time is for: ID, name, email or "me"`)
 
+	addBodyGuardFlags(cmd)
 	return cmd
 }
 

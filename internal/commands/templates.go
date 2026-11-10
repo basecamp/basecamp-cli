@@ -523,6 +523,16 @@ func newTemplatesUpdateCmd() *cobra.Command {
 				return err
 			}
 
+			if err := checkBodyUpdate(cmd, func() (time.Time, error) {
+				live, err := app.Account().Templates().Get(cmd.Context(), templateID)
+				if err != nil {
+					return time.Time{}, err
+				}
+				return live.UpdatedAt, nil
+			}); err != nil {
+				return err
+			}
+
 			// SDK requires name for update, fetch current if not provided
 			updateName := name
 			if updateName == "" {
@@ -562,6 +572,7 @@ func newTemplatesUpdateCmd() *cobra.Command {
 
 	allowDash(cmd, "flag:description", "flag:desc")
 
+	addBodyGuardFlags(cmd)
 	return cmd
 }
 

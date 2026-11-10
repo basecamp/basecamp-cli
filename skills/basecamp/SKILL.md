@@ -410,13 +410,9 @@ operation and the API path and payload are known.
 
 ## Mutations
 
-Before changing Basecamp:
-
-1. Resolve the account, project, container, and item unambiguously.
-2. Inspect leaf help for required positional arguments and visibility or
-   notification behavior.
-3. Make the smallest requested change.
-4. Return the resulting ID/URL and summarize what changed.
-
-For destructive or broad operations, preview when the command offers a dry-run
-and do not expand the user's requested scope.
+Resolve account/project/container/item; inspect help, visibility and notifications.
+For guarded updates, fetch the record's `updated_at`; pass it as
+`--if-unmodified-since`. No baseline: unprotected, even first use; no memory.
+GET→PUT races. Boost stays unguarded, as do raw API/MCP/TUI/SDK/other paths.
+Use typed guards, not `api put`. Change only requested items; return ID/URL.
+Preview broad/destructive work.

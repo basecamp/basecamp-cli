@@ -110,6 +110,49 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "comments guarded replacement refuses stale versions before writing" {
+  local todo_out todo_id comment_out comment_id baseline unchanged
+  todo_out=$(basecamp todos create "Guard target $(date +%s)" --list "$QA_TODOLIST" -p "$QA_PROJECT" --json)
+  todo_id=$(echo "$todo_out" | jq -r '.data.id // empty')
+  [[ -n "$todo_id" ]] || fail "No synthetic target returned"
+  comment_out=$(basecamp comments create "$todo_id" "Original synthetic comment" -p "$QA_PROJECT" --json)
+  comment_id=$(echo "$comment_out" | jq -r '.data.id // empty')
+  baseline=$(echo "$comment_out" | jq -r '.data.updated_at // empty')
+  [[ -n "$comment_id" && -n "$baseline" ]] || fail "Missing comment/version"
+
+  run_smoke basecamp comments update "$comment_id" "Matching version writes" \
+    --if-unmodified-since "$baseline" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  run_smoke basecamp comments show "$comment_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.content'
+  assert_json_not_null '.data.updated_at'
+  unchanged=$(echo "$output" | jq -c '.data | {content,updated_at}')
+
+  run_smoke basecamp comments update "$comment_id" "Must not replace human text" \
+    --if-unmodified-since '2000-01-01T00:00:00Z' -p "$QA_PROJECT" --json
+  assert_failure
+  assert_json_value '.ok' 'false'
+  assert_json_value '.error | contains("update conflict")' 'true'
+  run_smoke basecamp comments show "$comment_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.content'
+  assert_json_not_null '.data.updated_at'
+  [[ "$(echo "$output" | jq -c '.data | {content,updated_at}')" == "$unchanged" ]] || fail "Refusal changed the comment"
+
+  run_smoke basecamp comments update "$comment_id" "Explicit override writes" \
+    --if-unmodified-since '2000-01-01T00:00:00Z' --force -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  run_smoke basecamp comments show "$comment_id" -p "$QA_PROJECT" --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.content | contains("Explicit override writes")' 'true'
+}
+
 @test "comments trash trashes a comment" {
   local id_file="$BATS_FILE_TMPDIR/direct_comment_id"
   [[ -f "$id_file" ]] || mark_unverifiable "No comment created in prior test"
