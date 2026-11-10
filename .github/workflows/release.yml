@@ -20,9 +20,9 @@ jobs:
       security-events: write
       pull-requests: read
 
-  # Invoked here rather than merely run beforehand: scripts/release.sh commits
-  # and pushes a release-prep commit to main *before* tagging, so anything run
-  # ahead of time covers the wrong SHA. As a called workflow this runs against
+  # Invoked here rather than merely run beforehand: a stable release's
+  # release-prep commit merges to main through its PR *before* tagging, so
+  # anything run ahead of time covers the wrong SHA. As a called workflow this runs against
   # the exact tag SHA.
   #
   # contents: read is required and cannot be inherited — this workflow sets
