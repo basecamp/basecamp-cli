@@ -43,6 +43,7 @@ HOOK
   cat > scripts/update-nix-flake.sh <<'STUB'
 #!/usr/bin/env bash
 echo "update-nix-flake $1" >> "$LOG"
+grep -q "version = \"$1\"" nix/package.nix && exit 2
 sed -i.bak "s/version = \"[^\"]*\"/version = \"$1\"/" nix/package.nix
 rm -f nix/package.nix.bak
 STUB
@@ -86,6 +87,9 @@ teardown() {
   rm -rf "$WORK"
 }
 
+# Bash's errexit ignores a command negated with `!`, so `! cmd` on its own line
+# never fails a bats test. A function returning non-zero does.
+not() { if "$@"; then return 1; fi; }
 origin() { git --git-dir="$WORK/origin.git" "$@"; }
 versions() {
   echo "$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' nix/package.nix)" \
@@ -112,14 +116,14 @@ merge_release_pr() {
 
   [ "$(release_pushes)" = "refs/heads/release/v0.2.0" ]
   [ "$(origin rev-parse main)" = "$BASE" ]
-  ! origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
+  not origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
   [ "$(origin log -1 --format=%s release/v0.2.0)" = "Update nix flake and plugin version for v0.2.0" ]
   [ "$(origin rev-parse release/v0.2.0^)" = "$BASE" ]
   origin show release/v0.2.0:nix/package.nix | grep -q 'version = "0.2.0"'
   [ "$(origin show release/v0.2.0:.claude-plugin/plugin.json | jq -r .version)" = "0.2.0" ]
   [ "$(origin show release/v0.2.0:.codex-plugin/plugin.json | jq -r .version)" = "0.2.0" ]
   grep -q -- '^gh pr create --base main --head release/v0.2.0 --label release --title Prepare\\ v0.2.0\\ release' "$GH_LOG"
-  ! grep -q -- '--admin\|--auto\|merge' "$GH_LOG"
+  not grep -qE -- '^gh pr merge|--admin|--auto' "$GH_LOG"
   grep -q 'nix/package.nix' "$GH_LOG"
   grep -q 'codex-plugin/plugin.json' "$GH_LOG"
 
@@ -154,13 +158,13 @@ merge_release_pr() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Opened the release PR"* ]]
   [ "$(release_pushes)" = "refs/heads/release/v0.3.0" ]
-  ! origin rev-parse -q --verify refs/tags/v0.3.0 >/dev/null
+  not origin rev-parse -q --verify refs/tags/v0.3.0 >/dev/null
 }
 
 @test "partly stamped metadata is not taken for a stamped release" {
-  jq '.version = "0.2.0"' .claude-plugin/plugin.json > p.tmp && mv p.tmp .claude-plugin/plugin.json
+  # Only Nix: release-check holds the two plugin manifests in lockstep.
   sed -i.bak 's/version = "0.1.0"/version = "0.2.0"/' nix/package.nix && rm nix/package.nix.bak
-  git commit -qam "Stamp all but the Codex manifest"
+  git commit -qam "Stamp Nix only"
   git push -q origin main
   : > "$PUSH_LOG"
 
@@ -168,7 +172,7 @@ merge_release_pr() {
   [ "$status" -eq 0 ]
   [ "$(release_pushes)" = "refs/heads/release/v0.2.0" ]
   [ "$(origin log -1 --format=%s release/v0.2.0)" = "Update plugin version for v0.2.0" ]
-  ! origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
+  not origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
 }
 
 @test "a prerelease tags HEAD and leaves the stable metadata alone" {
@@ -180,7 +184,7 @@ merge_release_pr() {
   [ "$(origin rev-parse main)" = "$BASE" ]
   [ "$(versions)" = "0.1.0 0.1.0 0.1.0" ]
   [ ! -f "$GH_LOG" ]
-  ! grep -q update-nix-flake "$LOG"
+  not grep -q update-nix-flake "$LOG"
 }
 
 @test "a dry run of an unstamped release checks everything and creates nothing" {
@@ -191,11 +195,11 @@ merge_release_pr() {
 
   [ -z "$(release_pushes)" ]
   [ ! -f "$GH_LOG" ]
-  ! git rev-parse -q --verify refs/heads/release/v0.2.0 >/dev/null
+  not git rev-parse -q --verify refs/heads/release/v0.2.0 >/dev/null
   [ "$(git rev-parse HEAD)" = "$BASE" ]
   [ "$(versions)" = "0.1.0 0.1.0 0.1.0" ]
   grep -q '^release-check$' "$LOG"
-  ! grep -q update-nix-flake "$LOG"
+  not grep -q update-nix-flake "$LOG"
 }
 
 @test "a dry run of a stamped release creates no tag" {
@@ -205,7 +209,7 @@ merge_release_pr() {
   run scripts/release.sh 0.2.0 --dry-run
   [ "$status" -eq 0 ]
   [ -z "$(release_pushes)" ]
-  ! git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
+  not git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
 }
 
 @test "the Makefile's dry run stays dry" {
@@ -221,7 +225,7 @@ merge_release_pr() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"already open: https://github.com/basecamp/basecamp-cli/pull/998"* ]]
   [ -z "$(release_pushes)" ]
-  ! grep -q 'pr create' "$GH_LOG"
+  not grep -q 'pr create' "$GH_LOG"
   [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]
 }
 
@@ -233,7 +237,7 @@ merge_release_pr() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"origin already has release/v0.2.0 but no open PR"* ]]
   [ -z "$(release_pushes)" ]
-  ! grep -q 'pr create' "$GH_LOG"
+  not grep -q 'pr create' "$GH_LOG"
   [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]
   [ -z "$(git status --porcelain)" ]
 }
@@ -331,8 +335,8 @@ HOOK
   run scripts/release.sh 0.2.0
   [ "$status" -eq 1 ]
   [[ "$output" == *"was rejected"* ]]
-  ! origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
-  ! git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
+  not origin rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
+  not git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null
 }
 
 @test "refuses to release from a branch other than main" {
@@ -341,4 +345,51 @@ HOOK
   [ "$status" -eq 1 ]
   [[ "$output" == *"Must be on main"* ]]
   [ -z "$(release_pushes)" ]
+}
+
+@test "a stable tag waits for a Nix flake that still needs an update at the merged commit" {
+  scripts/release.sh 0.2.0 >/dev/null
+  merge_release_pr 0.2.0
+  MERGED=$(git rev-parse HEAD)
+  cat > scripts/update-nix-flake.sh <<'STUB'
+#!/usr/bin/env bash
+printf '{\n  version = "%s";\n  vendorHash = "new";\n}\n' "$1" > nix/package.nix
+echo "  vendorHash: updated"
+STUB
+  git commit -qam "Dependencies moved after the release PR"
+  git push -q origin main
+  : > "$PUSH_LOG"
+  MERGED=$(git rev-parse HEAD)
+
+  run scripts/release.sh 0.2.0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"nix/package.nix needs an update"* ]]
+  [ -z "$(release_pushes)" ]
+  not git rev-parse -q --verify refs/tags/v0.2.0
+  [ -z "$(git status --porcelain)" ]
+  [ "$(git rev-parse HEAD)" = "$MERGED" ]
+}
+
+@test "a stable tag verifies the Nix flake at the commit it tags" {
+  scripts/release.sh 0.2.0 >/dev/null
+  merge_release_pr 0.2.0
+  : > "$LOG"
+
+  run scripts/release.sh 0.2.0
+  [ "$status" -eq 0 ]
+  grep -q '^update-nix-flake 0.2.0$' "$LOG"
+}
+
+@test "a local release branch from an earlier attempt is left alone" {
+  git switch -q -c release/v0.2.0
+  git commit -q --allow-empty -m "Local work"
+  LOCAL_WORK=$(git rev-parse HEAD)
+  git switch -q main
+
+  run scripts/release.sh 0.2.0
+  [ "$status" -eq 0 ]
+  [ "$(git rev-parse release/v0.2.0)" = "$LOCAL_WORK" ]
+  [ "$(release_pushes)" = "refs/heads/release/v0.2.0" ]
+  [ "$(origin rev-parse release/v0.2.0^)" = "$BASE" ]
+  [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]
 }

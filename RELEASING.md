@@ -29,8 +29,10 @@ run tags `HEAD` of `main` and pushes the tag.
 make release VERSION=0.2.0 DRY_RUN=1
 ```
 
-A dry run runs every check and says which step a real run would take (open the
-release PR, or push the tag), without creating a branch, PR or tag.
+A dry run runs the release checks and says which step a real run would take
+(open the release PR, or push the tag), without creating a branch, PR or tag. It
+skips the Nix build and doesn't look for an existing release PR or branch, which
+the real run refuses on.
 
 ## What happens
 
@@ -41,17 +43,21 @@ release PR, or push the tag), without creating a branch, PR or tag.
 3. Refuses a tag that already exists at another commit, before anything is pushed
 4. Runs `make release-check` (quality checks, vuln scan, replace-check, race-test, surface compat)
 5. For a **stable** version whose metadata on `main` is not yet stamped with it
-   (the first run): on a `release/vX.Y.Z` branch, updates `nix/package.nix`
+   (the first run): for a `release/vX.Y.Z` branch, updates `nix/package.nix`
    (`scripts/update-nix-flake.sh`, which needs Docker) and stamps
-   `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, commits, pushes
-   that branch, opens a "Prepare vX.Y.Z release" PR labelled `release`, returns
+   `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`, commits on a
+   detached `HEAD`, pushes that commit as the branch, opens a "Prepare vX.Y.Z release" PR labelled `release`, returns
    to `main` and stops. Running it again while that PR is open points at the PR
    rather than opening another, and a `release/vX.Y.Z` branch on origin with no
    open PR is refused rather than pushed over. A failure partway puts the
    metadata back and returns to `main`
 6. Once `main` carries all three stamps for exactly that version (the run after
    the PR is merged), or for any prerelease: creates annotated tag `v$VERSION` at
-   `HEAD` and pushes only the tag. A rejected tag push removes the local tag
+   `HEAD` and pushes only the tag. A stable release first verifies the Nix flake
+   at that commit again (`scripts/update-nix-flake.sh`), since dependency changes
+   may have merged after the release PR; if `nix/package.nix` would change, it
+   tags nothing and asks for a corrective PR. A rejected tag push removes the
+   local tag
 7. GitHub Actions [release workflow](.github/workflows/release.yml) runs:
    - Security scan + full test suite + CLI surface compatibility check
    - Collects PGO profile from benchmarks
@@ -140,6 +146,7 @@ the previous one: rerun the job once the cause is fixed.
 
 - On `main` branch with clean, synced working tree
 - `gh`, signed in, for the release PR of a stable release
+- Docker, for the Nix build both runs of a stable release make
 - No `replace` directives in go.mod
 - `make release-check` passes (includes check, replace-check, vuln scan, race-test, surface compat)
 

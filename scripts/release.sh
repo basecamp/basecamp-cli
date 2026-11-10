@@ -72,8 +72,8 @@ fi
 # can be checked out to undo half-made edits: a failed Nix update or plugin
 # stamp must not leave a dirty tree that blocks the next attempt. Checkout from
 # HEAD, not the index, so a failed release commit (hook, signing) is unstaged
-# too. A failure while preparing the release PR also puts the clone back on
-# main, where the next attempt starts.
+# too. A failure while preparing the release PR, which stamps on a detached
+# HEAD, also puts the clone back on main, where the next attempt starts.
 METADATA_FILES=(nix/package.nix .claude-plugin/plugin.json .codex-plugin/plugin.json)
 restore_release_metadata() {
   if [[ "${1:-1}" -ne 0 ]]; then
@@ -162,7 +162,9 @@ open_release_pr() {
     die "origin already has ${branch} but no open PR from it. Open a PR from it, or delete it (git push origin --delete ${branch}) and re-run."
   fi
 
-  git switch --quiet -C "${branch}"
+  # Stamp on a detached HEAD and push it as the branch: no local branch of
+  # that name is created, so none left from an earlier attempt is reset.
+  git switch --quiet --detach
 
   info "Updating Nix flake"
   scripts/update-nix-flake.sh "${VERSION}" || nix_rc=$?
@@ -186,7 +188,7 @@ open_release_pr() {
     commit_msg="Update plugin version for ${TAG}"
   fi
   git commit --quiet -m "${commit_msg}"
-  git push --quiet --set-upstream origin "${branch}"
+  git push --quiet origin "HEAD:refs/heads/${branch}"
 
   # One Markdown list item per file the commit touches, each in backticks.
   # shellcheck disable=SC2016
@@ -222,6 +224,23 @@ elif ! metadata_stamped; then
   exit 0
 else
   info "Release metadata is stamped for ${VERSION}"
+  # The stamps say nothing about what merged since the release PR was built: a
+  # dependency or toolchain change can break the flake at the commit about to
+  # be tagged, and the release workflow verifies Nix only after publishing.
+  # Verify it here, at the tagged commit, as the single-run release did.
+  info "Verifying the Nix flake at ${LOCAL:0:7}"
+  if is_dry_run; then
+    echo "  (skipped — dry run)"
+  else
+    NIX_RC=0
+    scripts/update-nix-flake.sh "${VERSION}" || NIX_RC=$?
+    if [[ "${NIX_RC}" -eq 0 ]]; then
+      die "nix/package.nix needs an update at ${LOCAL:0:7} (above). Nothing was tagged; land it through a PR (make update-nix-hash) and re-run."
+    elif [[ "${NIX_RC}" -ne 2 ]]; then
+      die "scripts/update-nix-flake.sh failed (exit ${NIX_RC}). Nothing was tagged."
+    fi
+    echo "  nix flake: verified"
+  fi
 fi
 
 # --- Handle tag ---

@@ -216,6 +216,24 @@ func TestStampCodexPluginVersionCleansTemporaryFileAfterFailure(t *testing.T) {
 	assert.Empty(t, temporaryFiles)
 }
 
+func TestStampPluginVersionCleansTemporaryFileAfterFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("release scripts require a POSIX shell")
+	}
+	root := repositoryRoot(t)
+	fixture := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(fixture, ".claude-plugin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(fixture, ".claude-plugin", "plugin.json"), []byte("not json\n"), 0o644))
+
+	cmd := exec.CommandContext(context.Background(), filepath.Join(root, "scripts", "stamp-plugin-version.sh"), "1.2.3")
+	cmd.Dir = fixture
+	require.Error(t, cmd.Run())
+
+	temporaryFiles, err := filepath.Glob(filepath.Join(fixture, ".claude-plugin", "plugin.json.tmp*"))
+	require.NoError(t, err)
+	assert.Empty(t, temporaryFiles)
+}
+
 func TestReleaseWiringStampsBothStableManifests(t *testing.T) {
 	root := repositoryRoot(t)
 	goreleaser := readFile(t, filepath.Join(root, ".goreleaser.yaml"))
