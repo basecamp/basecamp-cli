@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,7 +58,7 @@ func TestOverride(t *testing.T) {
 func TestNothingAdvertisedUntilDetected(t *testing.T) {
 	now := time.Now()
 	s := newTestStore(t, &now)
-	key := Key("https://3.basecampapi.com", "1")
+	key := Key("https://3.basecampapi.com", "1", "")
 
 	assert.False(t, s.Visible())
 	assert.False(t, s.Enabled(key))
@@ -67,7 +68,7 @@ func TestNothingAdvertisedUntilDetected(t *testing.T) {
 func TestDetectRecordsAdvertised(t *testing.T) {
 	now := time.Now()
 	s := newTestStore(t, &now)
-	key := Key("https://3.basecampapi.com/", "1")
+	key := Key("https://3.basecampapi.com/", "1", "")
 
 	advertised, err := s.Detect(context.Background(), &fakeGetter{}, key)
 	require.NoError(t, err)
@@ -78,13 +79,13 @@ func TestDetectRecordsAdvertised(t *testing.T) {
 
 	// Another account on the machine is not enabled by this one's answer,
 	// though help (which cannot know the account) shows the command.
-	assert.False(t, s.Enabled(Key("https://3.basecampapi.com", "2")))
+	assert.False(t, s.Enabled(Key("https://3.basecampapi.com", "2", "")))
 }
 
 func TestDetectRecordsNotFoundAsOff(t *testing.T) {
 	now := time.Now()
 	s := newTestStore(t, &now)
-	key := Key("", "1")
+	key := Key("", "1", "")
 	s.Record(key, true)
 
 	advertised, err := s.Detect(context.Background(), &fakeGetter{err: basecamp.ErrNotFound("Resource", "x")}, key)
@@ -97,7 +98,7 @@ func TestDetectRecordsNotFoundAsOff(t *testing.T) {
 func TestCachedAnswerExpiresAfterTTL(t *testing.T) {
 	now := time.Now()
 	s := newTestStore(t, &now)
-	key := Key("", "1")
+	key := Key("", "1", "")
 	s.Record(key, true)
 
 	now = now.Add(TTL - time.Minute)
@@ -110,7 +111,7 @@ func TestCachedAnswerExpiresAfterTTL(t *testing.T) {
 func TestFailedDetectionKeepsAnswerAndBacksOff(t *testing.T) {
 	now := time.Now()
 	s := newTestStore(t, &now)
-	key := Key("", "1")
+	key := Key("", "1", "")
 	s.Record(key, true)
 	now = now.Add(TTL + time.Minute)
 
@@ -126,7 +127,7 @@ func TestFailedDetectionKeepsAnswerAndBacksOff(t *testing.T) {
 func TestOverrideWinsOverCache(t *testing.T) {
 	now := time.Now()
 	s := newTestStore(t, &now)
-	key := Key("", "1")
+	key := Key("", "1", "")
 	s.Record(key, true)
 
 	t.Setenv(EnvOverride, "0")
@@ -146,7 +147,7 @@ func TestCorruptStateReadsAsNothingAdvertised(t *testing.T) {
 	s := NewStore(dir)
 	assert.False(t, s.Visible())
 
-	s.Record(Key("", "1"), true)
+	s.Record(Key("", "1", ""), true)
 	assert.True(t, s.Visible(), "a corrupt file is replaced by the next answer")
 }
 
@@ -154,7 +155,7 @@ func TestDefaultStoreHonorsCacheDirEnv(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("BASECAMP_CACHE_DIR", dir)
 	t.Setenv(EnvOverride, "")
-	DefaultStore().Record(Key("", "1"), true)
+	DefaultStore().Record(Key("", "1", ""), true)
 	_, err := os.Stat(filepath.Join(dir, stateFile))
 	require.NoError(t, err)
 }
@@ -179,4 +180,27 @@ func TestCategories(t *testing.T) {
 	for _, c := range []string{"", "Bug", "feature", "bug "} {
 		assert.False(t, ValidCategory(c), c)
 	}
+}
+
+func TestKeySeparatesCredentials(t *testing.T) {
+	s := NewStore(t.TempDir())
+	t.Setenv(EnvOverride, "")
+	s.Record(Key("", "1", "profile:staff"), true)
+	assert.True(t, s.Enabled(Key("", "1", "profile:staff")))
+	assert.False(t, s.Enabled(Key("", "1", "profile:customer")), "another person in the same account has their own answer")
+	assert.True(t, s.Visible(), "help still shows the command once any credential saw a 200")
+}
+
+func TestCredentialNamesTheTokenWithoutHoldingIt(t *testing.T) {
+	t.Setenv("BASECAMP_TOKEN", "")
+	assert.Equal(t, "profile:staff", Credential("profile:staff"))
+
+	t.Setenv("BASECAMP_TOKEN", "secret-one")
+	one := Credential("profile:staff")
+	assert.True(t, strings.HasPrefix(one, "token:"), "BASECAMP_TOKEN wins over the stored credential")
+	assert.NotContains(t, one, "secret-one")
+	assert.Equal(t, one, Credential("profile:other"), "the token, not the profile, names the person")
+
+	t.Setenv("BASECAMP_TOKEN", "secret-two")
+	assert.NotEqual(t, one, Credential("profile:staff"))
 }

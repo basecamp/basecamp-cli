@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/feedback"
 	"github.com/basecamp/basecamp-cli/internal/observability"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -42,6 +43,7 @@ func submitRoute(status int, body string) stubRoute {
 func useFeedbackStore(t *testing.T) *feedback.Store {
 	t.Helper()
 	t.Setenv(feedback.EnvOverride, "")
+	t.Setenv("BASECAMP_TOKEN", "")
 	store := feedback.NewStore(t.TempDir())
 	saved := feedbackStore
 	feedbackStore = func() *feedback.Store { return store }
@@ -49,7 +51,10 @@ func useFeedbackStore(t *testing.T) *feedback.Store {
 	return store
 }
 
-var feedbackKey = feedback.Key("", "99999")
+// feedbackKey is the detection key of setupRecordingTestApp's app: no base
+// URL, account 99999, and the default login's credential (useFeedbackStore
+// clears BASECAMP_TOKEN).
+var feedbackKey = feedback.Key("", "99999", config.NormalizeBaseURL(""))
 
 func requests(transport *recordingTransport, method string) []recordedCall {
 	var out []recordedCall
@@ -386,6 +391,22 @@ func TestFeedbackHint(t *testing.T) {
 		assert.Empty(t, hint(t, cmd, output.ErrUsage("bad flag")))
 		assert.Empty(t, hint(t, cmd, convertSDKError(basecamp.ErrAuth("expired"))))
 		assert.Empty(t, hint(t, cmd, errors.New("plain")))
+	})
+	t.Run("absent for another person in the same account", func(t *testing.T) {
+		store := useFeedbackStore(t)
+		app, _ := setupRecordingTestApp(t)
+		app.Config.ActiveProfile = "staff"
+		store.Record(feedbackStoreKey(app), true)
+
+		app.Config.ActiveProfile = "customer"
+		var w bytes.Buffer
+		FeedbackHint(&w, cmd, app, serverErr)
+		assert.Empty(t, w.String(), "one person's answer is not another's")
+
+		t.Setenv("BASECAMP_TOKEN", "a-token")
+		app.Config.ActiveProfile = "staff"
+		FeedbackHint(&w, cmd, app, serverErr)
+		assert.Empty(t, w.String(), "BASECAMP_TOKEN is its own person, whatever the profile")
 	})
 	t.Run("absent on feedback itself", func(t *testing.T) {
 		useFeedbackStore(t).Record(feedbackKey, true)

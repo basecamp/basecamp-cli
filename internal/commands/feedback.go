@@ -77,7 +77,7 @@ The report is sent with your own login and answered with a receipt ID.`,
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-			key := feedback.Key(app.Config.BaseURL, app.Config.AccountID)
+			key := feedbackStoreKey(app)
 			account := app.Account()
 
 			// Ask afresh unless forced on: a person may have been switched on
@@ -246,7 +246,7 @@ func RefreshFeedbackDetection(cmd *cobra.Command, app *appctx.App) {
 		return
 	}
 	store := feedbackStore()
-	key := feedback.Key(app.Config.BaseURL, app.Config.AccountID)
+	key := feedbackStoreKey(app)
 	if !store.NeedsRefresh(key) || !store.BeginRefresh(key) {
 		return
 	}
@@ -281,7 +281,17 @@ func FeedbackHint(w io.Writer, cmd *cobra.Command, app *appctx.App, err error) {
 	if app.RequireAccount() != nil {
 		return
 	}
-	if feedbackStore().Enabled(feedback.Key(app.Config.BaseURL, app.Config.AccountID)) {
+	if feedbackStore().Enabled(feedbackStoreKey(app)) {
 		fmt.Fprintln(w, feedback.Hint)
 	}
+}
+
+// feedbackStoreKey names the cached detection answer for the app's host, account
+// and the credential its requests go out with.
+func feedbackStoreKey(app *appctx.App) string {
+	stored := ""
+	if app.Auth != nil {
+		stored = app.Auth.CredentialKey()
+	}
+	return feedback.Key(app.Config.BaseURL, app.Config.AccountID, feedback.Credential(stored))
 }

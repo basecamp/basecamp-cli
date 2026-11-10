@@ -124,7 +124,7 @@ func TestFeedbackHelpAndBadFlagsFailWhileHidden(t *testing.T) {
 
 func TestFeedbackListedOnceAdvertised(t *testing.T) {
 	isolateFeedback(t)
-	feedback.DefaultStore().Record(feedback.Key("", "1"), true)
+	feedback.DefaultStore().Record(feedback.Key("", "1", ""), true)
 
 	assert.Contains(t, rootOutput(t, "--help"), "basecamp feedback")
 	assert.True(t, namesFeedback(t, rootOutput(t, "--help", "--agent")))
@@ -142,7 +142,7 @@ func TestFeedbackOverrideControlsVisibility(t *testing.T) {
 	t.Setenv(feedback.EnvOverride, "1")
 	require.Contains(t, rootOutput(t, "--help"), "basecamp feedback")
 
-	feedback.DefaultStore().Record(feedback.Key("", "1"), true)
+	feedback.DefaultStore().Record(feedback.Key("", "1", ""), true)
 	t.Setenv(feedback.EnvOverride, "0")
 	assert.NotContains(t, rootOutput(t, "--help"), "feedback")
 }

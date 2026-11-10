@@ -11,6 +11,8 @@ package feedback
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -94,8 +96,8 @@ type state struct {
 	Accounts map[string]entry `json:"accounts"`
 }
 
-// Store is the cached detection state, one entry per Basecamp host and
-// account. It lives in the CLI's default cache directory rather than a
+// Store is the cached detection state, one entry per Basecamp host, account
+// and credential. It lives in the CLI's default cache directory rather than a
 // profile's, because help is rendered before any profile is resolved.
 type Store struct {
 	path string
@@ -117,13 +119,27 @@ func NewStore(dir string) *Store {
 	return &Store{path: filepath.Join(dir, stateFile), now: time.Now}
 }
 
-// Key names one account on one Basecamp host.
-func Key(baseURL, accountID string) string {
+// Key names one person's view of one account on one Basecamp host. Basecamp
+// can answer differently for two people in the same account, so the answer
+// is kept per credential: credential names the one in use (see Credential).
+func Key(baseURL, accountID, credential string) string {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
 		baseURL = config.Default().BaseURL
 	}
-	return baseURL + " " + accountID
+	return baseURL + " " + accountID + " " + credential
+}
+
+// Credential names the credential a request goes out with, without holding
+// it: a BASECAMP_TOKEN, which wins over any stored credential, by a short
+// digest of the token, and otherwise the stored credential's key (a profile,
+// or the host for the default login).
+func Credential(storedKey string) string {
+	if token := os.Getenv("BASECAMP_TOKEN"); token != "" {
+		sum := sha256.Sum256([]byte(token))
+		return "token:" + hex.EncodeToString(sum[:8])
+	}
+	return storedKey
 }
 
 func (s *Store) load() state {
