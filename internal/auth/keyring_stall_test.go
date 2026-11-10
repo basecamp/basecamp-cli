@@ -458,6 +458,32 @@ func TestTheHeldTokenIsServedWhileTheKeyringStalls(t *testing.T) {
 	}
 }
 
+// A held-only request is served the credential this process already read,
+// without reading the keyring, and refused when nothing fresh is held.
+func TestAHeldOnlyRequestNeverReadsTheStore(t *testing.T) {
+	store, machine, _ := stallingStore(t)
+	saveCreds(t, machine, "profile:agent", liveCreds("held-token"))
+	mgr := stallingManager(t, store)
+	heldOnly := WithHeldCredentialOnly(t.Context())
+
+	_, err := mgr.AccessToken(heldOnly)
+	require.ErrorIs(t, err, errNothingHeld, "nothing read yet, nothing to serve")
+	assert.Zero(t, machine.reads, "a held-only request reads nothing")
+
+	_, err = mgr.AccessToken(t.Context())
+	require.NoError(t, err)
+	reads := machine.reads
+
+	token, err := mgr.AccessToken(heldOnly)
+	require.NoError(t, err)
+	assert.Equal(t, "held-token", token)
+	assert.Equal(t, reads, machine.reads, "served from what this process holds")
+
+	store.keep("profile:agent", &Credentials{AccessToken: "t", OAuthType: "agent", ExpiresAt: time.Now().Add(time.Minute).Unix()})
+	_, err = mgr.AccessToken(heldOnly)
+	require.ErrorIs(t, err, errNothingHeld, "a token due for renewal is not renewed for it")
+}
+
 // A Secret Service that is restarting can report a credential it gave this
 // process a moment ago as missing. The read asks again before believing it;
 // a credential that is really gone is still gone, and is forgotten.

@@ -268,6 +268,23 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 	return m.storedAccessToken(ctx, "Not authenticated for")
 }
 
+// heldOnlyKey marks a request that may use only the credential this process
+// already holds (WithHeldCredentialOnly).
+type heldOnlyKey struct{}
+
+// errNothingHeld refuses a held-only token when no fresh credential is held.
+var errNothingHeld = errors.New("no credential held for a request that may not read or renew one")
+
+// WithHeldCredentialOnly marks ctx so its token comes only from the credential
+// this process already read or wrote: no credential-store or keyring read and
+// no renewal. With nothing held, or a token due for renewal, the token is
+// refused and the request is never sent. It is for requests that ride along
+// after a command's own, such as the feedback detection, so they cannot stall
+// on a keyring or renew a token for themselves.
+func WithHeldCredentialOnly(ctx context.Context) context.Context {
+	return context.WithValue(ctx, heldOnlyKey{}, true)
+}
+
 // StoredAccessToken returns a valid access token from the credential store,
 // renewing it if needed. Unlike AccessToken, this ignores the BASECAMP_TOKEN
 // environment variable and always uses stored OAuth credentials.
@@ -300,6 +317,13 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 	defer m.mu.Unlock()
 
 	credKey := m.credentialKey()
+	if heldOnly, _ := ctx.Value(heldOnlyKey{}).(bool); heldOnly {
+		held := m.store.heldCredential(credKey)
+		if held == nil || needsRenewal(held) {
+			return "", errNothingHeld
+		}
+		return m.servableToken(credKey, held)
+	}
 	creds, err := m.store.LoadContext(ctx, credKey)
 	if err != nil {
 		if held := m.heldWhileKeyringStalls(ctx, credKey, err); held != nil {

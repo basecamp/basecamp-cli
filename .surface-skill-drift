@@ -37,3 +37,7 @@ FLAG basecamp --unserve
 # Per-Campfire policy flags on the hidden connect setup command.
 FLAG basecamp --listen-campfire
 FLAG basecamp --no-listen-campfire
+# Not drift: feedback is hidden on purpose until detection (GET
+# /{account}/feedback.json answers 200) or BASECAMP_FEEDBACK=1 shows it, and the
+# skill names it only where `basecamp commands` lists it.
+CMD basecamp feedback

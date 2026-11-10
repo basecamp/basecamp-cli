@@ -88,8 +88,8 @@ argument-hint: "[action] [args...]"
 
 # Basecamp CLI
 
-Use the installed CLI as the command reference. This skill defines the operating
-rules; it does not duplicate the CLI's command catalog.
+The installed CLI is the command reference. This skill sets the operating rules
+and does not duplicate its catalog.
 
 ## Discovery-first workflow
 
@@ -117,9 +117,8 @@ For each task:
 5. Execute with an explicit output mode, then read structured errors and
    breadcrumbs before deciding what to do next.
 
-Targeted leaf help is cheap and local; root help returns the full command catalog
-and is not token-cheap. Do not load root help to confirm global flags
-already documented by this skill. For obvious Docs & Files requests, route
+Leaf help is cheap and local; root help returns the full catalog and costs many
+tokens. Do not load it to confirm global flags this skill documents. For obvious Docs & Files requests, route
 straight to `files list`, `files download`, or `files uploads create` before
 trying parent or root help. A subcommand's `inherited_flags` is intentionally
 short; global flags such as `--agent`, `--jq`, `--profile`, and `--verbose` still
@@ -167,8 +166,8 @@ Choose deliberately:
 | Consume data without an envelope | `--agent` |
 | Present portable output directly to a person | `--md` |
 
-`--jq` implies JSON. It normally filters the JSON envelope, so data is commonly
-under `.data`. With `--agent --jq`, it filters the data-only payload. Use `--md`
+`--jq` implies JSON and filters the envelope, so data is usually under `.data`.
+With `--agent --jq`, it filters the data-only payload. Use `--md`
 for human-facing listings, but remember that `--md` alone does not suppress
 interactive prompts. Add enough scope to remove ambiguity or set
 `BASECAMP_NONINTERACTIVE=1`.
@@ -182,8 +181,8 @@ basecamp <leaf-command> --jq '[.data[] | {id, name}]'
 
 ## Project, account, and pagination scope
 
-Do not infer that a command is project-scoped or account-wide from its noun.
-Inspect the leaf help and its notes. Use the user's explicit project/account when
+Do not infer project or account scope from a command's noun; inspect leaf help
+and its notes. Use the user's explicit project/account when
 provided; otherwise honor trusted local configuration.
 
 For paginated commands, inspect help before combining pagination flags. In
@@ -387,9 +386,9 @@ mentions work.
 Structured failures include `error`, `code`, `retryable`, and often `hint`.
 
 - Retry only when `retryable` is true, with bounded backoff.
-- `retryable: false` means there is no positive retry signal; it covers both
-  known verdicts and unclassified failures. Inspect `code`, `error`, and `hint`
-  before choosing recovery, and do not blindly repeat the same call.
+- `retryable: false` is no retry signal, for known verdicts and unclassified
+  failures alike. Inspect `code`, `error` and `hint` before choosing recovery;
+  do not blindly repeat the call.
 - For usage errors, inspect leaf help and supply the named positional argument.
 - If the CLI rejects a command or flag as unknown, check the group's help for
   its current form first. If this skill names it and the help lacks it, the CLI
@@ -402,9 +401,11 @@ Structured failures include `error`, `code`, `retryable`, and often `hint`.
 - Before any login recovery, inspect `oauth_type`. An `agent` profile must be
   recovered with the agent/client-credentials flow named by the CLI hint; a
   normal person login can replace the agent identity.
+- `basecamp feedback` reports bugs, missing capabilities or confusing behavior
+  to the Basecamp team, when it appears in `basecamp commands`.
 
-Do not improvise raw API calls merely because a command failed. First inspect the
-relevant help and error hint. Use `basecamp api` only when the CLI has no native
+Do not improvise raw API calls because a command failed; inspect its help and
+error hint first. Use `basecamp api` only when the CLI has no native
 operation and the API path and payload are known.
 
 ## Mutations
