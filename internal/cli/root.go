@@ -20,6 +20,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/commands"
 	"github.com/basecamp/basecamp-cli/internal/completion"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/feedback"
 	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -211,6 +212,7 @@ func NewRootCmd() *cobra.Command {
 
 	cmd.PersistentPostRunE = func(cmd *cobra.Command, args []string) error {
 		app := appctx.FromContext(cmd.Context())
+		commands.RefreshFeedbackDetection(cmd, app)
 		if app != nil {
 			app.Close()
 		}
@@ -302,6 +304,16 @@ func postRunNoticesEnabled(app *appctx.App) bool {
 	return app == nil || (!app.IsMachineOutput() && !app.SuppressPostRunNotices)
 }
 
+// newFeedbackCmd returns the feedback command, which ships dark: it stays out
+// of help and completions until Basecamp has advertised it on this machine or
+// BASECAMP_FEEDBACK forces it on. Deciding reads one small cached file and
+// makes no request.
+func newFeedbackCmd() *cobra.Command {
+	cmd := commands.NewFeedbackCmd()
+	cmd.Hidden = !feedback.DefaultStore().Visible()
+	return cmd
+}
+
 // Execute runs the root command.
 func Execute() {
 	cmd := NewRootCmd()
@@ -386,6 +398,8 @@ func Execute() {
 	cmd.AddCommand(commands.NewMCPCmd())
 	cmd.AddCommand(commands.NewConnectCmd())
 
+	cmd.AddCommand(newFeedbackCmd())
+
 	// Tier-2 stdin guard: reject a stray literal "-" when stdin is piped,
 	// everywhere a command doesn't explicitly accept it — except cobra's
 	// generated meta commands, which are deliberately exempt (see
@@ -394,6 +408,11 @@ func Execute() {
 
 	// Use ExecuteC to get the executed command (for correct context access)
 	executedCmd, err := cmd.ExecuteC()
+
+	// Help of a feedback command that ships dark fails as running it does.
+	if err == nil {
+		err = commands.UnavailableFeedbackHelp(executedCmd)
+	}
 
 	// Bare group command with a positional that matches no subcommand
 	// (e.g. "cards 12345", or "cards 12345 --in X"): Cobra stops at the group
@@ -455,6 +474,7 @@ func Execute() {
 			if app := appctx.FromContext(executedCmd.Context()); app != nil {
 				writeErr := app.Err(err)
 				if writeErr == nil {
+					commands.FeedbackHint(os.Stderr, executedCmd, app, err)
 					os.Exit(output.ExitCodeFor(apiErr.Code))
 				}
 

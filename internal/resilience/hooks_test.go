@@ -292,6 +292,24 @@ func TestGatingHooksRetryAfterHeaderIsHonoredOnAVerdictOperation(t *testing.T) {
 	assert.Greater(t, remaining, 5*time.Second)
 }
 
+// An endpoint quota's 429 sets no block, even with a Retry-After: it answers
+// that one endpoint, and the next command against any other must still run.
+// A 503's Retry-After on the same request is still honored.
+func TestGatingHooksEndpointQuota429SetsNoBlock(t *testing.T) {
+	block := func(status, retryAfter int) time.Duration {
+		hooks := NewGatingHooksFromConfig(NewStore(t.TempDir()), DefaultConfig())
+		ctx := WithEndpointQuota(context.Background())
+		hooks.OnRequestEnd(ctx, basecamp.RequestInfo{Method: "POST"}, basecamp.RequestResult{StatusCode: status, RetryAfter: retryAfter})
+		remaining, err := hooks.rateLimiter.RetryAfterRemaining()
+		require.NoError(t, err)
+		return remaining
+	}
+
+	assert.Zero(t, block(429, 3600), "a quota's Retry-After sets no block")
+	assert.Zero(t, block(429, 0), "a headerless quota 429 sets no block")
+	assert.Greater(t, block(503, 7), 5*time.Second, "a 503's Retry-After is still honored")
+}
+
 func TestGatingHooksResetsStaleHalfOpenAttemptsIntegration(t *testing.T) {
 	// This integration test verifies stale cleanup works even when the rate
 	// limiter updates State.UpdatedAt before the circuit breaker runs.

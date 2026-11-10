@@ -161,6 +161,22 @@ func CommandCategories() []CommandCategory {
 	}
 }
 
+// withVisibleFeedback lists feedback under Additional Commands while it is
+// shown in help. It is not in the static catalog because it ships dark.
+func withVisibleFeedback(cmd *cobra.Command, categories []CommandCategory) []CommandCategory {
+	fb, _, err := cmd.Root().Find([]string{"feedback"})
+	if err != nil || fb == cmd.Root() || fb.Hidden {
+		return categories
+	}
+	for i := range categories {
+		if categories[i].Name == "Additional Commands" {
+			categories[i].Commands = append(categories[i].Commands,
+				CommandInfo{Name: "feedback", Category: "additional", Description: fb.Short})
+		}
+	}
+	return categories
+}
+
 // CatalogCommandNames returns all command names from the catalog.
 // Used by tests to verify catalog matches registered commands.
 func CatalogCommandNames() []string {
@@ -188,7 +204,7 @@ func NewCommandsCmd() *cobra.Command {
 		Long:    "List all available basecamp commands organized by category.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			categories := CommandCategories()
+			categories := withVisibleFeedback(cmd, CommandCategories())
 
 			// For styled terminal output, render grouped columns directly
 			if app.Output.EffectiveFormat() == output.FormatStyled {

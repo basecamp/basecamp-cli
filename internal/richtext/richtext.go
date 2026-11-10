@@ -117,14 +117,15 @@ var (
 // richTextTags are the tags MarkdownToHTML keeps when they are written inside
 // Markdown: the content elements of Basecamp's rich text. Any other tag is
 // escaped, so prose such as "a Vec<String>" stays text, and so does markup the
-// rich text has no element for.
+// rich text has no element for. details and summary fold a block of detail
+// under a one-line summary, which Basecamp's rich text keeps and shows folded.
 var richTextTags = map[string]bool{
 	"a": true, "b": true, "bc-attachment": true, "blockquote": true, "br": true,
-	"caption": true, "code": true, "del": true, "div": true, "em": true,
+	"caption": true, "code": true, "del": true, "details": true, "div": true, "em": true,
 	"figcaption": true, "figure": true, "h1": true, "h2": true, "h3": true,
 	"h4": true, "h5": true, "h6": true, "hr": true, "i": true, "img": true,
 	"li": true, "ol": true, "p": true, "pre": true, "s": true, "span": true,
-	"strike": true, "strong": true, "table": true, "tbody": true, "td": true,
+	"strike": true, "strong": true, "summary": true, "table": true, "tbody": true, "td": true,
 	"tfoot": true, "th": true, "thead": true, "tr": true, "u": true, "ul": true,
 }
 

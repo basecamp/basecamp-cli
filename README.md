@@ -271,6 +271,18 @@ basecamp connect setup -P my-agent --serve 12345        # who may give it work, 
 basecamp connect -P my-agent                            # the watcher
 ```
 
+Campfires normally require an @mention. For a small Campfire where every
+trusted message should reach the agent, opt it in and restart the connector:
+
+```bash
+basecamp chat list --project 12345 -P my-agent --json
+basecamp connect setup -P my-agent --listen-campfire 12345:67890
+```
+
+Use the Campfire id from the listing. Existing trust rules still apply, and
+other agents still need mentions. To restore mentions, run setup with
+`--no-listen-campfire 12345:67890` and restart.
+
 An approval may add a connection or replace an existing one: read the approval
 page before proceeding. Personal and team agents can have several connections
 where Basecamp enables adding them for that kind of agent. Otherwise a new

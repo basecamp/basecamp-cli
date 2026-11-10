@@ -243,6 +243,9 @@ func renderRootHelp(w io.Writer, cmd *cobra.Command) {
 	b.WriteString("\n")
 	b.WriteString("  basecamp commands      List all available commands\n")
 	b.WriteString("  basecamp <command> -h  Help for any command\n")
+	if fb, _, err := cmd.Find([]string{"feedback"}); err == nil && fb != cmd && !fb.Hidden {
+		b.WriteString("  basecamp feedback      " + fb.Short + "\n")
+	}
 
 	fmt.Fprint(w, b.String())
 }
