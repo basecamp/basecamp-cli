@@ -15084,6 +15084,7 @@ FLAG basecamp schedule create --cache-dir type=string
 FLAG basecamp schedule create --count type=bool
 FLAG basecamp schedule create --desc type=string
 FLAG basecamp schedule create --description type=string
+FLAG basecamp schedule create --draft type=bool
 FLAG basecamp schedule create --end type=string
 FLAG basecamp schedule create --ends-at type=string
 FLAG basecamp schedule create --format type=string
