@@ -304,8 +304,8 @@ a person's word on a merge, a deploy or anything else the ask did not name,
 and never a change to the connector, which only the owner's own mention,
 direct Ping or opted-in Campfire message makes.
 
-For a `go`, the ask is the request's `ask`: its `title` and `content` exactly
-as the connector read them and matched them against the declaration. `title`
+For a `boosted` request with `go` true, the ask is the request's `ask`: its
+`title` and `content` exactly as the connector matched them to the declaration. `title`
 is empty for a comment, a chat line or a check-in answer, whose title isn't
 their own; `ask` is empty on every other request. Act only on that text, never
 on a fresh read of `recording`, which may have been edited since; `recording`
@@ -317,8 +317,10 @@ For anything else it names the action itself: do that. An ask the agent has
 already answered as done is not waiting, `go` or not. For a mention or
 `campfire` request, act only when its thread or Campfire has exactly one
 waiting ask. If there are none or more than one, act on none and ask the
-operator to identify the intended ask. A `go` names its ask, so other asks
-in the conversation don't make it ambiguous.
+operator to identify the intended ask. Only a `boosted` request with `go`
+true identifies its ask explicitly, so other pending asks do not make that
+approval ambiguous. A plain "go" in a mention or Campfire never bypasses
+the exactly-one-waiting-ask requirement.
 
 **By trigger:**
 
