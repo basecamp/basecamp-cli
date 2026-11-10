@@ -339,15 +339,15 @@ in portable commands.
 
 Basecamp shows blocks flush together unless a blank line in the Markdown
 separates them. Leave one between every two blocks, headings and lists
-included; in prose, a single newline joins lines into one paragraph. Don't
-hand-write HTML: `--format html` is stored as written, so touching blocks and
-`<br>`-stacked lines read as a wall of text.
+too; in prose, a single newline joins lines into one paragraph. Don't
+hand-write HTML: `--format html` is stored as written, blocks touching. To
+fold, wrap Markdown in `<details><summary>What</summary>` and `</details>`,
+each alone on a line, blank lines around.
 
 Rich-text fields support Mermaid diagrams. Put the source in a fenced code block
 with the language `mermaid`, and Basecamp shows the diagram to people reading
-the post. Previews, emails, and exports show the source, and so does a post
-whose source does not parse. Use one where a picture beats prose. Diagram source
-spans several lines, so pass it on stdin:
+the post; previews, emails, exports and source that doesn't parse show the
+text. Use one where a picture beats prose; pass it on stdin:
 
 ````bash
 basecamp messages create "Release flow" - --in "<project>" --json <<'EOF'

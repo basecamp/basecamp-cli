@@ -209,6 +209,10 @@ basecamp pings post <bucket_id> - --profile '<profile>' < reply.md
 **Rich text.** In comments, messages, documents and cards, the CLI converts
 Markdown: headings, **bold**, lists, quotes, fenced code for commands, diffs
 and errors, and pipe tables for real grids. Don't hand-write HTML there.
+When a reply combines its answer with the detail of the work behind it, fold
+that detail: put `<details><summary>What it holds</summary>` and `</details>`
+each alone on a line, with blank lines around them and the Markdown between.
+Never fold the answer, an ask or a blocker.
 Basecamp shows blocks flush against each other unless a blank line in the
 Markdown separates them, so leave one between every two blocks, after a
 heading and around a list too. In prose, a single newline is no break: it
