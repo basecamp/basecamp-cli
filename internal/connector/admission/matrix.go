@@ -17,6 +17,9 @@ const (
 	// none needs a mention; in a group Ping a line is the agent's business
 	// only as a mention.
 	TriggerPinged Trigger = "pinged"
+	// TriggerCampfire is a trusted person's line in a Campfire the operator
+	// opted into hearing without mentions.
+	TriggerCampfire Trigger = "campfire"
 )
 
 // Rule is one row of the trigger matrix: a trigger an event type can admit
@@ -59,7 +62,8 @@ var (
 	ruleBoosted = Rule{Trigger: TriggerBoosted, RequiresServed: true}
 	// Only a line in a Ping admits under pinged, and a Ping is never a served
 	// project, so the rule is not in the matrix: matchPing returns it.
-	rulePinged = Rule{Trigger: TriggerPinged, Acknowledge: true}
+	rulePinged   = Rule{Trigger: TriggerPinged, Acknowledge: true}
+	ruleCampfire = Rule{Trigger: TriggerCampfire, RequiresServed: true, Acknowledge: true}
 )
 
 // eventChatLineCreated is the one type a Ping's lines arrive as.
@@ -77,7 +81,7 @@ func V1Matrix() Matrix {
 		"message.created":   {ruleMentioned},
 		"todo.created":      {ruleMentioned},
 		"card.created":      {ruleMentioned},
-		"chat.line.created": {ruleMentioned},
+		"chat.line.created": {ruleMentioned, ruleCampfire},
 
 		"todo.assignment_changed": {ruleAssigned},
 		"card.assignment_changed": {ruleAssigned},

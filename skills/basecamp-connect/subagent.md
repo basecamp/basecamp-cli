@@ -289,8 +289,8 @@ detail, load the `basecamp` skill.
 - **Never leave a participant unanswered.** If the request is out of bounds,
   say so in the thread, and who can unblock it.
 
-**An operator's go.** A `role` `operator`, `trigger` `mentioned` request that
-says go on a thread where the agent asked for an operator's word is that
+**An operator's go.** A `role` `operator` request with trigger `mentioned` or
+`campfire` that says go on a thread where the agent asked for an operator's word is that
 approval, though its content is only "go". So is a `boosted` request with
 `go` true: the operator boosted a post the agent declared an ask, and theirs
 was the first boost to take it. One ask gets one go: once the operator's
@@ -301,15 +301,16 @@ A `subscribed` one is a reply that didn't mention the agent, and approves
 nothing; neither does a `boosted` one with `go` false, whoever gave it. The go
 is the operator's approval of what the ask names, and only that: it is never
 a person's word on a merge, a deploy or anything else the ask did not name,
-and never a change to the connector, which only the owner's own mention makes.
+and never a change to the connector, which only the owner's own mention,
+direct Ping or opted-in Campfire message makes.
 
 For a `go`, the ask is the request's `ask`: its `title` and `content` exactly
 as the connector read them and matched them against the declaration. `title`
 is empty for a comment, a chat line or a check-in answer, whose title isn't
 their own; `ask` is empty on every other request. Act only on that text, never
 on a fresh read of `recording`, which may have been edited since; `recording`
-and `reply_to` are for replying. For a mention, read the thread for the
-agent's ask. For a code change it names the repo, branch and commit: check
+and `reply_to` are for replying. For a mention or Campfire request, read the
+thread for the agent's ask. For a code change it names the repo, branch and commit: check
 the branch still points at that commit, then push and open the pull request.
 For anything else it names the action itself: do that. An ask the agent has
 already answered as done is not waiting, `go` or not. For a mention, if the
@@ -323,6 +324,10 @@ ambiguous.
 - **`pinged`**: an operator's line in a direct Ping with the agent, said to
   it without a mention. The instruction is `content`, as for `mentioned`.
   Reply in the Ping, chat-sized, as for any Campfire.
+- **`campfire`**: a trusted person's message in a Campfire configured to
+  hear requests without mentions. The instruction is `content`, as for
+  `mentioned`. Reply in the Campfire, chat-sized. The request's `role` still
+  decides its authority.
 - **`assigned`**: the recording is the task. Move the card, do the work, reply
   on it.
 - **`subscribed`**: activity on a thread the agent follows, not an instruction.

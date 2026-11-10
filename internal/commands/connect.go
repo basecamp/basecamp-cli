@@ -245,6 +245,9 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		if r.Class != "" {
 			settings += ", class " + r.Class
 		}
+		for _, fire := range r.ListenCampfires {
+			settings += fmt.Sprintf(", listens to Campfire %d without mentions", fire)
+		}
 		if r.WatchCompletions {
 			settings += ", watches completions"
 		}
@@ -338,11 +341,13 @@ type connectSetupFlags struct {
 	ackBoost   optionalString
 	noAckBoost bool
 
-	serve   []string
-	classes []string
-	watch   []string
-	unwatch []string
-	unserve []string
+	serve             []string
+	classes           []string
+	watch             []string
+	unwatch           []string
+	listenCampfires   []string
+	unlistenCampfires []string
+	unserve           []string
 
 	// guided is the guided setup running this one: a setup that passes says
 	// so in a line, since the guided summary names the agent, its owner and
@@ -411,6 +416,14 @@ serves: --serve <project-id>, --unserve <project-id>. Nothing in a project it
 does not serve is handed off, and nobody is told. --watch-completions <project-id>
 makes the agent hear every trusted completion in that project without being
 assigned.
+
+Campfires. --listen-campfire <project-id>:<campfire-id> makes every trusted
+person's new message in that Campfire a request without an @mention, like a
+public Ping. Other Campfires still require mentions. Existing trust rules
+apply; other agents still need mentions and remain capped.
+--no-listen-campfire <project-id>:<campfire-id> restores mentions. Both flags
+are repeatable and require a served project. Find the Campfire id with
+basecamp chat list --project <project-id>. Restart after changing this setting.
 
 The list is this profile's own. When two connections of one agent serve the
 same project, a request both admit there can be answered twice, so serve
@@ -514,6 +527,8 @@ Examples:
 	fl.StringArrayVar(&f.classes, "class", nil, "Classify a served project: <project-id>=<class>, or <project-id>= to clear it (repeatable)")
 	fl.StringArrayVar(&f.watch, "watch-completions", nil, "Admit every trusted completion in a served project (repeatable)")
 	fl.StringArrayVar(&f.unwatch, "no-watch-completions", nil, "Stop watching a project's completions (repeatable)")
+	fl.StringArrayVar(&f.listenCampfires, "listen-campfire", nil, "Hear trusted messages without mentions: <project-id>:<campfire-id> (repeatable)")
+	fl.StringArrayVar(&f.unlistenCampfires, "no-listen-campfire", nil, "Require mentions again: <project-id>:<campfire-id> (repeatable)")
 	fl.Var(&f.ackBoost, "ack-boost", fmt.Sprintf("Boost the connector acknowledges each request with, as the agent, before handing it off (default %s; at most %d characters)", setup.DefaultAckContent, setup.AckContentMax))
 	fl.BoolVar(&f.noAckBoost, "no-ack-boost", false, "Don't acknowledge requests in the connector; the session reading them boosts instead")
 	cmd.MarkFlagsMutuallyExclusive("operator", "operator-profile")
@@ -1031,6 +1046,28 @@ func (f *connectSetupFlags) changes() (setup.Changes, error) {
 				return ch, output.ErrUsage(fmt.Sprintf("Project %d is given both --watch-completions and --no-watch-completions", id))
 			}
 			ch.WatchCompletions[id] = list.on
+		}
+	}
+	for _, list := range []struct {
+		flag string
+		raw  []string
+		on   bool
+	}{{"--listen-campfire", f.listenCampfires, true}, {"--no-listen-campfire", f.unlistenCampfires, false}} {
+		for _, raw := range list.raw {
+			projectRaw, fireRaw, ok := strings.Cut(raw, ":")
+			project, projectErr := parsePositiveID(list.flag, projectRaw)
+			fire, fireErr := parsePositiveID(list.flag, fireRaw)
+			if !ok || projectErr != nil || fireErr != nil || project == 0 || fire == 0 {
+				return ch, output.ErrUsage(fmt.Sprintf("Invalid %s %q: expected <project-id>:<campfire-id>", list.flag, raw))
+			}
+			if ch.Campfires == nil {
+				ch.Campfires = map[setup.Campfire]bool{}
+			}
+			key := setup.Campfire{Project: project, ID: fire}
+			if prev, seen := ch.Campfires[key]; seen && prev != list.on {
+				return ch, output.ErrUsage(fmt.Sprintf("Campfire %s is given both --listen-campfire and --no-listen-campfire", raw))
+			}
+			ch.Campfires[key] = list.on
 		}
 	}
 	for _, raw := range f.unserve {
