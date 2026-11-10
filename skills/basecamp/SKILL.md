@@ -337,17 +337,17 @@ A pipe is never consumed implicitly. Only one input may read stdin in an
 invocation. Do not use shell-specific ANSI-C quoting such as `$'line 1\nline 2'`
 in portable commands.
 
-Basecamp shows blocks flush together unless a blank line in the Markdown
-separates them. Leave one between every two blocks, headings and lists
-included; in prose, a single newline joins lines into one paragraph. Don't
-hand-write HTML: `--format html` is stored as written, so touching blocks and
-`<br>`-stacked lines read as a wall of text.
+Basecamp shows blocks flush unless a blank line in the Markdown separates
+them: leave one between every two blocks, headings and lists too. In prose,
+one newline is no break. Don't hand-write HTML: `--format html` is stored as
+written, blocks touching. A fold stays Markdown, no `--format html`:
+`<details><summary>What</summary>` and `</details>` each alone on a line,
+blank lines around, Markdown between.
 
 Rich-text fields support Mermaid diagrams. Put the source in a fenced code block
 with the language `mermaid`, and Basecamp shows the diagram to people reading
-the post. Previews, emails, and exports show the source, and so does a post
-whose source does not parse. Use one where a picture beats prose. Diagram source
-spans several lines, so pass it on stdin:
+the post; previews, emails, exports and source that doesn't parse show the
+text. Use one where a picture beats prose; pass it on stdin:
 
 ````bash
 basecamp messages create "Release flow" - --in "<project>" --json <<'EOF'
