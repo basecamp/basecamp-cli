@@ -37,3 +37,6 @@ FLAG basecamp --unserve
 # Hidden unless detection (GET /{account}/feedback.json answers 200) or
 # BASECAMP_FEEDBACK=1 shows it; the skill names it only where `basecamp commands` lists it.
 CMD basecamp feedback
+# Per-Campfire policy flags on the hidden connect setup command.
+FLAG basecamp --listen-campfire
+FLAG basecamp --no-listen-campfire
