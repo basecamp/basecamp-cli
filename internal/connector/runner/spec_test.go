@@ -55,7 +55,8 @@ func TestRunnerJSONIsRefusedRatherThanMisread(t *testing.T) {
 		`{"rules":[{"ping":true,"project":1,"worker":{"adapter":"pi"}}]}`:                             "a Ping is in no project",
 		`{"rules":[{"project":1,"worker":{"adapter":"pi"}},{"within":-4,"worker":{"effort":"low"}}]}`: "rule 2: an id is negative",
 		`{"max_workers":500}`:                                                                         "max_workers",
-		`{} {}`:                                                                                       "more than one JSON value",
+		`{"rules":[{"repo":"code/app","worker":{"adapter":"pi"}}]}`:                                   "is not an absolute path",
+		`{} {}`: "more than one JSON value",
 	} {
 		_, err := ParseConfig([]byte(wrong))
 		assert.ErrorContains(t, err, why, wrong)

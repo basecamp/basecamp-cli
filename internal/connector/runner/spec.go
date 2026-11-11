@@ -163,6 +163,9 @@ func (r Rule) validate() error {
 	if r.Repo == "" && r.Project == 0 && len(r.containers()) == 0 && !r.Ping {
 		return errors.New("it names no condition (repo, project, card_table, todolist, within or ping)")
 	}
+	if r.Repo != "" && r.Repo != "~" && !strings.HasPrefix(r.Repo, "~/") && !filepath.IsAbs(r.Repo) {
+		return fmt.Errorf("repo %q is not an absolute path: a request's repo always is, so the rule would never match (use a full path, or one starting with ~/)", r.Repo)
+	}
 	if r.Project < 0 || slices.ContainsFunc(r.containers(), func(id int64) bool { return id < 0 }) {
 		return errors.New("an id is negative")
 	}

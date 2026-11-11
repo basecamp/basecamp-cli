@@ -789,7 +789,8 @@ basecamp connect stop -P '<profile>'
 on. `say` asks its orchestrator something and prints the answer: where a
 project's work goes, what a worker is doing. `restart` is for after a setup
 change. A later request on the same card, to-do, message or chat goes back to
-the worker that handled the first, in the same session. To send different
+the worker that handled the first, in its session, when that worker ran in the
+same repo on the same coding agent; otherwise a new worker starts. To send different
 work to different coding agents (by repo, project, card table or Ping), the
 person writes rules in `runner.json` beside the profile's connect.json:
 `basecamp connect --help` shows them.

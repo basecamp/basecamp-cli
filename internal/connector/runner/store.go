@@ -232,15 +232,32 @@ func (s *state) save(path string) error {
 }
 
 // prune drops the oldest requests, finished workers and dropped items past
-// what the file keeps. A live worker is never dropped.
+// what the file keeps. A live worker is never dropped, nor a request that
+// is still waiting or being worked on.
 func (s *state) prune() {
 	if over := len(s.Requests) - keepRequests; over > 0 {
+		// A request the orchestrator has yet to handle, or a live worker is
+		// on, is still needed: a dispatch for it reads it. Only history goes.
+		needed := map[int64]bool{}
+		for _, it := range s.Inbox {
+			needed[it.EventID] = true
+		}
+		for _, w := range s.Workers {
+			if w.live() {
+				needed[w.EventID] = true
+				for _, id := range w.Events {
+					needed[id] = true
+				}
+			}
+		}
 		ids := make([]int64, 0, len(s.Requests))
 		for id := range s.Requests {
-			ids = append(ids, id)
+			if !needed[id] {
+				ids = append(ids, id)
+			}
 		}
 		slices.Sort(ids)
-		for _, id := range ids[:over] {
+		for _, id := range ids[:min(over, len(ids))] {
 			delete(s.Requests, id)
 		}
 	}

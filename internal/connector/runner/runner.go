@@ -100,6 +100,12 @@ type Runner struct {
 	replies map[int64]chan sayReply
 	// turns are the running worker turns, by worker id.
 	turns map[string]context.CancelFunc
+	// working names the workers whose turns a goroutine is running, so one
+	// worker never has two, and stopping the workers whose running turn a
+	// stop ended, so the goroutine knows its turn was stopped whatever the
+	// worker has been told since.
+	working  map[string]bool
+	stopping map[string]bool
 	// doing is the tool each running worker called last.
 	doing map[string]string
 	// recordings caches what each event's recording sits under.
@@ -166,6 +172,7 @@ func New(opts Options) (*Runner, error) {
 	r := &Runner{
 		opts: opts, log: opts.Logger, st: st,
 		replies: map[int64]chan sayReply{}, turns: map[string]context.CancelFunc{},
+		working: map[string]bool{}, stopping: map[string]bool{},
 		doing: map[string]string{}, recordings: map[int64][]int64{},
 		wake:  make(chan struct{}, 1),
 		ready: make(chan struct{}),
@@ -182,7 +189,9 @@ func New(opts Options) (*Runner, error) {
 	// not, and applies from the next turn.
 	dir := filepath.Join(opts.Dir, "orchestrator")
 	if st.Orchestrator.Spec.Adapter != orchestrator.Adapter || st.Orchestrator.Dir != dir {
-		st.Orchestrator = sessionState{Dir: dir}
+		// The process of a turn the last run left is kept: Run ends it
+		// before anything is started, whichever agent it belonged to.
+		st.Orchestrator = sessionState{Dir: dir, Process: st.Orchestrator.Process}
 	}
 	st.Orchestrator.Spec = orchestrator
 	if err := r.linkExecutable(); err != nil {
@@ -514,6 +523,12 @@ func (r *Runner) orchestrate(ctx context.Context, batch []item) error {
 	}
 	r.mu.Lock()
 	session := r.st.Orchestrator
+	// Before the messages are counted as tried: a turn that is refused here
+	// reached no agent, and is not one of a message's attempts.
+	if err := CheckPermissions(mode, session.Spec); err != nil {
+		r.mu.Unlock()
+		return err
+	}
 	adapter := adapterByName(session.Spec.Adapter)
 	var parts []string
 	if session.ID == "" {
@@ -531,9 +546,6 @@ func (r *Runner) orchestrate(ctx context.Context, batch []item) error {
 	err = r.st.save(r.statePath())
 	r.mu.Unlock()
 	if err != nil {
-		return err
-	}
-	if err := CheckPermissions(mode, session.Spec); err != nil {
 		return err
 	}
 

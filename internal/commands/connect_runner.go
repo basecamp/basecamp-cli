@@ -70,8 +70,8 @@ type connectRunnerStart struct {
 
 // connectRunnerSettle is the start the flags ask for, over what runner.json
 // kept from the last one: a flag wins, and what no flag names comes from the
-// file. It is settled before anything is read from Basecamp, and kept in
-// runner.json when a flag changed it, so the next start is `--run`.
+// file. It is settled before anything is read from Basecamp. Nothing is kept
+// here: keep does that, once the start has passed its other checks.
 func connectRunnerSettle(f connectRunnerFlags, configPath string) (connectRunnerStart, error) {
 	var start connectRunnerStart
 	config, err := runner.LoadConfig(configPath)
@@ -110,12 +110,25 @@ func connectRunnerSettle(f connectRunnerFlags, configPath string) (connectRunner
 	if err := runner.CheckPermissions(start.permissions, everyRequest...); err != nil {
 		return start, output.ErrUsage(err.Error())
 	}
-	if start.orchestrator != config.Orchestrator || start.worker != config.Worker || start.permissions != config.Permissions {
-		if err := runner.SaveStart(configPath, start.orchestrator, start.worker, start.permissions); err != nil {
-			return start, output.ErrUsage("These settings could not be kept for the profile: " + err.Error())
-		}
-	}
 	return start, nil
+}
+
+// keep writes the start into runner.json when it differs from what the file
+// holds, so the next start is `--run`. The run calls it under the connector's
+// lock, with the profile's identity verified: a start that is refused before
+// then leaves what an earlier one kept as it was.
+func (s connectRunnerStart) keep(configPath string) error {
+	config, err := runner.LoadConfig(configPath)
+	if err != nil {
+		return output.ErrUsage(err.Error())
+	}
+	if s.orchestrator == config.Orchestrator && s.worker == config.Worker && s.permissions == config.Permissions {
+		return nil
+	}
+	if err := runner.SaveStart(configPath, s.orchestrator, s.worker, s.permissions); err != nil {
+		return output.ErrUsage("These settings could not be kept for the profile: " + err.Error())
+	}
+	return nil
 }
 
 // connectRunnerDir is the runner's own directory inside the connector's
@@ -145,7 +158,7 @@ func openConnectorLog(dir string) (*os.File, error) {
 
 // newConnectRunner builds the run's runner.
 func newConnectRunner(profile, stateDir, connectJSON string, orchestrator, worker runner.Spec, log *os.File, startLine string,
-	summaries admission.SummaryReader, stop func(restart bool), logger *slog.Logger) (*runner.Runner, error) {
+	summaries admission.SummaryReader, onHold connectOnHoldReader, stop func(restart bool), logger *slog.Logger) (*runner.Runner, error) {
 	skill, err := skills.Connect.ReadFile("basecamp-connect/SKILL.md")
 	if err != nil {
 		return nil, err
@@ -163,19 +176,59 @@ func newConnectRunner(profile, stateDir, connectJSON string, orchestrator, worke
 		Orchestrator: orchestrator, Worker: worker, ConfigPath: connectRunnerConfigPath(connectJSON),
 		Skill: string(skill), Subagent: string(subagent),
 		ConnectorLog: log.Name(), Executable: executable, StartLine: startLine,
-		Recordings: connectRecordingsAbove(summaries, logger), Stop: stop, Logger: logger,
+		Recordings: connectRecordingsAbove(summaries, onHold, logger), Stop: stop, Logger: logger,
 	})
 }
 
-// kanbanColumnType is a card table column's recording type.
-const kanbanColumnType = "Kanban::Column"
+// Recording types of a card table's parts.
+const (
+	// kanbanColumnType is a column.
+	kanbanColumnType = "Kanban::Column"
+	// kanbanOnHoldType is a column's On Hold section, which holds cards and
+	// is not a column: its id is its own, and it is reached through the
+	// column it belongs to.
+	kanbanOnHoldType = "Kanban::OnHold"
+)
+
+// connectOnHoldReader finds the column an On Hold section belongs to and
+// that column's card table, in a project. It answers nothing when it cannot.
+type connectOnHoldReader func(ctx context.Context, project, section int64) []int64
+
+// connectOnHoldAbove reads a project's card tables for the column whose On
+// Hold section is the one asked for. No read gives a section's column from
+// the section's own id, so the card tables are looked through.
+func connectOnHoldAbove(client *basecamp.AccountClient) connectOnHoldReader {
+	return func(ctx context.Context, project, section int64) []int64 {
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		found, err := client.Projects().Get(ctx, project)
+		if err != nil || found == nil {
+			return nil
+		}
+		for _, tool := range found.Dock {
+			if tool.Name != "kanban_board" {
+				continue
+			}
+			table, err := client.CardTables().Get(ctx, tool.ID)
+			if err != nil || table == nil {
+				continue
+			}
+			for _, column := range table.Lists {
+				if column.OnHold != nil && column.OnHold.ID == section {
+					return []int64{column.ID, table.ID}
+				}
+			}
+		}
+		return nil
+	}
+}
 
 // connectRecordingsAbove lists a request's recording and what it sits under,
 // nearest first, by reading each one's parent as the agent. It is asked only
 // when runner.json has a rule about a card table, a to-do list or another
 // recording. A read that fails ends the walk where it stands: the rule then
 // does not match, and the log says the walk fell short.
-func connectRecordingsAbove(summaries admission.SummaryReader, logger *slog.Logger) func(ctx context.Context, project, recordingID int64, recordingType string) []int64 {
+func connectRecordingsAbove(summaries admission.SummaryReader, onHold connectOnHoldReader, logger *slog.Logger) func(ctx context.Context, project, recordingID int64, recordingType string) []int64 {
 	return func(ctx context.Context, project, recordingID int64, recordingType string) []int64 {
 		ids := []int64{recordingID}
 		ref := basecamp.RecordingRef{BucketID: project, RecordingID: recordingID, RecordingType: recordingType}
@@ -201,6 +254,14 @@ func connectRecordingsAbove(summaries admission.SummaryReader, logger *slog.Logg
 				break
 			}
 			ids = append(ids, summary.Parent.ID)
+			if summary.Parent.Type == kanbanOnHoldType {
+				// A card on hold sits in its column's On Hold section. The
+				// column and the card table above it end the walk.
+				if onHold != nil {
+					ids = append(ids, onHold(ctx, project, summary.Parent.ID)...)
+				}
+				break
+			}
 			ref = basecamp.RecordingRef{BucketID: project, RecordingID: summary.Parent.ID, RecordingType: summary.Parent.Type}
 		}
 		return ids
@@ -249,11 +310,20 @@ func callConnectRunner(cmd *cobra.Command, req runner.Request, timeout time.Dura
 	return p, resp, nil
 }
 
+// maxConnectStdin bounds what a command reads from standard input: a handoff
+// carries a project's AGENTS.md, and nothing larger.
+const maxConnectStdin = 2 << 20
+
 // readConnectStdin reads what a command was given on standard input.
 func readConnectStdin(cmd *cobra.Command, what string) (string, error) {
-	data, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 2<<20))
+	data, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), maxConnectStdin+1))
 	if err != nil {
 		return "", err
+	}
+	if len(data) > maxConnectStdin {
+		// Refused whole: a handoff cut short would reach the worker looking
+		// complete.
+		return "", output.ErrUsage(fmt.Sprintf("Standard input is larger than %d MiB: %s", maxConnectStdin>>20, what))
 	}
 	text := strings.TrimSpace(string(data))
 	if text == "" {
@@ -298,7 +368,10 @@ by a new one.`,
 				return err
 			}
 			req.Handoff, req.NoRepo = handoff, noRepo
-			p, resp, err := callConnectRunner(cmd, runner.Request{Op: runner.OpDispatch, Dispatch: req}, time.Minute)
+			// Long enough for the reads that find what the request sits
+			// under, each of which has its own bound: a call that gave up
+			// first would report a failure for a worker that then starts.
+			p, resp, err := callConnectRunner(cmd, runner.Request{Op: runner.OpDispatch, Dispatch: req}, 5*time.Minute)
 			if err != nil {
 				return err
 			}
@@ -351,8 +424,11 @@ the orchestrator runs on and how many messages are waiting for it.`,
 			if workers == nil {
 				workers = []runner.WorkerView{}
 			}
-			return p.app.OK(map[string]any{"orchestrator": resp.Status, "workers": workers},
-				output.WithSummary(fmt.Sprintf("%d worker(s): %d running, %d queued; orchestrator on %s", len(workers), resp.Status.Running, resp.Status.Queued, resp.Status.Orchestrator)))
+			summary := fmt.Sprintf("%d worker(s): %d running, %d queued; orchestrator on %s", len(workers), resp.Status.Running, resp.Status.Queued, resp.Status.Orchestrator)
+			if resp.Status.ConfigError != "" {
+				summary += "; no agent starts until runner.json is fixed: " + resp.Status.ConfigError
+			}
+			return p.app.OK(map[string]any{"orchestrator": resp.Status, "workers": workers}, output.WithSummary(summary))
 		},
 	}, &cobra.Command{
 		Use:   "send <worker-id>",

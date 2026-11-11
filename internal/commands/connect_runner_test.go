@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/connector/runner"
@@ -167,11 +171,17 @@ func TestTheRunnersCommandsReachTheRunningRunner(t *testing.T) {
 	assert.Equal(t, "rule 1 (repo "+repo+")", worker["matched"])
 	assert.Equal(t, "Dispatched worker w1 on claude · opus · low", dispatched["summary"])
 
-	require.Eventually(t, func() bool {
-		list := run("", "workers", "list")
-		workers := list["workers"].([]any)
-		return len(workers) == 1 && workers[0].(map[string]any)["state"] == "done" && workers[0].(map[string]any)["report"] == "all quiet"
-	}, 20*time.Second, 50*time.Millisecond)
+	// Polled here, on the test's own goroutine, where a failed call fails
+	// the test rather than a timeout hiding it.
+	finished := false
+	for deadline := time.Now().Add(20 * time.Second); !finished && time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		workers, _ := run("", "workers", "list")["workers"].([]any)
+		if len(workers) == 1 {
+			worker, _ := workers[0].(map[string]any)
+			finished = worker["state"] == "done" && worker["report"] == "all quiet"
+		}
+	}
+	require.True(t, finished, "the worker finished and reported")
 
 	assert.Equal(t, "all quiet", run("", "say", "anything", "to", "report?")["reply"])
 	assert.Equal(t, "all quiet", run("anything to report?", "say")["reply"])
@@ -212,6 +222,8 @@ func TestWhatAStartNamesIsKeptAndRunStartsWithIt(t *testing.T) {
 
 	first, err := connectRunnerSettle(connectRunnerFlags{orchestrator: "claude", orchestratorModel: "sonnet", worker: "codex", workerEffort: "high", permissions: "guarded"}, path)
 	require.NoError(t, err)
+	assert.NoFileExists(t, path, "settling a start keeps nothing: the run keeps it once its other checks have passed")
+	require.NoError(t, first.keep(path))
 	assert.Equal(t, connectRunnerStart{
 		orchestrator: runner.Spec{Adapter: "claude", Model: "sonnet"},
 		worker:       runner.Spec{Adapter: "codex", Effort: "high"},
@@ -225,6 +237,7 @@ func TestWhatAStartNamesIsKeptAndRunStartsWithIt(t *testing.T) {
 	// One flag changes that one thing, and the change is kept too.
 	changed, err := connectRunnerSettle(connectRunnerFlags{workerEffort: "low"}, path)
 	require.NoError(t, err)
+	require.NoError(t, changed.keep(path))
 	assert.Equal(t, runner.Spec{Adapter: "codex", Effort: "low"}, changed.worker)
 	assert.Equal(t, first.orchestrator, changed.orchestrator)
 	kept, err := runner.LoadConfig(path)
@@ -247,4 +260,61 @@ func TestWhatAStartNamesIsKeptAndRunStartsWithIt(t *testing.T) {
 	assert.Equal(t, runner.PermissionsFull, full.permissions)
 	assert.Equal(t, "pi", full.worker.Adapter)
 	assert.Empty(t, full.worker.Model, "a model belongs to its coding agent: changing the agent does not carry it across")
+}
+
+// A handoff longer than a command reads is refused whole: cut short, it
+// would reach the worker looking complete.
+func TestStandardInputPastItsLimitIsRefusedNotCut(t *testing.T) {
+	cmd := newConnectDispatchCmd()
+	cmd.SetIn(strings.NewReader(strings.Repeat("x", maxConnectStdin+1)))
+	_, err := readConnectStdin(cmd, "the handoff")
+	assert.Contains(t, usageError(t, err).Message, "Standard input is larger than 2 MiB")
+	cmd.SetIn(strings.NewReader(strings.Repeat("x", maxConnectStdin)))
+	text, err := readConnectStdin(cmd, "the handoff")
+	require.NoError(t, err)
+	assert.Len(t, text, maxConnectStdin)
+}
+
+// summariesByID answers the typed read from a table, and refuses a type it
+// was not given, as the SDK refuses one it has no read for.
+type summariesByID map[int64]struct {
+	kind   string
+	parent *basecamp.Parent
+}
+
+func (s summariesByID) Summarize(_ context.Context, ref basecamp.RecordingRef) (*basecamp.RecordingSummary, error) {
+	found, ok := s[ref.RecordingID]
+	if !ok || found.kind != ref.RecordingType {
+		return nil, fmt.Errorf("no typed read for recording type: %q", ref.RecordingType)
+	}
+	return &basecamp.RecordingSummary{ID: ref.RecordingID, Type: found.kind, Parent: found.parent}, nil
+}
+
+// What a request sits under is walked parent by parent. A card table's
+// triage, "not now" and done columns have types of their own and are read as
+// columns. A card on hold sits in its column's On Hold section, whose column
+// and card table are found from the project's card tables.
+func TestWhatARequestSitsUnderReachesTheCardTableThroughEveryKindOfColumn(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+	summaries := summariesByID{
+		1: {kind: "Comment", parent: &basecamp.Parent{ID: 2, Type: "Kanban::Card"}},
+		2: {kind: "Kanban::Card", parent: &basecamp.Parent{ID: 3, Type: "Kanban::Triage"}},
+		3: {kind: "Kanban::Column", parent: &basecamp.Parent{ID: 4, Type: "Kanban::Board"}},
+		4: {kind: "Kanban::Board"},
+		// And a card on hold.
+		10: {kind: "Kanban::Card", parent: &basecamp.Parent{ID: 11, Type: "Kanban::OnHold"}},
+	}
+	onHold := func(_ context.Context, project, section int64) []int64 {
+		assert.Equal(t, int64(456), project)
+		assert.Equal(t, int64(11), section)
+		return []int64{12, 4}
+	}
+	above := connectRecordingsAbove(summaries, onHold, logger)
+	assert.Equal(t, []int64{1, 2, 3, 4}, above(context.Background(), 456, 1, "Comment"))
+	assert.Equal(t, []int64{10, 11, 12, 4}, above(context.Background(), 456, 10, "Kanban::Card"), "the section, its column, and the card table")
+
+	// With nothing to say whose section it is, the walk ends at the section.
+	assert.Equal(t, []int64{10, 11}, connectRecordingsAbove(summaries, nil, logger)(context.Background(), 456, 10, "Kanban::Card"))
+	// A read that fails ends the walk where it stands.
+	assert.Equal(t, []int64{99}, above(context.Background(), 456, 99, "Comment"))
 }

@@ -53,6 +53,8 @@
 // ends it, by its process group, before it continues that session: a request
 // is not worked on by two processes at once.
 //
-// Agents run unattended, so each adapter starts its CLI with permission
-// prompts off. Who may give the agent work is `basecamp connect setup`'s.
+// Agents run unattended. Under full permissions each adapter starts its CLI
+// with permission prompts off; under guarded permissions it starts the CLI
+// under that CLI's own guardrails. Who may give the agent work is `basecamp
+// connect setup`'s.
 package runner

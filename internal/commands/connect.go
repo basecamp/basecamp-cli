@@ -104,9 +104,11 @@ started:
      {"repo": "~/code/app", "worker": {"adapter": "claude", "model": "opus"}},
      {"card_table": 123, "worker": {"effort": "high"}},
      {"project": 456, "worker": {"adapter": "pi"}},
-     {"ping": true, "worker": {"model": "haiku"}}]}
+     {"ping": true, "worker": {"adapter": "claude", "model": "haiku"}}]}
 
-It is read again for each request, so an edit needs no restart.
+The rules and the permissions are read again for each request, so an edit to
+them needs no restart. The worker at the top is what the connector starts
+with.
 
   basecamp connect say "<message>"    talk to the orchestrator
   basecamp connect workers list       the workers and what each runs on

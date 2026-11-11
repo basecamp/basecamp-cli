@@ -86,6 +86,9 @@ func TestInstalledAgentsWorkUnattendedUnderTheirOwnGuardrails(t *testing.T) {
 			if _, err := exec.LookPath(adapter.Binary()); err != nil {
 				t.Skipf("%s is not installed", adapter.Binary())
 			}
+			if _, err := exec.LookPath("basecamp"); err != nil {
+				t.Skip("basecamp is not installed, and the agent is asked to run it")
+			}
 			t.Parallel()
 			dir := t.TempDir()
 			git := func(args ...string) string {

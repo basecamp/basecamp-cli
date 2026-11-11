@@ -67,11 +67,15 @@ func (r *Runner) view(w *workerState) WorkerView {
 	if w.State == workerRunning {
 		v.Doing = r.doing[w.ID]
 	}
+	// Copies, not pointers into the worker: a view is read after the lock is
+	// let go, while the worker's goroutine may be writing its times.
 	if !w.StartedAt.IsZero() {
-		v.StartedAt = &w.StartedAt
+		started := w.StartedAt
+		v.StartedAt = &started
 	}
 	if !w.EndedAt.IsZero() {
-		v.EndedAt = &w.EndedAt
+		ended := w.EndedAt
+		v.EndedAt = &ended
 	}
 	return v
 }
@@ -156,16 +160,25 @@ func (r *Runner) Dispatch(ctx context.Context, req DispatchRequest) (view Worker
 	r.mu.Unlock()
 
 	route := Route{Repo: repo, Project: request.Project, Ping: request.Ping}
+	fetched := false
 	if known && !request.Ping && config.NeedsRecordings() {
 		if !cached && r.opts.Recordings != nil {
-			recordings = r.opts.Recordings(ctx, request.Project, request.RecordingID, request.RecordingType)
+			recordings, fetched = r.opts.Recordings(ctx, request.Project, request.RecordingID, request.RecordingType), true
 		}
 		route.Recordings = recordings
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if known {
+	// The lock was let go for that read, and another dispatch for the same
+	// event may have got here first: it is asked again before anything is
+	// added, so one request never gets two workers by a race.
+	if w := r.st.workerFor(req.EventID); req.EventID != 0 && w != nil && !req.Again {
+		return r.view(w), true, nil
+	}
+	// Kept only when it was read: an event dispatched while no rule asked
+	// what it sits under is read when a rule first does.
+	if fetched {
 		r.recordings[req.EventID] = recordings
 	}
 	home, _ := os.UserHomeDir()
@@ -250,8 +263,14 @@ func (r *Runner) workerDoc(id string) string {
 // the last stop left: starting one then would start it twice.
 var errNotStarted = errors.New("the connector's runner has not started yet")
 
-// start runs a worker's turns on a goroutine of its own.
+// start runs a worker's turns on a goroutine of its own, unless one already
+// is: a worker told something more while its goroutine is still about takes
+// it up there. r.mu is held.
 func (r *Runner) start(id string) {
+	if r.working[id] {
+		return
+	}
+	r.working[id] = true
 	r.wg.Go(func() { r.work(id) })
 }
 
@@ -316,6 +335,10 @@ func (r *Runner) StopWorker(id string) (WorkerView, error) {
 	if w.live() {
 		w.State, w.EndedAt, w.Prompts = workerStopped, r.opts.Now(), nil
 		if cancel, ok := r.turns[id]; ok {
+			// Its goroutine learns the turn was stopped from this, not from
+			// the worker's state, which a message sent before the turn has
+			// ended may already have changed.
+			r.stopping[id] = true
 			cancel()
 		}
 		if err := r.st.save(r.statePath()); err != nil {
@@ -337,10 +360,29 @@ func (r *Runner) Workers() []WorkerView {
 	return views
 }
 
-// work runs a worker's turns until it has nothing more to be told, and
+// work is a worker's one goroutine. It runs the worker's turns, and before
+// it goes it looks once more, under the lock that start takes, for something
+// the worker was told while it was on its way out.
+func (r *Runner) work(id string) {
+	for {
+		r.workTurns(id)
+		r.mu.Lock()
+		w := r.st.worker(id)
+		more := r.ctx.Err() == nil && w != nil && w.live() && len(w.Prompts) > 0
+		if !more {
+			delete(r.working, id)
+		}
+		r.mu.Unlock()
+		if !more {
+			return
+		}
+	}
+}
+
+// workTurns runs a worker's turns until it has nothing more to be told, and
 // reports each to the orchestrator. Only so many workers run at once; the
 // rest wait their turn here.
-func (r *Runner) work(id string) {
+func (r *Runner) workTurns(id string) {
 	select {
 	case r.slots <- struct{}{}:
 		defer func() { <-r.slots }()
@@ -382,6 +424,12 @@ func (r *Runner) work(id string) {
 		if err != nil {
 			cancel()
 			r.log.Error("runner: a worker's state could not be saved; it is not started", "worker", id, "error", err)
+			r.mu.Lock()
+			delete(r.turns, id)
+			if w := r.st.worker(id); w != nil {
+				r.finish(w, workerFailed, "its state could not be saved")
+			}
+			r.mu.Unlock()
 			return
 		}
 
@@ -421,6 +469,8 @@ func (r *Runner) work(id string) {
 			r.mu.Unlock()
 			return
 		}
+		stopped := r.stopping[id]
+		delete(r.stopping, id)
 		w.Session.charge(result)
 		w.Session.Process = nil
 		w.Refused += len(result.Refused)
@@ -437,10 +487,12 @@ func (r *Runner) work(id string) {
 			_ = r.st.save(r.statePath())
 			r.mu.Unlock()
 			return
-		case w.State == workerStopped:
+		case stopped:
+			// The turn was stopped. Whether the worker has been told
+			// anything since is for the top of the loop to see.
 			_ = r.st.save(r.statePath())
 			r.mu.Unlock()
-			return
+			continue
 		case timedOut:
 			r.finish(w, workerFailed, fmt.Sprintf("it ran longer than %s and was stopped", r.opts.WorkerTimeout))
 		case err != nil && turn.Resume != "" && result.SessionID == "" && next.Fresh != "":

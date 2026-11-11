@@ -335,6 +335,13 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return err
 	}
 	defer func() { _ = lock.Release() }()
+	if f.runner.requested() {
+		// Under the lock, the identity verified: what this start named is
+		// kept for the profile only now that the start is going ahead.
+		if err := start.keep(connectRunnerConfigPath(path)); err != nil {
+			return err
+		}
+	}
 	pings, savePings, err := connectRunPings(lock, name, file, f.shadow, pingsFlag, len(buckets) > 0, creds)
 	if err != nil {
 		return err
@@ -470,7 +477,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	)
 	if f.runner.requested() {
 		startLine := fmt.Sprintf("It runs as profile %s; pings=%t (%s).", name, heard.Hears, heard.Describe())
-		work, err = newConnectRunner(name, stateDir, path, start.orchestrator, start.worker, connectorLog, startLine, reads.Summaries,
+		work, err = newConnectRunner(name, stateDir, path, start.orchestrator, start.worker, connectorLog, startLine, reads.Summaries, connectOnHoldAbove(accountClient),
 			func(again bool) {
 				restart.Store(again)
 				logger.Info("connector: stopping, asked through its runner", "restart", again)

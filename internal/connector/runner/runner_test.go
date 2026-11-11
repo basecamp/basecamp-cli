@@ -562,15 +562,21 @@ func TestAnAgentACrashLeftRunningIsEndedBeforeItsWorkerIsContinued(t *testing.T)
 		t.Skip("no sleep command to stand in for an agent left running")
 	}
 	const session = "22222222-2222-4222-8222-222222222222"
-	var leftover *driver.Worker
+	var leftover, orchestrating *driver.Worker
 	h := newHarness(t, func(o *Options) {
 		leftover, err = driver.StartWorker(context.Background(), driver.SessionConfig{Scope: driver.Scope{WorkDir: o.Dir}},
 			driver.Command{Path: sleep, Args: []string{"600"}})
 		require.NoError(t, err)
 		process := leftover.Process()
+		// The orchestrator's turn too, under the coding agent the crashed
+		// run was started with, which this start does not name.
+		orchestrating, err = driver.StartWorker(context.Background(), driver.SessionConfig{Scope: driver.Scope{WorkDir: o.Dir}},
+			driver.Command{Path: sleep, Args: []string{"600"}})
+		require.NoError(t, err)
+		orchestratorProcess := orchestrating.Process()
 		crashed := &state{
 			Version: stateVersion, WorkerSeq: 1, Requests: map[int64]request{},
-			Orchestrator: sessionState{Spec: o.Orchestrator, Dir: filepath.Join(o.Dir, "orchestrator")},
+			Orchestrator: sessionState{Spec: Spec{Adapter: "pi"}, ID: "old", Dir: filepath.Join(o.Dir, "orchestrator"), Process: &orchestratorProcess},
 			Workers: []*workerState{{
 				ID: "w1", State: workerRunning, Prompts: []prompt{{Text: "the handoff", Fresh: "the handoff"}},
 				Session: sessionState{Spec: Spec{Adapter: "codex"}, ID: session, Dir: o.Dir, Process: &process},
@@ -578,12 +584,17 @@ func TestAnAgentACrashLeftRunningIsEndedBeforeItsWorkerIsContinued(t *testing.T)
 		}
 		require.NoError(t, crashed.save(filepath.Join(o.Dir, StateFile)))
 	})
-	t.Cleanup(func() { leftover.Terminate(time.Second) })
+	t.Cleanup(func() {
+		leftover.Terminate(time.Second)
+		orchestrating.Terminate(time.Second)
+	})
 
-	select {
-	case <-leftover.Done():
-	case <-time.After(15 * time.Second):
-		t.Fatal("the process the crashed run left is still running")
+	for _, left := range []*driver.Worker{leftover, orchestrating} {
+		select {
+		case <-left.Done():
+		case <-time.After(15 * time.Second):
+			t.Fatal("a process the crashed run left is still running")
+		}
 	}
 	h.settled()
 	turns := by(h.invocations(), "codex")
@@ -861,8 +872,124 @@ func TestAnOrchestratorThatCannotRunUnderGuardedWaitsUntilItCan(t *testing.T) {
 	assert.Len(t, h.invocations(), before, "Pi is not started under a name that promises guardrails it does not have")
 	require.NoError(t, os.WriteFile(h.opts.ConfigPath, []byte(`{}`), 0o600))
 	select {
-	case <-answered:
+	case err := <-answered:
+		// However long it waited, it was not counted as tried and set
+		// aside: a turn that was refused reached no agent.
+		require.NoError(t, err)
 	case <-time.After(20 * time.Second):
 		t.Fatal("the message was never taken up again")
 	}
+	assert.Zero(t, h.runner.Status().SetAside)
+}
+
+// Two dispatches for one request, arriving together, give it one worker: the
+// second finds the first's, however long the first spent reading what the
+// request sits under.
+func TestDispatchesForOneRequestArrivingTogetherStartOneWorker(t *testing.T) {
+	h := newHarness(t, func(o *Options) {
+		o.Recordings = func(context.Context, int64, int64, string) []int64 {
+			time.Sleep(100 * time.Millisecond)
+			return []int64{789, 5000}
+		}
+		require.NoError(t, os.WriteFile(o.ConfigPath, []byte(`{"rules": [{"card_table": 5000, "worker": {"effort": "high"}}]}`), 0o600))
+	})
+	h.settled()
+	h.runner.mu.Lock()
+	h.runner.st.Requests[1] = request{Project: 456, RecordingID: 789, RecordingType: "Comment"}
+	h.runner.mu.Unlock()
+
+	const callers = 6
+	existing := make(chan bool, callers)
+	for range callers {
+		go func() {
+			_, was, err := h.runner.Dispatch(context.Background(), DispatchRequest{EventID: 1, NoRepo: true, Handoff: "x"})
+			assert.NoError(t, err)
+			existing <- was
+		}()
+	}
+	started := 0
+	for range callers {
+		if !<-existing {
+			started++
+		}
+	}
+	assert.Equal(t, 1, started)
+	h.settled()
+	assert.Len(t, h.runner.Workers(), 1)
+}
+
+// What a request sits under is read when a rule first asks, even for a
+// request dispatched earlier, when no rule did.
+func TestWhatARequestSitsUnderIsReadOnceARuleAsks(t *testing.T) {
+	asked := 0
+	h := newHarness(t, func(o *Options) {
+		o.Recordings = func(context.Context, int64, int64, string) []int64 {
+			asked++
+			return []int64{789, 5000}
+		}
+	})
+	h.settled()
+	h.runner.mu.Lock()
+	h.runner.st.Requests[1] = request{Project: 456, RecordingID: 789, RecordingType: "Comment"}
+	h.runner.mu.Unlock()
+	_, _, err := h.runner.Dispatch(context.Background(), DispatchRequest{EventID: 1, NoRepo: true, Handoff: "x"})
+	require.NoError(t, err)
+	assert.Zero(t, asked, "no rule asks, so nothing is read")
+
+	require.NoError(t, os.WriteFile(h.opts.ConfigPath, []byte(`{"rules": [{"card_table": 5000, "worker": {"effort": "high"}}]}`), 0o600))
+	view, _, err := h.runner.Dispatch(context.Background(), DispatchRequest{EventID: 1, NoRepo: true, Handoff: "x", Again: true})
+	require.NoError(t, err)
+	assert.Equal(t, 1, asked)
+	assert.Equal(t, "high", view.Effort)
+	h.settled()
+}
+
+// A worker told something more just after it was stopped, before its turn
+// has ended, takes it up on the goroutine it already has: its session never
+// has two turns at once.
+func TestAWorkerToldMoreWhileItsStoppedTurnEndsRunsOneTurnAtATime(t *testing.T) {
+	h := newHarness(t, func(o *Options) { o.Worker = Spec{Adapter: "codex"} })
+	h.settled()
+	view, _, err := h.runner.Dispatch(context.Background(), DispatchRequest{NoRepo: true, Handoff: "HANG"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		h.runner.mu.Lock()
+		defer h.runner.mu.Unlock()
+		return h.runner.st.Workers[0].State == workerRunning && h.runner.st.Workers[0].Session.ID != ""
+	}, 10*time.Second, 20*time.Millisecond)
+
+	_, err = h.runner.StopWorker(view.ID)
+	require.NoError(t, err)
+	_, err = h.runner.Send(view.ID, "carry on with this instead")
+	require.NoError(t, err)
+	h.settled()
+
+	workers := h.runner.Workers()
+	require.Len(t, workers, 1)
+	assert.Equal(t, workerDone, workers[0].State)
+	turns := by(h.invocations(), "codex")
+	require.Len(t, turns, 2, "the stopped turn, and the one that carried on")
+	assert.Equal(t, "[orchestrator] carry on with this instead", turns[1].Prompt)
+	h.runner.mu.Lock()
+	defer h.runner.mu.Unlock()
+	assert.Empty(t, h.runner.working, "its goroutine is gone once it has nothing more to do")
+	assert.Empty(t, h.runner.stopping)
+}
+
+func TestARequestStillWaitingOrBeingWorkedOnIsNotPruned(t *testing.T) {
+	s := &state{Version: stateVersion, Requests: map[int64]request{}}
+	for i := range int64(keepRequests + 50) {
+		s.Requests[i+1] = request{}
+	}
+	s.Inbox = []item{{ID: 1, Kind: kindRequest, EventID: 3}}
+	s.Workers = []*workerState{
+		{ID: "w1", State: workerRunning, EventID: 7, Events: []int64{5, 7}},
+		{ID: "w2", State: workerDone, EventID: 9, Events: []int64{9}},
+	}
+	s.prune()
+	for _, id := range []int64{3, 5, 7} {
+		assert.Contains(t, s.Requests, id, "request %d is still needed", id)
+	}
+	assert.NotContains(t, s.Requests, int64(9), "a finished worker's request is history")
+	assert.Len(t, s.Requests, keepRequests)
 }

@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -74,11 +75,18 @@ type Status struct {
 	SetAside int `json:"set_aside"`
 	Running  int `json:"running"`
 	Queued   int `json:"queued"`
+	// ConfigError says runner.json cannot be read as written, and why. The
+	// worker shown is then not the one a request would get: no agent is
+	// started until the file is fixed.
+	ConfigError string `json:"config_error,omitempty"`
 }
 
 // maxRequestBytes bounds one request: a handoff carries a project's
 // AGENTS.md, and nothing larger.
 const maxRequestBytes = 4 << 20
+
+// requestReadTimeout bounds how long a client has to send its request.
+const requestReadTimeout = 30 * time.Second
 
 // maxSocketPath is the longest path a unix socket address is given. The
 // kernel's own limit is 104 bytes on macOS and 108 on Linux.
@@ -125,21 +133,38 @@ func listen(ctx context.Context, path string) (net.Listener, error) {
 func (r *Runner) serve(ctx context.Context, listener net.Listener) {
 	for {
 		conn, err := listener.Accept()
-		if err != nil {
+		if errors.Is(err, net.ErrClosed) || ctx.Err() != nil {
 			return
+		}
+		if err != nil {
+			// Out of descriptors, say: the socket is still bound, and
+			// giving up on it would leave every later call hanging.
+			r.log.Warn("runner: a call could not be accepted; trying again", "error", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(200 * time.Millisecond):
+			}
+			continue
 		}
 		r.wg.Go(func() {
 			defer conn.Close()
+			// A stop ends the call, whatever it is waiting on, and a client
+			// that sends half a request does not hold the connector open.
+			stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+			defer stop()
 			select {
 			case <-r.ready:
 			case <-ctx.Done():
 				return
 			}
 			var req Request
+			_ = conn.SetReadDeadline(time.Now().Add(requestReadTimeout))
 			if err := json.NewDecoder(io.LimitReader(conn, maxRequestBytes)).Decode(&req); err != nil {
 				_ = json.NewEncoder(conn).Encode(Response{Error: "the request could not be read: " + err.Error()})
 				return
 			}
+			_ = conn.SetReadDeadline(time.Time{})
 			_ = json.NewEncoder(conn).Encode(r.handle(ctx, req))
 		})
 	}
@@ -198,6 +223,12 @@ func (r *Runner) Say(ctx context.Context, message string) (string, error) {
 	id := r.addItem(kindOwner, 0, message)
 	r.replies[id] = reply
 	err := r.st.save(r.statePath())
+	if err != nil {
+		// Not kept, so not sent: the caller is told it failed, and a retry
+		// must not find the first one still waiting to be answered.
+		r.st.Inbox = slices.DeleteFunc(r.st.Inbox, func(it item) bool { return it.ID == id })
+		delete(r.replies, id)
+	}
 	r.mu.Unlock()
 	if err != nil {
 		return "", err
@@ -213,13 +244,16 @@ func (r *Runner) Say(ctx context.Context, message string) (string, error) {
 
 // Status is the runner as it is now.
 func (r *Runner) Status() Status {
-	config, _ := r.config()
+	config, configErr := r.config()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	status := Status{
 		Profile: r.opts.Profile, Orchestrator: r.st.Orchestrator.Spec, Session: r.st.Orchestrator.ID,
 		Turns: r.st.Orchestrator.Turns, Worker: r.baseWorker(config),
 		Waiting: len(r.st.Inbox), SetAside: len(r.st.Dropped),
+	}
+	if configErr != nil {
+		status.ConfigError = configErr.Error()
 	}
 	for _, w := range r.st.Workers {
 		switch w.State {

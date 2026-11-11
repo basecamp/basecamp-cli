@@ -51,6 +51,10 @@ type turnRequest struct {
 	Prompt  string
 	Env     []string
 	// Transcript takes the CLI's raw output, for a person diagnosing a turn.
+	// It is written as the CLI wrote it, unredacted, which is deliberate: it
+	// holds no more than the session files the CLI keeps of its own accord,
+	// in a directory as private as the connector's state. Nothing read from
+	// it is logged or sent anywhere.
 	Transcript io.Writer
 	// Events is called for each event as it is read, on the reading
 	// goroutine.
@@ -169,7 +173,9 @@ func runTurn(ctx context.Context, req turnRequest) (TurnResult, error) {
 	case done:
 		return result, nil
 	case exit.Code != 0 || exit.Signaled || exit.Err != nil:
-		detail := worker.StderrTail(driver.NewRedactor(driver.Redaction{}))
+		// This reaches the log, the worker's record and the orchestrator, so
+		// what the agent's environment held is taken out of it.
+		detail := worker.StderrTail(driver.NewRedactor(driver.Redaction{Env: req.Env}))
 		return result, fmt.Errorf("%w: %s exited with status %d: %s", ErrTurnFailed, req.Adapter.Binary(), exit.Code, cmpText(detail, "no error output"))
 	case result.Text != "":
 		// The CLI ended cleanly and said something, without a line that
