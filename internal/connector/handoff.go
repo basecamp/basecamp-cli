@@ -244,8 +244,11 @@ func handOffReady(ctx context.Context, opts HandoffOptions) error {
 // started is closed without being written.
 func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 	if record.CreatedAt.Before(opts.Started.Add(-HandoffGrace)) {
+		if err := opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonBeforeThisRun); err != nil {
+			return err
+		}
 		opts.log().Info("connector: a request from before this run started is not handed off", "event_id", record.ID, "created_at", record.CreatedAt)
-		return opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonBeforeThisRun)
+		return nil
 	}
 	goes, err := opts.Ledger.isGo(ctx, record.ID)
 	if err != nil {
