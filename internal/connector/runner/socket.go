@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -92,28 +93,75 @@ const requestReadTimeout = 30 * time.Second
 // kernel's own limit is 104 bytes on macOS and 108 on Linux.
 const maxSocketPath = 100
 
-// SocketPath is where the runner in dir listens. It is inside dir, unless
-// that path is longer than a socket address can be: then it is a short one
-// named for dir, in a directory of this user's own under the temporary
-// directory.
+// socketPointer is the file in a runner's directory that says where its
+// socket is when that is not in the directory itself.
+const socketPointer = "sock.path"
+
+// SocketPath is where the runner in dir listens, for whoever calls it. It is
+// inside dir, unless that path is longer than a socket address can be. Then
+// it is where the running connector said it listens (socketPointer), so a
+// caller whose environment is not the connector's still finds it, and
+// failing that where a start in this environment would listen.
 func SocketPath(dir string) string {
 	path := filepath.Join(dir, "sock")
 	if len(path) <= maxSocketPath {
 		return path
 	}
-	sum := sha256.Sum256([]byte(dir))
-	return filepath.Join(socketFallbackDir(), hex.EncodeToString(sum[:8])+".sock")
+	if raw, err := os.ReadFile(filepath.Join(dir, socketPointer)); err == nil { //nolint:gosec // G304: the runner's own directory
+		if kept := strings.TrimSpace(string(raw)); filepath.IsAbs(kept) && len(kept) <= maxSocketPath {
+			return kept
+		}
+	}
+	return fallbackSocket(dir)
 }
 
-// socketFallbackDir is where a socket goes when its own directory's path is
-// too long: the user's runtime directory where there is one, which is
-// theirs alone, and otherwise a directory named for them in the temporary
-// directory, which listen and Call hold to checkSocketDir.
-func socketFallbackDir() string {
-	if runtime := os.Getenv("XDG_RUNTIME_DIR"); filepath.IsAbs(runtime) {
-		return filepath.Join(runtime, "basecamp-connect")
+// listenPath is where a start in dir listens: inside dir, or, for a path
+// too long, a short one named for dir.
+func listenPath(dir string) string {
+	if path := filepath.Join(dir, "sock"); len(path) <= maxSocketPath {
+		return path
 	}
-	return filepath.Join(os.TempDir(), "basecamp-connect-"+strconv.Itoa(os.Getuid()))
+	return fallbackSocket(dir)
+}
+
+// fallbackSocket is a short socket path named for dir: in the user's
+// runtime directory where there is one and the path fits, which is theirs
+// alone, and otherwise in a directory named for them in the temporary
+// directory. listen and Call hold either to checkSocketDir.
+func fallbackSocket(dir string) string {
+	sum := sha256.Sum256([]byte(dir))
+	name := hex.EncodeToString(sum[:8]) + ".sock"
+	if runtime := os.Getenv("XDG_RUNTIME_DIR"); filepath.IsAbs(runtime) {
+		if path := filepath.Join(runtime, "basecamp-connect", name); len(path) <= maxSocketPath {
+			return path
+		}
+	}
+	return filepath.Join(os.TempDir(), "basecamp-connect-"+strconv.Itoa(os.Geteuid()), name)
+}
+
+// keepSocketPath records where the runner in dir listens, for SocketPath:
+// a pointer when the socket is not in dir, and none when it is.
+func keepSocketPath(dir, socket string) error {
+	pointer := filepath.Join(dir, socketPointer)
+	if filepath.Dir(socket) == dir {
+		if err := os.Remove(pointer); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	tmp, err := os.CreateTemp(dir, "."+socketPointer+"-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(socket + "\n"); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), pointer)
 }
 
 // listen opens the socket. A socket file an earlier run left is removed

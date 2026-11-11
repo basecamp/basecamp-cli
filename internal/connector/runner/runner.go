@@ -394,11 +394,15 @@ func (r *Runner) signal() {
 // ends. Stopping ends every running turn; their sessions are continued at
 // the next start.
 func (r *Runner) Run(ctx context.Context) error {
-	listener, err := listen(ctx, SocketPath(r.opts.Dir))
+	socket := listenPath(r.opts.Dir)
+	listener, err := listen(ctx, socket)
 	if err != nil {
 		return fmt.Errorf("runner: %w", err)
 	}
 	defer listener.Close()
+	if err := keepSocketPath(r.opts.Dir, socket); err != nil {
+		return fmt.Errorf("runner: where the socket is could not be kept for the commands that call it: %w", err)
+	}
 	r.wg.Go(func() { r.serve(ctx, listener) })
 	go func() {
 		<-ctx.Done()

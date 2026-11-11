@@ -1164,14 +1164,38 @@ func TestASocketIsOnlyUsedInADirectoryThatIsThisUsersAlone(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(runtime) })
 	t.Setenv("XDG_RUNTIME_DIR", runtime)
 	long := filepath.Join(base, strings.Repeat("d", 120))
-	path := SocketPath(long)
+	require.NoError(t, os.Mkdir(long, 0o700))
+	path := listenPath(long)
 	assert.Equal(t, filepath.Join(runtime, "basecamp-connect"), filepath.Dir(path))
 	assert.Equal(t, path, SocketPath(long))
-	assert.LessOrEqual(t, len(path), maxSocketPath+30)
+	assert.LessOrEqual(t, len(path), maxSocketPath)
 	listener, err := listen(context.Background(), path)
 	require.NoError(t, err)
 	require.NoError(t, listener.Close())
 	info, err := os.Stat(filepath.Dir(path))
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
+
+	// The connector says where it listens, so a command started in another
+	// environment still finds it.
+	require.NoError(t, keepSocketPath(long, path))
+	t.Setenv("XDG_RUNTIME_DIR", "")
+	assert.NotEqual(t, path, listenPath(long), "a start in this environment would listen elsewhere")
+	assert.Equal(t, path, SocketPath(long), "a call goes where the running connector listens")
+
+	// A runtime directory whose own path is too long is passed over for
+	// the temporary directory rather than asked for an address that cannot
+	// be bound.
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(base, strings.Repeat("r", 120)))
+	assert.LessOrEqual(t, len(listenPath(long)), maxSocketPath)
+
+	// A socket in the runner's own directory needs no pointer, and one an
+	// earlier start left is taken away.
+	short, err := os.MkdirTemp("", "rn")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(short) })
+	require.NoError(t, os.WriteFile(filepath.Join(short, socketPointer), []byte("/elsewhere/sock\n"), 0o600))
+	require.NoError(t, keepSocketPath(short, listenPath(short)))
+	assert.NoFileExists(t, filepath.Join(short, socketPointer))
+	assert.Equal(t, filepath.Join(short, "sock"), SocketPath(short))
 }

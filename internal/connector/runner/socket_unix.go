@@ -31,7 +31,7 @@ func checkSocketDir(dir string) error {
 		return fmt.Errorf("%s is not a directory of its own: remove it and start the connector again", dir)
 	case !ok:
 		return errors.New("who owns " + dir + " cannot be told")
-	case int(stat.Uid) != os.Getuid():
+	case int(stat.Uid) != os.Geteuid():
 		return fmt.Errorf("%s belongs to another user: remove it, or set XDG_RUNTIME_DIR to a directory of your own, and start the connector again", dir)
 	case info.Mode().Perm()&0o077 != 0:
 		return fmt.Errorf("%s can be entered by other users (mode %04o): it must be 0700", dir, info.Mode().Perm())
