@@ -153,6 +153,13 @@ type HandoffOptions struct {
 	// turns the acknowledgement off.
 	AckContent string
 	Booster    Booster
+	// Deliver takes each request after its line is written and before its
+	// record is closed, for a run that does the work itself (the runner)
+	// rather than leaving the line to whoever reads stdout. It returns once
+	// it has kept the request, so a record is closed only for a request that
+	// survives a crash; one delivered and not yet closed is delivered again
+	// at the next start, and Deliver keeps it once. Nil delivers nowhere.
+	Deliver func(ctx context.Context, line HandoffLine) error
 }
 
 // Booster boosts a recording as the agent and returns the boost's id.
@@ -277,6 +284,11 @@ func handOff(ctx context.Context, opts HandoffOptions, record Record) error {
 	line.Acknowledge = line.Acknowledge && line.Ack == nil
 	if err := opts.Lines.WriteLine(line); err != nil {
 		return fmt.Errorf("connector: hand off event %d: %w", record.ID, err)
+	}
+	if opts.Deliver != nil {
+		if err := opts.Deliver(ctx, line); err != nil {
+			return fmt.Errorf("connector: deliver event %d: %w", record.ID, err)
+		}
 	}
 	return opts.Ledger.SetState(ctx, record.ID, StateDiscarded, ReasonHandedOff)
 }
