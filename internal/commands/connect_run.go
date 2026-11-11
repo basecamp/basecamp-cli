@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -26,6 +28,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/ndjson"
+	"github.com/basecamp/basecamp-cli/internal/connector/runner"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
@@ -43,6 +46,8 @@ type connectRunFlags struct {
 	// --pings=false is a choice, not the flag's absence.
 	pingsSet   bool
 	noPingsSet bool
+	// runner turns on the runner: the connector does the work itself.
+	runner connectRunnerFlags
 }
 
 func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
@@ -55,6 +60,7 @@ func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
 	fl.BoolVar(&f.shadow, "shadow", false, "Admit and log in an isolated state directory; dispatch and post nothing")
 	fl.Int64Var(&f.since, "since", 0, "Enter the feed just after this event id, whatever the ledger holds")
 	fl.BoolVar(&f.hold, "hold", false, "Set this profile's durable hold: intake and admission run, nothing is dispatched or posted until release, and earlier records wait for review")
+	addConnectRunnerFlags(cmd, &f.runner)
 }
 
 func connectStateHome() (string, error) {
@@ -216,6 +222,18 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	case err != nil:
 		return output.ErrUsage("connect.json cannot be used: " + err.Error())
 	}
+	// Which coding agents do the work, when the run does it itself: settled
+	// before anything is read from Basecamp, so a mistyped agent or one that
+	// is not installed ends the start rather than the first request.
+	var start connectRunnerStart
+	if f.runner.requested() {
+		if f.shadow {
+			return output.ErrUsage("A shadow run hands nothing off, so it has no orchestrator: drop --shadow, or the orchestrator and worker flags")
+		}
+		if start, err = connectRunnerSettle(f.runner, connectRunnerConfigPath(path)); err != nil {
+			return err
+		}
+	}
 
 	account, err := connectAccount(app, name)
 	if err != nil {
@@ -365,6 +383,20 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			"since", hold.HeldAt, "by", richtext.SanitizeSingleLine(hold.HeldBy))
 	}
 	lines := ndjson.NewWriter(cmd.OutOrStdout())
+	var connectorLog *os.File
+	if f.runner.requested() {
+		// The orchestrator searches the connector's output the way the skill
+		// searches the output file of a connector it started, so the lines
+		// are kept as well as printed.
+		if _, err := ensurePrivateChain(stateDir, filepath.Base(connectRunnerDir(stateDir))); err != nil {
+			return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
+		}
+		if connectorLog, err = openConnectorLog(connectRunnerDir(stateDir)); err != nil {
+			return err
+		}
+		defer func() { _ = connectorLog.Close() }()
+		lines = ndjson.NewWriter(io.MultiWriter(cmd.OutOrStdout(), connectorLog))
+	}
 
 	queue, err := connector.NewQueue(connector.DefaultBacklogWarn, connector.DefaultBacklogPause)
 	if err != nil {
@@ -429,6 +461,27 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		os.Exit(connector.ExitCodeForSignal(sig))
 	}()
 
+	// The runner, when the run does the work itself. Its stop is the one the
+	// orchestrator or the person asks for with `basecamp connect stop`.
+	var (
+		work    *runner.Runner
+		restart atomic.Bool
+		deliver func(context.Context, connector.HandoffLine) error
+	)
+	if f.runner.requested() {
+		startLine := fmt.Sprintf("It runs as profile %s; pings=%t (%s).", name, heard.Hears, heard.Describe())
+		work, err = newConnectRunner(name, stateDir, path, start.orchestrator, start.worker, connectorLog, startLine, reads.Summaries,
+			func(again bool) {
+				restart.Store(again)
+				logger.Info("connector: stopping, asked through its runner", "restart", again)
+				cancel()
+			}, logger)
+		if err != nil {
+			return output.ErrUsage("The runner cannot start: " + err.Error())
+		}
+		deliver = work.Deliver
+	}
+
 	stopState, stopDetail := connector.ConnectionStopped, ""
 	defer func() {
 		// Whatever ended the run, status says it is not running any more.
@@ -483,8 +536,12 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 				Ledger: ledger, Served: served.Current, Buckets: buckets, Pings: policy.HearsPings, AgentID: agentID,
 				Lines: lines, Logger: logger, Started: started,
 				AckContent: file.Ack().Content, Booster: connector.SDKBooster{Client: accountClient},
+				Deliver: deliver,
 			})
 		})
+	}
+	if work != nil {
+		runPart("runner", work.Run)
 	}
 	wg.Wait()
 
@@ -504,6 +561,8 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return err
 	case ctx.Err() != nil:
 		return ctx.Err()
+	case restart.Load():
+		return errConnectRestart
 	}
 	return nil
 }
