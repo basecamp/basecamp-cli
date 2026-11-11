@@ -33,6 +33,13 @@ CMD basecamp connect release
 CMD basecamp connect shadow promote
 CMD basecamp connect show
 CMD basecamp connect status
+# The connector doing the work itself (--orchestrator): hidden with the rest.
+FLAG basecamp --orchestrator
+FLAG basecamp --run
+CMD basecamp connect restart
+CMD basecamp connect say
+CMD basecamp connect stop
+CMD basecamp connect workers list
 FLAG basecamp --unserve
 # Per-Campfire policy flags on the hidden connect setup command.
 FLAG basecamp --listen-campfire
