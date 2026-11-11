@@ -285,8 +285,10 @@ func New(opts Options) (*Intake, error) {
 	if opts.Logger == nil {
 		opts.Logger = slog.New(slog.DiscardHandler)
 	}
-	// The queue reports a callback that panicked, and a queue built by a
-	// caller who did not think about that would report it nowhere. It is
+	// The queue reports its backlog edges - the warning, the pause of the
+	// feed read, the resume and the recovery - and a callback that panicked,
+	// and a queue built by a caller who did not think about that would report
+	// them nowhere. It is
 	// adopted under the queue's own lock, because the queue may already be
 	// in use — admission takes from it — and a logger the caller did set is
 	// kept.
