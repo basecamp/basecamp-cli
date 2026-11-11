@@ -477,7 +477,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	)
 	if f.runner.requested() {
 		startLine := fmt.Sprintf("It runs as profile %s; pings=%t (%s).", name, heard.Hears, heard.Describe())
-		work, err = newConnectRunner(name, stateDir, path, start.orchestrator, start.worker, connectorLog, startLine, reads.Summaries, connectOnHoldAbove(accountClient),
+		work, err = newConnectRunner(name, stateDir, path, start.orchestrator, start.worker, connectorLog, startLine, reads.Summaries, connectOnHoldAbove(accountClient), ledger.Held,
 			func(again bool) {
 				restart.Store(again)
 				logger.Info("connector: stopping, asked through its runner", "restart", again)

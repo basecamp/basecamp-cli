@@ -397,6 +397,9 @@ func (r *Runner) workTurns(id string) {
 			return
 		}
 		r.mu.Unlock()
+		if r.released(r.ctx) != nil {
+			return
+		}
 		mode, err := r.permissions(r.ctx)
 		if err != nil {
 			return

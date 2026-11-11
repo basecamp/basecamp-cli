@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -69,6 +70,9 @@ type Options struct {
 	// Recordings lists a request's recording and everything above it, for
 	// rules that ask what a request sits under. Nil answers with nothing.
 	Recordings func(ctx context.Context, project, recordingID int64, recordingType string) []int64
+	// Held reports whether the connector's hold stands. While it does, no
+	// agent is started. Nil means it never does.
+	Held func(ctx context.Context) (bool, error)
 	// Stop ends the connector, to start again when restart is set.
 	Stop   func(restart bool)
 	Logger *slog.Logger
@@ -399,7 +403,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		_ = listener.Close()
 	}()
 
-	r.endLeftovers()
+	if err := r.endLeftovers(); err != nil {
+		return fmt.Errorf("runner: %w", err)
+	}
 	r.mu.Lock()
 	r.ctx = ctx
 	r.continueWorkers() //nolint:contextcheck // workers run under r.ctx, set on the line above
@@ -455,36 +461,60 @@ func (r *Runner) Run(ctx context.Context) error {
 // endLeftovers ends every agent process the state still names. A run clears
 // a turn's process when the turn ends, however it ends, so one still named
 // at a start was left by a run that crashed, and may be working yet: a
-// worker continued beside it would do its request twice. Each is ended by
+// session continued beside it would do its request twice. Each is ended by
 // the process group recorded for it, and only while that group is still
-// provably the one recorded (driver.TerminateRecorded).
-func (r *Runner) endLeftovers() {
+// provably the one recorded (driver.TerminateRecorded, then the rule's last
+// step, driver.ConfirmGroupGone, for a group whose leader has gone).
+//
+// A group that cannot be confirmed gone keeps its record, and its session is
+// not continued beside it: a worker is closed as failed, which the
+// orchestrator is told, and an orchestrator's stops the start, since nothing
+// can be handed off without one.
+func (r *Runner) endLeftovers() error {
 	r.mu.Lock()
 	type leftover struct {
-		name    string
+		worker  string // empty for the orchestrator
 		process driver.Process
 	}
 	var left []leftover
 	if p := r.st.Orchestrator.Process; p != nil {
-		left = append(left, leftover{"orchestrator", *p})
-		r.st.Orchestrator.Process = nil
+		left = append(left, leftover{"", *p})
 	}
 	for _, w := range r.st.Workers {
 		if p := w.Session.Process; p != nil {
 			left = append(left, leftover{w.ID, *p})
-			w.Session.Process = nil
 		}
 	}
 	r.mu.Unlock()
+
+	var blocked error
 	for _, l := range left {
 		signaled, err := driver.TerminateRecorded(l.process, turnGrace)
-		switch {
-		case err != nil:
-			r.log.Warn("runner: an agent the last run left could not be confirmed ended; if it is still working, its request may be answered twice", "session", l.name, "pid", l.process.PID, "error", err)
-		case signaled:
-			r.log.Warn("runner: ended an agent the last run left running when it stopped without ending it", "session", l.name, "pid", l.process.PID)
+		if err != nil {
+			err = driver.ConfirmGroupGone(l.process, turnGrace)
+			signaled = err == nil
 		}
+		name := cmp.Or(l.worker, "orchestrator")
+		r.mu.Lock()
+		switch w := r.st.worker(l.worker); {
+		case err == nil:
+			if w != nil {
+				w.Session.Process = nil
+			} else if l.worker == "" {
+				r.st.Orchestrator.Process = nil
+			}
+			if signaled {
+				r.log.Warn("runner: ended an agent the last run left running when it stopped without ending it", "session", name, "pid", l.process.PID)
+			}
+		case l.worker == "":
+			blocked = fmt.Errorf("the orchestrator's coding agent from the last run (process %d) could not be confirmed ended, and another is not started beside it: end it, then start the connector again: %w", l.process.PID, err)
+		case w != nil && w.live():
+			r.log.Error("runner: an agent the last run left could not be confirmed ended; its worker is not continued beside it", "worker", name, "pid", l.process.PID, "error", err)
+			r.finish(w, workerFailed, fmt.Sprintf("a process of its from before the connector stopped (%d) could not be confirmed ended, so it was not continued beside it", l.process.PID))
+		}
+		r.mu.Unlock()
 	}
+	return blocked
 }
 
 // Ready is closed once Run is serving: the socket answers and the workers
@@ -517,6 +547,9 @@ func (r *Runner) nextBatch() []item {
 // takes its messages out of the inbox; one that fails leaves them for the
 // next, until each has failed maxAttempts times.
 func (r *Runner) orchestrate(ctx context.Context, batch []item) error {
+	if err := r.released(ctx); err != nil {
+		return err
+	}
 	mode, err := r.permissions(ctx)
 	if err != nil {
 		return err
@@ -624,6 +657,35 @@ func (r *Runner) orchestrate(ctx context.Context, batch []item) error {
 	r.log.Info("runner: orchestrator turn", "messages", len(batch), "took", r.opts.Now().Sub(started).Round(time.Second),
 		"cost_usd", roundCost(cost), "said", clip(richtext.SanitizeSingleLine(result.Text), 400))
 	return r.st.save(r.statePath())
+}
+
+// released returns once the connector's hold does not stand, or ctx ends. A
+// hold means nothing is dispatched or posted until it is released, and that
+// is as true of what the runner already holds (its inbox, a worker waiting
+// its turn) as of what the handoff has yet to hand it.
+func (r *Runner) released(ctx context.Context) error {
+	if r.opts.Held == nil {
+		return nil
+	}
+	said := false
+	for {
+		held, err := r.opts.Held(ctx)
+		if err == nil && !held {
+			if said {
+				r.log.Info("runner: the hold is released; agents are started again")
+			}
+			return nil
+		}
+		if !said {
+			r.log.Warn("runner: the hold stands, so no agent is started until `basecamp connect release`", "error", err)
+			said = true
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(r.opts.Retry(1)):
+		}
+	}
 }
 
 // permissions is what agents may do, as runner.json says now. A file that

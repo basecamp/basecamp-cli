@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -992,4 +993,64 @@ func TestARequestStillWaitingOrBeingWorkedOnIsNotPruned(t *testing.T) {
 	}
 	assert.NotContains(t, s.Requests, int64(9), "a finished worker's request is history")
 	assert.Len(t, s.Requests, keepRequests)
+}
+
+// While the connector's hold stands, the runner starts no agent: not for a
+// message already in its inbox, and not for a worker waiting its turn.
+func TestNoAgentIsStartedWhileTheHoldStands(t *testing.T) {
+	var held atomic.Bool
+	h := newHarness(t, func(o *Options) {
+		o.Held = func(context.Context) (bool, error) { return held.Load(), nil }
+	})
+	h.settled()
+	held.Store(true)
+	before := len(h.invocations())
+	view, _, err := h.runner.Dispatch(context.Background(), DispatchRequest{NoRepo: true, Handoff: "x"})
+	require.NoError(t, err)
+	answered := make(chan error, 1)
+	go func() {
+		_, err := h.runner.Say(context.Background(), "anything?")
+		answered <- err
+	}()
+	time.Sleep(300 * time.Millisecond)
+	assert.Len(t, h.invocations(), before, "neither the worker nor the orchestrator was started")
+	assert.Equal(t, workerQueued, h.runner.Workers()[0].State)
+
+	held.Store(false)
+	require.NoError(t, <-answered)
+	h.settled()
+	workers := h.runner.Workers()
+	assert.Equal(t, view.ID, workers[0].ID)
+	assert.Equal(t, workerDone, workers[0].State)
+}
+
+// A crashed run can leave a process group whose leader is gone and whose
+// other members are still at work. They are ended too, before the worker is
+// continued.
+func TestWhatALeftoverAgentStartedIsEndedWithIt(t *testing.T) {
+	shell, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh to stand in for an agent that started something and went")
+	}
+	var process driver.Process
+	h := newHarness(t, func(o *Options) {
+		gone, err := driver.StartWorker(context.Background(), driver.SessionConfig{Scope: driver.Scope{WorkDir: o.Dir}},
+			driver.Command{Path: shell, Args: []string{"-c", "sleep 600 >/dev/null 2>&1 & exit 0"}})
+		require.NoError(t, err)
+		<-gone.Done()
+		process = gone.Process()
+		require.True(t, driver.GroupMembersRemain(process), "the leader went and left a member of its group running")
+		crashed := &state{
+			Version: stateVersion, WorkerSeq: 1, Requests: map[int64]request{},
+			Orchestrator: sessionState{Spec: o.Orchestrator, Dir: filepath.Join(o.Dir, "orchestrator")},
+			Workers: []*workerState{{
+				ID: "w1", State: workerRunning, Prompts: []prompt{{Text: "the handoff", Fresh: "the handoff"}},
+				Session: sessionState{Spec: Spec{Adapter: "codex"}, ID: "33333333-3333-4333-8333-333333333333", Dir: o.Dir, Process: &process},
+			}},
+		}
+		require.NoError(t, crashed.save(filepath.Join(o.Dir, StateFile)))
+	})
+	assert.False(t, driver.GroupMembersRemain(process), "what the leader left running is ended before its worker is continued")
+	h.settled()
+	assert.Equal(t, workerDone, h.runner.Workers()[0].State)
 }

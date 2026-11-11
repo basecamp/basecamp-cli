@@ -158,7 +158,7 @@ func openConnectorLog(dir string) (*os.File, error) {
 
 // newConnectRunner builds the run's runner.
 func newConnectRunner(profile, stateDir, connectJSON string, orchestrator, worker runner.Spec, log *os.File, startLine string,
-	summaries admission.SummaryReader, onHold connectOnHoldReader, stop func(restart bool), logger *slog.Logger) (*runner.Runner, error) {
+	summaries admission.SummaryReader, onHold connectOnHoldReader, held func(context.Context) (bool, error), stop func(restart bool), logger *slog.Logger) (*runner.Runner, error) {
 	skill, err := skills.Connect.ReadFile("basecamp-connect/SKILL.md")
 	if err != nil {
 		return nil, err
@@ -176,7 +176,7 @@ func newConnectRunner(profile, stateDir, connectJSON string, orchestrator, worke
 		Orchestrator: orchestrator, Worker: worker, ConfigPath: connectRunnerConfigPath(connectJSON),
 		Skill: string(skill), Subagent: string(subagent),
 		ConnectorLog: log.Name(), Executable: executable, StartLine: startLine,
-		Recordings: connectRecordingsAbove(summaries, onHold, logger), Stop: stop, Logger: logger,
+		Recordings: connectRecordingsAbove(summaries, onHold, logger), Held: held, Stop: stop, Logger: logger,
 	})
 }
 

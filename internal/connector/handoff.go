@@ -157,8 +157,10 @@ type HandoffOptions struct {
 	// record is closed, for a run that does the work itself (the runner)
 	// rather than leaving the line to whoever reads stdout. It returns once
 	// it has kept the request, so a record is closed only for a request that
-	// survives a crash; one delivered and not yet closed is delivered again
-	// at the next start, and Deliver keeps it once. Nil delivers nowhere.
+	// survives a crash. One written and not yet kept when the connector
+	// crashed is handed off again by the next start, where Deliver keeps it
+	// once. That start has to come within HandoffGrace of the request, as
+	// for any record: an older one is not run late. Nil delivers nowhere.
 	Deliver func(ctx context.Context, line HandoffLine) error
 }
 

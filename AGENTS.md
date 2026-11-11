@@ -89,7 +89,7 @@ all of it:
   relied on, and both kinds of session are told where their instructions are kept.
 - **State** is `runner/state.json` in the connector's state directory: the orchestrator's
   inbox and session, and every worker. The handoff gives the runner each request before it
-  closes the record (`HandoffOptions.Deliver`), so a crash repeats a request rather than losing
+  closes the record (`HandoffOptions.Deliver`), so a crash and a prompt restart repeat a request rather than losing
   it, and a worker a stop interrupted is continued in its own session at the next start.
 
 **What agents may do** is one switch, `--permissions`, kept in `runner.json` and read for
