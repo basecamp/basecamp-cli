@@ -65,7 +65,7 @@ func fakeAgent(agent string) int {
 	text := string(prompt)
 	dir, _ := os.Getwd()
 	record, _ := json.Marshal(fakeInvocation{Agent: agent, Args: os.Args[1:], Dir: dir, Prompt: text, Path: os.Getenv("PATH"), Marker: os.Getenv("CLAUDECODE"),
-		Runner: strings.TrimSpace(os.Getenv(DirEnv) + " " + os.Getenv(ProfileEnv))})
+		Runner: strings.TrimSpace(os.Getenv(SocketEnv) + " " + os.Getenv(ProfileEnv))})
 	if log, err := os.OpenFile(os.Getenv(fakeLogEnv), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
 		_, _ = log.Write(append(record, '\n'))
 		_ = log.Close()
@@ -130,7 +130,9 @@ func fakeAgent(agent string) int {
 			if strings.Contains(text, "SLOW-WORKER") {
 				req.Handoff += " HANG"
 			}
-			resp, err := Call(context.Background(), os.Getenv(fakeDirEnv), Request{Op: OpDispatch, Dispatch: req}, 10*time.Second)
+			// By the socket the runner named for it, as a real agent's
+			// commands reach it.
+			resp, err := Call(context.Background(), os.Getenv(SocketEnv), Request{Op: OpDispatch, Dispatch: req}, 10*time.Second)
 			if err != nil {
 				answer = "dispatch failed: " + err.Error()
 			} else {

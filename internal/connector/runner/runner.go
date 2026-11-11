@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -296,12 +295,12 @@ var sessionMarkers = []string{
 
 // Variables an agent is started with that say which runner started it, for
 // the commands it runs against that runner: `basecamp connect dispatch` and
-// the rest. They find the runner's socket by them, without reading the
+// the rest. They reach the runner's socket by them, without reading the
 // profile's connect.json, whose ownership cannot be checked from inside a
 // coding agent's sandbox. Knowing where the socket is grants nothing: the
 // socket's own permissions decide who may use it.
 const (
-	DirEnv     = "BASECAMP_CONNECT_RUNNER"
+	SocketEnv  = "BASECAMP_CONNECT_RUNNER_SOCKET"
 	ProfileEnv = "BASECAMP_CONNECT_RUNNER_PROFILE"
 )
 
@@ -314,9 +313,12 @@ func (r *Runner) environ() []string {
 		bin = filepath.Join(r.opts.Dir, "bin")
 	}
 	base := slices.DeleteFunc(r.opts.Environ(), func(kv string) bool {
-		return strings.HasPrefix(kv, DirEnv+"=") || strings.HasPrefix(kv, ProfileEnv+"=")
+		return strings.HasPrefix(kv, SocketEnv+"=") || strings.HasPrefix(kv, ProfileEnv+"=")
 	})
-	return append(agentEnviron(base, bin), DirEnv+"="+r.opts.Dir, ProfileEnv+"="+r.opts.Profile)
+	// The socket's path itself, not the directory to work it out from: an
+	// agent's own temporary directory, which a long path falls back to, need
+	// not be the connector's.
+	return append(agentEnviron(base, bin), SocketEnv+"="+SocketPath(r.opts.Dir), ProfileEnv+"="+r.opts.Profile)
 }
 
 // agentEnviron is base without the session markers, and with bin, when
@@ -463,13 +465,14 @@ func (r *Runner) Run(ctx context.Context) error {
 // at a start was left by a run that crashed, and may be working yet: a
 // session continued beside it would do its request twice. Each is ended by
 // the process group recorded for it, and only while that group is still
-// provably the one recorded (driver.TerminateRecorded, then the rule's last
-// step, driver.ConfirmGroupGone, for a group whose leader has gone).
+// provably the one recorded (driver.TerminateRecorded), and then confirmed
+// gone (driver.ConfirmGroupGone): the first does not wait on its last signal
+// and leaves a group whose leader has gone to the second.
 //
-// A group that cannot be confirmed gone keeps its record, and its session is
-// not continued beside it: a worker is closed as failed, which the
-// orchestrator is told, and an orchestrator's stops the start, since nothing
-// can be handed off without one.
+// A group that cannot be confirmed gone keeps its record and stops the
+// start, whichever session it was and whatever state its worker is in. A
+// worker set aside instead could still be told more, or take a later request
+// on its thread, beside the process nobody could end.
 func (r *Runner) endLeftovers() error {
 	r.mu.Lock()
 	type leftover struct {
@@ -487,34 +490,29 @@ func (r *Runner) endLeftovers() error {
 	}
 	r.mu.Unlock()
 
-	var blocked error
+	var blocked []error
 	for _, l := range left {
-		signaled, err := driver.TerminateRecorded(l.process, turnGrace)
-		if err != nil {
-			err = driver.ConfirmGroupGone(l.process, turnGrace)
-			signaled = err == nil
+		signaled, ended := driver.TerminateRecorded(l.process, turnGrace)
+		name := "the orchestrator"
+		if l.worker != "" {
+			name = "worker " + l.worker
 		}
-		name := cmp.Or(l.worker, "orchestrator")
+		if err := driver.ConfirmGroupGone(l.process, turnGrace); err != nil {
+			blocked = append(blocked, fmt.Errorf("the coding agent the last run left running for %s (process %d) could not be confirmed ended, and nothing is started beside it: end it, then start the connector again: %w", name, l.process.PID, err))
+			continue
+		}
 		r.mu.Lock()
-		switch w := r.st.worker(l.worker); {
-		case err == nil:
-			if w != nil {
-				w.Session.Process = nil
-			} else if l.worker == "" {
-				r.st.Orchestrator.Process = nil
-			}
-			if signaled {
-				r.log.Warn("runner: ended an agent the last run left running when it stopped without ending it", "session", name, "pid", l.process.PID)
-			}
-		case l.worker == "":
-			blocked = fmt.Errorf("the orchestrator's coding agent from the last run (process %d) could not be confirmed ended, and another is not started beside it: end it, then start the connector again: %w", l.process.PID, err)
-		case w != nil && w.live():
-			r.log.Error("runner: an agent the last run left could not be confirmed ended; its worker is not continued beside it", "worker", name, "pid", l.process.PID, "error", err)
-			r.finish(w, workerFailed, fmt.Sprintf("a process of its from before the connector stopped (%d) could not be confirmed ended, so it was not continued beside it", l.process.PID))
+		if w := r.st.worker(l.worker); w != nil {
+			w.Session.Process = nil
+		} else if l.worker == "" {
+			r.st.Orchestrator.Process = nil
 		}
 		r.mu.Unlock()
+		if signaled || ended != nil {
+			r.log.Warn("runner: ended an agent the last run left running when it stopped without ending it", "session", name, "pid", l.process.PID)
+		}
 	}
-	return blocked
+	return errors.Join(blocked...)
 }
 
 // Ready is closed once Run is serving: the socket answers and the workers

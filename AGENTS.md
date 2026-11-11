@@ -89,8 +89,10 @@ all of it:
   relied on, and both kinds of session are told where their instructions are kept.
 - **State** is `runner/state.json` in the connector's state directory: the orchestrator's
   inbox and session, and every worker. The handoff gives the runner each request before it
-  closes the record (`HandoffOptions.Deliver`), so a crash and a prompt restart repeat a request rather than losing
-  it, and a worker a stop interrupted is continued in its own session at the next start.
+  closes the record (`HandoffOptions.Deliver`), so a crash repeats a request rather than
+  losing it if the connector starts again within `HandoffGrace` (a minute), and a worker a
+  stop interrupted is continued in its own session at the next start. A start ends what a
+  crash left running first, and does not start beside a process it cannot confirm ended.
 
 **What agents may do** is one switch, `--permissions`, kept in `runner.json` and read for
 every turn. `full`, the default, starts each CLI with its permission prompts off: a headless
@@ -101,7 +103,7 @@ request to run a stopped command outside the sandbox. Without that review a sand
 can neither commit in a repo (its git data is read-only there) nor read `connect.json`
 (inside the sandbox `/` belongs to nobody the CLI knows, so the check that the file is the
 person's own fails). That check is the trust anchor's and is not loosened: instead an agent
-is told which runner started it (`runner.DirEnv`), so `dispatch` and the other runner commands
+is told which runner started it (`runner.SocketEnv`), so `dispatch` and the other runner commands
 reach the socket without reading the file. Pi has no guardrails and is refused under
 `guarded`. What a mode means is told to the worker (`guardedNote`), the person at start
 (`PermissionsNotice`) and in the skill; keep the three in step. A `runner.json` that cannot

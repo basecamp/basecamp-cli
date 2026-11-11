@@ -197,12 +197,16 @@ type connectOnHoldReader func(ctx context.Context, project, section int64) []int
 // connectOnHoldAbove reads a project's card tables for the column whose On
 // Hold section is the one asked for. No read gives a section's column from
 // the section's own id, so the card tables are looked through.
-func connectOnHoldAbove(client *basecamp.AccountClient) connectOnHoldReader {
+func connectOnHoldAbove(client *basecamp.AccountClient, logger *slog.Logger) connectOnHoldReader {
+	// Said whenever the column is not found, as the walk's other failures
+	// are: a rule that then does not match should not fail to in silence.
+	const unresolved = "connector: the column an On Hold section belongs to could not be found; a runner.json rule about its column or card table does not match the request"
 	return func(ctx context.Context, project, section int64) []int64 {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		found, err := client.Projects().Get(ctx, project)
 		if err != nil || found == nil {
+			logger.Warn(unresolved, "project", project, "section", section, "error", err)
 			return nil
 		}
 		for _, tool := range found.Dock {
@@ -211,6 +215,7 @@ func connectOnHoldAbove(client *basecamp.AccountClient) connectOnHoldReader {
 			}
 			table, err := client.CardTables().Get(ctx, tool.ID)
 			if err != nil || table == nil {
+				logger.Warn("connector: a card table could not be read while looking for an On Hold section's column", "card_table", tool.ID, "error", err)
 				continue
 			}
 			for _, column := range table.Lists {
@@ -219,6 +224,7 @@ func connectOnHoldAbove(client *basecamp.AccountClient) connectOnHoldReader {
 				}
 			}
 		}
+		logger.Warn(unresolved, "project", project, "section", section)
 		return nil
 	}
 }
@@ -277,17 +283,17 @@ var errConnectRestart = errors.New("connect: restart")
 
 // callConnectRunner makes one call on the profile's running runner.
 //
-// An agent that runner started is told where it is (runner.DirEnv), and its
-// commands go straight there. Anyone else's find it through the profile's
-// connect.json.
+// An agent that runner started is told where its socket is
+// (runner.SocketEnv), and its commands go straight there. Anyone else's find
+// it through the profile's connect.json.
 func callConnectRunner(cmd *cobra.Command, req runner.Request, timeout time.Duration) (connectProfile, runner.Response, error) {
 	var (
-		p   connectProfile
-		dir string
+		p      connectProfile
+		socket string
 	)
-	if app := appctx.FromContext(cmd.Context()); app != nil && os.Getenv(runner.DirEnv) != "" && app.Config.ActiveProfile != "" &&
+	if app := appctx.FromContext(cmd.Context()); app != nil && os.Getenv(runner.SocketEnv) != "" && app.Config.ActiveProfile != "" &&
 		os.Getenv(runner.ProfileEnv) == app.Config.ActiveProfile {
-		p, dir = connectProfile{app: app, name: app.Config.ActiveProfile}, os.Getenv(runner.DirEnv)
+		p, socket = connectProfile{app: app, name: app.Config.ActiveProfile}, os.Getenv(runner.SocketEnv)
 	} else {
 		var err error
 		if p, err = loadConnectProfile(cmd); err != nil {
@@ -297,9 +303,9 @@ func callConnectRunner(cmd *cobra.Command, req runner.Request, timeout time.Dura
 		if err != nil {
 			return p, runner.Response{}, output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
 		}
-		dir = connectRunnerDir(stateDir)
+		socket = runner.SocketPath(connectRunnerDir(stateDir))
 	}
-	resp, err := runner.Call(cmd.Context(), dir, req, timeout)
+	resp, err := runner.Call(cmd.Context(), socket, req, timeout)
 	if errors.Is(err, runner.ErrNotRunning) {
 		return p, resp, output.ErrUsageHint(fmt.Sprintf("No connector is running with an orchestrator for profile %q", p.name),
 			"Start one: basecamp connect -P "+richtext.ShellQuote(p.name)+" --orchestrator claude")

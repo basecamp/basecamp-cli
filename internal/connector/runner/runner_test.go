@@ -30,9 +30,18 @@ type harness struct {
 	done   chan error
 }
 
-// newHarness builds a runner in a fresh directory. change edits its options
-// before it is built.
+// newHarness builds a runner in a fresh directory and runs it. change edits
+// its options before it is built.
 func newHarness(t *testing.T, change func(*Options)) *harness {
+	t.Helper()
+	h := unstartedHarness(t, change)
+	h.start()
+	return h
+}
+
+// unstartedHarness is a harness whose runner is neither built nor run, for a
+// test about a start that fails.
+func unstartedHarness(t *testing.T, change func(*Options)) *harness {
 	t.Helper()
 	look, log := fakeAgents(t)
 	// Short, so the socket's path fits whatever the test's own name is.
@@ -55,9 +64,7 @@ func newHarness(t *testing.T, change func(*Options)) *harness {
 	if change != nil {
 		change(&opts)
 	}
-	h := &harness{t: t, opts: opts, log: log}
-	h.start()
-	return h
+	return &harness{t: t, opts: opts, log: log}
 }
 
 // start builds the runner over the harness's directory and runs it.
@@ -162,7 +169,7 @@ func TestARequestIsHandedToTheOrchestratorWhichDispatchesAWorkerThatReportsBack(
 	// session the connector may have been started from.
 	assert.Equal(t, filepath.Join(h.opts.Dir, "bin")+":/usr/bin", worker.Path)
 	assert.Empty(t, worker.Marker)
-	assert.Equal(t, h.opts.Dir+" agent", worker.Runner, "an agent is told which runner started it, for the commands it runs against it")
+	assert.Equal(t, SocketPath(h.opts.Dir)+" agent", worker.Runner, "an agent is told which runner started it, for the commands it runs against it")
 	target, err := os.Readlink(filepath.Join(h.opts.Dir, "bin", "basecamp"))
 	require.NoError(t, err)
 	assert.Equal(t, "/opt/basecamp/bin/basecamp", target)
@@ -414,30 +421,34 @@ func TestTheSocketServesTheCommandsAnAgentRuns(t *testing.T) {
 	h.settled()
 	ctx := context.Background()
 
-	resp, err := Call(ctx, h.opts.Dir, Request{Op: OpDispatch, Dispatch: DispatchRequest{NoRepo: true, Handoff: "over the socket"}}, 10*time.Second)
+	resp, err := Call(ctx, SocketPath(h.opts.Dir), Request{Op: OpDispatch, Dispatch: DispatchRequest{NoRepo: true, Handoff: "over the socket"}}, 10*time.Second)
 	require.NoError(t, err)
 	require.NotNil(t, resp.Worker)
 	h.settled()
 
-	resp, err = Call(ctx, h.opts.Dir, Request{Op: OpWorkers}, 10*time.Second)
+	resp, err = Call(ctx, SocketPath(h.opts.Dir), Request{Op: OpWorkers}, 10*time.Second)
 	require.NoError(t, err)
 	require.Len(t, resp.Workers, 1)
 	assert.Equal(t, workerDone, resp.Workers[0].State)
 	assert.Equal(t, Spec{Adapter: "claude", Model: "opus"}, resp.Status.Orchestrator)
 	assert.Equal(t, Spec{Adapter: "claude", Model: "opus"}, resp.Status.Worker, "with no worker named, workers run on the orchestrator's agent")
 
-	resp, err = Call(ctx, h.opts.Dir, Request{Op: OpSay, Message: "hello"}, 20*time.Second)
+	resp, err = Call(ctx, SocketPath(h.opts.Dir), Request{Op: OpSay, Message: "hello"}, 20*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, "done", resp.Reply)
 
-	_, err = Call(ctx, h.opts.Dir, Request{Op: OpSend, Worker: "nope", Message: "x"}, 10*time.Second)
+	_, err = Call(ctx, SocketPath(h.opts.Dir), Request{Op: OpSend, Worker: "nope", Message: "x"}, 10*time.Second)
 	require.ErrorContains(t, err, "there is no worker")
 
-	_, err = Call(ctx, h.opts.Dir, Request{Op: OpStop, Restart: true}, 10*time.Second)
+	_, err = Call(ctx, SocketPath(h.opts.Dir), Request{Op: OpStop, Restart: true}, 10*time.Second)
 	require.NoError(t, err)
 	assert.True(t, <-stopped)
 
-	_, err = Call(ctx, t.TempDir(), Request{Op: OpWorkers}, time.Second)
+	elsewhere := t.TempDir()
+	require.NoError(t, os.Chmod(elsewhere, 0o700))
+	_, err = Call(ctx, SocketPath(elsewhere), Request{Op: OpWorkers}, time.Second)
+	require.ErrorIs(t, err, ErrNotRunning)
+	_, err = Call(ctx, filepath.Join(elsewhere, "gone", "sock"), Request{Op: OpWorkers}, time.Second)
 	require.ErrorIs(t, err, ErrNotRunning)
 
 	info, err := os.Stat(SocketPath(h.opts.Dir))
@@ -1039,6 +1050,8 @@ func TestWhatALeftoverAgentStartedIsEndedWithIt(t *testing.T) {
 		require.NoError(t, err)
 		<-gone.Done()
 		process = gone.Process()
+		// The runner ends it; this is for a run of the test in which it does not.
+		t.Cleanup(func() { _ = driver.ConfirmGroupGone(process, time.Second) })
 		require.True(t, driver.GroupMembersRemain(process), "the leader went and left a member of its group running")
 		crashed := &state{
 			Version: stateVersion, WorkerSeq: 1, Requests: map[int64]request{},
@@ -1053,4 +1066,112 @@ func TestWhatALeftoverAgentStartedIsEndedWithIt(t *testing.T) {
 	assert.False(t, driver.GroupMembersRemain(process), "what the leader left running is ended before its worker is continued")
 	h.settled()
 	assert.Equal(t, workerDone, h.runner.Workers()[0].State)
+}
+
+// A leftover that cannot be confirmed ended stops the start, whichever
+// session it was: a worker that was only set aside could be told more, or
+// take a later request on its thread, beside the process nobody ended.
+func TestALeftoverThatCannotBeConfirmedEndedStopsTheStart(t *testing.T) {
+	sleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("no sleep command to stand in for a process")
+	}
+	for name, crashed := range map[string]func(dir string, p *driver.Process) *state{
+		"a worker that had already been stopped": func(dir string, p *driver.Process) *state {
+			return &state{
+				Version: stateVersion, WorkerSeq: 1, Requests: map[int64]request{},
+				Orchestrator: sessionState{Spec: Spec{Adapter: "claude"}, Dir: filepath.Join(dir, "orchestrator")},
+				Workers: []*workerState{{
+					ID: "w1", State: workerStopped, Prompts: []prompt{{Text: "the handoff", Fresh: "the handoff"}},
+					Session: sessionState{Spec: Spec{Adapter: "codex"}, ID: "44444444-4444-4444-8444-444444444444", Dir: dir, Process: p},
+				}},
+			}
+		},
+		"the orchestrator": func(dir string, p *driver.Process) *state {
+			return &state{
+				Version: stateVersion, Requests: map[int64]request{},
+				Orchestrator: sessionState{Spec: Spec{Adapter: "claude"}, ID: "old", Dir: filepath.Join(dir, "orchestrator"), Process: p},
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel() // each waits out the grace a group is given to go
+			var stranger *driver.Worker
+			h := unstartedHarness(t, func(o *Options) {
+				started, err := driver.StartWorker(context.Background(), driver.SessionConfig{Scope: driver.Scope{WorkDir: o.Dir}},
+					driver.Command{Path: sleep, Args: []string{"600"}})
+				require.NoError(t, err)
+				stranger = started
+				// The recorded pid, since given to another process: one that
+				// started at another time. Whose group it is cannot be
+				// established, so it is neither signaled nor called gone.
+				process := stranger.Process()
+				process.StartedAt = process.StartedAt.Add(-time.Hour)
+				require.NoError(t, crashed(o.Dir, &process).save(filepath.Join(o.Dir, StateFile)))
+			})
+			t.Cleanup(func() { stranger.Terminate(time.Second) })
+
+			r, err := New(h.opts)
+			require.NoError(t, err)
+			err = r.Run(t.Context())
+			require.ErrorIs(t, err, driver.ErrGroupOutlivedLeader)
+			assert.Contains(t, err.Error(), "could not be confirmed ended")
+			assert.Empty(t, h.invocations(), "no agent is started beside it")
+			select {
+			case <-stranger.Done():
+				t.Fatal("a process that is not provably the recorded one was ended")
+			default:
+			}
+			kept, err := loadState(filepath.Join(h.opts.Dir, StateFile))
+			require.NoError(t, err)
+			if len(kept.Workers) > 0 {
+				assert.NotNil(t, kept.Workers[0].Session.Process, "its record is kept for the next start")
+			} else {
+				assert.NotNil(t, kept.Orchestrator.Process, "its record is kept for the next start")
+			}
+		})
+	}
+}
+
+// A socket is only called, and only listened on, in a directory that is
+// this user's alone and is a directory of its own. The fallback for a path
+// too long for a socket address can sit where other users write, and one of
+// them could have made it, or a link in its place, first.
+func TestASocketIsOnlyUsedInADirectoryThatIsThisUsersAlone(t *testing.T) {
+	base := t.TempDir()
+	private := filepath.Join(base, "private")
+	require.NoError(t, os.Mkdir(private, 0o700))
+	require.NoError(t, checkSocketDir(private))
+
+	open := filepath.Join(base, "open")
+	require.NoError(t, os.Mkdir(open, 0o755)) //nolint:gosec // G301: the case under test
+	require.ErrorContains(t, checkSocketDir(open), "can be entered by other users")
+	link := filepath.Join(base, "link")
+	require.NoError(t, os.Symlink(private, link))
+	require.ErrorContains(t, checkSocketDir(link), "is not a directory of its own")
+	require.ErrorIs(t, checkSocketDir(filepath.Join(base, "missing")), os.ErrNotExist)
+
+	_, err := listen(context.Background(), filepath.Join(link, "sock"))
+	require.ErrorContains(t, err, "is not a directory of its own", "a link is not adopted and given this user's permissions")
+	_, err = Call(context.Background(), filepath.Join(open, "sock"), Request{Op: OpWorkers}, time.Second)
+	require.ErrorContains(t, err, "can be entered by other users")
+
+	// A path too long for a socket address goes to the user's runtime
+	// directory, where there is one, under a name that is the same for the
+	// connector and for whoever calls it.
+	runtime, err := os.MkdirTemp("", "rt") // short: a test's own directory is too long a path itself
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(runtime) })
+	t.Setenv("XDG_RUNTIME_DIR", runtime)
+	long := filepath.Join(base, strings.Repeat("d", 120))
+	path := SocketPath(long)
+	assert.Equal(t, filepath.Join(runtime, "basecamp-connect"), filepath.Dir(path))
+	assert.Equal(t, path, SocketPath(long))
+	assert.LessOrEqual(t, len(path), maxSocketPath+30)
+	listener, err := listen(context.Background(), path)
+	require.NoError(t, err)
+	require.NoError(t, listener.Close())
+	info, err := os.Stat(filepath.Dir(path))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
 }

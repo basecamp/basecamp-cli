@@ -72,7 +72,9 @@ func TestAnAgentsCommandsReachItsRunnerWithoutReadingConnectJSON(t *testing.T) {
 	_, err := f.run(t, output.FormatJSON, "workers", "list")
 	assert.Contains(t, usageError(t, err).Message, "is not set up as a connector", "with nothing said of a runner, the profile is read")
 
-	t.Setenv(runner.DirEnv, t.TempDir())
+	private := t.TempDir()
+	require.NoError(t, os.Chmod(private, 0o700))
+	t.Setenv(runner.SocketEnv, filepath.Join(private, "sock"))
 	t.Setenv(runner.ProfileEnv, "agent")
 	_, err = f.run(t, output.FormatJSON, "workers", "list")
 	assert.Contains(t, usageError(t, err).Message, "No connector is running with an orchestrator", "the runner named is the one called, and nothing listens there")

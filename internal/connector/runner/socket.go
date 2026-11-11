@@ -102,17 +102,32 @@ func SocketPath(dir string) string {
 		return path
 	}
 	sum := sha256.Sum256([]byte(dir))
-	return filepath.Join(os.TempDir(), "basecamp-connect-"+strconv.Itoa(os.Getuid()), hex.EncodeToString(sum[:8])+".sock")
+	return filepath.Join(socketFallbackDir(), hex.EncodeToString(sum[:8])+".sock")
+}
+
+// socketFallbackDir is where a socket goes when its own directory's path is
+// too long: the user's runtime directory where there is one, which is
+// theirs alone, and otherwise a directory named for them in the temporary
+// directory, which listen and Call hold to checkSocketDir.
+func socketFallbackDir() string {
+	if runtime := os.Getenv("XDG_RUNTIME_DIR"); filepath.IsAbs(runtime) {
+		return filepath.Join(runtime, "basecamp-connect")
+	}
+	return filepath.Join(os.TempDir(), "basecamp-connect-"+strconv.Itoa(os.Getuid()))
 }
 
 // listen opens the socket. A socket file an earlier run left is removed
 // first: the connector's instance lock already says no other runner is
 // listening on it.
 func listen(ctx context.Context, path string) (net.Listener, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	// Made if it is not there, and never adopted as it is found: a
+	// directory someone else made first, or a link put in its place, is
+	// refused rather than given this user's permissions.
+	dir := filepath.Dir(path)
+	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 		return nil, err
 	}
-	if err := os.Chmod(filepath.Dir(path), 0o700); err != nil { //nolint:gosec // G302: a directory, which needs its search bit
+	if err := checkSocketDir(dir); err != nil {
 		return nil, err
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -133,7 +148,7 @@ func listen(ctx context.Context, path string) (net.Listener, error) {
 func (r *Runner) serve(ctx context.Context, listener net.Listener) {
 	for {
 		conn, err := listener.Accept()
-		if errors.Is(err, net.ErrClosed) || ctx.Err() != nil {
+		if err != nil && (errors.Is(err, net.ErrClosed) || ctx.Err() != nil) {
 			return
 		}
 		if err != nil {
@@ -270,11 +285,20 @@ func (r *Runner) Status() Status {
 // running with an orchestrator for the profile.
 var ErrNotRunning = errors.New("no connector is running with an orchestrator for this profile")
 
-// Call makes one call on the runner in dir. A zero timeout waits as long as
-// the answer takes, which for say is as long as the orchestrator's turn.
-func Call(ctx context.Context, dir string, req Request, timeout time.Duration) (Response, error) {
+// Call makes one call on the runner listening at path (SocketPath). A zero
+// timeout waits as long as the answer takes, which for say is as long as the
+// orchestrator's turn.
+func Call(ctx context.Context, path string, req Request, timeout time.Duration) (Response, error) {
+	// A socket is only as trustworthy as the directory it is in: one another
+	// user could have put there is not called.
+	switch err := checkSocketDir(filepath.Dir(path)); {
+	case errors.Is(err, os.ErrNotExist):
+		return Response{}, fmt.Errorf("%w (%w)", ErrNotRunning, err)
+	case err != nil:
+		return Response{}, err
+	}
 	var dialer net.Dialer
-	conn, err := dialer.DialContext(ctx, "unix", SocketPath(dir))
+	conn, err := dialer.DialContext(ctx, "unix", path)
 	if err != nil {
 		return Response{}, fmt.Errorf("%w (%w)", ErrNotRunning, err)
 	}

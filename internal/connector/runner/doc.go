@@ -53,7 +53,8 @@
 // A stop ends every agent process it started. A crash ends none, so the state
 // names the process of each turn in flight, and a start that finds one named
 // ends it, by its process group, before it continues that session: a request
-// is not worked on by two processes at once.
+// is not worked on by two processes at once. A start that cannot confirm one
+// ended does not start at all, and says which process a person has to end.
 //
 // Agents run unattended. Under full permissions each adapter starts its CLI
 // with permission prompts off; under guarded permissions it starts the CLI
