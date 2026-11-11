@@ -42,8 +42,7 @@ const (
 	StateQueued RecordState = "queued"
 	// StateBlocked is retained and retried: a reason, never a transport
 	// failure dressed up as a verdict. Retried by the intake sweep, on
-	// admission.NextBlockedRetry's schedule (Intake.sweepBlockedRetries), and
-	// by a person at any time with `basecamp connect redispatch <id>`.
+	// admission.NextBlockedRetry's schedule (Intake.sweepBlockedRetries).
 	StateBlocked RecordState = "blocked"
 	// StateDispatched was handed to a worker.
 	StateDispatched RecordState = "dispatched"
