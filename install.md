@@ -113,7 +113,10 @@ Interactive installs authenticate during Step 1. If setup was skipped, did not f
 basecamp auth login
 ```
 
-This opens browser OAuth. Grant access when prompted.
+This opens browser OAuth. Grant access when prompted. At a terminal it first
+asks whether this computer connects as your agent or as yourself; an agent
+installing for a person runs it without a terminal, which connects the person,
+or passes `--as agent` or `--as me` to choose.
 
 **Verify:**
 ```bash
