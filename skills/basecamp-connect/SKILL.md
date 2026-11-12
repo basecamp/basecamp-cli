@@ -79,8 +79,9 @@ between the start and the monitor is missed:
 tail -f -n +1 '<connector-output-file>' | grep --line-buffered -F '"type":"request"'
 ```
 
-Single-quote the path, as with every other value. If it expires anyway, re-arm
-it once, persistent; if that expires too, use *Without this session*.
+Single-quote the path, as with every other value. If it expires, re-arm it
+once, persistent. If that expires too, stop the connector, and once it exits
+use *Without this session*.
 
 Each notification is one request: handle it with *For each request*. A request
 that arrives while you're waiting on the person is not their reply.
