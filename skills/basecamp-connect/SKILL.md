@@ -66,25 +66,24 @@ basecamp connect -P '<profile>'
 ```
 
 It runs until stopped. After a few seconds its log should say
-`connector: running`. If it exited, or says `could not get the agent's token
-yet`, see *When the connector stops*.
+`connector: running`. If it exited, explain the error (*When the connector
+stops*) and stop. That section also covers `could not get the agent's token
+yet`.
 
-Then arm a monitor on it with the Monitor tool and the longest `timeout_ms`
-it allows. It replays the file from the start, and records each request line
-it delivers in `<delivered-file>`, a file of yours, so arming it again skips
-them:
+Then arm a monitor on it with the Monitor tool and its longest `timeout_ms`.
+It replays the file from the start, recording each request line it delivers
+beside it so arming it again skips them:
 
 ```bash
-: >> '<delivered-file>'
+: >> '<connector-output-file>.delivered'
 tail -f -n +1 '<connector-output-file>' | grep --line-buffered -F '"type":"request"' \
-  | awk -v skip="$(wc -l < '<delivered-file>')" 'NR > skip { print; fflush() }' | tee -a '<delivered-file>'
+  | awk -v skip="$(wc -l < '<connector-output-file>.delivered')" 'NR>skip{print;fflush()}' \
+  | tee -a '<connector-output-file>.delivered'
 ```
 
-Single-quote the paths, as always.
-
-A monitor ends at its `timeout_ms` (at most 30 minutes) with one notice; the
-connector is still running. Arm it again at once, the same way: it delivers
-what arrived meanwhile, nothing twice.
+At its `timeout_ms` (30 minutes at most) the monitor ends with a notice; the
+connector has not. Arm it again at once, the same way: it delivers what
+arrived meanwhile, nothing twice.
 
 Each notification is one request: handle it with *For each request*. A request
 that arrives while you're waiting on the person is not their reply.
