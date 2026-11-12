@@ -532,10 +532,12 @@ trust.
 
 **Upgrading from path-only trust:** previously trusted configs must be reviewed
 and trusted again before their security-sensitive settings apply. Global
-configuration and saved credentials are unchanged. While repository connection
-settings are ignored, other repository defaults still apply. Check the effective
-server address, account, and project with `basecamp config show` before making
-changes.
+configuration and saved credentials are unchanged. Until reapproval, trust-gated
+connection, cache, and LLM settings are ignored, including `base_url`, `profiles`,
+`default_profile`, `cache_dir`, `cache_enabled`, and LLM provider, endpoint, model,
+and budget settings. Ordinary top-level defaults such as `account_id`,
+`project_id`, and `todolist_id` still apply. Check the effective server address,
+account, and project with `basecamp config show` before making changes.
 
 ## Troubleshooting
 

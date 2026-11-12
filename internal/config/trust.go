@@ -154,6 +154,11 @@ var untrustedKeys = []string{
 // JSON object without untrustedKeys, re-encoded with sorted keys so that
 // formatting and key order do not change it.
 func trustDigest(data []byte) (string, error) {
+	// A decoder accepts the first value even when trailing content makes
+	// the document invalid. Match the loader's whole-document validation.
+	if !json.Valid(data) {
+		return "", errors.New("not a valid JSON object")
+	}
 	var fileCfg map[string]any
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()

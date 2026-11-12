@@ -376,9 +376,14 @@ func TestTrustStore_DigestOmitsOnlyUngatedKeys(t *testing.T) {
 		"experimental": map[string]any{"feature": true},
 	}
 	require.Len(t, values, len(untrustedKeys))
+	emptyDigest, err := trustDigest([]byte(`{}`))
+	require.NoError(t, err)
 	for _, key := range untrustedKeys {
 		data, err := json.Marshal(map[string]any{key: values[key]})
 		require.NoError(t, err)
+		digest, err := trustDigest(data)
+		require.NoError(t, err)
+		assert.Equal(t, emptyDigest, digest, "%s does not affect approval", key)
 		path := filepath.Join(t.TempDir(), "config.json")
 		require.NoError(t, os.WriteFile(path, data, 0o600))
 
@@ -392,8 +397,8 @@ func TestTrustStore_DigestOmitsOnlyUngatedKeys(t *testing.T) {
 	}
 }
 
-// The loader must check the bytes it parsed, not read the path a second
-// time: the file could have changed between the two reads.
+// IsTrustedContent checks the supplied bytes even if the path has changed.
+// The loader uses this entry point to avoid a second file read.
 func TestTrustStore_ChecksTheSuppliedContent(t *testing.T) {
 	original := []byte(`{"base_url":"https://original.example.com"}`)
 	configPath, ts := writeTrustedConfig(t, string(original))
@@ -438,10 +443,29 @@ func TestTrustStore_NestedKeyOrderKeepsTrust(t *testing.T) {
 }
 
 func TestTrustStore_TrustRefusesAFileThatIsNotAConfig(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.json")
-	require.NoError(t, os.WriteFile(configPath, []byte(`not json`), 0o600))
-	ts := NewTrustStore(dir)
-	assert.Error(t, ts.Trust(configPath))
-	assert.Empty(t, ts.List())
+	for _, contents := range []string{
+		`not json`, `null`, `[]`, ``,
+		`{"base_url":"https://original.example.com"} {}`,
+		`{"base_url":"https://original.example.com"} garbage`,
+	} {
+		t.Run(contents, func(t *testing.T) {
+			dir := t.TempDir()
+			configPath := filepath.Join(dir, "config.json")
+			require.NoError(t, os.WriteFile(configPath, []byte(contents), 0o600))
+			ts := NewTrustStore(dir)
+			assert.Error(t, ts.Trust(configPath))
+			assert.Empty(t, ts.List())
+		})
+	}
+}
+
+func TestTrustStore_TrailingContentInvalidatesApproval(t *testing.T) {
+	const original = `{"base_url":"https://original.example.com"}`
+	configPath, ts := writeTrustedConfig(t, original)
+	for _, suffix := range []string{` {}`, ` garbage`} {
+		data := []byte(original + suffix)
+		require.NoError(t, os.WriteFile(configPath, data, 0o600))
+		assert.False(t, ts.IsTrusted(configPath))
+		assert.False(t, ts.IsTrustedContent(configPath, data))
+	}
 }
