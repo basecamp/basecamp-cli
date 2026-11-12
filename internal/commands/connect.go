@@ -64,6 +64,56 @@ off nothing. --hold sets this profile's durable hold: intake and admission run,
 nothing is handed off, and earlier records wait for review, until basecamp
 connect release for this profile. Linux and macOS only.
 
+With --orchestrator the connector does the work itself, with no session
+reading its output: each trusted request goes to a headless session of the
+coding agent named (claude, codex or pi), which follows the basecamp-connect
+skill and hands the work to a worker, a session of its own on the coding
+agent --worker names (the orchestrator's by default), in the repo the request
+belongs to. --orchestrator-model, --orchestrator-effort, --worker-model and
+--worker-effort choose models and reasoning effort; without them each coding
+agent uses its own defaults.
+
+  basecamp connect -P <profile> --orchestrator claude --worker codex
+  basecamp connect -P <profile> --run
+
+What a start names is kept for the profile, so the next one is --run. Plain
+basecamp connect, with none of these, still only prints requests.
+
+Agents run unattended, as you. --permissions says what they may do:
+
+  full      Any command and any file, without asking first, since nobody is
+            at the keyboard to approve each step. The default.
+  guarded   Each coding agent under its own guardrails. Claude Code runs in
+            its auto mode: it judges each action and stops the ones it finds
+            unsafe. Codex runs each command in its sandbox, where it writes
+            only in the folder it works in and the temporary directory, and
+            decides itself whether a command the sandbox stopped may run
+            outside it. Nobody is asked either way. Pi has no guardrails, and
+            is refused.
+
+An agent that is stopped says so in its reply. Who may give the agent work
+is setup's, and by default it is only its operator: basecamp connect show.
+
+A runner.json beside the profile's connect.json chooses workers by where a
+request came from and which repo its work goes in. The first rule that
+matches wins, and what its worker leaves out comes from how the connector was
+started:
+
+  {"worker": {"adapter": "codex", "effort": "medium"},
+   "rules": [
+     {"repo": "~/code/app", "worker": {"adapter": "claude", "model": "opus"}},
+     {"card_table": 123, "worker": {"effort": "high"}},
+     {"project": 456, "worker": {"adapter": "pi"}},
+     {"ping": true, "worker": {"adapter": "claude", "model": "haiku"}}]}
+
+The rules and the permissions are read again for each request, so an edit to
+them needs no restart. The worker at the top is what the connector starts
+with.
+
+  basecamp connect say "<message>"    talk to the orchestrator
+  basecamp connect workers list       the workers and what each runs on
+  basecamp connect stop               stop it; restart starts it again
+
 One connector runs per profile in this state directory. An agent can run
 several connections where Basecamp enables adding them for its kind; otherwise
 a new approval replaces the existing connection. Each profile
@@ -100,12 +150,19 @@ status and doctor say which this profile's does.
 			"stdout_wire": "connect",
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runConnect(cmd, &run)
+			err := runConnect(cmd, &run)
+			if errors.Is(err, errConnectRestart) {
+				// Everything the run held is released: the same command
+				// takes this process over and starts from the beginning.
+				return connectReexec()
+			}
+			return err
 		},
 	}
 	addConnectRunFlags(cmd, &run)
 	cmd.AddCommand(newConnectSetupCmd(), newConnectShowCmd(), newConnectStatusCmd(), newConnectDoctorCmd(),
-		newConnectDiscardCmd(), newConnectAskCmd(), newConnectReleaseCmd(), newConnectShadowCmd(), newConnectImportCmd())
+		newConnectDiscardCmd(), newConnectAskCmd(), newConnectReleaseCmd(), newConnectShadowCmd(), newConnectImportCmd(),
+		newConnectDispatchCmd(), newConnectWorkersCmd(), newConnectSayCmd(), newConnectStopCmd(), newConnectRestartCmd())
 	return cmd
 }
 
