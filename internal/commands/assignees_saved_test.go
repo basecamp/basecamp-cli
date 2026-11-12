@@ -24,9 +24,10 @@ import (
 // A record takes its ID from the request path, #999 when the path has none. A
 // write answers with the assignee_ids it was sent, or, when drop matches the
 // path, with none of them: what Basecamp does with an ID it cannot assign,
-// such as a card column's.
+// such as a card column's. A read answers with existing as its assignees.
 type assigneeEchoTransport struct {
-	drop func(path string) bool
+	drop     func(path string) bool
+	existing string
 }
 
 var trailingRecordID = regexp.MustCompile(`/(\d+)(\.json)?$`)
@@ -58,7 +59,7 @@ func (m *assigneeEchoTransport) RoundTrip(req *http.Request) (*http.Response, er
 		case strings.HasSuffix(path, "/people.json"):
 			return respond(200, `[{"id": 42, "name": "Annie Bryan"}]`)
 		}
-		return respond(200, recordJSON(path, ""))
+		return respond(200, recordJSON(path, m.existing))
 	case http.MethodPost, http.MethodPut:
 		var body struct {
 			AssigneeIDs []int64 `json:"assignee_ids"`

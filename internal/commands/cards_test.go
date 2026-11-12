@@ -1756,10 +1756,11 @@ func TestCardsCreateHasAssigneeFlag(t *testing.T) {
 	require.NotNil(t, toFlag, "expected --to flag on cards create")
 }
 
-// mockCardAssignTransport handles resolver API calls with people endpoint,
-// card creation, and captures the PUT body for assignment verification.
+// mockCardAssignTransport handles resolver API calls with people endpoint and
+// captures the card create body. It refuses a PUT: the card is created
+// already assigned, so nothing may follow the create.
 type mockCardAssignTransport struct {
-	capturedPutBody []byte
+	capturedPostBody []byte
 }
 
 func (t *mockCardAssignTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -1787,7 +1788,12 @@ func (t *mockCardAssignTransport) RoundTrip(req *http.Request) (*http.Response, 
 	}
 
 	if req.Method == "POST" {
-		mockResp := `{"id": 999, "title": "Test Card", "assignees": []}`
+		if req.Body != nil {
+			body, _ := io.ReadAll(req.Body)
+			t.capturedPostBody = body
+			req.Body.Close()
+		}
+		mockResp := `{"id": 999, "title": "Test Card", "assignees": [{"id": 42, "name": "Annie Bryan"}]}`
 		return &http.Response{
 			StatusCode: 201,
 			Body:       io.NopCloser(strings.NewReader(mockResp)),
@@ -1795,24 +1801,10 @@ func (t *mockCardAssignTransport) RoundTrip(req *http.Request) (*http.Response, 
 		}, nil
 	}
 
-	if req.Method == "PUT" {
-		if req.Body != nil {
-			body, _ := io.ReadAll(req.Body)
-			t.capturedPutBody = body
-			req.Body.Close()
-		}
-		mockResp := `{"id": 999, "title": "Test Card", "assignees": [{"id": 42, "name": "Annie Bryan"}]}`
-		return &http.Response{
-			StatusCode: 200,
-			Body:       io.NopCloser(strings.NewReader(mockResp)),
-			Header:     header,
-		}, nil
-	}
-
-	return nil, errors.New("unexpected request")
+	return nil, fmt.Errorf("unexpected %s %s", req.Method, req.URL.Path)
 }
 
-func TestCardsCreateWithAssigneeSendsUpdate(t *testing.T) {
+func TestCardsCreateWithAssigneeSendsAssigneesOnCreate(t *testing.T) {
 	transport := &mockCardAssignTransport{}
 	app := setupCardsMockApp(t, transport)
 	app.Output = output.New(output.Options{
@@ -1827,16 +1819,15 @@ func TestCardsCreateWithAssigneeSendsUpdate(t *testing.T) {
 	err := executeCommand(cmd, app, "Test Card", "--assignee", "Annie Bryan")
 	require.NoError(t, err)
 
-	require.NotEmpty(t, transport.capturedPutBody, "expected PUT request for assignment")
+	require.NotEmpty(t, transport.capturedPostBody, "expected POST request for the card")
 
-	var putBody map[string]any
-	err = json.Unmarshal(transport.capturedPutBody, &putBody)
+	var postBody map[string]any
+	err = json.Unmarshal(transport.capturedPostBody, &postBody)
 	require.NoError(t, err)
 
-	assigneeIDs, ok := putBody["assignee_ids"].([]any)
-	require.True(t, ok, "expected assignee_ids array in PUT body")
-	require.Len(t, assigneeIDs, 1)
-	assert.Equal(t, float64(42), assigneeIDs[0])
+	assert.Equal(t, []any{float64(42)}, postBody["assignee_ids"])
+	_, notify := postBody["notify"]
+	assert.False(t, notify, "notify must be absent without --notify")
 }
 
 func TestResolveAssigneeIDRejectsZero(t *testing.T) {
