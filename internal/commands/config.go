@@ -666,8 +666,13 @@ func newConfigTrustCmd() *cobra.Command {
 		Long: `Trust a local or repo .basecamp/config.json to allow authority keys
 (base_url, default_profile, profiles).
 
+Trust applies to the file's current security-sensitive settings. If those
+settings change, review the file and trust it again. Formatting changes and
+changes to ordinary top-level defaults such as project_id retain trust.
+
 Without arguments, trusts the nearest .basecamp/config.json (CWD or repo root).
-With --list, shows all trusted config paths.`,
+With --list, shows all recorded config approvals, including those whose settings
+have changed or need to be trusted again after an upgrade.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -678,20 +683,27 @@ With --list, shows all trusted config paths.`,
 				}
 				ts := config.LoadTrustStore(config.GlobalConfigDir())
 				if ts == nil {
-					return app.OK([]any{}, output.WithSummary("No trusted configs"))
+					return app.OK([]any{}, output.WithSummary("No recorded config approvals"))
 				}
 				entries := ts.List()
 				if len(entries) == 0 {
-					return app.OK([]any{}, output.WithSummary("No trusted configs"))
+					return app.OK([]any{}, output.WithSummary("No recorded config approvals"))
 				}
 				result := make([]map[string]string, len(entries))
+				trusted := 0
 				for i, e := range entries {
+					status := "untrusted"
+					if ts.IsTrusted(e.Path) {
+						status = "trusted"
+						trusted++
+					}
 					result[i] = map[string]string{
 						"path":       e.Path,
 						"trusted_at": e.TrustedAt,
+						"status":     status,
 					}
 				}
-				return app.OK(result, output.WithSummary(fmt.Sprintf("%d trusted config(s)", len(entries))))
+				return app.OK(result, output.WithSummary(fmt.Sprintf("%d of %d config(s) currently trusted", trusted, len(entries))))
 			}
 
 			path, err := resolveConfigTrustPath(args)
@@ -725,7 +737,7 @@ With --list, shows all trusted config paths.`,
 		},
 	}
 
-	cmd.Flags().BoolVar(&list, "list", false, "List all trusted config paths")
+	cmd.Flags().BoolVar(&list, "list", false, "List recorded config approvals and their current trust status")
 
 	return cmd
 }

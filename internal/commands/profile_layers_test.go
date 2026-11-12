@@ -3,15 +3,23 @@
 package commands
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/appctx"
+	"github.com/basecamp/basecamp-cli/internal/auth"
 	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 )
@@ -194,4 +202,80 @@ func assertSetupReportsTheGlobalConfig(t *testing.T, s *connectSetupServer) {
 	hint := hintOf(t, err)
 	assert.NotContains(t, hint, "not the global config", "the global config was skipped, so it is no evidence")
 	assert.Contains(t, hint, "basecamp auth agent connect -P agent", "the generic remedy, which reports the file itself")
+}
+
+// A trusted repo config that is later rewritten, as a pull request checkout
+// rewrites it, to point the operator's profile at another host is no longer
+// trusted: the profile keeps the Basecamp the global config gives it, and
+// the new host is never sent the profile's token.
+func TestARewrittenTrustedConfigSendsNoTokenToItsNewHost(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BASECAMP_NO_KEYRING", "1")
+	t.Setenv("BASECAMP_TOKEN", "")
+
+	basecampSrv, basecampAuth := authorizationRecorder(t)
+	otherSrv, otherAuth := authorizationRecorder(t)
+
+	writeGlobalConfigHere(t, fmt.Sprintf(`{"profiles":{"work":{"base_url":%q,"account_id":"555"}}}`, basecampSrv.URL))
+	require.NoError(t, auth.NewStore(config.GlobalConfigDir()).Save("profile:work", &auth.Credentials{
+		AccessToken: "bc_at_work",
+		OAuthType:   "agent",
+		ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+	}))
+	local := trustedLocalConfig(t, `{"default_profile":"work"}`)
+
+	check := checkAPIConnectivity(context.Background(), loadedApp(t), false)
+	assert.Equal(t, "pass", check.Status, "%s: %s", check.Message, check.Hint)
+	assert.Equal(t, []string{"Bearer bc_at_work"}, basecampAuth(), "the trusted config works as trusted")
+
+	require.NoError(t, os.WriteFile(local, []byte(fmt.Sprintf(
+		`{"default_profile":"work","profiles":{"work":{"base_url":%q,"account_id":"555"}}}`, otherSrv.URL)), 0o600))
+
+	app := loadedApp(t)
+	assert.NotEqual(t, otherSrv.URL, app.Config.BaseURL, "the rewritten profile is not applied")
+	checkAPIConnectivity(context.Background(), app, false)
+	assert.Empty(t, otherAuth(), "the new host is sent no token")
+
+	// Explicit selection (-P work) must also keep the global profile and
+	// continue authenticating to its original host, not just drop the token.
+	cfg, err := config.Load(config.FlagOverrides{})
+	require.NoError(t, err)
+	require.NoError(t, cfg.ApplyProfile("work"))
+	check = checkAPIConnectivity(context.Background(), appctx.NewApp(cfg), false)
+	assert.Equal(t, "pass", check.Status, "%s: %s", check.Message, check.Hint)
+	assert.Equal(t, []string{"Bearer bc_at_work", "Bearer bc_at_work"}, basecampAuth())
+	assert.Empty(t, otherAuth(), "explicit profile selection sends no token to the new host either")
+}
+
+// loadedApp is the app the next invocation of the CLI builds, from
+// config.Load and the default profile it names.
+func loadedApp(t *testing.T) *appctx.App {
+	t.Helper()
+	cfg, err := config.Load(config.FlagOverrides{})
+	require.NoError(t, err)
+	if cfg.DefaultProfile != "" {
+		require.NoError(t, cfg.ApplyProfile(cfg.DefaultProfile))
+	}
+	return appctx.NewApp(cfg)
+}
+
+// authorizationRecorder answers an agent's person record and reports the
+// Authorization headers it was sent.
+func authorizationRecorder(t *testing.T) (*httptest.Server, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Header.Get("Authorization"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"id": 777, "name": "Agent"})
+	}))
+	t.Cleanup(srv.Close)
+	return srv, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), seen...)
+	}
 }

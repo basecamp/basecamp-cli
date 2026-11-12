@@ -514,6 +514,29 @@ basecamp mcp --domains projects,todos    # narrow the served surface (fails clos
 A leftover `~/.config/basecamp/client.json` (from the removed development
 client-registration flow) is obsolete and safe to delete.
 
+### Trusting repository configuration
+
+Repository and local configs may set ordinary defaults such as `project_id`
+and `todolist_id` without approval. Settings that control connections, including
+`base_url`, `profiles`, and `default_profile`, require explicit trust:
+
+```bash
+basecamp config trust /path/to/.basecamp/config.json
+```
+
+Review the file and its server addresses before trusting it. Trust applies to
+its current security-sensitive settings, not just its path. If those settings
+change, the CLI ignores them and warns until you review and trust the file
+again. Formatting changes and changes to ordinary top-level defaults retain
+trust.
+
+**Upgrading from path-only trust:** previously trusted configs must be reviewed
+and trusted again before their security-sensitive settings apply. Global
+configuration and saved credentials are unchanged. While repository connection
+settings are ignored, other repository defaults still apply. Check the effective
+server address, account, and project with `basecamp config show` before making
+changes.
+
 ## Troubleshooting
 
 ```bash

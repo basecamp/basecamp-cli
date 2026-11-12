@@ -188,6 +188,47 @@ func TestConfigTrust_ListWithEntries(t *testing.T) {
 	assert.Len(t, result, 1)
 	assert.NotEmpty(t, result[0]["path"])
 	assert.NotEmpty(t, result[0]["trusted_at"])
+	assert.Equal(t, "trusted", result[0]["status"])
+}
+
+func TestConfigTrust_ListShowsInvalidApprovals(t *testing.T) {
+	app, buf := setupConfigTestApp(t)
+	dir := t.TempDir()
+	changed := filepath.Join(dir, "changed.json")
+	legacy := filepath.Join(dir, "legacy.json")
+	missing := filepath.Join(dir, "missing.json")
+	valid := filepath.Join(dir, "valid.json")
+	for _, path := range []string{changed, legacy, missing, valid} {
+		require.NoError(t, os.WriteFile(path, []byte(`{}`), 0o600))
+		require.NoError(t, executeConfigCommand(app, "trust", path))
+		buf.Reset()
+	}
+	require.NoError(t, os.WriteFile(changed, []byte(`{"base_url":"https://other.example.com"}`), 0o600))
+	require.NoError(t, os.Remove(missing))
+
+	// A legacy approval has a path and timestamp, but no content digest.
+	storePath := filepath.Join(config.GlobalConfigDir(), "trusted-configs.json")
+	data, err := os.ReadFile(storePath)
+	require.NoError(t, err)
+	var store struct {
+		Trusted []config.TrustEntry `json:"trusted"`
+	}
+	require.NoError(t, json.Unmarshal(data, &store))
+	require.Len(t, store.Trusted, 4)
+	store.Trusted[1].Digest = ""
+	data, err = json.Marshal(store)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(storePath, data, 0o600))
+
+	require.NoError(t, executeConfigCommand(app, "trust", "--list"))
+	var result []map[string]string
+	parseEnvelopeData(t, buf, &result)
+	require.Len(t, result, 4)
+	for _, entry := range result[:3] {
+		assert.Equal(t, "untrusted", entry["status"], entry["path"])
+	}
+	assert.Equal(t, "trusted", result[3]["status"])
+	assert.Contains(t, buf.String(), "1 of 4 config(s) currently trusted")
 }
 
 func TestConfigTrust_ListRejectsArgs(t *testing.T) {
