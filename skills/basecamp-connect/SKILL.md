@@ -58,9 +58,6 @@ This flow needs Claude Code. Without it, or with no session open, see
 
 ### 1. Start it, and watch its output
 
-One connector per profile can run in this state directory. If another holds
-its lock, it refuses: tell the person, and don't start a second.
-
 Start it in the background with the Bash tool (`run_in_background: true`), and
 note the output file the harness reports:
 
@@ -68,22 +65,26 @@ note the output file the harness reports:
 basecamp connect -P '<profile>'
 ```
 
-It runs until stopped, from any folder. After a few seconds its log should say
-`connector: running`. If it exited instead, explain the error
-(see *When the connector stops*), and stop. If it says `could not get the
-agent's token yet`, Basecamp's token endpoint is limiting it or failing: it
-retries on its own. Tell the person, leave it running, and arm the monitor;
-restarting doesn't help.
+It runs until stopped. After a few seconds its log should say
+`connector: running`. If it exited, or says `could not get the agent's token
+yet`, see *When the connector stops*.
 
-Then arm a persistent monitor on that file with the Monitor tool
-(`persistent: true`), replaying from the start so nothing that arrived between
-the start and the monitor is missed:
+Then arm a monitor on it with the Monitor tool and the longest `timeout_ms`
+it allows. It replays the file from the start, and records each request line
+it delivers in `<delivered-file>`, a file of yours, so arming it again skips
+them:
 
 ```bash
-tail -f -n +1 '<connector-output-file>' | grep --line-buffered -F '"type":"request"'
+: >> '<delivered-file>'
+tail -f -n +1 '<connector-output-file>' | grep --line-buffered -F '"type":"request"' \
+  | awk -v skip="$(wc -l < '<delivered-file>')" 'NR > skip { print; fflush() }' | tee -a '<delivered-file>'
 ```
 
-Single-quote the path, as with every other value.
+Single-quote the paths, as always.
+
+A monitor ends at its `timeout_ms` (at most 30 minutes) with one notice; the
+connector is still running. Arm it again at once, the same way: it delivers
+what arrived meanwhile, nothing twice.
 
 Each notification is one request: handle it with *For each request*. A request
 that arrives while you're waiting on the person is not their reply.
@@ -682,6 +683,10 @@ compaction.
 The background task notifies you when the connector exits. Read the end of its
 output and tell the person what it means:
 
+- **`could not get the agent's token yet`**, and it is still running:
+  Basecamp's token endpoint is limiting it or failing, and it retries on its
+  own. Tell the person, leave it running, and arm the monitor; restarting
+  doesn't help.
 - **"was disconnected in Basecamp, or replaced by a newer connection"**: run
   `basecamp connect setup -P '<profile>'` (it reconnects with one approval),
   then start it again.
