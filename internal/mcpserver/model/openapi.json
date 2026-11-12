@@ -33316,8 +33316,17 @@
               "path": "github.com/basecamp/basecamp-sdk/go/pkg/types"
             }
           },
+          "assignee_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "People to assign to the new card. BC3 keeps only the ids it finds among\nthe card table's reachable people and silently drops the rest."
+          },
           "notify": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Notify the people assigned through assignee_ids. Off unless true."
           }
         },
         "required": [
@@ -41845,6 +41854,10 @@
               "type": "integer",
               "format": "int64"
             }
+          },
+          "notify": {
+            "type": "boolean",
+            "description": "Notify people newly assigned through assignee_ids in this same request.\nOff unless true, and has no effect without assignee_ids: people already\nassigned are not notified again."
           }
         }
       },
