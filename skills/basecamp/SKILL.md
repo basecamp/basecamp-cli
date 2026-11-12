@@ -418,5 +418,10 @@ Before changing Basecamp:
 3. Make the smallest requested change.
 4. Return the resulting ID/URL and summarize what changed.
 
+When you assign work to a person, pass `--notify` so they find out: Basecamp
+tells nobody about an assignment made without it. It applies to
+`basecamp assign`, `basecamp todos create`, `basecamp todos update`,
+`basecamp cards create` and `basecamp cards update` with `--assignee`.
+
 For destructive or broad operations, preview when the command offers a dry-run
 and do not expand the user's requested scope.
