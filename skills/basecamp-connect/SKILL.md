@@ -58,32 +58,31 @@ This flow needs Claude Code. Without it, or with no session open, see
 
 ### 1. Start it, and watch its output
 
-Start it in the background with the Bash tool (`run_in_background: true`), and
-note the output file the harness reports:
+Start it with the Bash tool, `run_in_background: true`, and note the output
+file the harness reports:
 
 ```bash
 basecamp connect -P '<profile>'
 ```
 
-It runs until stopped. After a few seconds its log should say
-`connector: running`. If it exited, explain the error (*When the connector
-stops*) and stop. That section also covers `could not get the agent's token
-yet`.
+After a few seconds its log should say `connector: running`. If it exited,
+explain the error (*When the connector stops*) and stop. That section also
+covers `could not get the agent's token yet`.
 
 Then arm a monitor on it with the Monitor tool and its longest `timeout_ms`.
-It replays the file from the start, recording each request line it delivers
-beside it so arming it again skips them:
+It replays the file from the start, recording what it delivers beside it so
+arming it again skips that:
 
 ```bash
 : >> '<connector-output-file>.delivered'
 tail -f -n +1 '<connector-output-file>' | grep --line-buffered -F '"type":"request"' \
-  | awk -v skip="$(wc -l < '<connector-output-file>.delivered')" 'NR>skip{print;fflush()}' \
-  | tee -a '<connector-output-file>.delivered'
+  | awk -v skip="$(wc -l < '<connector-output-file>.delivered')" -v f='<connector-output-file>.delivered' \
+    'NR>=skip{print;fflush()}NR>skip{print>>f;fflush(f)}'
 ```
 
 At its `timeout_ms` (30 minutes at most) the monitor ends with a notice; the
 connector has not. Arm it again at once, the same way: it delivers what
-arrived meanwhile, nothing twice.
+arrived meanwhile, and the last line again, to skip as handled.
 
 Each notification is one request: handle it with *For each request*. A request
 that arrives while you're waiting on the person is not their reply.
