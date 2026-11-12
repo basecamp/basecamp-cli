@@ -33,11 +33,6 @@ triggers:
 
 # /basecamp-connect: drive your agent from Basecamp
 
-Someone @mentions the agent in Basecamp, assigns it a card or to-do, or pings
-it. This session acknowledges it as the agent within seconds,
-a background subagent does the work in the right repo with your own Claude
-Code setup, and the agent replies in place.
-
 Three pieces:
 
 - **The agent**: a Basecamp person of its own, owned by you, connected to this
@@ -51,8 +46,9 @@ Three pieces:
   acknowledgement, chooses the repo, and dispatches one background subagent
   per request. It never does the work itself.
 
-This flow needs Claude Code. Without it, or with no session open, see
-*Without this session*. The connector runs on Linux and macOS.
+This flow needs Claude Code, with a Monitor tool that takes `persistent`.
+Without either, or with no session open, see *Without this session*. The
+connector runs on Linux and macOS.
 
 ## Running the connector
 
@@ -75,15 +71,16 @@ agent's token yet`, Basecamp's token endpoint is limiting it or failing: it
 retries on its own. Tell the person, leave it running, and arm the monitor;
 restarting doesn't help.
 
-Then arm a persistent monitor on that file with the Monitor tool
-(`persistent: true`), replaying from the start so nothing that arrived between
-the start and the monitor is missed:
+Then arm a monitor on that file with the Monitor tool, **`persistent: true`
+and never a `timeout_ms`**, replaying from the start so nothing that arrived
+between the start and the monitor is missed:
 
 ```bash
 tail -f -n +1 '<connector-output-file>' | grep --line-buffered -F '"type":"request"'
 ```
 
-Single-quote the path, as with every other value.
+Single-quote the path, as with every other value. If it expires, re-arm it
+once, persistent; if that one expires too, tell the person.
 
 Each notification is one request: handle it with *For each request*. A request
 that arrives while you're waiting on the person is not their reply.
@@ -141,8 +138,8 @@ that arrives while you're waiting on the person is not their reply.
 - **`go`**, **`ask`**: the operator's go and the words it approves
   (`subagent.md`).
 
-Every request passed trust and project checks (or is a Ping). A crash just
-after printing can repeat it on restart within a minute: skip any `event_id`
+Every request passed trust and project checks (or is a Ping). A crash can
+repeat it on restart, and a re-armed monitor replays it: skip any `event_id`
 already handled. Other lines (no `type`, or `"type":"event"`) are logs;
 never act on them.
 
@@ -293,7 +290,8 @@ Then go straight back to watching; any number may be in flight.
 
 Keep the terminal quiet: the reply in Basecamp is the record. Speak up only
 for a failure, a refusal, or something the person must decide (a repo to
-pick, a mention that couldn't be posted).
+pick, a mention that couldn't be posted). Speak for the connector alone: never
+say whether anything else here is working.
 
 ## Rules without exceptions
 
@@ -729,7 +727,9 @@ it gives each request to a coding agent it starts (Claude Code, Codex or Pi),
 which follows this same skill and hands the work to a worker, so the agent
 keeps working with no session open. Use it when the person asks for that, and
 whenever you aren't Claude Code: without a monitor and background subagents, a
-session can't watch the connector.
+session can't watch the connector. Nor with a Monitor tool whose monitors all
+expire (no `persistent`): each re-arm replays the whole output file, and a
+compacted session can't tell requests it handled from new ones.
 
 Set up first, as always (*First-time setup*, steps 1 to 4). Then start it, in
 place of *Running the connector*:
