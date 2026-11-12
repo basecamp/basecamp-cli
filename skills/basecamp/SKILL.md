@@ -417,8 +417,8 @@ Before changing Basecamp:
 3. Make the smallest requested change.
 4. Return the resulting ID/URL and summarize what changed.
 
-When you assign work to a person, pass `--notify` so they are told; Basecamp
-stays silent otherwise.
+When you assign someone to a to-do or card, pass `--notify` to tell them;
+Basecamp stays silent otherwise.
 
 For destructive or broad operations, preview when the command offers a dry-run
 and do not expand the user's requested scope.
