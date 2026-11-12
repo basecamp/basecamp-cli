@@ -47,14 +47,19 @@
 // minute: a request older than that at a start is not run late, with or
 // without a runner. The repeat is dropped by its event id. A worker that was running
 // when the connector stopped is resumed in its own session at the next start
-// and told it was interrupted: what it had already done (a post, a commit) is
-// the session's to recognize, as it is for the skill after a crash.
+// and told it was interrupted, with what it was last given, which a stop just
+// after its turn began may have come before it had: what it had already done
+// (a post, a commit) is the session's to recognize, as it is for the skill
+// after a crash.
 //
 // A stop ends every agent process it started. A crash ends none, so the state
 // names the process of each turn in flight, and a start that finds one named
 // ends it, by its process group, before it continues that session: a request
 // is not worked on by two processes at once. A start that cannot confirm one
 // ended does not start at all, and says which process a person has to end.
+// A turn is held to the same: its process is named before the agent is told
+// anything, and the name goes only once nothing of its process group is
+// left. A session whose last turn left something is not given another.
 //
 // Agents run unattended. Under full permissions each adapter starts its CLI
 // with permission prompts off; under guarded permissions it starts the CLI

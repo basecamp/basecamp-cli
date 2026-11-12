@@ -83,6 +83,12 @@ func runTurn(ctx context.Context, req turnRequest) (TurnResult, error) {
 	if err != nil {
 		return TurnResult{}, err
 	}
+	if ctx.Err() != nil {
+		// Ended as it started, by what Started made of it or by a stop: the
+		// agent is told nothing.
+		worker.Terminate(turnGrace)
+		return TurnResult{}, ctx.Err()
+	}
 	finished := make(chan struct{})
 	defer close(finished)
 	go func() {

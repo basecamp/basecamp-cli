@@ -557,6 +557,17 @@ func (r *Runner) orchestrate(ctx context.Context, batch []item) error {
 		return err
 	}
 	r.mu.Lock()
+	left := r.st.Orchestrator.Process
+	r.mu.Unlock()
+	if left != nil {
+		// A turn of its own that could not be confirmed ended. Nothing is
+		// started beside it, and no message is counted as tried.
+		if err := ended(*left); err != nil {
+			return fmt.Errorf("what the orchestrator's coding agent left running (process group %d) could not be confirmed ended, and nothing is started beside it: end it: %w", left.PGID, err)
+		}
+	}
+	r.mu.Lock()
+	r.st.Orchestrator.Process = nil
 	session := r.st.Orchestrator
 	// Before the messages are counted as tried: a turn that is refused here
 	// reached no agent, and is not one of a message's attempts.
@@ -590,11 +601,20 @@ func (r *Runner) orchestrate(ctx context.Context, batch []item) error {
 	}
 	started := r.opts.Now()
 	turnCtx, cancel := context.WithTimeout(ctx, r.opts.OrchestratorTimeout)
-	result, err := r.turn(turnCtx, "orchestrator", adapter, turn, strings.Join(parts, "\n\n"), func(process driver.Process) {
+	var (
+		process   driver.Process
+		recordErr error
+	)
+	result, err := r.turn(turnCtx, "orchestrator", adapter, turn, strings.Join(parts, "\n\n"), func(started driver.Process) {
 		r.mu.Lock()
-		r.st.Orchestrator.Process = &process
-		_ = r.st.save(r.statePath())
-		r.mu.Unlock()
+		defer r.mu.Unlock()
+		process = started
+		r.st.Orchestrator.Process = &started
+		// An agent the state does not name is one a start after a crash would
+		// work beside. It is ended before it is told anything.
+		if recordErr = r.st.save(r.statePath()); recordErr != nil {
+			cancel()
+		}
 	}, func(event Event) {
 		if event.Kind == EventSession && event.SessionID != "" {
 			r.mu.Lock()
@@ -605,9 +625,19 @@ func (r *Runner) orchestrate(ctx context.Context, batch []item) error {
 	})
 	timedOut := turnCtx.Err() != nil && ctx.Err() == nil
 	cancel()
-	// The turn's process is ended, whichever way the turn went.
 	r.mu.Lock()
-	r.st.Orchestrator.Process = nil
+	ran, unrecorded := process, recordErr
+	r.mu.Unlock()
+	// The turn ended its process group, whichever way the turn went. The
+	// record of it goes only once nothing of the group is left: one that
+	// stays is asked after again before the next turn, and by the next start.
+	stays := ended(ran)
+	r.mu.Lock()
+	if stays == nil {
+		r.st.Orchestrator.Process = nil
+	} else {
+		r.log.Error("runner: what the orchestrator's coding agent left running could not be confirmed ended", "process_group", ran.PGID, "error", stays)
+	}
 	saveErr := r.st.save(r.statePath())
 	r.mu.Unlock()
 	if ctx.Err() != nil {
@@ -616,7 +646,10 @@ func (r *Runner) orchestrate(ctx context.Context, batch []item) error {
 	if saveErr != nil {
 		return saveErr
 	}
-	if timedOut {
+	switch {
+	case unrecorded != nil:
+		err = fmt.Errorf("%w: its process could not be recorded, so it was ended before it was told anything: %w", ErrTurnFailed, unrecorded)
+	case timedOut:
 		err = fmt.Errorf("%w: it ran longer than %s", ErrTurnFailed, r.opts.OrchestratorTimeout)
 	}
 

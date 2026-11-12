@@ -153,3 +153,7 @@ func furtherRequestNote(doc string) string {
 // interruptedNote is what a worker is told when it is continued after the
 // connector stopped under it.
 const interruptedNote = `[connector] The connector stopped while you were working and has started again. You are continued in the same session. Before doing anything else, check what you had already done: the thread in Basecamp for a reply you posted, the boost, and the state of any worktree. Do not repeat a post or a push that already landed. Then finish the request, and end with your one-line report.`
+
+// interruptedRequest comes between that notice and what the worker was last
+// given, which may or may not have reached its session before the stop.
+const interruptedRequest = "\n\nWhat you were last given follows, in case the stop came before it reached you. If you already have it, it is the same request and not a new one.\n\n"

@@ -106,7 +106,9 @@ func fakeAgent(agent string) int {
 
 	failed := ""
 	switch {
-	case strings.Contains(text, "HANG"):
+	case strings.Contains(text, "HANG") && !strings.HasPrefix(text, interruptedNote):
+		// A worker continued after a stop is given its request again, and
+		// answers this time.
 		time.Sleep(time.Hour)
 	case strings.Contains(text, "FAIL-ALWAYS"), strings.HasPrefix(text, "[connector] Your last turn ended in an error"):
 		// The second is a worker's retry of the first, in the runner's words.

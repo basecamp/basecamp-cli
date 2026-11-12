@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/basecamp/basecamp-cli/internal/connector/driver"
@@ -202,6 +203,7 @@ func (r *Runner) Dispatch(ctx context.Context, req DispatchRequest) (view Worker
 		earlier.Session.Spec.Adapter == spec.Adapter && (earlier.live() || earlier.Session.ID != "") {
 		// A model or an effort may have changed since; the session takes it
 		// from its next turn.
+		before := *earlier
 		earlier.Session.Spec, earlier.Matched = spec, matched
 		earlier.Prompts = append(earlier.Prompts, prompt{
 			Text:    furtherRequest(r.workerDoc(earlier.ID), guarded) + "\n\n" + handoff,
@@ -215,6 +217,9 @@ func (r *Runner) Dispatch(ctx context.Context, req DispatchRequest) (view Worker
 			earlier.State, earlier.Error, earlier.StartedAt, earlier.EndedAt = workerQueued, "", time.Time{}, time.Time{}
 		}
 		if err := r.st.save(r.statePath()); err != nil {
+			// The dispatch failed, so the worker is as it was: one left queued
+			// with nobody to run it would answer every later dispatch as taken.
+			*earlier = before
 			return WorkerView{}, false, err
 		}
 		r.log.Info("runner: request given to the worker that handled its thread before", "worker", earlier.ID, "event_id", req.EventID, "agent", spec.String(), "session", cmpText(earlier.Session.ID, "none yet"))
@@ -282,8 +287,10 @@ func (r *Runner) continueWorkers() {
 		if !w.live() {
 			continue
 		}
-		if w.State == workerRunning && w.Session.ID != "" && len(w.Prompts) > 0 {
-			w.Prompts[0].Text = interruptedNote
+		if w.State == workerRunning && w.Session.ID != "" && len(w.Prompts) > 0 && !strings.HasPrefix(w.Prompts[0].Text, interruptedNote) {
+			// What it was on goes with the notice: a stop in the moment after
+			// its turn began may have come before its session had the words.
+			w.Prompts[0].Text = interruptedNote + interruptedRequest + w.Prompts[0].Text
 		}
 		w.State = workerQueued
 		r.log.Info("runner: continuing a worker the last stop interrupted", "worker", w.ID, "event_id", w.EventID, "session", cmpText(w.Session.ID, "none yet"))
@@ -309,12 +316,15 @@ func (r *Runner) Send(id, message string) (WorkerView, error) {
 	if !w.live() && w.Session.ID == "" {
 		return WorkerView{}, fmt.Errorf("worker %s never opened a session to continue: dispatch its request again with --again", id)
 	}
+	before := *w
 	w.Prompts = append(w.Prompts, prompt{Text: "[orchestrator] " + message, EventID: w.EventID})
 	idle := !w.live()
 	if idle {
 		w.State, w.Error, w.StartedAt, w.EndedAt = workerQueued, "", time.Time{}, time.Time{}
 	}
 	if err := r.st.save(r.statePath()); err != nil {
+		// The message was not sent, so the worker is as it was.
+		*w = before
 		return WorkerView{}, err
 	}
 	if idle {
@@ -396,7 +406,23 @@ func (r *Runner) workTurns(id string) {
 			r.mu.Unlock()
 			return
 		}
+		left := w.Session.Process
 		r.mu.Unlock()
+		if left != nil {
+			// A turn of its own that could not be confirmed ended. Nothing is
+			// started beside it.
+			err := ended(*left)
+			r.mu.Lock()
+			if w := r.st.worker(id); w != nil && err != nil {
+				r.finish(w, workerFailed, leftRunning(*left, err))
+			} else if w != nil {
+				w.Session.Process = nil
+			}
+			r.mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
 		if r.released(r.ctx) != nil {
 			return
 		}
@@ -440,12 +466,21 @@ func (r *Runner) workTurns(id string) {
 		if session.ID == "" {
 			turn.NewID = adapter.NewSessionID()
 		}
-		result, err := r.turn(turnCtx, id, adapter, turn, next.Text, func(process driver.Process) {
+		var (
+			process   driver.Process
+			recordErr error
+		)
+		result, err := r.turn(turnCtx, id, adapter, turn, next.Text, func(started driver.Process) {
 			r.mu.Lock()
 			defer r.mu.Unlock()
+			process = started
 			if w := r.st.worker(id); w != nil {
-				w.Session.Process = &process
-				_ = r.st.save(r.statePath())
+				w.Session.Process = &started
+				// An agent the state does not name is one a start after a crash
+				// would work beside. It is ended before it is told anything.
+				if recordErr = r.st.save(r.statePath()); recordErr != nil {
+					cancel()
+				}
 			}
 		}, func(event Event) {
 			r.mu.Lock()
@@ -465,6 +500,14 @@ func (r *Runner) workTurns(id string) {
 		cancel()
 
 		r.mu.Lock()
+		unrecorded := recordErr
+		ran := process
+		r.mu.Unlock()
+		// The turn ended its process group; the record of it goes only once
+		// nothing of the group is left.
+		stays := ended(ran)
+
+		r.mu.Lock()
 		delete(r.turns, id)
 		delete(r.doing, id)
 		w = r.st.worker(id)
@@ -475,7 +518,9 @@ func (r *Runner) workTurns(id string) {
 		stopped := r.stopping[id]
 		delete(r.stopping, id)
 		w.Session.charge(result)
-		w.Session.Process = nil
+		if stays == nil {
+			w.Session.Process = nil
+		}
 		w.Refused += len(result.Refused)
 		if len(result.Refused) > 0 {
 			r.log.Warn("runner: a worker's coding agent refused some of what it tried, by a rule of its own settings", "worker", id, "refused", describeRefused(result.Refused))
@@ -486,10 +531,15 @@ func (r *Runner) workTurns(id string) {
 		switch {
 		case r.ctx.Err() != nil:
 			// The connector is stopping. The worker stays as it is, running,
-			// and is continued at the next start.
+			// and is continued at the next start, which ends anything the
+			// state still names first.
 			_ = r.st.save(r.statePath())
 			r.mu.Unlock()
 			return
+		case stays != nil:
+			r.finish(w, workerFailed, leftRunning(ran, stays))
+		case unrecorded != nil:
+			r.finish(w, workerFailed, "its coding agent's process could not be recorded, so it was ended before it was told anything: "+richtext.SanitizeSingleLine(unrecorded.Error()))
 		case stopped:
 			// The turn was stopped. Whether the worker has been told
 			// anything since is for the top of the loop to see.
@@ -547,6 +597,22 @@ func (r *Runner) workTurns(id string) {
 		r.mu.Unlock()
 		return
 	}
+}
+
+// ended confirms that nothing is left of the process group a turn ran in,
+// which the turn ended as it finished. A turn that never had a process left
+// nothing.
+func ended(p driver.Process) error {
+	if p.PGID <= 0 {
+		return nil
+	}
+	return driver.ConfirmGroupGone(p, turnGrace)
+}
+
+// leftRunning is what is said of a turn whose process group could not be
+// confirmed ended: its session is not continued beside what may still run.
+func leftRunning(p driver.Process, err error) string {
+	return fmt.Sprintf("what its coding agent left running (process group %d) could not be confirmed ended, and nothing is started beside it: end it, then send the request again: %s", p.PGID, richtext.SanitizeSingleLine(err.Error()))
 }
 
 // report tells the orchestrator how a worker's turn for a request ended.

@@ -92,7 +92,9 @@ all of it:
   closes the record (`HandoffOptions.Deliver`), so a crash repeats a request rather than
   losing it if the connector starts again within `HandoffGrace` (a minute), and a worker a
   stop interrupted is continued in its own session at the next start. A start ends what a
-  crash left running first, and does not start beside a process it cannot confirm ended.
+  crash left running first, and does not start beside a process it cannot confirm ended; a
+  turn's process is recorded before its agent is told anything, and a session is not given
+  another turn while what its last one started cannot be confirmed ended.
 
 **What agents may do** is one switch, `--permissions`, kept in `runner.json` and read for
 every turn. `full`, the default, starts each CLI with its permission prompts off: a headless

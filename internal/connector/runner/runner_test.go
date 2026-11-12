@@ -319,7 +319,9 @@ func TestAWorkerInterruptedByAStopIsContinuedInItsSessionAtTheNextStart(t *testi
 	require.Len(t, workers, 2)
 	assert.Equal(t, workers[0].Args[slices.Index(workers[0].Args, "--session-id")+1], workers[1].Args[slices.Index(workers[1].Args, "--session")+1])
 	assert.True(t, strings.HasPrefix(workers[1].Prompt, "[connector] The connector stopped while you were working"))
-	assert.NotContains(t, workers[1].Prompt, "HANG")
+	// With what it was on, which a stop just after its turn began may have
+	// come before its session had.
+	assert.Contains(t, workers[1].Prompt, "handoff for event 55")
 	assert.Equal(t, workerDone, h.runner.Workers()[0].State)
 
 	// The orchestrator, in the same session as before, hears the report.
@@ -1131,6 +1133,157 @@ func TestALeftoverThatCannotBeConfirmedEndedStopsTheStart(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A turn whose process group could not be confirmed ended keeps its record,
+// and its session's next turn asks after it again before it starts: nothing
+// is started beside what may still be running.
+func TestNothingIsStartedBesideWhatATurnLeftRunning(t *testing.T) {
+	sleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("no sleep command to stand in for a process")
+	}
+	// The recorded pid, since given to another process: whose group it is
+	// cannot be established, so it is neither signaled nor called gone.
+	left := func(t *testing.T, dir string) (*driver.Worker, driver.Process) {
+		stranger, err := driver.StartWorker(context.Background(), driver.SessionConfig{Scope: driver.Scope{WorkDir: dir}},
+			driver.Command{Path: sleep, Args: []string{"600"}})
+		require.NoError(t, err)
+		t.Cleanup(func() { stranger.Terminate(time.Second) })
+		process := stranger.Process()
+		process.StartedAt = process.StartedAt.Add(-time.Hour)
+		return stranger, process
+	}
+
+	t.Run("a worker", func(t *testing.T) {
+		t.Parallel() // each waits out the grace a group is given to go
+		h := newHarness(t, func(o *Options) { o.Worker = Spec{Adapter: "codex"} })
+		view, _, err := h.runner.Dispatch(context.Background(), DispatchRequest{NoRepo: true, Handoff: "first"})
+		require.NoError(t, err)
+		h.settled()
+		stranger, process := left(t, h.opts.Dir)
+		h.runner.mu.Lock()
+		h.runner.st.Workers[0].Session.Process = &process
+		h.runner.mu.Unlock()
+
+		_, err = h.runner.Send(view.ID, "one more thing")
+		require.NoError(t, err)
+		h.settled()
+		worker := h.runner.Workers()[0]
+		assert.Equal(t, workerFailed, worker.State)
+		assert.Contains(t, worker.Error, "could not be confirmed ended")
+		assert.Len(t, by(h.invocations(), "codex"), 1, "its session is not continued beside it")
+		select {
+		case <-stranger.Done():
+			t.Fatal("a process that is not provably the recorded one was ended")
+		default:
+		}
+		h.runner.mu.Lock()
+		assert.NotNil(t, h.runner.st.Workers[0].Session.Process, "its record is kept")
+		h.runner.mu.Unlock()
+	})
+
+	t.Run("the orchestrator", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t, nil)
+		h.settled()
+		turns := len(h.invocations())
+		stranger, process := left(t, h.opts.Dir)
+		h.runner.mu.Lock()
+		h.runner.st.Orchestrator.Process = &process
+		h.runner.mu.Unlock()
+
+		require.NoError(t, h.runner.Deliver(context.Background(), h.request(7, "hello")))
+		time.Sleep(turnGrace + time.Second)
+		assert.Len(t, h.invocations(), turns, "no turn is started beside it")
+		assert.Equal(t, 1, h.runner.Status().Waiting, "and its message waits, untried")
+
+		// Once it has gone, the message is handled.
+		stranger.Terminate(time.Second)
+		h.settled()
+		assert.Greater(t, len(h.invocations()), turns)
+	})
+}
+
+// A request or a message that could not be saved was not given: its worker
+// is as it was, and takes the same one when it is given again.
+func TestWhatCouldNotBeSavedLeavesItsWorkerAsItWas(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes where the directory says nobody may")
+	}
+	h := newHarness(t, func(o *Options) { o.Worker = Spec{Adapter: "codex"} })
+	require.NoError(t, h.runner.Deliver(context.Background(), h.onThread(1, "first")))
+	h.settled()
+	// A second request on the thread, which nobody has dispatched yet.
+	h.runner.mu.Lock()
+	h.runner.st.Requests[2] = h.runner.st.Requests[1]
+	h.runner.mu.Unlock()
+	before := h.runner.Workers()[0]
+	require.Equal(t, workerDone, before.State)
+
+	require.NoError(t, os.Chmod(h.opts.Dir, 0o500))       //nolint:gosec // G302: a directory the state cannot be saved in
+	t.Cleanup(func() { _ = os.Chmod(h.opts.Dir, 0o700) }) //nolint:gosec // G302: the test's own directory
+	_, _, err := h.runner.Dispatch(context.Background(), DispatchRequest{EventID: 2, NoRepo: true, Handoff: "second"})
+	require.Error(t, err)
+	_, err = h.runner.Send(before.ID, "one more thing")
+	require.Error(t, err)
+	assert.Equal(t, before, h.runner.Workers()[0], "a worker left queued with nobody to run it would never run again")
+	h.runner.mu.Lock()
+	assert.Empty(t, h.runner.st.Workers[0].Prompts)
+	h.runner.mu.Unlock()
+	require.NoError(t, os.Chmod(h.opts.Dir, 0o700)) //nolint:gosec // G302: the test's own directory
+
+	view, existing, err := h.runner.Dispatch(context.Background(), DispatchRequest{EventID: 2, NoRepo: true, Handoff: "second"})
+	require.NoError(t, err)
+	assert.False(t, existing, "the dispatch that failed did not take the request")
+	assert.Equal(t, before.ID, view.ID)
+	h.settled()
+	turns := by(h.invocations(), "codex")
+	require.Len(t, turns, 2)
+	assert.Contains(t, turns[1].Prompt, "second")
+}
+
+// An agent whose process could not be written to the state is one a start
+// after a crash would know nothing of. It is ended before it is told
+// anything, and its worker is reported as one that could not run.
+func TestAnAgentWhoseProcessCouldNotBeRecordedIsToldNothing(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes where the directory says nobody may")
+	}
+	var armed atomic.Bool
+	h := newHarness(t, func(o *Options) {
+		o.Worker = Spec{Adapter: "pi"}
+		look, dir := o.LookPath, o.Dir
+		// The CLI is looked for after the turn's start is saved and before
+		// its process exists, which is when the state stops taking writes.
+		o.LookPath = func(name string) (string, error) {
+			if name == "pi" && armed.Load() {
+				_ = os.Chmod(dir, 0o500) //nolint:gosec // G302: a directory the state cannot be saved in
+			}
+			return look(name)
+		}
+	})
+	t.Cleanup(func() { _ = os.Chmod(h.opts.Dir, 0o700) }) //nolint:gosec // G302: the test's own directory
+	h.settled()
+	armed.Store(true)
+	_, _, err := h.runner.Dispatch(context.Background(), DispatchRequest{NoRepo: true, Handoff: "THE-REQUEST"})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		workers := h.runner.Workers()
+		return len(workers) == 1 && workers[0].State == workerFailed
+	}, 20*time.Second, 20*time.Millisecond)
+	armed.Store(false)
+	require.NoError(t, os.Chmod(h.opts.Dir, 0o700)) //nolint:gosec // G302: the test's own directory
+	assert.Contains(t, h.runner.Workers()[0].Error, "could not be recorded")
+	for _, inv := range by(h.invocations(), "pi") {
+		assert.NotContains(t, inv.Prompt, "THE-REQUEST", "it was told nothing")
+	}
+	h.settled()
+	said := ""
+	for _, inv := range by(h.invocations(), "claude") {
+		said += inv.Prompt + "\n"
+	}
+	assert.Contains(t, said, "could not run", "the orchestrator hears of it")
 }
 
 // A socket is only called, and only listened on, in a directory that is
