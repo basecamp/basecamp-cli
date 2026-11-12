@@ -261,7 +261,7 @@ func loadFromFile(cfg *Config, path string, source Source, trust *TrustStore) {
 	// via `basecamp config trust` — a malicious config in a cloned repo or
 	// parent directory could redirect authenticated traffic.
 	untrusted := (source == SourceLocal || source == SourceRepo) &&
-		(trust == nil || !trust.IsTrusted(path))
+		(trust == nil || !trust.IsTrustedContent(path, data))
 
 	if v, ok := fileCfg["base_url"].(string); ok && v != "" {
 		if untrusted {
