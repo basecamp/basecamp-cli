@@ -80,8 +80,7 @@ tail -f -n +1 '<connector-output-file>' | grep --line-buffered -F '"type":"reque
 ```
 
 Single-quote the path, as with every other value. If it expires, re-arm it
-once, persistent. If that expires too, stop the connector, and once it exits
-use *Without this session*.
+once, persistent; if that one expires too, tell the person.
 
 Each notification is one request: handle it with *For each request*. A request
 that arrives while you're waiting on the person is not their reply.
