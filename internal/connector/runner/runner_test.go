@@ -1008,6 +1008,22 @@ func TestARequestStillWaitingOrBeingWorkedOnIsNotPruned(t *testing.T) {
 	assert.Len(t, s.Requests, keepRequests)
 }
 
+// A finished worker whose process is still named could not be confirmed
+// ended. Its record is what the next start ends it by, so it is kept
+// however many workers have come since.
+func TestAWorkerWhoseProcessIsStillNamedIsNotPruned(t *testing.T) {
+	s := &state{Version: stateVersion, Requests: map[int64]request{}}
+	s.Workers = append(s.Workers, &workerState{ID: "left", State: workerFailed, Session: sessionState{Process: &driver.Process{PID: 4242, PGID: 4242}}})
+	for i := range keepWorkers + 20 {
+		s.Workers = append(s.Workers, &workerState{ID: fmt.Sprintf("w%d", i), State: workerDone})
+	}
+	s.prune()
+	assert.Len(t, s.Workers, keepWorkers)
+	require.NotNil(t, s.worker("left"))
+	assert.NotNil(t, s.worker("left").Session.Process)
+	assert.Nil(t, s.worker("w0"), "the oldest finished worker is history")
+}
+
 // While the connector's hold stands, the runner starts no agent: not for a
 // message already in its inbox, and not for a worker waiting its turn.
 func TestNoAgentIsStartedWhileTheHoldStands(t *testing.T) {

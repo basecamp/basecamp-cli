@@ -232,8 +232,9 @@ func (s *state) save(path string) error {
 }
 
 // prune drops the oldest requests, finished workers and dropped items past
-// what the file keeps. A live worker is never dropped, nor a request that
-// is still waiting or being worked on.
+// what the file keeps. A live worker is never dropped, nor one whose process
+// is still named, which is all that says something of it may be running, nor
+// a request that is still waiting or being worked on.
 func (s *state) prune() {
 	if over := len(s.Requests) - keepRequests; over > 0 {
 		// A request the orchestrator has yet to handle, or a live worker is
@@ -263,7 +264,7 @@ func (s *state) prune() {
 	}
 	if over := len(s.Workers) - keepWorkers; over > 0 {
 		s.Workers = slices.DeleteFunc(s.Workers, func(w *workerState) bool {
-			if over > 0 && !w.live() {
+			if over > 0 && !w.live() && w.Session.Process == nil {
 				over--
 				return true
 			}
