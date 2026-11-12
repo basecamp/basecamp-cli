@@ -518,26 +518,17 @@ func HasRichTextHTML(md string) bool {
 	return found
 }
 
-// reHTMLTag matches an opening or closing tag anywhere in raw HTML and
-// captures its name.
-var reHTMLTag = regexp.MustCompile(`</?([A-Za-z][A-Za-z0-9-]*)(?:[\s/>]|$)`)
+// reFoldMarkup matches raw HTML made only of a fold's own bare tags, <details>,
+// <summary> and their closing tags, with text between them. Every "<" in it
+// must open one of those four tags, so a tag with attributes, any other tag, a
+// comment or a declaration does not match.
+var reFoldMarkup = regexp.MustCompile(`(?i)^(?:[^<]|</?(?:details|summary)>)*$`)
 
 // isFoldMarkup reports whether raw HTML holds only a fold's own tags, <details>
 // and <summary>, with nothing but text between them. An HTML block that also
-// holds other tags, such as a whole fold written as HTML, is not.
+// holds anything else, such as a whole fold written as HTML, is not.
 func isFoldMarkup(raw []byte) bool {
-	tags := reHTMLTag.FindAllSubmatch(raw, -1)
-	if len(tags) == 0 {
-		return false
-	}
-	for _, m := range tags {
-		switch strings.ToLower(string(m[1])) {
-		case "details", "summary":
-		default:
-			return false
-		}
-	}
-	return true
+	return reFoldMarkup.Match(raw)
 }
 
 // reLeadingAttachmentTag matches a <bc-attachment> open or close tag at the

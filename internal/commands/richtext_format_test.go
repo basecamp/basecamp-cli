@@ -147,6 +147,8 @@ func TestRichTextHTMLInMarkdownWarns(t *testing.T) {
 		{"a fold written as html", []string{"create", "789", "<details><summary>Steps</summary><p>ran it twice</p></details>"}, true},
 		{"html beside a fold", []string{"create", "789", "<p>A</p>\n\n<details><summary>Steps</summary>\n\nran it\n\n</details>"}, true},
 		{"a summary holding other tags", []string{"create", "789", "<details><summary><strong>Steps</strong></summary>\n\nran it\n\n</details>"}, true},
+		{"a fold holding a comment", []string{"create", "789", "<details><summary>Steps</summary><!-- a note -->\n\nran it\n\n</details>"}, true},
+		{"a fold tag with an attribute", []string{"create", "789", "<details data-x=\"<p>\"><summary>Steps</summary>\n\nran it\n\n</details>"}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
