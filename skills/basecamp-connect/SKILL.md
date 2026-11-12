@@ -46,8 +46,9 @@ Three pieces:
   acknowledgement, chooses the repo, and dispatches one background subagent
   per request. It never does the work itself.
 
-This flow needs Claude Code. Without it, or with no session open, see
-*Without this session*. The connector runs on Linux and macOS.
+This flow needs Claude Code, with a Monitor tool that takes `persistent`.
+Without either, or with no session open, see *Without this session*. The
+connector runs on Linux and macOS.
 
 ## Running the connector
 
@@ -79,8 +80,7 @@ tail -f -n +1 '<connector-output-file>' | grep --line-buffered -F '"type":"reque
 ```
 
 Single-quote the path, as with every other value. If it expires anyway, re-arm
-it once, persistent. If the tool has no `persistent`, give it the longest
-`timeout_ms` and re-arm on each expiry without a word.
+it once, persistent; if that expires too, use *Without this session*.
 
 Each notification is one request: handle it with *For each request*. A request
 that arrives while you're waiting on the person is not their reply.
@@ -727,8 +727,9 @@ it gives each request to a coding agent it starts (Claude Code, Codex or Pi),
 which follows this same skill and hands the work to a worker, so the agent
 keeps working with no session open. Use it when the person asks for that, and
 whenever you aren't Claude Code: without a monitor and background subagents, a
-session can't watch the connector. Offer it for a watch meant to last days when
-your Monitor tool has no `persistent`: each expiry costs the session a turn.
+session can't watch the connector. Nor with a Monitor tool whose monitors all
+expire (no `persistent`): each re-arm replays the whole output file, and a
+compacted session can't tell requests it handled from new ones.
 
 Set up first, as always (*First-time setup*, steps 1 to 4). Then start it, in
 place of *Running the connector*:
