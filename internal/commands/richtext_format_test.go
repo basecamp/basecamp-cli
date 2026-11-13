@@ -120,7 +120,10 @@ func TestCommentsCreateRejectsUnknownFormat(t *testing.T) {
 // Content that used to be sent as written because it looked like HTML is now
 // read as Markdown. The caller is told once, on stderr, how to keep the old
 // result — unless the format was chosen explicitly, or the only tags are the
-// mention and attachment markup Markdown content carries routinely.
+// mention and attachment markup Markdown content carries routinely, or a fold's
+// <details> and <summary>, which the basecamp skill tells agents to write in
+// Markdown. Warning on a fold pointed agents at --format html, where every block
+// is stored touching.
 func TestRichTextHTMLInMarkdownWarns(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -139,6 +142,13 @@ func TestRichTextHTMLInMarkdownWarns(t *testing.T) {
 		{"html in a tilde fence", []string{"create", "789", "~~~\n<p>x</p>\n~~~"}, false},
 		{"html in indented code", []string{"create", "789", "Example:\n\n    <p>x</p>"}, false},
 		{"angle brackets in prose", []string{"create", "789", "A Vec<String> here"}, false},
+		{"a fold in markdown", []string{"create", "789", "The fix landed.\n\n<details><summary>▶ How it was measured</summary>\n\n- Five **runs**\n\n</details>"}, false},
+		{"a fold written inline", []string{"create", "789", "Done. <details><summary>Steps</summary>ran it twice</details>"}, false},
+		{"a fold written as html", []string{"create", "789", "<details><summary>Steps</summary><p>ran it twice</p></details>"}, true},
+		{"html beside a fold", []string{"create", "789", "<p>A</p>\n\n<details><summary>Steps</summary>\n\nran it\n\n</details>"}, true},
+		{"a summary holding other tags", []string{"create", "789", "<details><summary><strong>Steps</strong></summary>\n\nran it\n\n</details>"}, true},
+		{"a fold holding a comment", []string{"create", "789", "<details><summary>Steps</summary><!-- a note -->\n\nran it\n\n</details>"}, true},
+		{"a fold tag with an attribute", []string{"create", "789", "<details data-x=\"<p>\"><summary>Steps</summary>\n\nran it\n\n</details>"}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
