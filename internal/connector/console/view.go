@@ -179,7 +179,8 @@ func outcome(r Request) (string, tone) {
 		}
 		return "Blocked", toneWait
 	case r.State == "completed":
-		return "Done", toneGood
+		// How it ended is not carried here: it may have failed.
+		return "Finished", toneNone
 	}
 	return "Waiting", toneBusy
 }
@@ -445,7 +446,9 @@ func (m model) talkLines(width int) []string {
 		case said.waiting:
 			lines = append(lines, m.styles.muted.Render("Orchestrator  waiting for its turn, "+span(m.now().Sub(said.at))))
 		case said.err != "":
-			say("Not sent", m.styles.bad, said.err)
+			// It may have reached the orchestrator before the answer was
+			// lost, so it is not said to be unsent.
+			say("No reply", m.styles.bad, said.err)
 		default:
 			say("Orchestrator", m.styles.busy, said.reply)
 		}
@@ -1162,8 +1165,9 @@ func (m model) settingsLines(width int) []string {
 			m.fact(&lines, "Permissions", "full: each coding agent runs with its permission prompts off", width)
 		}
 		m.fact(&lines, "At once", capWords(r.MaxWorkers), width)
-		if r.Live && r.KeptMaxWorkers != r.MaxWorkers {
+		if r.Live && r.ConfigError == "" && r.KeptMaxWorkers != r.MaxWorkers {
 			// A cap is read at a start, so an edit waits for the next one.
+			// A file that cannot be read says nothing of what it holds.
 			m.fact(&lines, "", m.styles.wait.Render("runner.json now says "+capWords(r.KeptMaxWorkers)+", which applies when the connector next starts"), width)
 		}
 		if r.ConfigError != "" {
@@ -1220,8 +1224,9 @@ func (m model) settingsLines(width int) []string {
 	default:
 		m.fact(&lines, "Also", "nobody else", width)
 	}
-	if snap.Trust.AllowAssignments {
-		m.fact(&lines, "Assignments", "from the people above as well as the operator", width)
+	if snap.Trust.AllowAssignments && len(snap.Trust.Allowlist) > 0 {
+		// Only the people named: being on a served project is not enough.
+		m.fact(&lines, "Assignments", "from the operator and "+people(snap.Trust.Allowlist), width)
 	} else {
 		m.fact(&lines, "Assignments", "from the operator alone", width)
 	}

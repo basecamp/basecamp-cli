@@ -112,13 +112,20 @@ func TestTheConsoleListsTheWorkersThatFinishedLast(t *testing.T) {
 	}
 	// The oldest was given another request, and finished it after the rest.
 	workers[len(workers)-1].EndedAt = ended(start.Add(24 * time.Hour))
+
+	// One long finished still names a process that could not be confirmed
+	// ended. It is kept past the list's length: it is what Health warns of.
+	stuck := len(workers) - 2
+	workers[stuck].State, workers[stuck].Process = "failed", 4242
 	workers = append([]runner.WorkerActivity{
 		{WorkerView: runner.WorkerView{ID: "w90", State: "running"}},
 		{WorkerView: runner.WorkerView{ID: "w91", State: "queued"}},
 	}, workers...)
 
 	now, done := connectConsoleWorkers(workers, true, map[string]string{"w90": "Bash"})
-	require.Len(t, done, connectConsoleRecent)
+	require.Len(t, done, connectConsoleRecent+1)
+	assert.Equal(t, "w2", done[len(done)-1].ID)
+	assert.Equal(t, 4242, done[len(done)-1].Process)
 	assert.Equal(t, "w1", done[0].ID, "the one that finished last is first")
 	assert.Equal(t, fmt.Sprintf("w%d", connectConsoleRecent+5), done[1].ID)
 	require.Len(t, now, 2)

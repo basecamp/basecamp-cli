@@ -372,12 +372,20 @@ func TestARequestAPersonClosedSaysSo(t *testing.T) {
 	assert.Equal(t, "Closed without running", word)
 }
 
+// A completed record may have failed, and how it ended is not carried, so
+// it is not shown as a success.
+func TestACompletedRequestIsNotCalledASuccess(t *testing.T) {
+	word, tone := outcome(Request{State: "completed"})
+	assert.Equal(t, "Finished", word)
+	assert.Equal(t, toneNone, tone)
+}
+
 func TestAMessageThatCouldNotBeSentSaysWhy(t *testing.T) {
 	say := func(context.Context, string) (string, error) { return "", errors.New("the connector stopped") }
 	m := open(t, running(), Options{Say: say}, 110, 30)
 	m, cmd := press(t, m, "/", "x", "enter")
 	m = step(t, m, cmd())
-	assert.Contains(t, screen(m), "Not sent  the connector stopped")
+	assert.Contains(t, screen(m), "No reply  the connector stopped")
 }
 
 func TestNobodyIsToldWhenNoOrchestratorRuns(t *testing.T) {
@@ -507,6 +515,13 @@ func TestSettingsAreShownAsTheyAreOnDisk(t *testing.T) {
 	assert.Contains(t, shown, "Launch · answers 1 chats without a mention")
 	assert.NotContains(t, shown, "started without an orchestrator")
 
+	// Assignments are let in from the people named, and only them: being on
+	// a served project does not make someone one of them.
+	snap.Trust = Trust{Mode: "project", Operator: Person{ID: 7, Name: "Ann"}, Allowlist: []Person{{ID: 8, Name: "Bo"}}, AllowAssignments: true}
+	m = step(t, m, snapshotMsg{snap})
+	assert.Contains(t, screen(m), "Also          everyone on a project it serves who is not a client, and Bo")
+	assert.Contains(t, screen(m), "Assignments   from the operator and Bo")
+
 	// A cap is the running connector's. One written into runner.json since
 	// it started waits for the next start, and is said to.
 	snap.Runner.MaxWorkers, snap.Runner.KeptMaxWorkers = 3, 3
@@ -516,6 +531,10 @@ func TestSettingsAreShownAsTheyAreOnDisk(t *testing.T) {
 	snap.Runner.KeptMaxWorkers = 1
 	m = step(t, m, snapshotMsg{snap})
 	assert.Contains(t, strings.Join(strings.Fields(screen(m)), " "), "runner.json now says one worker at a time: a request past that waits its turn, which applies when the connector next starts")
+	snap.Runner.ConfigError, snap.Runner.KeptMaxWorkers = "unexpected end of JSON input", 0
+	m = step(t, m, snapshotMsg{snap})
+	assert.NotContains(t, screen(m), "runner.json now says", "a file that cannot be read says nothing of its cap")
+	assert.Contains(t, screen(m), "cannot be read as written")
 
 	// A connector that hands requests to the session that started it does
 	// not use them, and says so.

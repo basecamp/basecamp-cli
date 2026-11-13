@@ -261,7 +261,8 @@ func readConnectConsoleLedger(ctx context.Context, snap *console.Snapshot, state
 		return
 	}
 	defer func() { _ = ledger.Close() }()
-	status, err := ledger.Status(ctx)
+	// Read about once a second, so only the parts that cost little.
+	status, err := ledger.Glance(ctx)
 	if err != nil {
 		snap.Notes = append(snap.Notes, "The connector's ledger could not be read: "+setup.ErrorText(err))
 		return
@@ -356,7 +357,15 @@ func connectConsoleWorkers(workers []runner.WorkerActivity, live bool, doing map
 	slices.SortStableFunc(done, func(a, b runner.WorkerActivity) int {
 		return connectConsoleEnded(b).Compare(connectConsoleEnded(a))
 	})
-	return now, done[:min(len(done), connectConsoleRecent)]
+	// A finished worker that still names a process is kept however old it
+	// is: that process is what the console warns of.
+	latest := done[:0:0]
+	for i, w := range done {
+		if i < connectConsoleRecent || w.Process != 0 {
+			latest = append(latest, w)
+		}
+	}
+	return now, latest
 }
 
 func connectConsoleEnded(w runner.WorkerActivity) time.Time {

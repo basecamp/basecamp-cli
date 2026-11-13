@@ -55,6 +55,13 @@ func TestInvariant8StatusReadsBesideAWriterAndShowsNoSecrets(t *testing.T) {
 	assert.Equal(t, "hold", s.Hold.Cause)
 	require.NotNil(t, s.Connection)
 	assert.Equal(t, ConnectionRunning, s.Connection.State)
+
+	// A glance is the same hold, connection and held records, and none of
+	// the rest: it is what a watcher reads every second.
+	glance, err := reader.Glance(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, Status{Hold: s.Hold, Connection: s.Connection, Held: s.Held}, glance)
+	assert.NotNil(t, glance.Held, "no held record is an empty list, as in status")
 	require.Len(t, s.Positions, 1)
 	assert.True(t, s.Positions[0].HasPosition)
 	assert.Equal(t, int64(41), s.Positions[0].LastPollServedID)

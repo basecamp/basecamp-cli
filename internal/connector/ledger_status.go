@@ -276,12 +276,8 @@ func (l *Ledger) status(ctx context.Context) (Status, error) {
 	if err := statusConnection(ctx, tx, &s); err != nil {
 		return Status{}, err
 	}
-	hold, ok, err := readHold(ctx, tx)
-	if err != nil {
+	if err := statusHold(ctx, tx, &s); err != nil {
 		return Status{}, err
-	}
-	if ok {
-		s.Hold = &HoldStatus{Generation: hold.Generation, Cause: string(hold.Cause), HeldBy: hold.HeldBy, HeldAt: hold.HeldAt}
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM generations`).Scan(&s.Generation); err != nil {
 		return Status{}, fmt.Errorf("connector: status generation: %w", err)
@@ -294,6 +290,37 @@ func (l *Ledger) status(ctx context.Context) (Status, error) {
 		}
 	}
 	return s, nil
+}
+
+// Glance is the part of Status that someone watching a connector reads
+// again and again: its own record of itself, its hold, and the records
+// waiting for a person. Each is a read of a row or of the held records
+// alone. Status's counts and diagnostics read the whole of the ledger's
+// history, which only grows, and are for when a person asks.
+func (l *Ledger) Glance(ctx context.Context) (Status, error) {
+	tx, err := l.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return Status{}, fmt.Errorf("connector: begin glance: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var s Status
+	for _, step := range []func(context.Context, *sql.Tx, *Status) error{statusConnection, statusHold, statusHeld} {
+		if err := step(ctx, tx, &s); err != nil {
+			return Status{}, err
+		}
+	}
+	return s, nil
+}
+
+func statusHold(ctx context.Context, tx *sql.Tx, s *Status) error {
+	hold, ok, err := readHold(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if ok {
+		s.Hold = &HoldStatus{Generation: hold.Generation, Cause: string(hold.Cause), HeldBy: hold.HeldBy, HeldAt: hold.HeldAt}
+	}
+	return nil
 }
 
 func statusConnection(ctx context.Context, tx *sql.Tx, s *Status) error {
