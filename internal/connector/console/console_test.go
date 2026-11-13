@@ -380,7 +380,7 @@ func TestACompletedRequestIsNotCalledASuccess(t *testing.T) {
 	assert.Equal(t, toneNone, tone)
 }
 
-func TestAMessageThatCouldNotBeSentSaysWhy(t *testing.T) {
+func TestAMessageWhoseAnswerIsLostSaysSo(t *testing.T) {
 	say := func(context.Context, string) (string, error) { return "", errors.New("the connector stopped") }
 	m := open(t, running(), Options{Say: say}, 110, 30)
 	m, cmd := press(t, m, "/", "x", "enter")
