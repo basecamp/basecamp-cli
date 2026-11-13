@@ -346,7 +346,8 @@ func TestAnActivityScreenWithNoRowsScrolls(t *testing.T) {
 	assert.Contains(t, screen(m), "Working now")
 }
 
-// The first row is shown even when what is over it fills the window.
+// The first row is shown even when what is over it fills the window, and
+// up from it is what is over it: the window cannot show both.
 func TestTheFirstRowShowsUnderALongExplanation(t *testing.T) {
 	snap := running()
 	snap.Runner.Live = false
@@ -354,6 +355,48 @@ func TestTheFirstRowShowsUnderALongExplanation(t *testing.T) {
 	m := open(t, snap, Options{}, 40, 12)
 	require.Len(t, m.items(), 1)
 	assert.Contains(t, screen(m), "▸")
+	assert.NotContains(t, screen(m), "Working now")
+
+	m, _ = press(t, m, "g")
+	assert.Contains(t, screen(m), "Working now")
+	assert.NotContains(t, screen(m), "▸")
+	// A snapshot does not take the person back down to the row.
+	m = step(t, m, snapshotMsg{snap})
+	assert.Contains(t, screen(m), "Working now")
+	m, _ = press(t, m, "j")
+	assert.Contains(t, screen(m), "▸")
+	assert.Equal(t, 0, m.cursor, "down from there is back to the row, not past it")
+}
+
+// In a narrow window a row keeps what it is and gives up when: a worker's
+// name and what it was asked matter more than the coding agent it runs on.
+func TestANarrowRowKeepsItsName(t *testing.T) {
+	m := open(t, running(), Options{}, 44, 30)
+	shown := screen(m)
+	assert.Contains(t, shown, "w2  Ship it")
+	assert.Contains(t, shown, "Working 1m 12s")
+	assert.NotContains(t, shown, "Claude Code · opus · Working")
+
+	m = open(t, running(), Options{}, 20, 30)
+	shown = screen(m)
+	assert.Contains(t, shown, "● w2  Ship it")
+	assert.Contains(t, shown, "✓ w1  how man")
+}
+
+// --run has nothing to start with until a start has kept an orchestrator,
+// so a profile that never had one is told to name one.
+func TestTheStartCommandIsOneThatWorks(t *testing.T) {
+	snap := running()
+	snap.Connector = Connector{}
+	snap.Runner.Live = false
+	m := open(t, snap, Options{}, 110, 40)
+	m, _ = press(t, m, "2")
+	assert.Contains(t, screen(m), "Start it: basecamp connect -P agent --run")
+
+	snap.Runner.Orchestrator = runner.Spec{}
+	m = step(t, m, snapshotMsg{snap})
+	assert.Contains(t, screen(m), "Start it: basecamp connect -P agent --orchestrator claude")
+	assert.NotContains(t, screen(m), "--run")
 }
 
 // In the narrowest window the checks are still there, each under its name.

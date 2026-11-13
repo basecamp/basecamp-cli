@@ -687,17 +687,38 @@ type RequestStatus struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+// recentRequestsReach is how many of the latest discarded records
+// RecentRequests looks through for the requests among them.
+const recentRequestsReach = 10000
+
 // RecentRequests lists the latest requests that passed admission, newest
 // first: those handed to a session, those waiting, held or blocked, those a
 // start found too old to run and those a person closed without running.
 // What admission turned away is not a request and is not listed.
+//
+// It is read by someone watching, again and again, so what it costs must
+// not grow with the ledger's history. Nearly every record of a busy account
+// is discarded, and nearly all of those were never requests: each state's
+// latest records are read off the index, newest first, and for the
+// discarded ones the search for requests stops recentRequestsReach records
+// back. A request discarded longer ago than that is not listed.
 func (l *Ledger) RecentRequests(ctx context.Context, limit int) ([]RequestStatus, error) {
-	rows, err := l.db.QueryContext(ctx, `
-SELECT id, event_type, trigger_name, bucket_id, recording_url, state, reason, updated_at
-FROM events
-WHERE state IN ('admitted', 'queued', 'dispatched', 'held', 'blocked', 'completed')
-   OR (state = 'discarded' AND reason IN (?, ?, ?, ?))
-ORDER BY id DESC LIMIT ?`, ReasonHandedOff, ReasonBeforeThisRun, ReasonUnreadable, ReasonByOperator, limit)
+	const columns = `id, event_type, trigger_name, bucket_id, recording_url, state, reason, updated_at`
+	states := []RecordState{StateAdmitted, StateQueued, StateDispatched, StateHeld, StateBlocked, StateCompleted}
+	var query strings.Builder
+	args := make([]any, 0, 2*len(states)+8)
+	query.WriteString(`SELECT ` + columns + ` FROM (`)
+	for _, state := range states {
+		query.WriteString(`
+SELECT * FROM (SELECT ` + columns + ` FROM events WHERE state = ? ORDER BY id DESC LIMIT ?) UNION ALL`)
+		args = append(args, string(state), limit)
+	}
+	query.WriteString(`
+SELECT * FROM (SELECT ` + columns + ` FROM (SELECT ` + columns + ` FROM events WHERE state = ? ORDER BY id DESC LIMIT ?)
+  WHERE reason IN (?, ?, ?, ?) ORDER BY id DESC LIMIT ?)
+) ORDER BY id DESC LIMIT ?`)
+	args = append(args, string(StateDiscarded), recentRequestsReach, ReasonHandedOff, ReasonBeforeThisRun, ReasonUnreadable, ReasonByOperator, limit, limit)
+	rows, err := l.db.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("connector: recent requests: %w", err)
 	}

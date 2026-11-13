@@ -183,3 +183,48 @@ func TestStatusCarriesATokenHolderThatCannotBeAccountedFor(t *testing.T) {
 	assert.True(t, after.Tasks[0].TakerUnaccounted, "the held attempt says its token is out")
 	assert.Zero(t, after.Tasks[0].TakerPID, "and there is no process to name")
 }
+
+// The latest requests are the same ones whichever way they are looked for:
+// newest first across every state a request can be in, with what admission
+// turned away left out, however much of it there is between two requests.
+func TestRecentRequestsAreTheLatestAcrossStatesAndNothingElse(t *testing.T) {
+	ctx := context.Background()
+	l := newTestLedger(t)
+	// Mostly records that were never requests, as a busy account's are.
+	type was struct {
+		state  RecordState
+		reason string
+	}
+	requests := map[int64]was{
+		3: {StateDiscarded, ReasonHandedOff}, 17: {StateBlocked, "no_route"}, 18: {StateDiscarded, ReasonByOperator},
+		29: {StateDiscarded, ReasonBeforeThisRun}, 30: {StateHeld, ""}, 44: {StateDiscarded, ReasonUnreadable}, 58: {StateAdmitted, ""},
+	}
+	for id := int64(1); id <= 60; id++ {
+		to, ok := requests[id]
+		if !ok {
+			to = was{StateDiscarded, "not_addressed"}
+		}
+		seenRecord(t, l, id)
+		_, err := l.db.ExecContext(ctx, `UPDATE events SET state = ?, reason = ? WHERE id = ?`, string(to.state), to.reason, id)
+		require.NoError(t, err, id)
+	}
+
+	ids := func(limit int) []int64 {
+		t.Helper()
+		recent, err := l.RecentRequests(ctx, limit)
+		require.NoError(t, err)
+		ids := make([]int64, 0, len(recent))
+		for _, r := range recent {
+			ids = append(ids, r.EventID)
+		}
+		return ids
+	}
+	assert.Equal(t, []int64{58, 44, 30, 29, 18, 17, 3}, ids(30))
+	assert.Equal(t, []int64{58, 44, 30}, ids(3), "the latest of them, across states")
+
+	recent, err := l.RecentRequests(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, recent, 1)
+	assert.Equal(t, "admitted", recent[0].State)
+	assert.False(t, recent[0].UpdatedAt.IsZero())
+}

@@ -128,6 +128,10 @@ type model struct {
 	selected string
 	// detail shows the selected row in full, in place of the list.
 	detail bool
+	// above says the person scrolled up from the first row to read what the
+	// screen says over it, so the row is not brought back into view under
+	// them.
+	above bool
 	// scroll is the first line shown of each tab's body.
 	scroll [tabCount]int
 
@@ -310,6 +314,19 @@ func (m *model) move(by int) {
 		m.scroll[m.tab] = min(max(0, min(m.scroll[m.tab], last)+clampStep(by)), last)
 		return
 	}
+	switch {
+	case by < 0 && m.cursor == 0 && m.scroll[tabActivity] > 0:
+		// Up from the first row is what the screen says over its rows,
+		// which a small window cannot show beside them.
+		m.scroll[tabActivity] = max(0, m.scroll[tabActivity]+clampStep(by))
+		m.above = true
+		return
+	case by > 0 && m.above:
+		// And down from there is back to the row.
+		m.above = false
+		m.reveal()
+		return
+	}
 	m.cursor = min(max(0, m.cursor+clampStep(by)), len(items)-1)
 	m.selected = items[m.cursor].key()
 	m.reveal()
@@ -321,6 +338,10 @@ func (m *model) reveal() {
 	if m.detail || m.snap == nil {
 		return
 	}
+	if m.above && m.cursor == 0 {
+		return
+	}
+	m.above = false
 	_, at := m.activityLines(max(1, m.width-2))
 	if m.cursor >= len(at) {
 		return

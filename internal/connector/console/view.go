@@ -402,12 +402,19 @@ func (s *Snapshot) orchestrating() string {
 // handsOffWords says, for a connector that hands requests off, that it
 // does none of the work and how to start one that does.
 func (s *Snapshot) handsOffWords() string {
+	return "This connector was started without an orchestrator, so it does none of the work itself: it prints each request for the coding agent session that started it, and a request is worked on only if such a session is reading them. To have the connector do the work, stop it and start it with: " + s.startCommand()
+}
+
+// startCommand is the command that starts this profile's connector doing
+// the work itself: with what an earlier start kept, when one kept an
+// orchestrator, and otherwise naming one, since --run has nothing to start
+// with until a start has.
+func (s *Snapshot) startCommand() string {
 	start := "--orchestrator claude"
 	if s.Runner != nil && s.Runner.Orchestrator.Adapter != "" {
 		start = "--run"
 	}
-	return "This connector was started without an orchestrator, so it does none of the work itself: it prints each request for the coding agent session that started it, and a request is worked on only if such a session is reading them. To have the connector do the work, stop it and start it with: basecamp connect -P " +
-		richtext.ShellQuote(s.Profile) + " " + start
+	return "basecamp connect -P " + richtext.ShellQuote(s.Profile) + " " + start
 }
 
 // listening says the running connector has started its parts: its own
@@ -641,31 +648,43 @@ func (m model) section(name string, count int) string {
 func (m model) activityLines(width int) (lines []string, at []int) {
 	snap, now := m.snap, m.now()
 	add := func(line string) { lines = append(lines, line) }
-	row := func(left, right string) {
+	// aside is the fullest of rights, a row's words at its right edge from
+	// the fullest to the shortest, that leaves the row's own words room: all
+	// of them, or twenty columns. In a window too narrow for the shortest
+	// there is none: what the row is matters more than when.
+	aside := func(left string, rights ...string) string {
+		room := min(ansi.StringWidth(left)+2, 20)
+		for _, right := range rights {
+			if width-ansi.StringWidth(right)-3 >= room {
+				return right + " "
+			}
+		}
+		return ""
+	}
+	row := func(left string, rights ...string) {
 		index := len(at)
 		at = append(at, len(lines))
+		right := aside(left, rights...)
 		if index == m.cursor {
-			add(m.styles.selected.Render(spread("▸ "+ansi.Strip(left), ansi.Strip(right)+" ", width)))
+			add(m.styles.selected.Render(spread("▸ "+ansi.Strip(left), right, width)))
 			return
 		}
-		add(spread("  "+left, right+" ", width))
+		add(spread("  "+left, m.styles.muted.Render(right), width))
 	}
 	workerRow := func(w *runner.WorkerActivity) {
 		word, tone := workerWords(w.State)
 		left := m.styles.tone(tone).Render(tone.mark()) + " " + plain(w.ID) + "  " + workerTitle(w)
-		right := specWords(runner.Spec{Adapter: w.Adapter, Model: w.Model, Effort: w.Effort}) + " · "
+		when := word
 		switch {
 		case w.State == "running" && w.StartedAt != nil:
 			if doing := plain(w.Doing); doing != "" {
 				left += m.styles.muted.Render("  " + doing)
 			}
-			right += word + " " + span(now.Sub(*w.StartedAt))
+			when += " " + span(now.Sub(*w.StartedAt))
 		case w.EndedAt != nil:
-			right += word + " " + ago(*w.EndedAt, now)
-		default:
-			right += word
+			when += " " + ago(*w.EndedAt, now)
 		}
-		row(left, m.styles.muted.Render(right))
+		row(left, specWords(runner.Spec{Adapter: w.Adapter, Model: w.Model, Effort: w.Effort})+" · "+when, when, word)
 	}
 
 	add("")
@@ -687,7 +706,7 @@ func (m model) activityLines(width int) (lines []string, at []int) {
 		// came in and hands the work off. It is a line and not a row, since
 		// it is nothing to open.
 		left := m.styles.busy.Render(toneBusy.mark()) + " Orchestrator" + m.styles.muted.Render("  "+doing)
-		add(spread("  "+left, m.styles.muted.Render(specWords(snap.Runner.Orchestrator))+" ", width))
+		add(spread("  "+left, m.styles.muted.Render(aside(left, specWords(snap.Runner.Orchestrator))), width))
 	}
 	for i := range snap.Now {
 		workerRow(&snap.Now[i])
@@ -698,7 +717,7 @@ func (m model) activityLines(width int) (lines []string, at []int) {
 		add(m.section("Waiting for you", len(snap.Held)))
 		for _, h := range snap.Held {
 			left := m.styles.wait.Render(toneWait.mark()) + " " + eventWords(h.Trigger, h.EventType) + m.styles.muted.Render(" · held for review")
-			row(left, m.styles.muted.Render(ago(h.UpdatedAt, now)))
+			row(left, ago(h.UpdatedAt, now))
 		}
 	}
 
@@ -721,7 +740,7 @@ func (m model) activityLines(width int) (lines []string, at []int) {
 		if project := requestProject(r); project != "" {
 			left += m.styles.muted.Render(" · " + project)
 		}
-		row(left, m.styles.muted.Render(word+" · "+ago(r.At, now)))
+		row(left, word+" · "+ago(r.At, now), word)
 	}
 	return lines, at
 }
@@ -1017,7 +1036,7 @@ func (m model) healthLines(width int) []string {
 		if c.LastChange != nil {
 			message += " The last one " + lastChangeWords(c.LastChange) + " " + ago(c.LastChange.ChangedAt, now) + "."
 		}
-		m.check(&lines, toneNone, "Process", message, "Start it: basecamp connect -P "+richtext.ShellQuote(snap.Profile)+" --run", width)
+		m.check(&lines, toneNone, "Process", message, "Start it: "+snap.startCommand(), width)
 	}
 
 	switch {
@@ -1146,12 +1165,12 @@ func (m model) settingsLines(width int) []string {
 
 	lines = append(lines, m.styles.heading.Render("Who does the work"))
 	if r := snap.Runner; r == nil {
-		for _, line := range wrap("The coding agent session that starts the connector, when one does. To have the connector do the work itself, start it with a coding agent: basecamp connect -P "+profile+" --orchestrator claude", width-2) {
+		for _, line := range wrap("The coding agent session that starts the connector, when one does. To have the connector do the work itself, start it with a coding agent: "+snap.startCommand(), width-2) {
 			lines = append(lines, "  "+m.styles.muted.Render(line))
 		}
 	} else {
 		if snap.handsOff() {
-			for _, line := range wrap("The connector running now was started without an orchestrator, so it uses none of this. What follows is used when it is started to do the work itself: basecamp connect -P "+profile+" --run", width-2) {
+			for _, line := range wrap("The connector running now was started without an orchestrator, so it uses none of this. What follows is used when it is started to do the work itself: "+snap.startCommand(), width-2) {
 				lines = append(lines, "  "+m.styles.muted.Render(line))
 			}
 			lines = append(lines, "")
