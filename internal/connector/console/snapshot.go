@@ -101,7 +101,12 @@ type Runner struct {
 	Orchestrator runner.Spec
 	Worker       runner.Spec
 	Permissions  string
-	MaxWorkers   int
+	// MaxWorkers is the cap on workers running at once, zero for none: the
+	// one a running connector started with, and otherwise runner.json's.
+	// KeptMaxWorkers is runner.json's, which a running connector takes up
+	// at its next start.
+	MaxWorkers     int
+	KeptMaxWorkers int
 	// Rules are runner.json's, in the order they are tried.
 	Rules []Rule
 	// Turns, Waiting and SetAside are the orchestrator's: the turns it has

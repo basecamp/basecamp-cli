@@ -766,6 +766,17 @@ func requestProject(r Request) string {
 	return "Ping"
 }
 
+// capWords is a cap on workers running at once as a person reads it.
+func capWords(limit int) string {
+	switch limit {
+	case 0:
+		return "no limit: every request gets a worker as it arrives"
+	case 1:
+		return "one worker at a time: a request past that waits its turn"
+	}
+	return "at most " + strconv.Itoa(limit) + " workers: a request past that waits its turn"
+}
+
 // fact is one "Name  value" line of a details view, value wrapped.
 func (m model) fact(lines *[]string, name, value string, width int) {
 	if value == "" {
@@ -1150,7 +1161,11 @@ func (m model) settingsLines(width int) []string {
 		default:
 			m.fact(&lines, "Permissions", "full: each coding agent runs with its permission prompts off", width)
 		}
-		m.fact(&lines, "At once", strconv.Itoa(r.MaxWorkers)+" workers", width)
+		m.fact(&lines, "At once", capWords(r.MaxWorkers), width)
+		if r.Live && r.KeptMaxWorkers != r.MaxWorkers {
+			// A cap is read at a start, so an edit waits for the next one.
+			m.fact(&lines, "", m.styles.wait.Render("runner.json now says "+capWords(r.KeptMaxWorkers)+", which applies when the connector next starts"), width)
+		}
 		if r.ConfigError != "" {
 			m.fact(&lines, "runner.json", m.styles.bad.Render("cannot be read as written: "+plain(r.ConfigError)), width)
 		}

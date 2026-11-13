@@ -35,7 +35,7 @@ func running() *Snapshot {
 		Projects: []Project{{ID: 456, Name: "Launch", Campfires: 1}},
 		Trust:    Trust{Mode: "operator", Operator: Person{ID: 7, Name: "Ann"}},
 		Runner: &Runner{Live: true, Orchestrator: runner.Spec{Adapter: "claude", Model: "opus"}, Worker: runner.Spec{Adapter: "codex"},
-			Permissions: "full", MaxWorkers: 4, Turns: 12,
+			Permissions: "full", Turns: 12,
 			Rules: []Rule{{When: []string{"asked in Launch"}, Worker: runner.Spec{Adapter: "pi"}}}},
 		Now: []runner.WorkerActivity{{
 			WorkerView: runner.WorkerView{ID: "w2", EventID: 7, State: "running", Adapter: "claude", Model: "opus", Doing: "Bash", StartedAt: before(72 * time.Second), Requests: 1},
@@ -497,6 +497,7 @@ func TestSettingsAreShownAsTheyAreOnDisk(t *testing.T) {
 	assert.Contains(t, shown, "Orchestrator  Claude Code · opus")
 	assert.Contains(t, shown, "Worker        Codex")
 	assert.Contains(t, shown, "Permissions   full: each coding agent runs with its permission prompts off")
+	assert.Contains(t, shown, "At once       no limit: every request gets a worker as it arrives")
 	assert.Contains(t, shown, " 1. asked in Launch → Pi")
 	assert.Contains(t, shown, "Answers       yes: chosen with --pings")
 	assert.Contains(t, shown, "Operator      Ann")
@@ -505,6 +506,16 @@ func TestSettingsAreShownAsTheyAreOnDisk(t *testing.T) {
 	assert.Contains(t, shown, "Other agents  C-3PO, by mention only")
 	assert.Contains(t, shown, "Launch · answers 1 chats without a mention")
 	assert.NotContains(t, shown, "started without an orchestrator")
+
+	// A cap is the running connector's. One written into runner.json since
+	// it started waits for the next start, and is said to.
+	snap.Runner.MaxWorkers, snap.Runner.KeptMaxWorkers = 3, 3
+	m = step(t, m, snapshotMsg{snap})
+	assert.Contains(t, screen(m), "At once       at most 3 workers: a request past that waits its turn")
+	assert.NotContains(t, screen(m), "runner.json now says")
+	snap.Runner.KeptMaxWorkers = 1
+	m = step(t, m, snapshotMsg{snap})
+	assert.Contains(t, strings.Join(strings.Fields(screen(m)), " "), "runner.json now says one worker at a time: a request past that waits its turn, which applies when the connector next starts")
 
 	// A connector that hands requests to the session that started it does
 	// not use them, and says so.

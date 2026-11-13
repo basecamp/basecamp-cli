@@ -297,11 +297,8 @@ func readConnectConsoleRunner(ctx context.Context, snap *console.Snapshot, state
 
 	view := &console.Runner{
 		Orchestrator: config.Orchestrator, Worker: config.Worker.Over(config.Orchestrator),
-		Permissions: string(config.Mode()), MaxWorkers: config.MaxWorkers,
+		Permissions: string(config.Mode()), MaxWorkers: config.MaxWorkers, KeptMaxWorkers: config.MaxWorkers,
 		Turns: activity.Turns, Waiting: activity.Waiting, SetAside: activity.SetAside, Process: activity.Process,
-	}
-	if view.MaxWorkers == 0 {
-		view.MaxWorkers = runner.DefaultMaxWorkers
 	}
 	if configErr != nil {
 		view.ConfigError = setup.ErrorText(configErr)
@@ -318,7 +315,7 @@ func readConnectConsoleRunner(ctx context.Context, snap *console.Snapshot, state
 	cancel()
 	if err == nil && resp.Status != nil {
 		view.Live = true
-		view.Orchestrator, view.Worker = resp.Status.Orchestrator, resp.Status.Worker
+		view.Orchestrator, view.Worker, view.MaxWorkers = resp.Status.Orchestrator, resp.Status.Worker, resp.Status.MaxWorkers
 		if resp.Status.ConfigError != "" {
 			view.ConfigError = resp.Status.ConfigError
 		}
