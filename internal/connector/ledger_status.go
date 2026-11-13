@@ -645,3 +645,49 @@ WHERE (state IN (?, ?, ?, ?) OR (state = ? AND reason = ?))
 		string(StateBlocked), ReasonSpawnFailed, operatorID).Scan(&n)
 	return n, err
 }
+
+// RequestStatus is one request the connector let in and what became of it:
+// ids, states and timestamps, as the rest of status is. The recording's URL
+// is shown so a person can open what was asked.
+type RequestStatus struct {
+	EventID      int64     `json:"event_id"`
+	EventType    string    `json:"event_type"`
+	Trigger      string    `json:"trigger,omitempty"`
+	BucketID     int64     `json:"bucket_id"`
+	RecordingURL string    `json:"recording_url,omitempty"`
+	State        string    `json:"state"`
+	Reason       string    `json:"reason,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// RecentRequests lists the latest requests that passed admission, newest
+// first: those handed to a session, those waiting, held or blocked, and
+// those a start found too old to run. What admission turned away is not a
+// request and is not listed.
+func (l *Ledger) RecentRequests(ctx context.Context, limit int) ([]RequestStatus, error) {
+	rows, err := l.db.QueryContext(ctx, `
+SELECT id, event_type, trigger_name, bucket_id, recording_url, state, reason, updated_at
+FROM events
+WHERE state IN ('admitted', 'queued', 'dispatched', 'held', 'blocked', 'completed')
+   OR (state = 'discarded' AND reason IN (?, ?, ?))
+ORDER BY id DESC LIMIT ?`, ReasonHandedOff, ReasonBeforeThisRun, ReasonUnreadable, limit)
+	if err != nil {
+		return nil, fmt.Errorf("connector: recent requests: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	requests := []RequestStatus{}
+	for rows.Next() {
+		var (
+			r       RequestStatus
+			updated string
+		)
+		if err := rows.Scan(&r.EventID, &r.EventType, &r.Trigger, &r.BucketID, &r.RecordingURL, &r.State, &r.Reason, &updated); err != nil {
+			return nil, err
+		}
+		if r.UpdatedAt, err = parseStamp(updated); err != nil {
+			return nil, err
+		}
+		requests = append(requests, r)
+	}
+	return requests, rows.Err()
+}

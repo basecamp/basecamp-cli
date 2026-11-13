@@ -59,14 +59,21 @@ type WorkerView struct {
 
 // view is w as a WorkerView. r.mu is held.
 func (r *Runner) view(w *workerState) WorkerView {
+	v := viewOf(w)
+	if w.State == workerRunning {
+		v.Doing = r.doing[w.ID]
+	}
+	return v
+}
+
+// viewOf is what a worker's record says of it, which is everything but the
+// tool a running one called last: that is the running connector's to know.
+func viewOf(w *workerState) WorkerView {
 	v := WorkerView{
 		ID: w.ID, EventID: w.EventID, State: w.State,
 		Adapter: w.Session.Spec.Adapter, Model: w.Session.Spec.Model, Effort: w.Session.Spec.Effort,
 		Repo: w.Repo, Matched: w.Matched, Requests: max(1, len(w.Events)), Refused: w.Refused, Report: clip(w.Report, 600), Error: w.Error,
 		CreatedAt: w.CreatedAt, CostUSD: roundCost(w.Session.CostUSD),
-	}
-	if w.State == workerRunning {
-		v.Doing = r.doing[w.ID]
 	}
 	// Copies, not pointers into the worker: a view is read after the lock is
 	// let go, while the worker's goroutine may be writing its times.
