@@ -2,6 +2,10 @@ package runner
 
 import (
 	"bufio"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -169,4 +173,49 @@ func TestCheckInstalledNamesTheCommandThatIsMissing(t *testing.T) {
 	require.NoError(t, CheckInstalled(look, Spec{Adapter: "claude"}, Spec{Adapter: "pi"}))
 	require.ErrorContains(t, CheckInstalled(look, Spec{Adapter: "claude"}, Spec{Adapter: "codex"}), "the codex adapter needs the `codex` command")
 	require.ErrorContains(t, CheckInstalled(look, Spec{Adapter: "aider"}), "unknown adapter")
+}
+
+// What a CLI prints past the start of its answer is taken and not kept, so
+// one that prints without end fills no memory.
+func TestOnlyTheStartOfAVersionAnswerIsKept(t *testing.T) {
+	out := head{limit: 8}
+	for range 1000 {
+		n, err := out.Write([]byte("0123456789"))
+		require.NoError(t, err)
+		require.Equal(t, 10, n, "the rest is taken, so the command is not stopped mid-write")
+	}
+	assert.Equal(t, "01234567", string(out.kept))
+}
+
+// The console asks each coding agent's CLI its version: the first line it
+// answers --version with, and for one that is missing or does not answer,
+// that it is so.
+func TestInstalledAgentsAreAskedTheirVersions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in CLIs are shell scripts")
+	}
+	dir := t.TempDir()
+	script := func(name, body string) string {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o700)) //nolint:gosec // G306: a stand-in CLI has to be executable
+		return path
+	}
+	found := map[string]string{
+		"claude": script("claude", `[ "$1" = "--version" ] && printf '2.1.0 (Claude Code)\nmore\n'`),
+		"codex":  script("codex", `exit 3`),
+	}
+	look := func(name string) (string, error) {
+		if path, ok := found[name]; ok {
+			return path, nil
+		}
+		return "", exec.ErrNotFound
+	}
+
+	agents := InstalledAgents(t.Context(), look)
+	require.Len(t, agents, 3)
+	assert.Equal(t, Installed{Name: "claude", Path: found["claude"], Version: "2.1.0 (Claude Code)", Guarded: true}, agents[0])
+	assert.Equal(t, "codex", agents[1].Name)
+	assert.Empty(t, agents[1].Version)
+	assert.Contains(t, agents[1].Error, "could not be asked its version")
+	assert.Equal(t, Installed{Name: "pi"}, agents[2])
 }

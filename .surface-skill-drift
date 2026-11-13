@@ -36,6 +36,7 @@ CMD basecamp connect status
 # The connector doing the work itself (--orchestrator): hidden with the rest.
 FLAG basecamp --orchestrator
 FLAG basecamp --run
+CMD basecamp connect console
 CMD basecamp connect restart
 CMD basecamp connect say
 CMD basecamp connect stop

@@ -96,6 +96,16 @@ all of it:
   turn's process is recorded before its agent is told anything, and a session is not given
   another turn while what its last one started cannot be confirmed ended.
 
+**The console** (`basecamp connect console`, `internal/connector/console`) is the person's
+view of all this in a terminal: what is worked on, what was done, doctor's checks, the
+coding agents installed, the settings, and a line to the orchestrator. It is a process of
+its own that reads what `status` reads (`connectConsole.snapshot`) and writes nothing, so
+it runs beside a connector, before one starts and after one stops; what the person types
+goes over the runner's socket, as `say` does. Everything it draws that someone else wrote
+(a recording's title, a worker's report) goes through `plain` or `text` first: keep it so.
+`console.Run` is the one place it starts a bubbletea program, listed in
+`internal/tui/launchers_test.go`.
+
 **What agents may do** is one switch, `--permissions`, kept in `runner.json` and read for
 every turn. `full`, the default, starts each CLI with its permission prompts off: a headless
 turn has nobody to answer one. `guarded` starts each under its own unattended guardrails

@@ -118,6 +118,7 @@ the connector was started with.
   basecamp connect say "<message>"    talk to the orchestrator
   basecamp connect workers list       the workers and what each runs on
   basecamp connect stop               stop it; restart starts it again
+  basecamp connect console            watch it, and talk to it, in a terminal
 
 One connector runs per profile in this state directory. An agent can run
 several connections where Basecamp enables adding them for its kind; otherwise
@@ -167,7 +168,8 @@ status and doctor say which this profile's does.
 	addConnectRunFlags(cmd, &run)
 	cmd.AddCommand(newConnectSetupCmd(), newConnectShowCmd(), newConnectStatusCmd(), newConnectDoctorCmd(),
 		newConnectDiscardCmd(), newConnectAskCmd(), newConnectReleaseCmd(), newConnectShadowCmd(), newConnectImportCmd(),
-		newConnectDispatchCmd(), newConnectWorkersCmd(), newConnectSayCmd(), newConnectStopCmd(), newConnectRestartCmd())
+		newConnectDispatchCmd(), newConnectWorkersCmd(), newConnectSayCmd(), newConnectStopCmd(), newConnectRestartCmd(),
+		newConnectConsoleCmd())
 	return cmd
 }
 
