@@ -241,7 +241,7 @@ func TestRecentRequestsAreTheLatestAcrossStatesAndNothingElse(t *testing.T) {
 		}
 		return ids
 	}
-	// The latest 20 discarded records are 60 down to 39 without 58: 44 is
+	// The latest 20 discarded records are 60 down to 40 without 58: 44 is
 	// among them, and 29, 18 and 3 are not.
 	assert.Equal(t, []int64{58, 44, 30, 17}, reached(20))
 	assert.Equal(t, []int64{58, 30, 17}, reached(0))
