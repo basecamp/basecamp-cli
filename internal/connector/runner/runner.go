@@ -21,8 +21,6 @@ import (
 
 // Defaults a Config or an Options leaves unset.
 const (
-	// DefaultMaxWorkers is how many workers run at once.
-	DefaultMaxWorkers = 4
 	// DefaultOrchestratorTimeout bounds one orchestrator turn: it
 	// acknowledges and hands off, and never does the work.
 	DefaultOrchestratorTimeout = 15 * time.Minute
@@ -52,6 +50,10 @@ type Options struct {
 	// worker, then from Orchestrator.
 	Orchestrator Spec
 	Worker       Spec
+	// MaxWorkers is the cap on workers running at once that the start
+	// named, zero for none. Nil is a start that named no cap, and leaves it
+	// to runner.json's max_workers.
+	MaxWorkers *int
 	// ConfigPath is runner.json.
 	ConfigPath string
 	// Skill and Subagent are the basecamp-connect skill's two files.
@@ -114,7 +116,9 @@ type Runner struct {
 	// recordings caches what each event's recording sits under.
 	recordings map[int64][]int64
 
-	wake  chan struct{}
+	wake chan struct{}
+	// slots holds a place for each worker having its turns, up to the cap
+	// this run started with. Nil is no cap.
 	slots chan struct{}
 	wg    sync.WaitGroup
 	// ctx is the run's context. It is nil until Run has continued the
@@ -179,7 +183,16 @@ func New(opts Options) (*Runner, error) {
 		doing: map[string]string{}, recordings: map[int64][]int64{},
 		wake:  make(chan struct{}, 1),
 		ready: make(chan struct{}),
-		slots: make(chan struct{}, cmpInt(config.MaxWorkers, DefaultMaxWorkers)),
+	}
+	limit := config.MaxWorkers
+	if opts.MaxWorkers != nil {
+		if err := CheckMaxWorkers(*opts.MaxWorkers); err != nil {
+			return nil, fmt.Errorf("runner: %w", err)
+		}
+		limit = *opts.MaxWorkers
+	}
+	if limit > 0 {
+		r.slots = make(chan struct{}, limit)
 	}
 	// runner.json's orchestrator fills in a model and an effort the start
 	// did not name, for the same agent; it never changes which agent that is.
@@ -206,13 +219,6 @@ func New(opts Options) (*Runner, error) {
 		return nil, err
 	}
 	return r, st.save(r.statePath())
-}
-
-func cmpInt(v, fallback int) int {
-	if v > 0 {
-		return v
-	}
-	return fallback
 }
 
 // retryDelay is the wait before a failed orchestrator turn is tried again.
@@ -426,7 +432,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		return fmt.Errorf("runner: %w", err)
 	}
 	close(r.ready)
-	r.log.Info("runner: running", "orchestrator", orchestrator.String(), "worker", worker.String(), "permissions", string(config.Mode()), "state", r.opts.Dir)
+	r.log.Info("runner: running", "orchestrator", orchestrator.String(), "worker", worker.String(), "permissions", string(config.Mode()), "max_workers", cap(r.slots), "state", r.opts.Dir)
 	agents := []string{orchestrator.Adapter, worker.Adapter}
 	for _, rule := range config.Rules {
 		agents = append(agents, rule.Worker.Adapter)

@@ -502,24 +502,88 @@ func TestAWorkerThatRunsPastItsTimeIsStoppedAndReported(t *testing.T) {
 	assert.Contains(t, all[len(all)-1].Prompt, "[worker-report] worker "+view.ID+" (claude · opus, no repo) could not run: it ran longer than 300ms and was stopped.")
 }
 
-func TestOnlySoManyWorkersRunAtOnce(t *testing.T) {
+// With no cap, no request waits for another's worker.
+func TestWithNoCapEveryWorkerRunsAtOnce(t *testing.T) {
+	h := newHarness(t, nil)
+	h.settled()
+	const many = 6
+	for range many {
+		_, _, err := h.runner.Dispatch(context.Background(), DispatchRequest{NoRepo: true, Handoff: "HANG"})
+		require.NoError(t, err)
+	}
+	require.Eventually(t, func() bool { return h.runner.Status().Running == many }, 10*time.Second, 20*time.Millisecond)
+	assert.Zero(t, h.runner.Status().Queued)
+	assert.Zero(t, h.runner.Status().MaxWorkers)
+}
+
+// A cap is the one the start found: a request past it waits for a worker to
+// finish.
+func TestUnderACapOnlySoManyWorkersRunAtOnce(t *testing.T) {
+	one := 1
+	for name, capped := range map[string]func(*testing.T, *Options){
+		"runner.json's": func(t *testing.T, o *Options) {
+			require.NoError(t, os.WriteFile(o.ConfigPath, []byte(`{"max_workers": 1}`), 0o600))
+		},
+		"the start's, over runner.json's": func(t *testing.T, o *Options) {
+			require.NoError(t, os.WriteFile(o.ConfigPath, []byte(`{"max_workers": 3}`), 0o600))
+			o.MaxWorkers = &one
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, func(o *Options) { capped(t, o) })
+			h.settled()
+			first, _, err := h.runner.Dispatch(context.Background(), DispatchRequest{NoRepo: true, Handoff: "HANG"})
+			require.NoError(t, err)
+			require.Eventually(t, func() bool { return h.runner.Status().Running == 1 }, 10*time.Second, 20*time.Millisecond)
+			_, _, err = h.runner.Dispatch(context.Background(), DispatchRequest{NoRepo: true, Handoff: "quick"})
+			require.NoError(t, err)
+			time.Sleep(200 * time.Millisecond)
+			status := h.runner.Status()
+			assert.Equal(t, 1, status.Running)
+			assert.Equal(t, 1, status.Queued)
+			assert.Equal(t, 1, status.MaxWorkers)
+
+			// An edit to runner.json is for the next start: this run keeps
+			// the cap it started with for the requests that come after the
+			// edit too, and says so.
+			require.NoError(t, os.WriteFile(h.opts.ConfigPath, []byte(`{"max_workers": 5}`), 0o600))
+			_, _, err = h.runner.Dispatch(context.Background(), DispatchRequest{NoRepo: true, Handoff: "quick"})
+			require.NoError(t, err)
+			time.Sleep(200 * time.Millisecond)
+			status = h.runner.Status()
+			assert.Equal(t, 1, status.Running)
+			assert.Equal(t, 2, status.Queued)
+			assert.Equal(t, 1, status.MaxWorkers)
+
+			_, err = h.runner.StopWorker(first.ID)
+			require.NoError(t, err)
+			h.settled()
+			assert.Equal(t, workerDone, h.runner.Workers()[1].State)
+		})
+	}
+}
+
+// A start that says no cap has none, whatever runner.json holds.
+func TestAStartThatTakesTheCapOffRunsWithNone(t *testing.T) {
+	none := 0
 	h := newHarness(t, func(o *Options) {
 		require.NoError(t, os.WriteFile(o.ConfigPath, []byte(`{"max_workers": 1}`), 0o600))
+		o.MaxWorkers = &none
 	})
 	h.settled()
-	first, _, err := h.runner.Dispatch(context.Background(), DispatchRequest{NoRepo: true, Handoff: "HANG"})
-	require.NoError(t, err)
-	require.Eventually(t, func() bool { return h.runner.Status().Running == 1 }, 10*time.Second, 20*time.Millisecond)
-	_, _, err = h.runner.Dispatch(context.Background(), DispatchRequest{NoRepo: true, Handoff: "quick"})
-	require.NoError(t, err)
-	time.Sleep(200 * time.Millisecond)
-	status := h.runner.Status()
-	assert.Equal(t, 1, status.Running)
-	assert.Equal(t, 1, status.Queued)
-	_, err = h.runner.StopWorker(first.ID)
-	require.NoError(t, err)
-	h.settled()
-	assert.Equal(t, workerDone, h.runner.Workers()[1].State)
+	for range 3 {
+		_, _, err := h.runner.Dispatch(context.Background(), DispatchRequest{NoRepo: true, Handoff: "HANG"})
+		require.NoError(t, err)
+	}
+	require.Eventually(t, func() bool { return h.runner.Status().Running == 3 }, 10*time.Second, 20*time.Millisecond)
+	assert.Zero(t, h.runner.Status().MaxWorkers)
+}
+
+func TestARunnerIsNotBuiltWithANegativeCap(t *testing.T) {
+	negative := -1
+	h := unstartedHarness(t, func(o *Options) { o.MaxWorkers = &negative })
+	_, err := New(h.opts)
+	require.ErrorContains(t, err, "it cannot be negative")
 }
 
 func TestClaudeCodesRunningTotalIsNotCountedTwice(t *testing.T) {
@@ -818,7 +882,7 @@ func TestPermissionsAreReadForEveryTurnAndAnUnreadableFileStartsNoAgent(t *testi
 	first := by(h.invocations(), "claude")[0]
 	assert.Contains(t, first.Prompt, "[connector] The connector started. It runs as profile agent. Permissions are full.")
 
-	require.NoError(t, SaveStart(h.opts.ConfigPath, Spec{}, Spec{}, PermissionsGuarded))
+	require.NoError(t, SaveStart(h.opts.ConfigPath, Spec{}, Spec{}, PermissionsGuarded, nil))
 	_, err := h.runner.Say(context.Background(), "hello")
 	require.NoError(t, err)
 	assert.Equal(t, "auto", orchestratorArgs()[slices.Index(orchestratorArgs(), "--permission-mode")+1])

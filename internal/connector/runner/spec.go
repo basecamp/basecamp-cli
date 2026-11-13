@@ -107,12 +107,13 @@ func ParsePermissions(value string) (Permissions, error) {
 const ConfigFile = "runner.json"
 
 // Config is runner.json: which coding agent does what. It is the person's own
-// file, written by hand, and read again for every worker, so an edit applies
-// to the next request without a restart.
+// file, written by hand, and read again for every worker, so an edit to its
+// rules or its permissions applies to the next request without a restart.
 //
-// Nothing in it is required. Orchestrator, Worker and Permissions are what
-// the connector was last started with, kept so the next start need not name
-// them again (SaveStart); a start that names one wins over what is kept.
+// Nothing in it is required. Orchestrator, Worker, Permissions and
+// MaxWorkers are what the connector was last started with, kept so the next
+// start need not name them again (SaveStart); a start that names one wins
+// over what is kept.
 // Rules then choose a worker by where the request came from and which repo
 // its work goes in.
 type Config struct {
@@ -121,7 +122,9 @@ type Config struct {
 	// Permissions is what agents may do on this computer: "full" or
 	// "guarded". Empty means full. It is read again for every turn.
 	Permissions Permissions `json:"permissions,omitempty"`
-	// MaxWorkers is how many workers run at once. Zero means DefaultMaxWorkers.
+	// MaxWorkers caps how many workers run at once: a request past it waits
+	// its turn. Zero, or leaving it out, is no cap. Unlike the rules and
+	// the permissions it is read once, when the connector starts.
 	MaxWorkers int `json:"max_workers,omitempty"`
 	// Rules are tried in order and the first that matches wins. What its
 	// worker leaves out comes from the default worker.
@@ -250,8 +253,8 @@ func ParseConfig(data []byte) (Config, error) {
 			return Config{}, fmt.Errorf("%s: %w", ConfigFile, err)
 		}
 	}
-	if c.MaxWorkers < 0 || c.MaxWorkers > 64 {
-		return Config{}, fmt.Errorf("%s: max_workers must be between 1 and 64", ConfigFile)
+	if err := CheckMaxWorkers(c.MaxWorkers); err != nil {
+		return Config{}, fmt.Errorf("%s: max_workers: %w", ConfigFile, err)
 	}
 	for i, rule := range c.Rules {
 		if err := rule.validate(); err != nil {
@@ -259,6 +262,15 @@ func ParseConfig(data []byte) (Config, error) {
 		}
 	}
 	return c, nil
+}
+
+// CheckMaxWorkers refuses a negative cap on workers. A cap is the most that
+// run at once, and zero is none.
+func CheckMaxWorkers(limit int) error {
+	if limit < 0 {
+		return fmt.Errorf("it cannot be negative: it is the most workers that run at once, and 0 is no cap (not %d)", limit)
+	}
+	return nil
 }
 
 // Mode is the permissions in force: what the file says, or full when it says
@@ -272,14 +284,21 @@ func (c Config) Mode() Permissions {
 
 // SaveStart keeps what a connector was started with in runner.json, beside
 // whatever else the file holds, and creates the file when there is none. A
+// nil maxWorkers is a start that named no cap, and leaves the file's own. A
 // file that cannot be read as written is left alone and reported: rewriting
 // it would drop whatever the person meant by it.
-func SaveStart(path string, orchestrator, worker Spec, mode Permissions) error {
+func SaveStart(path string, orchestrator, worker Spec, mode Permissions, maxWorkers *int) error {
 	config, err := LoadConfig(path)
 	if err != nil {
 		return err
 	}
 	config.Orchestrator, config.Worker, config.Permissions = orchestrator, worker, mode
+	if maxWorkers != nil {
+		if err := CheckMaxWorkers(*maxWorkers); err != nil {
+			return fmt.Errorf("max_workers: %w", err)
+		}
+		config.MaxWorkers = *maxWorkers
+	}
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return err

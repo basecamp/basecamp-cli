@@ -76,6 +76,10 @@ type Status struct {
 	SetAside int `json:"set_aside"`
 	Running  int `json:"running"`
 	Queued   int `json:"queued"`
+	// MaxWorkers is the cap on workers running at once that this run
+	// started with, which a later edit to runner.json does not change.
+	// Zero, left out, is no cap.
+	MaxWorkers int `json:"max_workers,omitempty"`
 	// ConfigError says runner.json cannot be read as written, and why. The
 	// worker shown is then not the one a request would get: no agent is
 	// started until the file is fixed.
@@ -313,7 +317,7 @@ func (r *Runner) Status() Status {
 	status := Status{
 		Profile: r.opts.Profile, Orchestrator: r.st.Orchestrator.Spec, Session: r.st.Orchestrator.ID,
 		Turns: r.st.Orchestrator.Turns, Worker: r.baseWorker(config),
-		Waiting: len(r.st.Inbox), SetAside: len(r.st.Dropped),
+		Waiting: len(r.st.Inbox), SetAside: len(r.st.Dropped), MaxWorkers: cap(r.slots),
 	}
 	if configErr != nil {
 		status.ConfigError = configErr.Error()

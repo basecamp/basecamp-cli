@@ -71,7 +71,9 @@ skill and hands the work to a worker, a session of its own on the coding
 agent --worker names (the orchestrator's by default), in the repo the request
 belongs to. --orchestrator-model, --orchestrator-effort, --worker-model and
 --worker-effort choose models and reasoning effort; without them each coding
-agent uses its own defaults.
+agent uses its own defaults. Each request gets a worker as it arrives.
+--max-workers caps how many run at once, so a request past the cap waits its
+turn, and --max-workers 0 takes the cap off again.
 
   basecamp connect -P <profile> --orchestrator claude --worker codex
   basecamp connect -P <profile> --run
@@ -108,7 +110,10 @@ started:
 
 The rules and the permissions are read again for each request, so an edit to
 them needs no restart. The worker at the top is what the connector starts
-with.
+with. max_workers, where --max-workers is kept, is read once, when the
+connector starts: a change to it applies at the next start that does not
+name --max-workers itself. basecamp connect restart starts with the flags
+the connector was started with.
 
   basecamp connect say "<message>"    talk to the orchestrator
   basecamp connect workers list       the workers and what each runs on
