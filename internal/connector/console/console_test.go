@@ -366,6 +366,22 @@ func TestTheFirstRowShowsUnderALongExplanation(t *testing.T) {
 	m, _ = press(t, m, "j")
 	assert.Contains(t, screen(m), "▸")
 	assert.Equal(t, 0, m.cursor, "down from there is back to the row, not past it")
+
+	// Opening the row and closing it again is back at the row, and a jump
+	// to the end goes to the end.
+	m, _ = press(t, m, "g")
+	require.True(t, m.above)
+	m, _ = press(t, m, "enter", "esc")
+	assert.False(t, m.above)
+	assert.Contains(t, screen(m), "▸")
+	m, _ = press(t, m, "g")
+	require.True(t, m.above)
+	snap.Requests = append(snap.Requests, snap.Requests[0], snap.Requests[0])
+	snap.Requests[1].EventID, snap.Requests[2].EventID = 8, 9
+	m = step(t, m, snapshotMsg{snap})
+	m, _ = press(t, m, "G")
+	assert.False(t, m.above)
+	assert.Equal(t, len(m.items())-1, m.cursor)
 }
 
 // In a narrow window a row keeps what it is and gives up when: a worker's

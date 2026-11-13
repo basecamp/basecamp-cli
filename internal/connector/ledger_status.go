@@ -703,6 +703,10 @@ const recentRequestsReach = 10000
 // discarded ones the search for requests stops recentRequestsReach records
 // back. A request discarded longer ago than that is not listed.
 func (l *Ledger) RecentRequests(ctx context.Context, limit int) ([]RequestStatus, error) {
+	return l.recentRequests(ctx, limit, recentRequestsReach)
+}
+
+func (l *Ledger) recentRequests(ctx context.Context, limit, reach int) ([]RequestStatus, error) {
 	const columns = `id, event_type, trigger_name, bucket_id, recording_url, state, reason, updated_at`
 	states := []RecordState{StateAdmitted, StateQueued, StateDispatched, StateHeld, StateBlocked, StateCompleted}
 	var query strings.Builder
@@ -717,7 +721,7 @@ SELECT * FROM (SELECT ` + columns + ` FROM events WHERE state = ? ORDER BY id DE
 SELECT * FROM (SELECT ` + columns + ` FROM (SELECT ` + columns + ` FROM events WHERE state = ? ORDER BY id DESC LIMIT ?)
   WHERE reason IN (?, ?, ?, ?) ORDER BY id DESC LIMIT ?)
 ) ORDER BY id DESC LIMIT ?`)
-	args = append(args, string(StateDiscarded), recentRequestsReach, ReasonHandedOff, ReasonBeforeThisRun, ReasonUnreadable, ReasonByOperator, limit, limit)
+	args = append(args, string(StateDiscarded), reach, ReasonHandedOff, ReasonBeforeThisRun, ReasonUnreadable, ReasonByOperator, limit, limit)
 	rows, err := l.db.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("connector: recent requests: %w", err)

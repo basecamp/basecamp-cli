@@ -227,4 +227,22 @@ func TestRecentRequestsAreTheLatestAcrossStatesAndNothingElse(t *testing.T) {
 	require.Len(t, recent, 1)
 	assert.Equal(t, "admitted", recent[0].State)
 	assert.False(t, recent[0].UpdatedAt.IsZero())
+
+	// The search among discarded records stops a way back, so that it costs
+	// the same however long the ledger's history: a request discarded
+	// longer ago than that is not listed. Requests in other states are.
+	reached := func(reach int) []int64 {
+		t.Helper()
+		recent, err := l.recentRequests(ctx, 30, reach)
+		require.NoError(t, err)
+		ids := make([]int64, 0, len(recent))
+		for _, r := range recent {
+			ids = append(ids, r.EventID)
+		}
+		return ids
+	}
+	// The latest 20 discarded records are 60 down to 39 without 58: 44 is
+	// among them, and 29, 18 and 3 are not.
+	assert.Equal(t, []int64{58, 44, 30, 17}, reached(20))
+	assert.Equal(t, []int64{58, 30, 17}, reached(0))
 }

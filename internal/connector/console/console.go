@@ -249,12 +249,12 @@ func (m model) pressed(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.move(1 << 30)
 	case "enter":
 		if m.tab == tabActivity && len(m.items()) > 0 {
-			m.detail = !m.detail
+			m.detail, m.above = !m.detail, false
 			m.scroll[tabActivity] = 0
 			m.reveal()
 		}
 	case "esc", "backspace":
-		m.detail = false
+		m.detail, m.above = false, false
 		m.reveal()
 	case "o":
 		return m, m.open()
@@ -322,10 +322,13 @@ func (m *model) move(by int) {
 		m.above = true
 		return
 	case by > 0 && m.above:
-		// And down from there is back to the row.
+		// And one step down from there is back to the row. A jump goes
+		// where it would have from the row.
 		m.above = false
-		m.reveal()
-		return
+		if by == 1 {
+			m.reveal()
+			return
+		}
 	}
 	m.cursor = min(max(0, m.cursor+clampStep(by)), len(items)-1)
 	m.selected = items[m.cursor].key()
