@@ -47,6 +47,12 @@ func TestRunnerJSONIsRefusedRatherThanMisread(t *testing.T) {
 	assert.Equal(t, 2, config.MaxWorkers)
 	assert.Equal(t, "repo ~/code/app, project 7", config.Rules[0].describe())
 
+	// A cap has no ceiling of its own: one above anything that would run is
+	// the same as none.
+	config, err = ParseConfig([]byte(`{"max_workers": 500}`))
+	require.NoError(t, err)
+	assert.Equal(t, 500, config.MaxWorkers)
+
 	for wrong, why := range map[string]string{
 		`{"rules":[{"projekt":1,"worker":{"adapter":"pi"}}]}`:                                         "unknown field",
 		`{"worker":{"adapter":"gemini"}}`:                                                             "unknown adapter",
@@ -54,8 +60,8 @@ func TestRunnerJSONIsRefusedRatherThanMisread(t *testing.T) {
 		`{"rules":[{"project":1,"worker":{}}]}`:                                                       "rule 1: its worker names nothing to change",
 		`{"rules":[{"ping":true,"project":1,"worker":{"adapter":"pi"}}]}`:                             "a Ping is in no project",
 		`{"rules":[{"project":1,"worker":{"adapter":"pi"}},{"within":-4,"worker":{"effort":"low"}}]}`: "rule 2: an id is negative",
-		`{"max_workers":500}`:                                                                         "max_workers",
-		`{"rules":[{"repo":"code/app","worker":{"adapter":"pi"}}]}`:                                   "is not an absolute path",
+		`{"max_workers":-1}`: "max_workers: it cannot be negative",
+		`{"rules":[{"repo":"code/app","worker":{"adapter":"pi"}}]}`: "is not an absolute path",
 		`{} {}`: "more than one JSON value",
 	} {
 		_, err := ParseConfig([]byte(wrong))
@@ -75,14 +81,26 @@ func TestWhatAStartNamedIsKeptBesideWhatTheFileAlreadyHolds(t *testing.T) {
 	assert.Equal(t, PermissionsFull, config.Mode(), "full until the person says otherwise")
 
 	require.NoError(t, os.WriteFile(path, []byte(`{"max_workers": 2, "rules": [{"project": 7, "worker": {"effort": "high"}}]}`), 0o600))
-	require.NoError(t, SaveStart(path, Spec{Adapter: "claude", Model: "sonnet"}, Spec{Adapter: "codex"}, PermissionsGuarded))
+	require.NoError(t, SaveStart(path, Spec{Adapter: "claude", Model: "sonnet"}, Spec{Adapter: "codex"}, PermissionsGuarded, nil))
 	config, err = LoadConfig(path)
 	require.NoError(t, err)
 	assert.Equal(t, Spec{Adapter: "claude", Model: "sonnet"}, config.Orchestrator)
 	assert.Equal(t, Spec{Adapter: "codex"}, config.Worker)
 	assert.Equal(t, PermissionsGuarded, config.Mode())
-	assert.Equal(t, 2, config.MaxWorkers)
+	assert.Equal(t, 2, config.MaxWorkers, "a start that names no cap leaves the one the file held")
 	require.Len(t, config.Rules, 1, "the rules the file held are kept")
+
+	// A start that names a cap keeps it, and one that names 0 takes it off.
+	for _, named := range []int{6, 0} {
+		require.NoError(t, SaveStart(path, config.Orchestrator, config.Worker, config.Permissions, &named))
+		config, err = LoadConfig(path)
+		require.NoError(t, err)
+		assert.Equal(t, named, config.MaxWorkers)
+		require.Len(t, config.Rules, 1)
+	}
+	written, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(written), "max_workers", "no cap is the key left out")
 
 	_, err = ParsePermissions("limited")
 	require.ErrorContains(t, err, `permissions must be "full" or "guarded"`)
@@ -92,7 +110,7 @@ func TestWhatAStartNamedIsKeptBesideWhatTheFileAlreadyHolds(t *testing.T) {
 	// A file that cannot be read as written is left exactly as it is.
 	broken := []byte(`{"rulez": []}`)
 	require.NoError(t, os.WriteFile(path, broken, 0o600))
-	require.Error(t, SaveStart(path, Spec{Adapter: "pi"}, Spec{}, PermissionsFull))
+	require.Error(t, SaveStart(path, Spec{Adapter: "pi"}, Spec{}, PermissionsFull, nil))
 	after, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, broken, after)

@@ -743,6 +743,13 @@ basecamp connect -P '<profile>' --orchestrator <claude|codex|pi>
   `--orchestrator-model`, `--orchestrator-effort`, `--worker-model` and
   `--worker-effort` choose models and effort: pass them only when the person
   asks. Each coding agent named has to be installed and signed in here.
+- **How many at once.** Each request gets a worker as it arrives, with no
+  limit. `--max-workers <n>` caps how many run at once, so a request past
+  the cap waits its turn: pass it only when the person asks for a limit, and
+  `--max-workers 0` to take one off. A cap is read at a start: to change it
+  for a connector already running, stop that connector and start it again
+  with the flag. That is the person's to do when you are the connector's
+  own agent, so give them the command.
 - **Kept for the profile.** What a start names is remembered, so the next
   start is `basecamp connect -P '<profile>' --run`.
 - **It has to outlive you.** It runs in the foreground until stopped. Start it

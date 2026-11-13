@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -246,6 +247,7 @@ func TestWhatAStartNamesIsKeptAndRunStartsWithIt(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "low", kept.Worker.Effort)
 	assert.Equal(t, runner.PermissionsGuarded, kept.Mode())
+	assert.Zero(t, kept.MaxWorkers, "no start named a cap, so none is kept")
 
 	// Guarded refuses a coding agent with no guardrails, before anything is
 	// kept, and an unknown value is not a setting.
@@ -262,6 +264,58 @@ func TestWhatAStartNamesIsKeptAndRunStartsWithIt(t *testing.T) {
 	assert.Equal(t, runner.PermissionsFull, full.permissions)
 	assert.Equal(t, "pi", full.worker.Adapter)
 	assert.Empty(t, full.worker.Model, "a model belongs to its coding agent: changing the agent does not carry it across")
+}
+
+// --max-workers caps how many workers run at once, and the cap is kept like
+// the rest of what a start names. A start that does not name it leaves the
+// kept one alone, and 0 takes it off.
+func TestAStartsCapOnWorkersIsKeptUntilAStartTakesItOff(t *testing.T) {
+	bin := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\n"), 0o700)) //nolint:gosec // G306: a test's executable
+	t.Setenv("PATH", bin)
+	path := filepath.Join(t.TempDir(), runner.ConfigFile)
+	flags := func(args ...string) connectRunnerFlags {
+		t.Helper()
+		var f connectRunnerFlags
+		cmd := &cobra.Command{}
+		addConnectRunnerFlags(cmd, &f)
+		require.NoError(t, cmd.Flags().Parse(args))
+		return f
+	}
+	start := func(args ...string) int {
+		t.Helper()
+		started, err := connectRunnerSettle(flags(args...), path)
+		require.NoError(t, err)
+		require.NoError(t, started.keep(path))
+		kept, err := runner.LoadConfig(path)
+		require.NoError(t, err)
+		return kept.MaxWorkers
+	}
+
+	assert.Zero(t, start("--orchestrator", "claude"), "no cap unless a start names one")
+	assert.Equal(t, 3, start("--run", "--max-workers", "3"))
+	assert.Equal(t, 3, start("--run"), "a start that names none leaves the kept one")
+	assert.Equal(t, 3, start("--permissions", "guarded"))
+
+	// One the person wrote into runner.json between two starts is theirs.
+	written, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, bytes.Replace(written, []byte(`"max_workers": 3`), []byte(`"max_workers": 12`), 1), 0o600))
+	assert.Equal(t, 12, start("--run", "--permissions", "full"))
+
+	assert.Zero(t, start("--run", "--max-workers", "0"), "0 takes the cap off")
+	written, err = os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(written), "max_workers")
+
+	assert.True(t, flags("--max-workers", "0").requested(), "it is the runner's flag, so it asks for the runner even at 0")
+	assert.False(t, flags().requested())
+	_, err = connectRunnerSettle(flags("--run", "--max-workers", "-2"), path)
+	assert.Contains(t, usageError(t, err).Message, "--max-workers: it cannot be negative")
+	var f connectRunnerFlags
+	cmd := &cobra.Command{}
+	addConnectRunnerFlags(cmd, &f)
+	require.ErrorContains(t, cmd.Flags().Parse([]string{"--max-workers", "many"}), `invalid argument "many" for "--max-workers" flag`)
 }
 
 // A handoff longer than a command reads is refused whole: cut short, it

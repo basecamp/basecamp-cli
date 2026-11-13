@@ -121,9 +121,14 @@ reach the socket without reading the file. Pi has no guardrails and is refused u
 (`PermissionsNotice`) and in the skill; keep the three in step. A `runner.json` that cannot
 be read starts no agent: it is never read as `full`.
 
-**What a start names is kept** (`SaveStart`): the orchestrator, the worker and the
-permissions go into `runner.json`, and `--run` starts with them. Plain `basecamp connect`
-never reads them, so the Claude Code skill's path is untouched.
+**What a start names is kept** (`SaveStart`): the orchestrator, the worker, the
+permissions and a cap on workers go into `runner.json`, and `--run` starts with them.
+Plain `basecamp connect` never reads them, so the Claude Code skill's path is untouched.
+
+**How many workers run at once** has no cap unless a start names one with
+`--max-workers`: every request gets a worker as it arrives. A cap is `max_workers` in
+`runner.json`, and `--max-workers 0` takes a kept one off. Unlike the rules and the
+permissions, which are read again as the connector runs, a cap is read once, at a start.
 
 ## Basecamp API Reference
 

@@ -397,19 +397,25 @@ func (r *Runner) work(id string) {
 }
 
 // workTurns runs a worker's turns until it has nothing more to be told, and
-// reports each to the orchestrator. Only so many workers run at once; the
-// rest wait their turn here.
+// reports each to the orchestrator. Under a cap only so many workers run at
+// once, and the rest wait their turn here; with none, no worker waits for
+// another.
 func (r *Runner) workTurns(id string) {
-	select {
-	case r.slots <- struct{}{}:
-		defer func() { <-r.slots }()
-	case <-r.ctx.Done():
-		return
+	if r.slots != nil {
+		select {
+		case r.slots <- struct{}{}:
+			defer func() { <-r.slots }()
+		case <-r.ctx.Done():
+			return
+		}
 	}
 	for {
 		r.mu.Lock()
 		w := r.st.worker(id)
-		if w == nil || !w.live() || len(w.Prompts) == 0 {
+		// A run that is ending starts no turn, and does not ask after the
+		// hold or the permissions for one: the worker keeps what it was
+		// told, and the next start continues it.
+		if r.ctx.Err() != nil || w == nil || !w.live() || len(w.Prompts) == 0 {
 			r.mu.Unlock()
 			return
 		}
@@ -438,7 +444,9 @@ func (r *Runner) workTurns(id string) {
 			return
 		}
 		r.mu.Lock()
-		if w = r.st.worker(id); w == nil || !w.live() || len(w.Prompts) == 0 {
+		// Asked again here, where the turn is about to start: the run may
+		// have ended while the hold or the permissions were waited on.
+		if w = r.st.worker(id); r.ctx.Err() != nil || w == nil || !w.live() || len(w.Prompts) == 0 {
 			r.mu.Unlock()
 			return
 		}
