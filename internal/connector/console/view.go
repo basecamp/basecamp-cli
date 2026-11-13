@@ -373,6 +373,28 @@ func (s *Snapshot) handsOff() bool {
 	return s.Connector.listening() && (s.Runner == nil || !s.Runner.Live)
 }
 
+// orchestrating says what a running orchestrator is busy with, and nothing
+// when it is idle: its turn in flight, or the messages waiting for its
+// next. A message is a request, a worker's report or what the person told
+// it.
+func (s *Snapshot) orchestrating() string {
+	r := s.Runner
+	if r == nil || !r.Live || (r.Process == 0 && r.Waiting == 0) {
+		return ""
+	}
+	messages := strconv.Itoa(r.Waiting) + " messages"
+	if r.Waiting == 1 {
+		messages = "1 message"
+	}
+	switch {
+	case r.Process == 0:
+		return messages + " waiting for its next turn"
+	case r.Waiting == 0:
+		return "finishing its turn"
+	}
+	return "taking in " + messages
+}
+
 // handsOffWords says, for a connector that hands requests off, that it
 // does none of the work and how to start one that does.
 func (s *Snapshot) handsOffWords() string {
@@ -628,8 +650,15 @@ func (m model) activityLines(width int) (lines []string, at []int) {
 		for _, line := range wrap("Nothing here does the work yet: no connector is running, and none has run with an orchestrator.", width-2) {
 			add("  " + m.styles.muted.Render(line))
 		}
-	case len(snap.Now) == 0:
+	case len(snap.Now) == 0 && snap.orchestrating() == "":
 		add("  " + m.styles.muted.Render("Nothing is being worked on."))
+	}
+	if doing := snap.orchestrating(); doing != "" {
+		// The orchestrator's turn comes before any worker's: it reads what
+		// came in and hands the work off. It is a line and not a row, since
+		// it is nothing to open.
+		left := m.styles.busy.Render(toneBusy.mark()) + " Orchestrator" + m.styles.muted.Render("  "+doing)
+		add(spread("  "+left, m.styles.muted.Render(specWords(snap.Runner.Orchestrator))+" ", width))
 	}
 	for i := range snap.Now {
 		workerRow(&snap.Now[i])

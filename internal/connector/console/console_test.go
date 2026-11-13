@@ -108,6 +108,42 @@ func TestTheActivityScreenSaysWhatIsWorkedOnAndWhatWasDone(t *testing.T) {
 	assert.Contains(t, shown, "Handed off · 2m ago")
 }
 
+// The orchestrator's turn comes before any worker's, so it shows as work
+// too: a request that has just come in is otherwise nowhere on the screen.
+func TestTheOrchestratorsTurnShowsAsWork(t *testing.T) {
+	snap := running()
+	snap.Now = nil
+	m := open(t, snap, Options{}, 110, 30)
+	assert.Contains(t, screen(m), "Nothing is being worked on.")
+	assert.NotContains(t, screen(m), "Orchestrator  ")
+
+	snap.Runner.Process, snap.Runner.Waiting = 4242, 2
+	m = step(t, m, snapshotMsg{snap})
+	assert.Contains(t, screen(m), "● Orchestrator  taking in 2 messages")
+	assert.Contains(t, screen(m), "Claude Code · opus")
+	assert.NotContains(t, screen(m), "Nothing is being worked on.")
+
+	snap.Runner.Waiting = 0
+	m = step(t, m, snapshotMsg{snap})
+	assert.Contains(t, screen(m), "● Orchestrator  finishing its turn")
+
+	// Between turns, with something still to read: the moment before a
+	// turn starts, or the wait before a failed one is tried again.
+	snap.Runner.Process, snap.Runner.Waiting = 0, 1
+	m = step(t, m, snapshotMsg{snap})
+	assert.Contains(t, screen(m), "● Orchestrator  1 message waiting for its next turn")
+
+	// It is a line, not a row: the selection stays on the rows.
+	first := m.items()[0].key()
+	m, _ = press(t, m, "down", "up")
+	assert.Equal(t, first, m.items()[m.cursor].key())
+	assert.Equal(t, first, m.selected)
+
+	snap.Runner.Live = false
+	m = step(t, m, snapshotMsg{snap})
+	assert.NotContains(t, screen(m), "Orchestrator  1 message")
+}
+
 func TestARowOpensInFull(t *testing.T) {
 	m := open(t, running(), Options{}, 110, 30)
 	m, _ = press(t, m, "down", "enter")
