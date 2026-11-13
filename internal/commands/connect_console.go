@@ -89,7 +89,8 @@ func runConnectConsole(cmd *cobra.Command, _ []string) error {
 // say gives the running connector's orchestrator a message from the person
 // and waits for its answer, which is as long as the orchestrator's turn.
 func (c *connectConsole) say(ctx context.Context, message string) (string, error) {
-	resp, err := runner.Call(ctx, runner.SocketPath(connectRunnerDir(c.stateDir)), runner.Request{Op: runner.OpSay, Message: message}, 0)
+	_, stateDir, _ := c.current()
+	resp, err := runner.Call(ctx, runner.SocketPath(connectRunnerDir(stateDir)), runner.Request{Op: runner.OpSay, Message: message}, 0)
 	if errors.Is(err, runner.ErrNotRunning) {
 		return "", errors.New("no connector is running with an orchestrator for this profile")
 	}
@@ -103,23 +104,36 @@ func (c *connectConsole) say(ctx context.Context, message string) (string, error
 func (c *connectConsole) health(ctx context.Context) *console.Health {
 	health := &console.Health{}
 	var wg sync.WaitGroup
-	wg.Go(func() {
-		for _, check := range connectDoctorChecks(ctx, c.p) {
-			health.Checks = append(health.Checks, console.Check{Name: check.Name, Status: check.Status, Message: check.Message, Hint: check.Hint})
-		}
-	})
+	wg.Go(func() { health.Checks = c.checks(ctx) })
 	wg.Go(func() { health.Agents = runner.InstalledAgents(ctx, nil) })
 	wg.Wait()
 	health.At = time.Now()
 	return health
 }
 
+// checks are doctor's checks as doctor run now would make them: against
+// connect.json as it stands, not as it stood when the console opened.
+func (c *connectConsole) checks(ctx context.Context) []console.Check {
+	p, _, err := c.current()
+	if err != nil {
+		return []console.Check{{Name: "connect.json", Status: setup.StatusFail,
+			Message: "It cannot be used as it now stands: " + setup.ErrorText(err),
+			Hint:    "Run basecamp connect setup -P " + richtext.ShellQuote(p.name) + " again, then press r."}}
+	}
+	var checks []console.Check
+	for _, check := range connectDoctorChecks(ctx, p) {
+		checks = append(checks, console.Check{Name: check.Name, Status: check.Status, Message: check.Message, Hint: check.Hint})
+	}
+	return checks
+}
+
 // connectConsole reads what the console shows.
 type connectConsole struct {
+	mu sync.Mutex
+	// p is the profile, its file as last read, and stateDir where its
+	// connector keeps its state, as last found (current).
 	p        connectProfile
 	stateDir string
-
-	mu sync.Mutex
 	// names are what Basecamp calls the projects and people connect.json
 	// names by id, once read; namesErr is why they could not be.
 	projects map[int64]string
@@ -134,17 +148,14 @@ const connectConsoleRecent = 30
 // snapshot reads the connector's state as it stands. A part that cannot be
 // read is left empty and named in Notes: the console shows what it can.
 func (c *connectConsole) snapshot(ctx context.Context) *console.Snapshot {
+	p, stateDir, loadErr := c.current()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// connect.json is read again each time, so a change made with `basecamp
-	// connect setup` shows without closing the console.
-	file := c.p.file
-	snap := &console.Snapshot{At: time.Now().UTC(), Profile: c.p.name, Now: []runner.WorkerActivity{}, Done: []runner.WorkerActivity{},
+	file := p.file
+	snap := &console.Snapshot{At: time.Now().UTC(), Profile: p.name, Now: []runner.WorkerActivity{}, Done: []runner.WorkerActivity{},
 		Requests: []console.Request{}, Held: []connector.HeldStatus{}}
-	if fresh, err := setup.Load(c.p.path); err != nil {
-		snap.Notes = append(snap.Notes, "connect.json cannot be read as it now stands, so this shows it as it was when the console opened: "+setup.ErrorText(err))
-	} else {
-		file = fresh
+	if loadErr != nil {
+		snap.Notes = append(snap.Notes, "connect.json cannot be read as it now stands, so this shows it as it was last read: "+setup.ErrorText(loadErr))
 	}
 	if c.namesErr != "" {
 		snap.Notes = append(snap.Notes, "Names could not be read from Basecamp, so projects and people are shown by id: "+c.namesErr)
@@ -177,7 +188,7 @@ func (c *connectConsole) snapshot(ctx context.Context) *console.Snapshot {
 		Agents: c.persons(file.Trust.AgentIDs),
 	}
 
-	pings := readConnectPingsView(ctx, nil, c.p.name, file)
+	pings := readConnectPingsView(ctx, nil, p.name, file)
 	if hears, known := pings.Hears(); known {
 		snap.Pings.Hears = &hears
 	}
@@ -200,19 +211,38 @@ func (c *connectConsole) snapshot(ctx context.Context) *console.Snapshot {
 	slices.SortFunc(snap.Pings.Guests, func(a, b console.PingGuests) int { return int(a.PingID - b.PingID) })
 
 	snap.Connector.Running = pings.Running.Running
-	if holder, ok := connector.InstanceHolder(c.stateDir, file.AccountID, file.Agent.PersonID); ok && snap.Connector.Running {
+	if holder, ok := connector.InstanceHolder(stateDir, file.AccountID, file.Agent.PersonID); ok && snap.Connector.Running {
 		snap.Connector.PID, snap.Connector.StartedAt = holder.PID, holder.StartedAt
 	}
 
-	c.readLedger(ctx, snap)
-	c.readRunner(ctx, snap)
+	c.readLedger(ctx, snap, stateDir)
+	c.readRunner(ctx, snap, stateDir, connectRunnerConfigPath(p.path))
 	return snap
+}
+
+// current is the profile as connect.json has it now and where its connector
+// keeps its state now, both looked up again: setup changes the file, and a
+// connector's first start under a profile moves the state directory an
+// older CLI left there. When connect.json cannot be read as it stands, it
+// is the last reading that could be, and why this one could not.
+func (c *connectConsole) current() (p connectProfile, stateDir string, problem error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if fresh, err := setup.Load(c.p.path); err != nil {
+		problem = err
+	} else {
+		c.p.file = fresh
+	}
+	if dir, err := connectStatePath(c.p.name, c.p.file, false); err == nil {
+		c.stateDir = dir
+	}
+	return c.p, c.stateDir, problem
 }
 
 // readLedger adds what the ledger says: the hold, the last run, the held
 // records and the latest requests.
-func (c *connectConsole) readLedger(ctx context.Context, snap *console.Snapshot) {
-	ledger, err := connector.OpenLedgerReadOnly(ctx, filepath.Join(c.stateDir, connector.LedgerFile))
+func (c *connectConsole) readLedger(ctx context.Context, snap *console.Snapshot, stateDir string) {
+	ledger, err := connector.OpenLedgerReadOnly(ctx, filepath.Join(stateDir, connector.LedgerFile))
 	if errors.Is(err, os.ErrNotExist) {
 		snap.Notes = append(snap.Notes, "This profile's connector has not run yet, so it has heard nothing.")
 		return
@@ -244,9 +274,8 @@ func (c *connectConsole) readLedger(ctx context.Context, snap *console.Snapshot)
 // readRunner adds the runner: its settings as runner.json has them, its
 // work as its state file has it, and, from a connector running with an
 // orchestrator, what each worker is doing this moment.
-func (c *connectConsole) readRunner(ctx context.Context, snap *console.Snapshot) {
-	dir := connectRunnerDir(c.stateDir)
-	configPath := connectRunnerConfigPath(c.p.path)
+func (c *connectConsole) readRunner(ctx context.Context, snap *console.Snapshot, stateDir, configPath string) {
+	dir := connectRunnerDir(stateDir)
 	config, configErr := runner.LoadConfig(configPath)
 	activity, ran, err := runner.ReadActivity(dir)
 	if err != nil {
@@ -272,9 +301,6 @@ func (c *connectConsole) readRunner(ctx context.Context, snap *console.Snapshot)
 		view.Orchestrator = activity.Orchestrator
 		view.Worker = config.Worker.Over(activity.Orchestrator)
 	}
-	for _, rule := range config.Rules {
-		view.Rules = append(view.Rules, console.Rule{When: c.ruleWords(rule), Worker: rule.Worker.Over(view.Worker)})
-	}
 
 	// What is live comes from the running connector, when one answers.
 	doing := map[string]string{}
@@ -291,28 +317,40 @@ func (c *connectConsole) readRunner(ctx context.Context, snap *console.Snapshot)
 			doing[w.ID] = w.Doing
 		}
 	}
+	// A rule's worker is laid over the default in force, which for a running
+	// connector is the one it started with, not the file's.
+	for _, rule := range config.Rules {
+		view.Rules = append(view.Rules, console.Rule{When: c.ruleWords(rule), Worker: rule.Worker.Over(view.Worker)})
+	}
 	snap.Runner = view
+	now, done := connectConsoleWorkers(activity.Workers, view.Live, doing)
+	snap.Now, snap.Done = append(snap.Now, now...), append(snap.Done, done...)
+}
 
-	for _, w := range activity.Workers {
+// connectConsoleWorkers sorts a runner's workers into those at work and the
+// latest that finished, newest first. doing is what each is doing this
+// moment, by worker id, from a connector that is live; without one, a
+// worker that was at work is waiting for the next start.
+func connectConsoleWorkers(workers []runner.WorkerActivity, live bool, doing map[string]string) (now, done []runner.WorkerActivity) {
+	for _, w := range workers {
 		switch w.State {
 		case "running", "queued":
-			if view.Live {
+			if live {
 				w.Doing = doing[w.ID]
-				snap.Now = append(snap.Now, w)
 			} else {
-				// Nothing is running it: it waits for the next start.
 				w.State = "interrupted"
-				snap.Now = append(snap.Now, w)
 			}
+			now = append(now, w)
 		default:
-			if len(snap.Done) < connectConsoleRecent {
-				snap.Done = append(snap.Done, w)
-			}
+			done = append(done, w)
 		}
 	}
-	slices.SortStableFunc(snap.Done, func(a, b runner.WorkerActivity) int {
+	// Sorted before the list is cut to its length: a worker is kept for its
+	// thread, so an old one may be the one that finished last.
+	slices.SortStableFunc(done, func(a, b runner.WorkerActivity) int {
 		return connectConsoleEnded(b).Compare(connectConsoleEnded(a))
 	})
+	return now, done[:min(len(done), connectConsoleRecent)]
 }
 
 func connectConsoleEnded(w runner.WorkerActivity) time.Time {
@@ -393,11 +431,9 @@ func (c *connectConsole) learnNames(ctx context.Context) {
 }
 
 func (c *connectConsole) readNames(ctx context.Context) (projects map[int64]string, people map[int64]string, err error) {
-	file, err := setup.Load(c.p.path)
-	if err != nil {
-		file = c.p.file
-	}
-	agent, err := verifiedConnectAgent(ctx, c.p)
+	p, _, _ := c.current()
+	file := p.file
+	agent, err := verifiedConnectAgent(ctx, p)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"bytes"
 	"context"
 	"os/exec"
 	"strings"
@@ -56,6 +55,18 @@ func InstalledAgents(ctx context.Context, look func(string) (string, error)) []I
 	return found
 }
 
+// head keeps the first limit bytes written to it and takes the rest without
+// keeping them, so a command that prints without end fills no memory.
+type head struct {
+	kept  []byte
+	limit int
+}
+
+func (h *head) Write(p []byte) (int, error) {
+	h.kept = append(h.kept, p[:min(len(p), h.limit-len(h.kept))]...)
+	return len(p), nil
+}
+
 // versionOf runs the command at path with --version and returns its first
 // line, or why there is none.
 func versionOf(ctx context.Context, path string) (version, problem string) {
@@ -63,7 +74,8 @@ func versionOf(ctx context.Context, path string) (version, problem string) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "--version") //nolint:gosec // G204: the adapter's own command, found on PATH
 	cmd.WaitDelay = time.Second
-	var out bytes.Buffer
+	// Only the first line is kept, so only the start of what it prints is.
+	out := head{limit: 4 << 10}
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
@@ -71,7 +83,7 @@ func versionOf(ctx context.Context, path string) (version, problem string) {
 		}
 		return "", "it could not be asked its version: " + err.Error()
 	}
-	line, _, _ := strings.Cut(strings.TrimSpace(out.String()), "\n")
+	line, _, _ := strings.Cut(strings.TrimSpace(string(out.kept)), "\n")
 	if line = strings.TrimSpace(line); line == "" {
 		return "", "it answered --version with nothing"
 	}

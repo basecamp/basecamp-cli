@@ -84,10 +84,17 @@ const (
 	tabActivity tab = iota
 	tabHealth
 	tabSettings
+	// tabTalk is the whole conversation with the orchestrator, of which the
+	// other screens show only the end.
+	tabTalk
 	tabCount
 )
 
-var tabNames = [tabCount]string{"Activity", "Health", "Settings"}
+var tabNames = [tabCount]string{"Activity", "Health", "Settings", "Talk"}
+
+// toEnd is a scroll position past any screen's last line: the end of it,
+// once drawn.
+const toEnd = 1 << 30
 
 // exchange is one thing the person told the orchestrator and its answer.
 type exchange struct {
@@ -190,6 +197,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.err != nil {
 				said.err = msg.err.Error()
 			}
+			m.scroll[tabTalk] = toEnd
 		}
 		return m, nil
 	case openedMsg:
@@ -221,7 +229,7 @@ func (m model) pressed(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.tab, m.detail = (m.tab+1)%tabCount, false
 	case "shift+tab", "left", "h":
 		m.tab, m.detail = (m.tab+tabCount-1)%tabCount, false
-	case "1", "2", "3":
+	case "1", "2", "3", "4":
 		m.tab, m.detail = tab(msg.String()[0]-'1'), false
 	case "up", "k":
 		m.move(-1)
@@ -281,6 +289,7 @@ func (m model) typed(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.input.Reset()
 		m.talk = append(m.talk, exchange{said: message, waiting: true, at: m.now()})
+		m.scroll[tabTalk] = toEnd
 		index, say, ctx := len(m.talk)-1, m.opts.Say, m.ctx
 		return m, func() tea.Msg {
 			reply, err := say(ctx, message)
@@ -292,15 +301,13 @@ func (m model) typed(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// move moves the selection on the activity list, and scrolls the others.
+// move moves the selection on the activity list, and scrolls the others,
+// and the activity screen too while it has no row to select.
 func (m *model) move(by int) {
-	if m.tab != tabActivity || m.detail {
-		last := max(0, len(m.bodyLines(m.width-2))-m.bodyHeight())
-		m.scroll[m.tab] = min(max(0, m.scroll[m.tab]+clampStep(by)), last)
-		return
-	}
 	items := m.items()
-	if len(items) == 0 {
+	if m.tab != tabActivity || m.detail || len(items) == 0 {
+		last := max(0, len(m.bodyLines(m.width-2))-m.bodyHeight())
+		m.scroll[m.tab] = min(max(0, min(m.scroll[m.tab], last)+clampStep(by)), last)
 		return
 	}
 	m.cursor = min(max(0, m.cursor+clampStep(by)), len(items)-1)
@@ -320,7 +327,8 @@ func (m *model) reveal() {
 	}
 	line, height, first := at[m.cursor], m.bodyHeight(), m.scroll[tabActivity]
 	switch {
-	case m.cursor == 0:
+	case m.cursor == 0 && line < height:
+		// The first row, with everything over it, when both fit.
 		first = 0
 	case line-1 < first:
 		first = line - 1

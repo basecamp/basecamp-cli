@@ -289,6 +289,84 @@ func TestAMessageGoesToTheOrchestratorAndItsAnswerShows(t *testing.T) {
 	assert.Nil(t, cmd)
 }
 
+// Under the other screens only the end of the conversation fits. The Talk
+// screen has all of it, and scrolls.
+func TestALongAnswerCanBeReadInFull(t *testing.T) {
+	long := "FIRST-WORDS " + strings.Repeat("and more ", 400) + "LAST-WORDS"
+	say := func(context.Context, string) (string, error) { return long, nil }
+	m := open(t, running(), Options{Say: say}, 80, 24)
+	m, _ = press(t, m, "/")
+	m, cmd := press(t, m, "h", "i", "enter")
+	m = step(t, m, cmd())
+	m, _ = press(t, m, "esc")
+	shown := screen(m)
+	assert.Contains(t, shown, "── Orchestrator · 4 shows all of it ─")
+	assert.Contains(t, shown, "LAST-WORDS")
+	assert.NotContains(t, shown, "FIRST-WORDS")
+
+	// The Talk screen opens on the end of what was just said, and goes back
+	// to its start.
+	m, _ = press(t, m, "4")
+	shown = screen(m)
+	assert.Contains(t, shown, "LAST-WORDS")
+	assert.NotContains(t, shown, "── Orchestrator", "the screen is the conversation, so its end is not shown twice")
+	m, _ = press(t, m, "k")
+	assert.NotContains(t, screen(m), "LAST-WORDS", "one line up from the end")
+	m, _ = press(t, m, "g")
+	shown = screen(m)
+	assert.Contains(t, shown, "You  hi")
+	assert.Contains(t, shown, "Orchestrator  FIRST-WORDS")
+	m, _ = press(t, m, "G")
+	assert.Contains(t, screen(m), "LAST-WORDS")
+
+	// Before anything is said it says how to.
+	empty := open(t, running(), Options{Say: say}, 80, 24)
+	empty, _ = press(t, empty, "4")
+	assert.Contains(t, screen(empty), "Nothing has been said yet.")
+}
+
+// A screen with no row to select scrolls, so what it says can be read to
+// its end in a small window: the command that starts an orchestrator is the
+// last of it.
+func TestAnActivityScreenWithNoRowsScrolls(t *testing.T) {
+	snap := running()
+	snap.Runner.Live = false
+	snap.Now, snap.Done, snap.Requests = nil, nil, nil
+	m := open(t, snap, Options{}, 40, 12)
+	require.Empty(t, m.items())
+	assert.NotContains(t, screen(m), "--run")
+	m, _ = press(t, m, "G")
+	assert.Contains(t, screen(m), "--run")
+	m, _ = press(t, m, "g")
+	assert.Contains(t, screen(m), "Working now")
+}
+
+// The first row is shown even when what is over it fills the window.
+func TestTheFirstRowShowsUnderALongExplanation(t *testing.T) {
+	snap := running()
+	snap.Runner.Live = false
+	snap.Now, snap.Done = nil, nil
+	m := open(t, snap, Options{}, 40, 12)
+	require.Len(t, m.items(), 1)
+	assert.Contains(t, screen(m), "▸")
+}
+
+// In the narrowest window the checks are still there, each under its name.
+func TestHealthIsReadableInTheNarrowestWindow(t *testing.T) {
+	m := open(t, running(), Options{Health: func(context.Context) *Health { return nil }}, 20, 30)
+	m = step(t, m, healthMsg{&Health{At: testNow, Checks: []Check{{Name: "Token", Status: StatusFail, Message: "Refused", Hint: "Sign in"}}}})
+	m, _ = press(t, m, "2")
+	shown := screen(m)
+	assert.Contains(t, shown, "✗ Token")
+	assert.Contains(t, shown, "Refused")
+	assert.Contains(t, shown, "Sign in")
+}
+
+func TestARequestAPersonClosedSaysSo(t *testing.T) {
+	word, _ := outcome(Request{State: "discarded", Reason: connector.ReasonByOperator})
+	assert.Equal(t, "Closed without running", word)
+}
+
 func TestAMessageThatCouldNotBeSentSaysWhy(t *testing.T) {
 	say := func(context.Context, string) (string, error) { return "", errors.New("the connector stopped") }
 	m := open(t, running(), Options{Say: say}, 110, 30)

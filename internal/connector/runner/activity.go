@@ -79,6 +79,9 @@ func ReadActivity(dir string) (Activity, bool, error) {
 	}
 	for _, w := range slices.Backward(st.Workers) {
 		worker := WorkerActivity{WorkerView: viewOf(w)}
+		// The whole report, as far as the orchestrator is given it: the
+		// list's view of a worker cuts it shorter.
+		worker.Report = clip(w.Report, maxReport)
 		if left := w.Session.Process; left != nil {
 			worker.Process = left.PGID
 		}

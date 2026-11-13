@@ -178,6 +178,18 @@ func TestCheckInstalledNamesTheCommandThatIsMissing(t *testing.T) {
 // The console asks each coding agent's CLI its version: the first line it
 // answers --version with, and for one that is missing or does not answer,
 // that it is so.
+// What a CLI prints past the start of its answer is taken and not kept, so
+// one that prints without end fills no memory.
+func TestOnlyTheStartOfAVersionAnswerIsKept(t *testing.T) {
+	out := head{limit: 8}
+	for range 1000 {
+		n, err := out.Write([]byte("0123456789"))
+		require.NoError(t, err)
+		require.Equal(t, 10, n, "the rest is taken, so the command is not stopped mid-write")
+	}
+	assert.Equal(t, "01234567", string(out.kept))
+}
+
 func TestInstalledAgentsAreAskedTheirVersions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the stand-in CLIs are shell scripts")

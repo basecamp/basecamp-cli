@@ -661,16 +661,16 @@ type RequestStatus struct {
 }
 
 // RecentRequests lists the latest requests that passed admission, newest
-// first: those handed to a session, those waiting, held or blocked, and
-// those a start found too old to run. What admission turned away is not a
-// request and is not listed.
+// first: those handed to a session, those waiting, held or blocked, those a
+// start found too old to run and those a person closed without running.
+// What admission turned away is not a request and is not listed.
 func (l *Ledger) RecentRequests(ctx context.Context, limit int) ([]RequestStatus, error) {
 	rows, err := l.db.QueryContext(ctx, `
 SELECT id, event_type, trigger_name, bucket_id, recording_url, state, reason, updated_at
 FROM events
 WHERE state IN ('admitted', 'queued', 'dispatched', 'held', 'blocked', 'completed')
-   OR (state = 'discarded' AND reason IN (?, ?, ?))
-ORDER BY id DESC LIMIT ?`, ReasonHandedOff, ReasonBeforeThisRun, ReasonUnreadable, limit)
+   OR (state = 'discarded' AND reason IN (?, ?, ?, ?))
+ORDER BY id DESC LIMIT ?`, ReasonHandedOff, ReasonBeforeThisRun, ReasonUnreadable, ReasonByOperator, limit)
 	if err != nil {
 		return nil, fmt.Errorf("connector: recent requests: %w", err)
 	}

@@ -169,6 +169,8 @@ func outcome(r Request) (string, tone) {
 		return "Missed while stopped", toneNone
 	case r.State == "discarded" && r.Reason == connector.ReasonUnreadable:
 		return "Could not be read", toneBad
+	case r.State == "discarded" && r.Reason == connector.ReasonByOperator:
+		return "Closed without running", toneNone
 	case r.State == "held":
 		return "Held for review", toneWait
 	case r.State == "blocked":
@@ -450,9 +452,21 @@ func (m model) talkLines(width int) []string {
 	return lines
 }
 
+// talkScreen is the conversation in full, on a screen of its own.
+func (m model) talkScreen(width int) []string {
+	if len(m.talk) > 0 {
+		return append([]string{""}, m.talkLines(width)...)
+	}
+	lines := []string{""}
+	for _, line := range wrap("Nothing has been said yet. Press / to tell the orchestrator something. What you say and what it answers stay here for as long as the console is open.", width) {
+		lines = append(lines, m.styles.muted.Render(line))
+	}
+	return lines
+}
+
 // talkHeight is how many lines the conversation takes, its rule included.
 func (m model) talkHeight() int {
-	if len(m.talk) == 0 {
+	if len(m.talk) == 0 || m.tab == tabTalk {
 		return 0
 	}
 	// What the screen can spare once the tab has a line of its own.
@@ -530,8 +544,13 @@ func (m model) render() string {
 	}
 
 	if talk := m.talkHeight(); talk > 0 {
-		b.WriteString(m.styles.muted.Render(fit("── Orchestrator "+strings.Repeat("─", width), width)) + "\n")
 		said := m.talkLines(width - 2)
+		rule := "── Orchestrator "
+		if len(said) > talk-1 {
+			// Only the end fits here.
+			rule += "· 4 shows all of it "
+		}
+		b.WriteString(m.styles.muted.Render(fit(rule+strings.Repeat("─", width), width)) + "\n")
 		for _, line := range said[len(said)-(talk-1):] {
 			b.WriteString(" " + fit(line, width-2) + "\n")
 		}
@@ -589,6 +608,8 @@ func (m model) bodyLines(width int) []string {
 		return m.healthLines(width)
 	case tabSettings:
 		return m.settingsLines(width)
+	case tabTalk:
+		return m.talkScreen(width)
 	case tabActivity, tabCount:
 	}
 	if m.detail {
@@ -846,6 +867,20 @@ func (m model) detailLines(width int) []string {
 // with what to do about it under it.
 func (m model) check(lines *[]string, t tone, name, message, hint string, width int) {
 	const label = 18
+	if width-label-4 < 16 {
+		// Too narrow for the name and what is so side by side: one under
+		// the other.
+		*lines = append(*lines, "  "+m.styles.tone(t).Render(t.mark())+" "+fit(name, width-4))
+		for _, line := range wrap(message, width-4) {
+			*lines = append(*lines, "    "+line)
+		}
+		if hint != "" {
+			for _, line := range wrap(hint, width-4) {
+				*lines = append(*lines, "    "+m.styles.muted.Render(line))
+			}
+		}
+		return
+	}
 	for i, line := range wrap(message, width-label-4) {
 		head := strings.Repeat(" ", label+2)
 		if i == 0 {

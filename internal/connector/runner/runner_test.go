@@ -1389,7 +1389,7 @@ func TestActivityIsReadFromTheStateFileWithoutTheRequestsWords(t *testing.T) {
 		Inbox:        []item{{ID: 1, Kind: kindRequest, Body: "waiting"}},
 		Requests:     map[int64]request{7: {Project: 456, RecordingID: 789, RecordingType: "Kanban::Card", Line: string(line)}},
 		Workers: []*workerState{
-			{ID: "w1", EventID: 6, State: workerFailed, Report: "Posted.", Session: sessionState{Spec: Spec{Adapter: "codex"}, Process: &driver.Process{PID: 4242, PGID: 4242}}},
+			{ID: "w1", EventID: 6, State: workerFailed, Report: strings.Repeat("r", 900), Session: sessionState{Spec: Spec{Adapter: "codex"}, Process: &driver.Process{PID: 4242, PGID: 4242}}},
 			{ID: "w2", EventID: 7, State: workerRunning, Session: sessionState{Spec: Spec{Adapter: "claude", Model: "opus"}}},
 		},
 	}
@@ -1409,6 +1409,7 @@ func TestActivityIsReadFromTheStateFileWithoutTheRequestsWords(t *testing.T) {
 	assert.Nil(t, activity.Workers[1].Request, "a worker whose request is no longer kept still shows")
 	assert.Zero(t, newest.Process)
 	assert.Equal(t, 4242, activity.Workers[1].Process, "what a turn left running is named")
+	assert.Len(t, activity.Workers[1].Report, 900, "the report is whole, where the list's view of a worker cuts it short")
 
 	shown, err := json.Marshal(activity)
 	require.NoError(t, err)
