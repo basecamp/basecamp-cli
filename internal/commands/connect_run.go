@@ -228,7 +228,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	var start connectRunnerStart
 	if f.runner.requested() {
 		if f.shadow {
-			return output.ErrUsage("A shadow run hands nothing off, so it has no orchestrator: drop --shadow, or the flags that have the connector do the work (--orchestrator, --worker, --permissions, --max-workers, --run)")
+			return output.ErrUsage("A shadow run hands nothing off, so it has no orchestrator: drop --shadow, or the flags that have the connector do the work (--orchestrator and --worker, their -model and -effort, --permissions, --max-workers, --run)")
 		}
 		if start, err = connectRunnerSettle(f.runner, connectRunnerConfigPath(path)); err != nil {
 			return err

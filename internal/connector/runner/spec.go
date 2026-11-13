@@ -107,8 +107,8 @@ func ParsePermissions(value string) (Permissions, error) {
 const ConfigFile = "runner.json"
 
 // Config is runner.json: which coding agent does what. It is the person's own
-// file, written by hand, and read again for every worker, so an edit applies
-// to the next request without a restart.
+// file, written by hand, and read again for every worker, so an edit to its
+// rules or its permissions applies to the next request without a restart.
 //
 // Nothing in it is required. Orchestrator, Worker, Permissions and
 // MaxWorkers are what the connector was last started with, kept so the next
@@ -264,8 +264,8 @@ func ParseConfig(data []byte) (Config, error) {
 	return c, nil
 }
 
-// CheckMaxWorkers refuses a cap on workers that is no cap at all: the most
-// that run at once, or zero for none.
+// CheckMaxWorkers refuses a negative cap on workers. A cap is the most that
+// run at once, and zero is none.
 func CheckMaxWorkers(limit int) error {
 	if limit < 0 {
 		return fmt.Errorf("it cannot be negative: it is the most workers that run at once, and 0 is no cap (not %d)", limit)

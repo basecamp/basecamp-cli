@@ -432,7 +432,8 @@ func newConnectWorkersCmd() *cobra.Command {
 		Long: `List the workers of the connector running for this profile: each one's
 request, state, the coding agent, model and effort it runs on, the runner.json
 rule that chose them, and its report once it has finished. It also says what
-the orchestrator runs on and how many messages are waiting for it.`,
+the orchestrator runs on, how many messages are waiting for it, and the cap
+on workers running at once when the connector was started with one.`,
 		Example: `  basecamp connect workers list -P agent`,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

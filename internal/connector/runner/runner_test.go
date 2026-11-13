@@ -520,17 +520,17 @@ func TestWithNoCapEveryWorkerRunsAtOnce(t *testing.T) {
 // finish.
 func TestUnderACapOnlySoManyWorkersRunAtOnce(t *testing.T) {
 	one := 1
-	for name, capped := range map[string]func(*Options){
-		"runner.json's": func(o *Options) {
+	for name, capped := range map[string]func(*testing.T, *Options){
+		"runner.json's": func(t *testing.T, o *Options) {
 			require.NoError(t, os.WriteFile(o.ConfigPath, []byte(`{"max_workers": 1}`), 0o600))
 		},
-		"the start's, over runner.json's": func(o *Options) {
+		"the start's, over runner.json's": func(t *testing.T, o *Options) {
 			require.NoError(t, os.WriteFile(o.ConfigPath, []byte(`{"max_workers": 3}`), 0o600))
 			o.MaxWorkers = &one
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			h := newHarness(t, capped)
+			h := newHarness(t, func(o *Options) { capped(t, o) })
 			h.settled()
 			first, _, err := h.runner.Dispatch(context.Background(), DispatchRequest{NoRepo: true, Handoff: "HANG"})
 			require.NoError(t, err)
