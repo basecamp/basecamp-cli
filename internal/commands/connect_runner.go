@@ -38,6 +38,9 @@ type connectRunnerFlags struct {
 	workerModel        string
 	workerEffort       string
 	permissions        string
+	// maxWorkers is --max-workers, the cap on workers running at once. It
+	// remembers whether it was passed: 0 given takes a kept cap off.
+	maxWorkers optionalInt
 	// run starts the runner with what the profile's last start kept.
 	run bool
 }
@@ -52,7 +55,8 @@ func addConnectRunnerFlags(cmd *cobra.Command, f *connectRunnerFlags) {
 	fl.StringVar(&f.workerModel, "worker-model", "", "The workers' model (default: the coding agent's own; kept for the profile)")
 	fl.StringVar(&f.workerEffort, "worker-effort", "", "The workers' reasoning effort (default: the coding agent's own; kept for the profile)")
 	fl.StringVar(&f.permissions, "permissions", "", "What the coding agents may do on this computer: full (any command, without asking; the default) or guarded (each under its own guardrails: Claude Code's auto mode, Codex's sandbox with automatic review); kept for the profile")
-	fl.BoolVar(&f.run, "run", false, "Do the work here, with the orchestrator, worker and permissions this profile was last started with")
+	fl.Var(&f.maxWorkers, "max-workers", "Cap how many workers run at once, so a request past that waits its turn (default: no cap; 0 takes a kept cap off; kept for the profile)")
+	fl.BoolVar(&f.run, "run", false, "Do the work here, with the orchestrator, worker, permissions and cap on workers this profile was last started with")
 }
 
 // requested reports whether any runner flag was given.
@@ -66,6 +70,9 @@ type connectRunnerStart struct {
 	orchestrator runner.Spec
 	worker       runner.Spec
 	permissions  runner.Permissions
+	// maxWorkers is the cap on workers this start named, zero for none. It
+	// is nil when the start named no cap, which leaves runner.json's.
+	maxWorkers *int
 }
 
 // connectRunnerSettle is the start the flags ask for, over what runner.json
@@ -101,6 +108,12 @@ func connectRunnerSettle(f connectRunnerFlags, configPath string) (connectRunner
 			return start, output.ErrUsage("--permissions: " + err.Error())
 		}
 	}
+	if f.maxWorkers.set {
+		if err := runner.CheckMaxWorkers(f.maxWorkers.value); err != nil {
+			return start, output.ErrUsage("--max-workers: " + err.Error())
+		}
+		start.maxWorkers = &f.maxWorkers.value
+	}
 	// The agents every request needs are looked for now. One only a rule
 	// names is found, or not, when a request first matches that rule.
 	everyRequest := []runner.Spec{start.orchestrator, start.worker.Over(start.orchestrator)}
@@ -122,10 +135,11 @@ func (s connectRunnerStart) keep(configPath string) error {
 	if err != nil {
 		return output.ErrUsage(err.Error())
 	}
-	if s.orchestrator == config.Orchestrator && s.worker == config.Worker && s.permissions == config.Permissions {
+	sameCap := s.maxWorkers == nil || *s.maxWorkers == config.MaxWorkers
+	if s.orchestrator == config.Orchestrator && s.worker == config.Worker && s.permissions == config.Permissions && sameCap {
 		return nil
 	}
-	if err := runner.SaveStart(configPath, s.orchestrator, s.worker, s.permissions); err != nil {
+	if err := runner.SaveStart(configPath, s.orchestrator, s.worker, s.permissions, s.maxWorkers); err != nil {
 		return output.ErrUsage("These settings could not be kept for the profile: " + err.Error())
 	}
 	return nil
@@ -157,7 +171,7 @@ func openConnectorLog(dir string) (*os.File, error) {
 }
 
 // newConnectRunner builds the run's runner.
-func newConnectRunner(profile, stateDir, connectJSON string, orchestrator, worker runner.Spec, log *os.File, startLine string,
+func newConnectRunner(profile, stateDir, connectJSON string, start connectRunnerStart, log *os.File, startLine string,
 	summaries admission.SummaryReader, onHold connectOnHoldReader, held func(context.Context) (bool, error), stop func(restart bool), logger *slog.Logger) (*runner.Runner, error) {
 	skill, err := skills.Connect.ReadFile("basecamp-connect/SKILL.md")
 	if err != nil {
@@ -173,7 +187,7 @@ func newConnectRunner(profile, stateDir, connectJSON string, orchestrator, worke
 	}
 	return runner.New(runner.Options{
 		Profile: profile, Dir: connectRunnerDir(stateDir),
-		Orchestrator: orchestrator, Worker: worker, ConfigPath: connectRunnerConfigPath(connectJSON),
+		Orchestrator: start.orchestrator, Worker: start.worker, MaxWorkers: start.maxWorkers, ConfigPath: connectRunnerConfigPath(connectJSON),
 		Skill: string(skill), Subagent: string(subagent),
 		ConnectorLog: log.Name(), Executable: executable, StartLine: startLine,
 		Recordings: connectRecordingsAbove(summaries, onHold, logger), Held: held, Stop: stop, Logger: logger,
@@ -431,6 +445,9 @@ the orchestrator runs on and how many messages are waiting for it.`,
 				workers = []runner.WorkerView{}
 			}
 			summary := fmt.Sprintf("%d worker(s): %d running, %d queued; orchestrator on %s", len(workers), resp.Status.Running, resp.Status.Queued, resp.Status.Orchestrator)
+			if resp.Status.MaxWorkers > 0 {
+				summary += fmt.Sprintf("; at most %d at once", resp.Status.MaxWorkers)
+			}
 			if resp.Status.ConfigError != "" {
 				summary += "; no agent starts until runner.json is fixed: " + resp.Status.ConfigError
 			}

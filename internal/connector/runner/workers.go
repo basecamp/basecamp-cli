@@ -390,14 +390,21 @@ func (r *Runner) work(id string) {
 }
 
 // workTurns runs a worker's turns until it has nothing more to be told, and
-// reports each to the orchestrator. Only so many workers run at once; the
-// rest wait their turn here.
+// reports each to the orchestrator. Under a cap only so many workers run at
+// once, and the rest wait their turn here; with none, no worker waits for
+// another. A run that is ending starts no turn: the worker keeps what it
+// was told for the next start.
 func (r *Runner) workTurns(id string) {
-	select {
-	case r.slots <- struct{}{}:
-		defer func() { <-r.slots }()
-	case <-r.ctx.Done():
+	if r.ctx.Err() != nil {
 		return
+	}
+	if r.slots != nil {
+		select {
+		case r.slots <- struct{}{}:
+			defer func() { <-r.slots }()
+		case <-r.ctx.Done():
+			return
+		}
 	}
 	for {
 		r.mu.Lock()
