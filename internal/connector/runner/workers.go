@@ -405,7 +405,10 @@ func (r *Runner) workTurns(id string) {
 	for {
 		r.mu.Lock()
 		w := r.st.worker(id)
-		if w == nil || !w.live() || len(w.Prompts) == 0 {
+		// A run that is ending starts no turn, and does not ask after the
+		// hold or the permissions for one: the worker keeps what it was
+		// told, and the next start continues it.
+		if r.ctx.Err() != nil || w == nil || !w.live() || len(w.Prompts) == 0 {
 			r.mu.Unlock()
 			return
 		}
@@ -434,8 +437,8 @@ func (r *Runner) workTurns(id string) {
 			return
 		}
 		r.mu.Lock()
-		// A run that is ending starts no turn: the worker keeps what it was
-		// told, and the next start continues it.
+		// Asked again here, where the turn is about to start: the run may
+		// have ended while the hold or the permissions were waited on.
 		if w = r.st.worker(id); r.ctx.Err() != nil || w == nil || !w.live() || len(w.Prompts) == 0 {
 			r.mu.Unlock()
 			return
