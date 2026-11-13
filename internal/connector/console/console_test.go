@@ -119,13 +119,13 @@ func TestTheOrchestratorsTurnShowsAsWork(t *testing.T) {
 
 	snap.Runner.Process, snap.Runner.Waiting = 4242, 2
 	m = step(t, m, snapshotMsg{snap})
-	assert.Contains(t, screen(m), "● Orchestrator  taking in 2 messages")
+	assert.Contains(t, screen(m), "● Orchestrator  at work, with 2 messages not yet handled")
 	assert.Contains(t, screen(m), "Claude Code · opus")
 	assert.NotContains(t, screen(m), "Nothing is being worked on.")
 
 	snap.Runner.Waiting = 0
 	m = step(t, m, snapshotMsg{snap})
-	assert.Contains(t, screen(m), "● Orchestrator  finishing its turn")
+	assert.Contains(t, screen(m), "● Orchestrator  at work")
 
 	// Between turns, with something still to read: the moment before a
 	// turn starts, or the wait before a failed one is tried again.
@@ -322,7 +322,12 @@ func TestALongAnswerCanBeReadInFull(t *testing.T) {
 	// Before anything is said it says how to.
 	empty := open(t, running(), Options{Say: say}, 80, 24)
 	empty, _ = press(t, empty, "4")
-	assert.Contains(t, screen(empty), "Nothing has been said yet.")
+	assert.Contains(t, screen(empty), "Nothing has been said yet. Press / to tell")
+	snap := running()
+	snap.Runner.Live = false
+	empty = step(t, empty, snapshotMsg{snap})
+	assert.Contains(t, screen(empty), "no orchestrator is running to talk to")
+	assert.NotContains(t, screen(empty), "Press / to tell")
 }
 
 // A screen with no row to select scrolls, so what it says can be read to

@@ -175,9 +175,6 @@ func TestCheckInstalledNamesTheCommandThatIsMissing(t *testing.T) {
 	require.ErrorContains(t, CheckInstalled(look, Spec{Adapter: "aider"}), "unknown adapter")
 }
 
-// The console asks each coding agent's CLI its version: the first line it
-// answers --version with, and for one that is missing or does not answer,
-// that it is so.
 // What a CLI prints past the start of its answer is taken and not kept, so
 // one that prints without end fills no memory.
 func TestOnlyTheStartOfAVersionAnswerIsKept(t *testing.T) {
@@ -190,6 +187,9 @@ func TestOnlyTheStartOfAVersionAnswerIsKept(t *testing.T) {
 	assert.Equal(t, "01234567", string(out.kept))
 }
 
+// The console asks each coding agent's CLI its version: the first line it
+// answers --version with, and for one that is missing or does not answer,
+// that it is so.
 func TestInstalledAgentsAreAskedTheirVersions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the stand-in CLIs are shell scripts")

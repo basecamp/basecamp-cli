@@ -376,9 +376,10 @@ func (s *Snapshot) handsOff() bool {
 }
 
 // orchestrating says what a running orchestrator is busy with, and nothing
-// when it is idle: its turn in flight, or the messages waiting for its
-// next. A message is a request, a worker's report or what the person told
-// it.
+// when it is idle. A message is a request, a worker's report or what the
+// person told it. The process its session names is nearly always its turn
+// in flight, but may be one a turn that ended left running, so it is said
+// to be at work and not to be in a turn.
 func (s *Snapshot) orchestrating() string {
 	r := s.Runner
 	if r == nil || !r.Live || (r.Process == 0 && r.Waiting == 0) {
@@ -392,9 +393,9 @@ func (s *Snapshot) orchestrating() string {
 	case r.Process == 0:
 		return messages + " waiting for its next turn"
 	case r.Waiting == 0:
-		return "finishing its turn"
+		return "at work"
 	}
-	return "taking in " + messages
+	return "at work, with " + messages + " not yet handled"
 }
 
 // handsOffWords says, for a connector that hands requests off, that it
@@ -457,8 +458,12 @@ func (m model) talkScreen(width int) []string {
 	if len(m.talk) > 0 {
 		return append([]string{""}, m.talkLines(width)...)
 	}
+	words := "Nothing has been said yet. Press / to tell the orchestrator something. What you say and what it answers stay here for as long as the console is open."
+	if m.snap == nil || m.snap.Runner == nil || !m.snap.Runner.Live {
+		words = "Nothing has been said yet, and no orchestrator is running to talk to. What you say to one, and what it answers, stays here for as long as the console is open."
+	}
 	lines := []string{""}
-	for _, line := range wrap("Nothing has been said yet. Press / to tell the orchestrator something. What you say and what it answers stay here for as long as the console is open.", width) {
+	for _, line := range wrap(words, width) {
 		lines = append(lines, m.styles.muted.Render(line))
 	}
 	return lines

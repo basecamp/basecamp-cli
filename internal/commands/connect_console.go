@@ -134,11 +134,17 @@ type connectConsole struct {
 	// connector keeps its state, as last found (current).
 	p        connectProfile
 	stateDir string
-	// names are what Basecamp calls the projects and people connect.json
-	// names by id, once read; namesErr is why they could not be.
+	names    connectConsoleNames
+}
+
+// connectConsoleNames are what Basecamp calls the projects and people
+// connect.json names by id, once read, and err why they could not be. The
+// maps are replaced whole and never changed, so a copy is read without the
+// lock.
+type connectConsoleNames struct {
 	projects map[int64]string
 	people   map[int64]string
-	namesErr string
+	err      string
 }
 
 // connectConsoleRecent is how many requests and how many finished workers
@@ -148,24 +154,27 @@ const connectConsoleRecent = 30
 // snapshot reads the connector's state as it stands. A part that cannot be
 // read is left empty and named in Notes: the console shows what it can.
 func (c *connectConsole) snapshot(ctx context.Context) *console.Snapshot {
+	// The lock is not held while the ledger and the runner are read: what
+	// the person tells the orchestrator does not wait behind a snapshot.
 	p, stateDir, loadErr := c.current()
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	names := c.names
+	c.mu.Unlock()
 	file := p.file
 	snap := &console.Snapshot{At: time.Now().UTC(), Profile: p.name, Now: []runner.WorkerActivity{}, Done: []runner.WorkerActivity{},
 		Requests: []console.Request{}, Held: []connector.HeldStatus{}}
 	if loadErr != nil {
 		snap.Notes = append(snap.Notes, "connect.json cannot be read as it now stands, so this shows it as it was last read: "+setup.ErrorText(loadErr))
 	}
-	if c.namesErr != "" {
-		snap.Notes = append(snap.Notes, "Names could not be read from Basecamp, so projects and people are shown by id: "+c.namesErr)
+	if names.err != "" {
+		snap.Notes = append(snap.Notes, "Names could not be read from Basecamp, so projects and people are shown by id: "+names.err)
 	}
 	snap.AccountID = file.AccountID
-	snap.Agent = c.person(file.Agent.PersonID)
+	snap.Agent = names.person(file.Agent.PersonID)
 
 	for id, project := range file.Projects {
 		snap.Projects = append(snap.Projects, console.Project{
-			ID: id, Name: c.projects[id], URL: connectConsoleProjectURL(file.AccountID, id),
+			ID: id, Name: names.projects[id], URL: connectConsoleProjectURL(file.AccountID, id),
 			WatchCompletions: project.WatchCompletions, Campfires: len(project.ListenCampfires),
 		})
 	}
@@ -183,9 +192,9 @@ func (c *connectConsole) snapshot(ctx context.Context) *console.Snapshot {
 	})
 
 	snap.Trust = console.Trust{
-		Mode: string(file.Trust.Mode), Operator: c.person(file.Trust.OperatorID),
-		Allowlist: c.persons(file.Trust.AllowlistIDs), AllowAssignments: file.Trust.AllowAssignments,
-		Agents: c.persons(file.Trust.AgentIDs),
+		Mode: string(file.Trust.Mode), Operator: names.person(file.Trust.OperatorID),
+		Allowlist: names.persons(file.Trust.AllowlistIDs), AllowAssignments: file.Trust.AllowAssignments,
+		Agents: names.persons(file.Trust.AgentIDs),
 	}
 
 	pings := readConnectPingsView(ctx, nil, p.name, file)
@@ -206,7 +215,7 @@ func (c *connectConsole) snapshot(ctx context.Context) *console.Snapshot {
 		snap.Pings.Error = errorMessage(pings.SavedErr)
 	}
 	for id, trust := range file.Pings {
-		snap.Pings.Guests = append(snap.Pings.Guests, console.PingGuests{PingID: id, People: c.persons(trust.Participants)})
+		snap.Pings.Guests = append(snap.Pings.Guests, console.PingGuests{PingID: id, People: names.persons(trust.Participants)})
 	}
 	slices.SortFunc(snap.Pings.Guests, func(a, b console.PingGuests) int { return int(a.PingID - b.PingID) })
 
@@ -215,8 +224,8 @@ func (c *connectConsole) snapshot(ctx context.Context) *console.Snapshot {
 		snap.Connector.PID, snap.Connector.StartedAt = holder.PID, holder.StartedAt
 	}
 
-	c.readLedger(ctx, snap, stateDir)
-	c.readRunner(ctx, snap, stateDir, connectRunnerConfigPath(p.path))
+	readConnectConsoleLedger(ctx, snap, stateDir, names)
+	readConnectConsoleRunner(ctx, snap, stateDir, connectRunnerConfigPath(p.path), names)
 	return snap
 }
 
@@ -239,9 +248,9 @@ func (c *connectConsole) current() (p connectProfile, stateDir string, problem e
 	return c.p, c.stateDir, problem
 }
 
-// readLedger adds what the ledger says: the hold, the last run, the held
+// readConnectConsoleLedger adds what the ledger says: the hold, the last run, the held
 // records and the latest requests.
-func (c *connectConsole) readLedger(ctx context.Context, snap *console.Snapshot, stateDir string) {
+func readConnectConsoleLedger(ctx context.Context, snap *console.Snapshot, stateDir string, names connectConsoleNames) {
 	ledger, err := connector.OpenLedgerReadOnly(ctx, filepath.Join(stateDir, connector.LedgerFile))
 	if errors.Is(err, os.ErrNotExist) {
 		snap.Notes = append(snap.Notes, "This profile's connector has not run yet, so it has heard nothing.")
@@ -265,16 +274,16 @@ func (c *connectConsole) readLedger(ctx context.Context, snap *console.Snapshot,
 	}
 	for _, r := range recent {
 		snap.Requests = append(snap.Requests, console.Request{
-			EventID: r.EventID, Trigger: r.Trigger, EventType: r.EventType, ProjectID: r.BucketID, ProjectName: c.projects[r.BucketID],
+			EventID: r.EventID, Trigger: r.Trigger, EventType: r.EventType, ProjectID: r.BucketID, ProjectName: names.projects[r.BucketID],
 			URL: r.RecordingURL, State: r.State, Reason: r.Reason, At: r.UpdatedAt,
 		})
 	}
 }
 
-// readRunner adds the runner: its settings as runner.json has them, its
+// readConnectConsoleRunner adds the runner: its settings as runner.json has them, its
 // work as its state file has it, and, from a connector running with an
 // orchestrator, what each worker is doing this moment.
-func (c *connectConsole) readRunner(ctx context.Context, snap *console.Snapshot, stateDir, configPath string) {
+func readConnectConsoleRunner(ctx context.Context, snap *console.Snapshot, stateDir, configPath string, names connectConsoleNames) {
 	dir := connectRunnerDir(stateDir)
 	config, configErr := runner.LoadConfig(configPath)
 	activity, ran, err := runner.ReadActivity(dir)
@@ -320,7 +329,7 @@ func (c *connectConsole) readRunner(ctx context.Context, snap *console.Snapshot,
 	// A rule's worker is laid over the default in force, which for a running
 	// connector is the one it started with, not the file's.
 	for _, rule := range config.Rules {
-		view.Rules = append(view.Rules, console.Rule{When: c.ruleWords(rule), Worker: rule.Worker.Over(view.Worker)})
+		view.Rules = append(view.Rules, console.Rule{When: names.ruleWords(rule), Worker: rule.Worker.Over(view.Worker)})
 	}
 	snap.Runner = view
 	now, done := connectConsoleWorkers(activity.Workers, view.Live, doing)
@@ -361,13 +370,13 @@ func connectConsoleEnded(w runner.WorkerActivity) time.Time {
 }
 
 // ruleWords is a rule's conditions as a person reads them.
-func (c *connectConsole) ruleWords(rule runner.Rule) []string {
+func (n connectConsoleNames) ruleWords(rule runner.Rule) []string {
 	var when []string
 	if rule.Repo != "" {
 		when = append(when, "work in "+rule.Repo)
 	}
 	if rule.Project != 0 {
-		name := c.projects[rule.Project]
+		name := n.projects[rule.Project]
 		if name == "" {
 			name = "project " + strconv.FormatInt(rule.Project, 10)
 		}
@@ -388,14 +397,14 @@ func (c *connectConsole) ruleWords(rule runner.Rule) []string {
 	return when
 }
 
-func (c *connectConsole) person(id int64) console.Person {
-	return console.Person{ID: id, Name: c.people[id]}
+func (n connectConsoleNames) person(id int64) console.Person {
+	return console.Person{ID: id, Name: n.people[id]}
 }
 
-func (c *connectConsole) persons(ids []int64) []console.Person {
+func (n connectConsoleNames) persons(ids []int64) []console.Person {
 	people := make([]console.Person, 0, len(ids))
 	for _, id := range ids {
-		people = append(people, c.person(id))
+		people = append(people, n.person(id))
 	}
 	return people
 }
@@ -417,9 +426,9 @@ func (c *connectConsole) learnNames(ctx context.Context) {
 		projects, people, err := c.readNames(ctx)
 		c.mu.Lock()
 		if err != nil {
-			c.namesErr = setup.ErrorText(err)
+			c.names.err = setup.ErrorText(err)
 		} else {
-			c.projects, c.people, c.namesErr = projects, people, ""
+			c.names = connectConsoleNames{projects: projects, people: people}
 		}
 		c.mu.Unlock()
 		select {
