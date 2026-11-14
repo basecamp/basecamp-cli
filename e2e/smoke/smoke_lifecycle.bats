@@ -324,3 +324,35 @@ load smoke_helper
 @test "vaults uploads list is out of scope" {
   mark_out_of_scope "Shares implementation with files group (tested)"
 }
+
+@test "docs cloud-files create is out of scope" {
+  mark_out_of_scope "Shares implementation with files group (tested)"
+}
+
+@test "docs cloud-files update is out of scope" {
+  mark_out_of_scope "Shares implementation with files group (tested)"
+}
+
+@test "docs google-docs create is out of scope" {
+  mark_out_of_scope "Shares implementation with files group (tested)"
+}
+
+@test "docs google-docs update is out of scope" {
+  mark_out_of_scope "Shares implementation with files group (tested)"
+}
+
+@test "vaults cloud-files create is out of scope" {
+  mark_out_of_scope "Shares implementation with files group (tested)"
+}
+
+@test "vaults cloud-files update is out of scope" {
+  mark_out_of_scope "Shares implementation with files group (tested)"
+}
+
+@test "vaults google-docs create is out of scope" {
+  mark_out_of_scope "Shares implementation with files group (tested)"
+}
+
+@test "vaults google-docs update is out of scope" {
+  mark_out_of_scope "Shares implementation with files group (tested)"
+}
