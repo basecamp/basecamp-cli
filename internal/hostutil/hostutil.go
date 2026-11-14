@@ -196,5 +196,12 @@ func OpenBrowser(url string) error {
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}
 
-	return exec.CommandContext(context.Background(), cmd, args...).Start() //nolint:gosec // G204: cmd is hardcoded per-platform
+	opener := exec.CommandContext(context.Background(), cmd, args...) //nolint:gosec // G204: cmd is hardcoded per-platform
+	if err := opener.Start(); err != nil {
+		return err
+	}
+	// Waited for, so that it is not left a zombie for as long as a caller
+	// that stays open does. Its outcome is the browser's to show.
+	go func() { _ = opener.Wait() }()
+	return nil
 }

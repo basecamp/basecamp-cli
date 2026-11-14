@@ -1,6 +1,9 @@
 package config
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,17 +14,23 @@ import (
 	"time"
 )
 
-// TrustStore manages the set of trusted local/repo config file paths.
+// TrustStore manages the set of trusted local/repo config files.
 // Trusted configs are allowed to set authority keys (base_url, profiles,
 // default_profile) that are normally rejected from local/repo sources.
+// Trust is given to a file's trust-gated settings as they were when it was
+// trusted: a checkout or pull that changes them leaves the file untrusted
+// until it is trusted again.
 type TrustStore struct {
 	path string // e.g. ~/.config/basecamp/trusted-configs.json
 }
 
-// TrustEntry records a single trusted config path and when it was trusted.
+// TrustEntry records a single trusted config path, when it was trusted, and
+// a digest of the trust-gated settings it held then. An entry without a
+// digest, written before trust was bound to content, trusts nothing.
 type TrustEntry struct {
 	Path      string `json:"path"`
 	TrustedAt string `json:"trusted_at"`
+	Digest    string `json:"digest,omitempty"`
 }
 
 type trustFile struct {
@@ -43,26 +52,50 @@ func LoadTrustStore(configDir string) *TrustStore {
 	return NewTrustStore(configDir)
 }
 
-// IsTrusted reports whether path (after canonicalization) is in the trust store.
+// IsTrusted reports whether the config file at path is trusted as it is now.
 func (ts *TrustStore) IsTrusted(path string) bool {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: Path is a config file the caller is about to load
+	if err != nil {
+		return false
+	}
+	return ts.IsTrustedContent(path, data)
+}
+
+// IsTrustedContent reports whether path (after canonicalization) is in the
+// trust store with data's trust-gated settings, data being the file's
+// contents as the caller read them.
+func (ts *TrustStore) IsTrustedContent(path string, data []byte) bool {
 	canon := canonicalizePath(path)
 	if canon == "" {
+		return false
+	}
+	digest, err := trustDigest(data)
+	if err != nil {
 		return false
 	}
 	tf := ts.load()
 	for _, e := range tf.Trusted {
 		if e.Path == canon {
-			return true
+			return e.Digest == digest
 		}
 	}
 	return false
 }
 
-// Trust adds path to the trust store (idempotent — re-trusting updates the timestamp).
+// Trust adds path to the trust store with its current trust-gated settings
+// (idempotent — re-trusting updates the timestamp and the digest).
 func (ts *TrustStore) Trust(path string) error {
 	canon := canonicalizePath(path)
 	if canon == "" {
 		return fmt.Errorf("cannot resolve path: %s", path)
+	}
+	data, err := os.ReadFile(canon) //nolint:gosec // G304: Path is the config file the user asked to trust
+	if err != nil {
+		return fmt.Errorf("cannot read config: %w", err)
+	}
+	digest, err := trustDigest(data)
+	if err != nil {
+		return fmt.Errorf("cannot trust %s: %w", path, err)
 	}
 
 	tf := ts.load()
@@ -73,12 +106,13 @@ func (ts *TrustStore) Trust(path string) error {
 	for i := range tf.Trusted {
 		if tf.Trusted[i].Path == canon {
 			tf.Trusted[i].TrustedAt = now
+			tf.Trusted[i].Digest = digest
 			found = true
 			break
 		}
 	}
 	if !found {
-		tf.Trusted = append(tf.Trusted, TrustEntry{Path: canon, TrustedAt: now})
+		tf.Trusted = append(tf.Trusted, TrustEntry{Path: canon, TrustedAt: now, Digest: digest})
 	}
 
 	return ts.save(tf)
@@ -104,6 +138,45 @@ func (ts *TrustStore) Untrust(path string) (bool, error) {
 // List returns all trusted entries.
 func (ts *TrustStore) List() []TrustEntry {
 	return ts.load().Trusted
+}
+
+// untrustedKeys are the keys loadFromFile takes from a local or repo config
+// whether or not it is trusted. Trust adds nothing to them, so changing one
+// does not take a file's trust away. Every other key, including any this
+// version does not know, is part of what is trusted. A key gated by trust
+// must never be listed here.
+var untrustedKeys = []string{
+	"account_id", "project_id", "todolist_id", "scope",
+	"format", "hints", "stats", "onboarded", "verbose", "experimental",
+}
+
+// trustDigest is the SHA-256 of a config file's trust-gated settings: the
+// JSON object without untrustedKeys, re-encoded with sorted keys so that
+// formatting and key order do not change it.
+func trustDigest(data []byte) (string, error) {
+	// A decoder accepts the first value even when trailing content makes
+	// the document invalid. Match the loader's whole-document validation.
+	if !json.Valid(data) {
+		return "", errors.New("not a valid JSON object")
+	}
+	var fileCfg map[string]any
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := dec.Decode(&fileCfg); err != nil {
+		return "", fmt.Errorf("not a JSON object: %w", err)
+	}
+	if fileCfg == nil {
+		return "", errors.New("not a JSON object")
+	}
+	for _, key := range untrustedKeys {
+		delete(fileCfg, key)
+	}
+	canonical, err := json.Marshal(fileCfg)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(canonical)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func (ts *TrustStore) load() trustFile {

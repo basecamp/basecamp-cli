@@ -172,7 +172,7 @@ for human-facing listings, but remember that `--md` alone does not suppress
 interactive prompts. Add enough scope to remove ambiguity or set
 `BASECAMP_NONINTERACTIVE=1`.
 
-Examples of generic transformations, not command discovery:
+Generic examples, not command discovery:
 
 ```bash
 basecamp <leaf-command> --jq '.data | length'
@@ -291,9 +291,8 @@ basecamp projects logo remove --in "<project>" --json
 - People and agents who can edit the project can change its logo. Others get
   403, and a project the caller cannot see gets 404; do not retry or route
   around either refusal.
-- The CLI checks the file's size and MIME hint before uploading; leaf help
-  names the limits. Server image validations still apply. Removing a logo from
-  a project that has none succeeds.
+- Uploads are checked as for the wallpaper. Removing a logo from a project
+  that has none succeeds.
 - Each command returns the project. `.data.logo` is `{url}`, and is absent when
   the project has none; `projects show` carries the same field. Like the
   wallpaper's, the URL needs authentication.
@@ -417,6 +416,9 @@ Before changing Basecamp:
    notification behavior.
 3. Make the smallest requested change.
 4. Return the resulting ID/URL and summarize what changed.
+
+When you assign someone to a to-do or card, pass `--notify` to tell them;
+Basecamp stays silent otherwise.
 
 For destructive or broad operations, preview when the command offers a dry-run
 and do not expand the user's requested scope.

@@ -12,5 +12,9 @@ fi
 VERSION="${1:?Usage: stamp-plugin-version.sh VERSION}"
 PLUGIN_JSON=".claude-plugin/plugin.json"
 
-jq --arg v "$VERSION" '.version = $v' "$PLUGIN_JSON" > "${PLUGIN_JSON}.tmp"
-mv "${PLUGIN_JSON}.tmp" "$PLUGIN_JSON"
+TEMP_FILE=$(mktemp "${PLUGIN_JSON}.tmp.XXXXXX")
+trap 'rm -f "${TEMP_FILE}"' EXIT
+
+jq --arg v "$VERSION" '.version = $v' "$PLUGIN_JSON" > "${TEMP_FILE}"
+mv "${TEMP_FILE}" "$PLUGIN_JSON"
+trap - EXIT

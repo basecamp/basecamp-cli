@@ -5,21 +5,24 @@ load smoke_helper
 
 # No setup_file needed — these operate on local config only
 
-@test "config trust trusts a directory" {
-  local dir="$BATS_FILE_TMPDIR/smoke-trust-test"
+@test "config trust trusts a config file" {
+  local dir="$BATS_TEST_TMPDIR/smoke-trust-test/.basecamp"
   mkdir -p "$dir"
+  printf '%s\n' '{}' > "$dir/config.json"
 
-  run_smoke basecamp config trust "$dir"
+  run_smoke basecamp config trust "$dir/config.json"
   assert_success
 }
 
-@test "config untrust untrusts a directory" {
-  local dir="$BATS_FILE_TMPDIR/smoke-trust-test"
+@test "config untrust untrusts a config file" {
+  local dir="$BATS_TEST_TMPDIR/smoke-trust-test/.basecamp"
   mkdir -p "$dir"
+  printf '%s\n' '{}' > "$dir/config.json"
 
-  # Trust first so untrust has something to remove
-  basecamp config trust "$dir" 2>/dev/null || true
+  # Trust first so untrust has something to remove.
+  run_smoke basecamp config trust "$dir/config.json"
+  assert_success
 
-  run_smoke basecamp config untrust "$dir"
+  run_smoke basecamp config untrust "$dir/config.json"
   assert_success
 }

@@ -94,8 +94,9 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 **SDK version:** the pin in `go.mod`, with
 `internal/version/sdk-provenance.json` authoritative for the exact commit. That
-pin is basecamp-sdk v0.23.0, which sends a check-in question's time as
-`time_of_day` (basecamp/basecamp-sdk#968). v0.22.0 shipped
+pin is basecamp-sdk v0.36.0, which adds `assignee_ids` to card create and
+`notify` to card update (basecamp/basecamp-sdk#1091). v0.23.0 sends a check-in
+question's time as `time_of_day` (basecamp/basecamp-sdk#968). v0.22.0 shipped
 `Recordings().MoveToVault` (basecamp/basecamp-sdk#960). v0.21.0 shipped the Subtasks service
 (basecamp/basecamp-sdk#883). v0.19.0 shipped the event-feed operations.
 The command surface below largely dates to the v0.12.0 bump, which added 20 exported
@@ -260,7 +261,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | spotlights | 2 | `spotlight`, `unspotlight` | ✅ | BC5 | - | `POST`/`DELETE /recordings/{id}/spotlight.json` put a recording's card on, or take it off, its project or template home page; both idempotent. No endpoint reads spotlight state or lists spotlights, so there is no `check` or list. Reordering spotlights (`PUT /recordings/:id/spotlight/position`) has no SDK operation, so it is not covered |
 | **Cards (Kanban)** |
 | card_tables | 3 | `cards` | ✅ | BC4 | - | Accessed via project dock |
-| card_table_cards | 9 | `cards` | ✅ | BC4 | - | list, show, create, update, move |
+| card_table_cards | 9 | `cards` | ✅ | BC4 | - | list, show, create, update, move. `cards create --assignee` assigns in the create request (`assignee_ids`, SDK v0.36.0, basecamp/basecamp-sdk#1091); `--notify` is sent as `notify: true` on create and card-update writes, including `assign --card`, so Basecamp tells the people newly assigned; `cards update --notify` alone only reads the card |
 | card_table_columns | 11 | `cards columns` | ✅ | BC4 | - | list columns. SDK v0.12.0 added `Subscribe`/`Unsubscribe`; `cards column watch\|unwatch` already performs the same action through the generic recording-subscription endpoint and returns the resulting subscription details the specific endpoint does not, so the CLI keeps one spelling |
 | card_table_steps | 4 | `cards steps` | ✅ | BC4 | - | Workflow steps on cards. The card-scoped aliases of `subtasks`, which bc3 keeps serving; `cards step move --position` is 1-based (the SDK refuses 0 since basecamp/basecamp-sdk#883) |
 | card_table_wormholes | 3 | `cards wormholes` | ✅ | BC5 | - | list (via `wormholes[]` on card table), create, update, delete; `cards move --to-wormhole` teleports a card across projects and reports the new card once it lands |

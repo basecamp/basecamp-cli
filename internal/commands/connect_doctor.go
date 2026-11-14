@@ -49,6 +49,27 @@ func runConnectDoctor(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	checks := connectDoctorChecks(ctx, p)
+
+	result := summarizeChecks(asDoctorChecks(checks))
+	title := "Connector doctor for profile " + strconv.Quote(p.name)
+	if p.app.Output.EffectiveFormat() == output.FormatStyled {
+		renderChecksStyled(cmd.OutOrStdout(), title, result)
+		if result.Failed > 0 {
+			return doctorNotReady(checks)
+		}
+		return nil
+	}
+	if result.Failed > 0 {
+		return doctorNotReady(checks)
+	}
+	return p.app.OK(result, output.WithSummary(result.Summary()))
+}
+
+// connectDoctorChecks are doctor's checks of a set-up profile, in the order
+// they are shown. They write nothing to the connector's ledger and post
+// nothing to Basecamp.
+func connectDoctorChecks(ctx context.Context, p connectProfile) []setup.Check {
 	checks := []setup.Check{{Name: "connect.json", Status: setup.StatusPass,
 		Message: fmt.Sprintf("Agent person %d in account %s", p.file.Agent.PersonID, p.file.AccountID)}}
 	if !connectSupportedOS(runtime.GOOS) {
@@ -69,20 +90,7 @@ func runConnectDoctor(cmd *cobra.Command, _ []string) error {
 	}
 	checks = append(checks, pingsCheck(ctx, p))
 	checks = append(checks, ledgerChecks(ctx, p)...)
-
-	result := summarizeChecks(asDoctorChecks(checks))
-	title := "Connector doctor for profile " + strconv.Quote(p.name)
-	if p.app.Output.EffectiveFormat() == output.FormatStyled {
-		renderChecksStyled(cmd.OutOrStdout(), title, result)
-		if result.Failed > 0 {
-			return doctorNotReady(checks)
-		}
-		return nil
-	}
-	if result.Failed > 0 {
-		return doctorNotReady(checks)
-	}
-	return p.app.OK(result, output.WithSummary(result.Summary()))
+	return checks
 }
 
 func errorMessage(err error) string {

@@ -3,6 +3,8 @@ changelog:
     labels:
       - dependencies
       - github_actions
+      # The release PR scripts/release.sh opens to stamp the version.
+      - release
     authors:
       - dependabot[bot]
   categories:
