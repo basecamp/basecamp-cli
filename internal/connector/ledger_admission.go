@@ -46,9 +46,10 @@ var undecided = []RecordState{StateSeen, StateBlocked}
 //
 // A blocked record is loaded only when something has given it an attempt to
 // make, and only once that attempt is due — whoever handed the id over. The
-// queue carries an id and not the revision it was claimed at, and `basecamp
-// connect redispatch` runs beside a live connector, so a person can re-decide
-// a record between the sweep's offer and admission taking it; without this,
+// queue carries an id and not the revision it was claimed at, so a record can
+// be re-decided between the sweep's offer and admission taking it — by a
+// duplicate offer decided first, and, when this was written, by `connect
+// redispatch`, which went with the worker side (#815); without this,
 // admission would load the newer revision and decide it at once, inside the
 // interval that re-decision had just written (Copilot on #770).
 //
