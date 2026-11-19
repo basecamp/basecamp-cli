@@ -368,8 +368,11 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 
 	// Where the line was said decides whose word counts, so it is settled
 	// before anyone's trust is read: a Ping has no members to ask about.
+	// A boost outside a served project passed the gate only to be asked
+	// about here (Rule.HeardInPings): it is heard in a Ping alone.
+	_, served := policy.served(ev.BucketID)
 	var ping *basecamp.Ping
-	if _, served := policy.served(ev.BucketID); !served && ev.EventType == eventChatLineCreated {
+	if !served && (ev.EventType == eventChatLineCreated || boostID > 0) {
 		var reason Reason
 		if ping, reason, err = d.pingOf(ctx, ev.BucketID); err != nil {
 			return Verdict{}, err
@@ -389,6 +392,11 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 			// discards its event in any bucket connect.json does not serve.
 			return v.end(StateDiscarded, ReasonUntrustedPerformer), nil
 		}
+	}
+	if boostID > 0 && !served && ping == nil {
+		// A project connect.json does not serve. Never blocked: a holding
+		// reply to a boost answers nobody.
+		return v.end(StateDiscarded, ReasonNoRoute), nil
 	}
 	if gate.InPing && ping == nil {
 		// Trusted only in a Ping, and the bucket is none the agent is in.
@@ -470,10 +478,15 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		state  State
 		reason Reason
 	)
-	if ping != nil {
+	switch {
+	case ping != nil && boost != nil:
+		rule, state, reason = a.matchPingBoost(summary, shape)
+	case ping != nil:
 		rule, author, state, reason = a.matchPing(summary, ping, gate.Role)
-	} else if rule, author, state, reason, err = d.match(ctx, ev, policy, gate, summary); err != nil {
-		return Verdict{}, err
+	default:
+		if rule, author, state, reason, err = d.match(ctx, ev, policy, gate, summary); err != nil {
+			return Verdict{}, err
+		}
 	}
 	if state != "" {
 		return v.end(state, reason), nil
@@ -704,6 +717,18 @@ func (a *Admitter) matchPing(summary *basecamp.RecordingSummary, ping *basecamp.
 		return rulePinged, role, "", ""
 	}
 	return Rule{}, "", StateDiscarded, ReasonNotAddressed
+}
+
+// matchPingBoost decides what a boost in a Ping is to the agent. The booster
+// was an operator at the gate, or a participant connect.json lets into this
+// Ping, and wrote the boost (readBoost): it is a reply when the boosted line
+// is the agent's own, as a boost on the agent's comment is in a project.
+// A boost on anyone else's line in a Ping says nothing to the agent.
+func (a *Admitter) matchPingBoost(summary *basecamp.RecordingSummary, shape shape) (Rule, State, Reason) {
+	if shape == shapeChatLine && summary.Creator.ID == a.policy.AgentID {
+		return ruleBoosted, "", ""
+	}
+	return Rule{}, StateDiscarded, ReasonNotAddressed
 }
 
 // direct reports whether the Ping is the agent and the writer alone. People

@@ -20,7 +20,8 @@ type GateResult struct {
 	Agent bool
 	// InPing says the performer is trusted only as a participant of the Ping
 	// the event's bucket is keyed as (Policy.Pings): only once the Ping read
-	// confirms the bucket is a Ping, and only by mention.
+	// confirms the bucket is a Ping, and only by mention or by boosting the
+	// agent's own line there.
 	InPing bool
 }
 
@@ -99,7 +100,8 @@ func Gate(ev Event, p Policy, m Matrix) GateResult {
 		case role == RoleOperator:
 			// Named in the allowlist; Validate keeps one out of operator mode.
 		case !served && p.pingParticipant(ev.BucketID, performer):
-			// Let into this one Ping, by mention (matchPing). Before project
+			// Let into this one Ping, by mention or a boost on the agent's
+			// line there (matchPing, matchPingBoost). Before project
 			// trust, which would ask a Ping for members it does not have; a
 			// served bucket is a project, whatever a Ping entry is keyed on.
 			inPing = true
@@ -109,7 +111,7 @@ func Gate(ev Event, p Policy, m Matrix) GateResult {
 			drop(ReasonUntrustedPerformer)
 			continue
 		}
-		if rule.RequiresServed && !served {
+		if rule.RequiresServed && !served && (!rule.HeardInPings || !p.HearsPings) {
 			drop(ReasonNoRoute)
 			continue
 		}

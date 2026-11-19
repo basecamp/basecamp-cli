@@ -13,7 +13,9 @@
 //  2. A chat line in a bucket connect.json does not serve is read as a Ping
 //     (Reads.Pings), because where the line was said decides whose word
 //     counts, and that comes before anyone's trust is read. A bucket that
-//     is no Ping goes on as an unserved project's; its answer is cached.
+//     is no Ping goes on as an unserved project's; its answer is cached. A
+//     boost there is read the same way by the connector that hears Pings,
+//     and is heard only in a Ping.
 //  3. In project trust mode a performer the policy does not name is confirmed
 //     as a non-client member of the project. That is a read, cached per
 //     project, and it is the one trust decision the pointer alone cannot make.
@@ -29,7 +31,8 @@
 //     completed (trusted completer and a stake: the served project's
 //     watch_completions flag, an assignment, or a subscription), or boosted
 //     (a boost on the recording itself, which the agent wrote, given by the
-//     trusted performer; a boost on one of a recording's events is not), or,
+//     trusted performer, in a served project or on the agent's line in a
+//     Ping; a boost on one of a recording's events is not), or,
 //     in a Ping, pinged (an operator's line in a direct Ping, the agent and
 //     its writer alone; in a group Ping, and from a participant anywhere,
 //     only a mention counts), or campfire (a trusted human's new line in a
