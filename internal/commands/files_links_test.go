@@ -383,6 +383,8 @@ func TestLinkUpdatesRefuseAnotherURLBeforeAnyRequest(t *testing.T) {
 		"a look-alike host":                      {"cloud-files", "update", "https://evil.example/99999/buckets/123/cloud_files/456", "--title", "X"},
 		"another account":                        {"cloud-files", "update", "https://3.basecamp.com/11111/buckets/123/cloud_files/456", "--title", "X"},
 		"a collection":                           {"google-docs", "update", "https://3.basecamp.com/99999/buckets/123/vaults/777", "--title", "X"},
+		"a comment on a cloud file":              {"cloud-files", "update", "https://3.basecamp.com/99999/buckets/123/cloud_files/456#__recording_901", "--title", "X"},
+		"a comment on a Google document":         {"google-docs", "update", "https://3.basecamp.com/99999/buckets/123/vaults/777/google_documents/789#__recording_901", "--title", "X"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			app, transport := setupRecordingTestApp(t)

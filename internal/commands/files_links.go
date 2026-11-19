@@ -99,8 +99,10 @@ func linkDescription(cmd *cobra.Command, app *appctx.App, value string) (string,
 
 // linkIDArg reads a cloud file's or Google document's ID, or the ID in its
 // Basecamp URL, as doorIDArg does: a URL must be on a trusted Basecamp host,
-// name one record of urlType, and name the configured account, whose place
-// it takes when none is configured.
+// name one record of urlType (not a comment on it: a #__recording_ permalink
+// names the comment, and updating its parent would write the wrong record),
+// and name the configured account, whose place it takes when none is
+// configured.
 func linkIDArg(app *appctx.App, arg, urlType, what, hint string) (int64, error) {
 	idStr := arg
 	if urlarg.IsURL(arg) {
@@ -108,7 +110,7 @@ func linkIDArg(app *appctx.App, arg, urlType, what, hint string) (int64, error) 
 			return 0, output.ErrUsage("refusing untrusted host in URL — expected a Basecamp URL")
 		}
 		parsed := urlarg.Parse(arg)
-		if parsed == nil || parsed.IsCollection || parsed.Type != urlType || parsed.RecordingID == "" {
+		if parsed == nil || parsed.IsCollection || parsed.Type != urlType || parsed.RecordingID == "" || parsed.CommentID != "" {
 			return 0, output.ErrUsageHint("The URL does not name one "+what, hint)
 		}
 		if parsed.AccountID != "" {
