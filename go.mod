@@ -10,7 +10,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/basecamp/basecamp-sdk/go v0.36.0
 	github.com/basecamp/cli v0.2.2-0.20261023171439-c9bce8206df9
-	github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d
+	github.com/basecamp/mcp v0.0.0-20261118214004-663b2e5d2836
 	github.com/basecamp/surfguard/go v0.1.0
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -22,7 +22,7 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gofrs/flock v0.13.1
 	github.com/itchyny/gojq v0.12.19
-	github.com/modelcontextprotocol/go-sdk v1.8.0
+	github.com/modelcontextprotocol/go-sdk v1.8.1-0.20261014132652-7c486efa8223
 	github.com/sigstore/sigstore-go v1.3.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10

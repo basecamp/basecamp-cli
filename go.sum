@@ -93,8 +93,8 @@ github.com/basecamp/basecamp-sdk/go v0.36.0 h1:mkAcJQlh+5Vz64OmpImSda/pfa/usWPJ6
 github.com/basecamp/basecamp-sdk/go v0.36.0/go.mod h1:ynVJME8mVV3UHMUMnzBgygTnMtadQFxz1iYg7fqwUeM=
 github.com/basecamp/cli v0.2.2-0.20261023171439-c9bce8206df9 h1:3NfGs+zx23Tp6cf+97+UewrJHlzZMLzmvEXOmOJyQAk=
 github.com/basecamp/cli v0.2.2-0.20261023171439-c9bce8206df9/go.mod h1:iTBTaWvsPEFIcZfkxQHEfISyJ6sZ7036K6bNx0RY3EE=
-github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d h1:zEQVGq1x1nhKMZ2TudFAcSJ32CHT8richI1vQakIKz4=
-github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d/go.mod h1:Ee2c/q1/pg+5T5741PIuA3s6VJMQC7I0XBNXIHIujzA=
+github.com/basecamp/mcp v0.0.0-20261118214004-663b2e5d2836 h1:ND4te8b+HVFFrgcm7+n8P83MKKPqBpIyoJ63tT9liRU=
+github.com/basecamp/mcp v0.0.0-20261118214004-663b2e5d2836/go.mod h1:K3sgTH90CIR6Ed0XPnivIBqNIpw6aeOlcXThBrZ+2gc=
 github.com/basecamp/surfguard/go v0.1.0 h1:JMo+MZQEOBRqnUylzD0/jS9S42Fp+XKWMG+4LWfu/XE=
 github.com/basecamp/surfguard/go v0.1.0/go.mod h1:y5MWhE5S/CZAPzUOS0LoOYGUVxTeWFByFDssE3/l4b4=
 github.com/blang/semver v3.5.1+incompatible h1:cQNTCjp13qL8KC3Nbxr/y2Bqb63oX6wdnnjpJbkM4JQ=
@@ -179,8 +179,8 @@ github.com/fsnotify/fsnotify v1.10.1 h1:b0/UzAf9yR5rhf3RPm9gf3ehBPpf0oZKIjtpKrx5
 github.com/fsnotify/fsnotify v1.10.1/go.mod h1:TLheqan6HD6GBK6PrDWyDPBaEV8LspOxvPSjC+bVfgo=
 github.com/go-chi/chi/v5 v5.3.0 h1:halUjDxhshgXHMrao5bB8eNBXo/rnzwr8m5m36glehM=
 github.com/go-chi/chi/v5 v5.3.0/go.mod h1:R+tYY2hNuVUUjxoPtqUdgBqevM9s9njzkTLutVsOCto=
-github.com/go-jose/go-jose/v4 v4.1.4 h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=
-github.com/go-jose/go-jose/v4 v4.1.4/go.mod h1:x4oUasVrzR7071A4TnHLGSPpNOm2a21K9Kf04k1rs08=
+github.com/go-jose/go-jose/v4 v4.1.5 h1:RjgjO2LOtWOJKUC5wpwY9LR3B3vwVAz6JS2YHfYU6eA=
+github.com/go-jose/go-jose/v4 v4.1.5/go.mod h1:x4oUasVrzR7071A4TnHLGSPpNOm2a21K9Kf04k1rs08=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
 github.com/go-logr/logr v1.4.4 h1:tG4xh9yMsRCAiodLVTxyrkzSZ9+o0L1Kg/+cPVcbP/8=
 github.com/go-logr/logr v1.4.4/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=
@@ -342,8 +342,8 @@ github.com/mitchellh/hashstructure/v2 v2.0.2 h1:vGKWl0YJqUNxE8d+h8f6NJLcCJrgbhC4
 github.com/mitchellh/hashstructure/v2 v2.0.2/go.mod h1:MG3aRVU/N29oo/V/IhBX8GR/zz4kQkprJgF2EVszyDE=
 github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyuac5Z2hdY=
 github.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
-github.com/modelcontextprotocol/go-sdk v1.8.0 h1:KIvahhYqwtbeniWVPs3TcXEA7b8jEtwfBpOTAI+Urx4=
-github.com/modelcontextprotocol/go-sdk v1.8.0/go.mod h1:dL7u98E/zjJTGzEq+j30jQ8K2k1mb6LeAH4inEcSGts=
+github.com/modelcontextprotocol/go-sdk v1.8.1-0.20261014132652-7c486efa8223 h1:THyv0oM2i7h3ezGwwXWCOqwsh/C2rUTabh+ukQCiClE=
+github.com/modelcontextprotocol/go-sdk v1.8.1-0.20261014132652-7c486efa8223/go.mod h1:dL7u98E/zjJTGzEq+j30jQ8K2k1mb6LeAH4inEcSGts=
 github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 h1:ZK8zHtRHOkbHy6Mmr5D264iyp3TiX5OmNcI5cIARiQI=
 github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6/go.mod h1:CJlz5H+gyd6CUWT45Oy4q24RdLyn7Md9Vj2/ldJBSIo=
 github.com/muesli/cancelreader v0.2.2 h1:3I4Kt4BQjOR54NavqnDogx/MIoWBFa0StPA8ELUXHmA=
