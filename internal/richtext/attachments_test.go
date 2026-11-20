@@ -52,3 +52,46 @@ func TestCollapseAttachmentsInMarkdownLeavesCode(t *testing.T) {
 			"    "+expanded+"\n",
 		CollapseAttachmentsInMarkdown(input))
 }
+
+// A self-closing attachment is not the opening tag of the next one: reading it
+// that way dropped everything up to the next closing tag.
+func TestCollapseAttachmentsSkipsASelfClosingAttachment(t *testing.T) {
+	input := `<bc-attachment sgid="file"/>KEEP THIS TEXT<bc-attachment sgid="person"><figure>Jo</figure></bc-attachment>`
+
+	assert.Equal(t,
+		`<bc-attachment sgid="file"/>KEEP THIS TEXT<bc-attachment sgid="person"></bc-attachment>`,
+		CollapseAttachments(input))
+	assert.Equal(t,
+		`<bc-attachment sgid="file"/>KEEP THIS TEXT<bc-attachment sgid="person"></bc-attachment>`,
+		CollapseAttachmentsInMarkdown(input))
+}
+
+func TestCollapseAttachmentsReadsAQuotedGreaterThan(t *testing.T) {
+	input := `<bc-attachment sgid="x" caption="a > b" title='c > d'><figure>a > b</figure></bc-attachment>`
+
+	assert.Equal(t,
+		`<bc-attachment sgid="x" caption="a > b" title='c > d'></bc-attachment>`,
+		CollapseAttachments(input))
+}
+
+func TestCollapseAttachmentsLeavesAnUnclosedAttachment(t *testing.T) {
+	for _, input := range []string{
+		`<p>Hi <bc-attachment sgid="x"><figure>Jo</figure></p>`,
+		`<p>Hi <bc-attachment sgid="x" caption="never closed`,
+		`<bc-attachment-like sgid="x"><figure>Jo</figure></bc-attachment-like>`,
+	} {
+		assert.Equal(t, input, CollapseAttachments(input))
+	}
+
+	assert.Equal(t,
+		`<bc-attachment sgid="a">KEEP <bc-attachment sgid="b"></bc-attachment>`,
+		CollapseAttachments(`<bc-attachment sgid="a">KEEP <bc-attachment sgid="b"><figure>Jo</figure></bc-attachment>`))
+}
+
+// Lowering a string for a case-blind search must not move its bytes: 'İ'
+// lowers to three bytes from two.
+func TestCollapseAttachmentsAfterTextThatLowersLonger(t *testing.T) {
+	input := `<p>İİ <BC-ATTACHMENT sgid="x"><figure>Jo</figure></BC-ATTACHMENT> ok</p>`
+
+	assert.Equal(t, `<p>İİ <bc-attachment sgid="x"></bc-attachment> ok</p>`, CollapseAttachments(input))
+}
