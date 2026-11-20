@@ -95,3 +95,31 @@ func TestCollapseAttachmentsAfterTextThatLowersLonger(t *testing.T) {
 
 	assert.Equal(t, `<p>İİ <bc-attachment sgid="x"></bc-attachment> ok</p>`, CollapseAttachments(input))
 }
+
+// A backslash makes a tag literal Markdown text, so neither an escaped
+// opening tag nor an escaped closing tag is markup.
+func TestCollapseAttachmentsInMarkdownLeavesEscapedTags(t *testing.T) {
+	for _, input := range []string{
+		`Example: \<bc-attachment sgid="x">KEEP THIS TEXT\</bc-attachment>`,
+		`Example: <bc-attachment sgid="x">KEEP THIS TEXT\</bc-attachment>`,
+	} {
+		assert.Equal(t, input, CollapseAttachmentsInMarkdown(input))
+	}
+
+	assert.Equal(t,
+		`Example: \\<bc-attachment sgid="x"></bc-attachment>`,
+		CollapseAttachmentsInMarkdown(`Example: \\<bc-attachment sgid="x"><figure>Jo</figure></bc-attachment>`))
+}
+
+// Markup inside an HTML comment is not markup: reading it as an attachment
+// deleted the visible content between two comments.
+func TestCollapseAttachmentsLeavesTagsInComments(t *testing.T) {
+	input := `<!-- <bc-attachment sgid="x"> --><p>KEEP THIS TEXT</p><!-- </bc-attachment> -->`
+
+	assert.Equal(t, input, CollapseAttachments(input))
+	assert.Equal(t, input, CollapseAttachmentsInMarkdown(input))
+
+	assert.Equal(t,
+		`<!-- note --><bc-attachment sgid="x"></bc-attachment><!-- unterminated <bc-attachment sgid="y"><figure>Jo</figure></bc-attachment>`,
+		CollapseAttachments(`<!-- note --><bc-attachment sgid="x"><figure>Jo</figure></bc-attachment><!-- unterminated <bc-attachment sgid="y"><figure>Jo</figure></bc-attachment>`))
+}

@@ -26,39 +26,60 @@ var reTagAttribute = regexp.MustCompile(`([^\s"'=<>/]+)(?:\s*=\s*(?:"[^"]*"|'[^'
 // content itself (a horizontal rule, say) and is left as written, and so is
 // one that is self-closing or never closed.
 func CollapseAttachments(html string) string {
-	return collapseAttachmentsOutside(html, nil)
+	return collapseAttachments(html, nil)
 }
 
 // CollapseAttachmentsInMarkdown is CollapseAttachments for Markdown: it
-// leaves alone an attachment written inside a code span or code block, which
-// shows the markup as text rather than writing it.
+// leaves alone an attachment written inside a code span or code block, or
+// escaped with a backslash, which shows the markup as text rather than
+// writing it.
 func CollapseAttachmentsInMarkdown(md string) string {
 	if !hasAttachmentTag(md) {
 		return md
 	}
-	return collapseAttachmentsOutside(md, markdownCodeSpans(md))
+	code := markdownCodeSpans(md)
+	return collapseAttachments(md, func(i int) bool {
+		return code.contains(i) || escapedInMarkdown(md, i)
+	})
 }
 
 func hasAttachmentTag(s string) bool {
 	return strings.Contains(strings.ToLower(s), "<bc-attachment")
 }
 
-// collapseAttachmentsOutside collapses every attachment element in s whose
-// opening tag does not start inside code.
-func collapseAttachmentsOutside(s string, code textSpanIndex) string {
+// escapedInMarkdown reports whether the '<' at i follows an odd run of
+// backslashes, which makes it a literal character in Markdown.
+func escapedInMarkdown(s string, i int) bool {
+	n := 0
+	for j := i - 1; j >= 0 && s[j] == '\\'; j-- {
+		n++
+	}
+	return n%2 == 1
+}
+
+// collapseAttachments collapses every attachment element in s. A tag that
+// starts where literal says is text, or inside an HTML comment, is not one.
+func collapseAttachments(s string, literal func(int) bool) string {
 	if !hasAttachmentTag(s) {
 		return s
 	}
-	lower := asciiLower(s)
+	if literal == nil {
+		literal = func(int) bool { return false }
+	}
+	comments := htmlComments(s, literal)
+	tags := attachmentTags{s: s, lower: asciiLower(s), literal: func(i int) bool {
+		return literal(i) || comments.contains(i)
+	}}
+
 	var b strings.Builder
 	last, pos := 0, 0
 	for {
-		el, ok := nextAttachmentElement(s, lower, pos)
+		el, ok := tags.nextElement(pos)
 		if !ok {
 			break
 		}
 		pos = el.end
-		if el.selfClosing || code.contains(el.start) {
+		if el.selfClosing {
 			continue
 		}
 		b.WriteString(s[last:el.start])
@@ -67,6 +88,30 @@ func collapseAttachmentsOutside(s string, code textSpanIndex) string {
 	}
 	b.WriteString(s[last:])
 	return b.String()
+}
+
+// htmlComments returns the byte ranges of s inside HTML comments, an
+// unterminated one running to the end. A "<!--" that literal says is text
+// opens none.
+func htmlComments(s string, literal func(int) bool) textSpanIndex {
+	var index textSpanIndex
+	for from := 0; ; {
+		i := strings.Index(s[from:], "<!--")
+		if i < 0 {
+			return index
+		}
+		start := from + i
+		if literal(start) {
+			from = start + 1
+			continue
+		}
+		end := len(s)
+		if j := strings.Index(s[start+4:], "-->"); j >= 0 {
+			end = start + 4 + j + 3
+		}
+		index = append(index, textSpan{start: start, end: end})
+		from = end
+	}
 }
 
 // attachmentElement locates one <bc-attachment> in a string: where it starts,
@@ -82,44 +127,65 @@ const (
 	attachmentClose = "</bc-attachment"
 )
 
-// nextAttachmentElement finds the first <bc-attachment> element at or after
-// from. The opening tag is read with its quoted attribute values, so a '>'
-// inside one does not end it. An element that is opened and never closed, or
-// is followed by another before its closing tag, is not one: the search moves
-// past its opening tag.
-// lower is s with its ASCII letters lowered, byte for byte.
-func nextAttachmentElement(s, lower string, from int) (attachmentElement, bool) {
-	for from < len(s) {
-		i := strings.Index(lower[from:], attachmentOpen)
+// attachmentTags finds attachment tags in s. lower is s with its ASCII
+// letters lowered, byte for byte, and a tag starting where literal says is
+// text is passed by.
+type attachmentTags struct {
+	s, lower string
+	literal  func(int) bool
+}
+
+// next returns the start of the first tag beginning with prefix at or after
+// from, followed by the end of its name or the string.
+func (t attachmentTags) next(prefix string, from int) (int, bool) {
+	for from < len(t.s) {
+		i := strings.Index(t.lower[from:], prefix)
 		if i < 0 {
-			return attachmentElement{}, false
+			return 0, false
 		}
 		start := from + i
-		after := start + len(attachmentOpen)
-		if after < len(s) && !isTagNameEnd(s[after]) {
-			from = after
-			continue
+		after := start + len(prefix)
+		if (after == len(t.s) || isTagNameEnd(t.s[after])) && !t.literal(start) {
+			return start, true
 		}
-		openEnd, ok := openingTagEnd(s, after)
+		from = after
+	}
+	return 0, false
+}
+
+// nextElement finds the first <bc-attachment> element at or after from. The
+// opening tag is read with its quoted attribute values, so a '>' inside one
+// does not end it. An element that is opened and never closed, or is followed
+// by another before its closing tag, is not one: the search moves past its
+// opening tag.
+func (t attachmentTags) nextElement(from int) (attachmentElement, bool) {
+	for {
+		start, ok := t.next(attachmentOpen, from)
 		if !ok {
 			return attachmentElement{}, false
 		}
-		if strings.HasSuffix(strings.TrimRight(s[after:openEnd-1], " \t\n\r"), "/") {
+		after := start + len(attachmentOpen)
+		openEnd, ok := openingTagEnd(t.s, after)
+		if !ok {
+			return attachmentElement{}, false
+		}
+		if strings.HasSuffix(strings.TrimRight(t.s[after:openEnd-1], " \t\n\r"), "/") {
 			return attachmentElement{start: start, openEnd: openEnd, end: openEnd, selfClosing: true}, true
 		}
-		c := strings.Index(lower[openEnd:], attachmentClose)
-		if c < 0 || strings.Contains(lower[openEnd:openEnd+c], attachmentOpen) {
+		closeStart, ok := t.next(attachmentClose, openEnd)
+		if !ok {
+			return attachmentElement{}, false
+		}
+		if nested, ok := t.next(attachmentOpen, openEnd); ok && nested < closeStart {
 			from = openEnd
 			continue
 		}
-		closeStart := openEnd + c
-		closeEnd := strings.IndexByte(s[closeStart:], '>')
+		closeEnd := strings.IndexByte(t.s[closeStart:], '>')
 		if closeEnd < 0 {
 			return attachmentElement{}, false
 		}
 		return attachmentElement{start: start, openEnd: openEnd, end: closeStart + closeEnd + 1}, true
 	}
-	return attachmentElement{}, false
 }
 
 // asciiLower lowers only ASCII letters, so every index into the result is the
