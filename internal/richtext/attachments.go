@@ -31,7 +31,7 @@ func CollapseAttachments(s string) string {
 	if !hasAttachmentTag(s) {
 		return s
 	}
-	return collapseAttachments(s, attachmentTagsIn(s, 0, len(s)))
+	return collapseAttachments(s, attachmentTagsIn([]byte(s), []text.Segment{text.NewSegment(0, len(s))}))
 }
 
 // CollapseAttachmentsInMarkdown is CollapseAttachments for Markdown. Only an
@@ -50,10 +50,13 @@ func hasAttachmentTag(s string) bool {
 }
 
 // attachmentTag is one <bc-attachment> tag: where it starts and ends in the
-// string it was read from, and which kind of tag it is.
+// string it was read from, which kind of tag it is, and the tag as read. A
+// tag can span lines whose prefixes (a blockquote's "> ") are not part of it,
+// so the tag as read can differ from the source between start and end.
 type attachmentTag struct {
 	start, end int
 	kind       html.TokenType
+	raw        string
 }
 
 // collapseAttachments collapses the attachment elements tags pair up in s.
@@ -69,7 +72,7 @@ func collapseAttachments(s string, tags []attachmentTag) string {
 			continue
 		}
 		b.WriteString(s[last:open.start])
-		b.WriteString(collapseAttachment(s[open.start:next.end], s[open.start:open.end]))
+		b.WriteString(collapseAttachment(s[open.start:next.end], open.raw))
 		last = next.end
 		i++
 	}
@@ -77,13 +80,27 @@ func collapseAttachments(s string, tags []attachmentTag) string {
 	return b.String()
 }
 
-// attachmentTagsIn reads s[start:end] as HTML and returns its attachment
-// tags. A tokenizer reads it, so markup inside a comment or inside another
-// tag's attribute value is not taken for a tag.
-func attachmentTagsIn(s string, start, end int) []attachmentTag {
+// attachmentTagsIn reads the segments of source, joined, as HTML and
+// returns their attachment tags, placed in source. A tokenizer reads them, so
+// markup inside a comment or inside another tag's attribute value is not
+// taken for a tag.
+func attachmentTagsIn(source []byte, segments []text.Segment) []attachmentTag {
+	var joined []byte
+	var at []int // at[i] is where joined[i] is in source
+	for _, seg := range segments {
+		for range seg.Padding {
+			joined = append(joined, ' ')
+			at = append(at, seg.Start)
+		}
+		for i := seg.Start; i < seg.Stop; i++ {
+			joined = append(joined, source[i])
+			at = append(at, i)
+		}
+	}
+
 	var tags []attachmentTag
-	z := html.NewTokenizer(strings.NewReader(s[start:end]))
-	for pos := start; ; {
+	z := html.NewTokenizer(bytes.NewReader(joined))
+	for pos := 0; ; {
 		kind := z.Next()
 		if kind == html.ErrorToken {
 			return tags
@@ -91,7 +108,9 @@ func attachmentTagsIn(s string, start, end int) []attachmentTag {
 		size := len(z.Raw())
 		isTag := kind == html.StartTagToken || kind == html.EndTagToken || kind == html.SelfClosingTagToken
 		if name, _ := z.TagName(); isTag && bytes.Equal(name, []byte("bc-attachment")) {
-			tags = append(tags, attachmentTag{start: pos, end: pos + size, kind: kind})
+			tags = append(tags, attachmentTag{
+				start: at[pos], end: at[pos+size-1] + 1, kind: kind, raw: string(joined[pos : pos+size]),
+			})
 		}
 		pos += size
 	}
@@ -99,18 +118,16 @@ func attachmentTagsIn(s string, start, end int) []attachmentTag {
 
 // markdownAttachmentTags returns the attachment tags in md that its renderer
 // writes as markup: inline raw HTML, and the HTML blocks it passes through
-// (isRichTextTag, as renderHTMLBlock decides). Code, backslash escapes and
-// the HTML blocks it escapes hold none.
+// (isRichTextTag, as renderHTMLBlock decides), each read from its segments
+// as the renderer reads it. Code, backslash escapes and the HTML blocks it
+// escapes hold none.
 func markdownAttachmentTags(md string) []attachmentTag {
 	source := []byte(md)
 	doc := mdConverter.Parser().Parse(text.NewReader(source))
 
 	var tags []attachmentTag
 	read := func(segments []text.Segment) {
-		if len(segments) == 0 {
-			return
-		}
-		tags = append(tags, attachmentTagsIn(md, segments[0].Start, segments[len(segments)-1].Stop)...)
+		tags = append(tags, attachmentTagsIn(source, segments)...)
 	}
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {

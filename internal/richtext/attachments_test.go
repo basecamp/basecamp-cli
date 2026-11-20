@@ -144,3 +144,17 @@ func TestCollapseAttachmentsInMarkdownLeavesEscapedHTMLBlocks(t *testing.T) {
 	assert.Equal(t, input, CollapseAttachmentsInMarkdown(input))
 	assert.Contains(t, MarkdownToHTML(CollapseAttachmentsInMarkdown(input)), "KEEP THIS TEXT")
 }
+
+// A tag split across the lines of a blockquote is read without the "> " that
+// starts each line, as the renderer reads it: with the prefix put back, its
+// '>' ended the tag early and the attributes after it were dropped.
+func TestCollapseAttachmentsInMarkdownReadsATagAcrossBlockquoteLines(t *testing.T) {
+	input := "> Hi <bc-attachment sgid=\"x\"\n> content-type=\"image/png\" caption=\"keep\"><figure>Jo</figure></bc-attachment> bye\n"
+
+	collapsed := CollapseAttachmentsInMarkdown(input)
+	assert.Equal(t,
+		"> Hi <bc-attachment sgid=\"x\" content-type=\"image/png\" caption=\"keep\"></bc-attachment> bye\n",
+		collapsed)
+	assert.Contains(t, MarkdownToHTML(collapsed),
+		`<bc-attachment sgid="x" content-type="image/png" caption="keep"></bc-attachment>`)
+}
