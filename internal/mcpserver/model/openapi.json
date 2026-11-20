@@ -6476,7 +6476,7 @@
     },
     "/{accountId}/cards/overdue.json": {
       "get": {
-        "description": "Get every overdue card across all accessible projects, oldest-due-date-first.\nA complete, unpaginated array; each item embeds its `bucket`.",
+        "description": "Get every overdue card across all accessible projects, oldest-due-date-first,\n50 per page. Each item embeds its `bucket`.",
         "operationId": "GetEverythingOverdueCards",
         "parameters": [
           {
@@ -6512,6 +6512,16 @@
             "schema": {
               "type": "string",
               "description": "Filter by due date: with, without, or overdue. Unrecognized values are ignored."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page number for paginating through results. Defaults to 1. A positive value selects exactly that page, not a starting offset; see SPEC section 8.",
+            "schema": {
+              "type": "integer",
+              "description": "Page number for paginating through results. Defaults to 1. A positive value selects exactly that page, not a starting offset; see SPEC section 8.",
+              "format": "int32"
             }
           }
         ],
@@ -6570,6 +6580,11 @@
         "tags": [
           "Everything"
         ],
+        "x-basecamp-pagination": {
+          "style": "link",
+          "totalCountHeader": "X-Total-Count",
+          "maxPageSize": 50
+        },
         "x-basecamp-retry": {
           "maxAttempts": 3,
           "baseDelayMs": 1000,
@@ -12557,7 +12572,7 @@
     },
     "/{accountId}/my/assignments/completed.json": {
       "get": {
-        "description": "Get the current user's completed assignments.\nArchived and trashed recordings are excluded. This endpoint is not paginated.",
+        "description": "Get the current user's completed assignments, most recently completed first,\n50 per page. Archived and trashed recordings are excluded.",
         "operationId": "GetMyCompletedAssignments",
         "parameters": [
           {
@@ -12570,6 +12585,16 @@
               "description": "Basecamp account ID (numeric string)"
             },
             "required": true
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page number for paginating through results. Defaults to 1. A positive value selects exactly that page, not a starting offset; see SPEC section 8.",
+            "schema": {
+              "type": "integer",
+              "description": "Page number for paginating through results. Defaults to 1. A positive value selects exactly that page, not a starting offset; see SPEC section 8.",
+              "format": "int32"
+            }
           }
         ],
         "responses": {
@@ -12617,6 +12642,11 @@
         "tags": [
           "MyAssignments"
         ],
+        "x-basecamp-pagination": {
+          "style": "link",
+          "totalCountHeader": "X-Total-Count",
+          "maxPageSize": 50
+        },
         "x-basecamp-retry": {
           "maxAttempts": 3,
           "baseDelayMs": 1000,
@@ -22790,7 +22820,7 @@
     },
     "/{accountId}/reports/timesheet.json": {
       "get": {
-        "description": "Get account-wide timesheet report",
+        "description": "Get account-wide timesheet report, latest first, 50 per page",
         "operationId": "GetTimesheetReport",
         "parameters": [
           {
@@ -22824,6 +22854,16 @@
             "schema": {
               "type": "integer",
               "format": "int64"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page number for paginating through results. Defaults to 1. A positive value selects exactly that page, not a starting offset; see SPEC section 8.",
+            "schema": {
+              "type": "integer",
+              "description": "Page number for paginating through results. Defaults to 1. A positive value selects exactly that page, not a starting offset; see SPEC section 8.",
+              "format": "int32"
             }
           }
         ],
@@ -22882,6 +22922,11 @@
         "tags": [
           "Schedule"
         ],
+        "x-basecamp-pagination": {
+          "style": "link",
+          "totalCountHeader": "X-Total-Count",
+          "maxPageSize": 50
+        },
         "x-basecamp-retry": {
           "maxAttempts": 3,
           "baseDelayMs": 1000,
@@ -22978,7 +23023,7 @@
     },
     "/{accountId}/reports/todos/assigned/{personId}": {
       "get": {
-        "description": "Get todos assigned to a specific person",
+        "description": "Get todos assigned to a specific person, 50 per page. Every page repeats\n`person` and `grouped_by`; `todos` holds that page's to-dos.",
         "operationId": "GetAssignedTodos",
         "parameters": [
           {
@@ -23008,6 +23053,16 @@
             "schema": {
               "type": "string",
               "description": "Group by \"bucket\" or \"date\""
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page number for paginating through results. Defaults to 1. A positive value selects exactly that page, not a starting offset; see SPEC section 8.",
+            "schema": {
+              "type": "integer",
+              "description": "Page number for paginating through results. Defaults to 1. A positive value selects exactly that page, not a starting offset; see SPEC section 8.",
+              "format": "int32"
             }
           }
         ],
@@ -23076,6 +23131,12 @@
         "tags": [
           "Reports"
         ],
+        "x-basecamp-pagination": {
+          "style": "link",
+          "totalCountHeader": "X-Total-Count",
+          "maxPageSize": 50,
+          "key": "todos"
+        },
         "x-basecamp-retry": {
           "maxAttempts": 3,
           "baseDelayMs": 1000,
@@ -23089,7 +23150,7 @@
     },
     "/{accountId}/reports/todos/overdue.json": {
       "get": {
-        "description": "Get overdue todos grouped by lateness",
+        "description": "Get one page of overdue todos grouped by lateness, latest first.\n\nEvery page holds 50 to-dos, and each page fills the same four groups with\nonly its own to-dos, so a group can continue onto the next page. A\n`Link: rel=\"next\"` header names the next page and `X-Total-Count` the\ntotal. This operation is not auto-paginated in any SDK: the response\nis an object of four arrays, which no pagination key can name.",
         "operationId": "GetOverdueTodos",
         "parameters": [
           {
@@ -23102,6 +23163,16 @@
               "description": "Basecamp account ID (numeric string)"
             },
             "required": true
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page number for paginating through results. Defaults to 1. This\noperation is not auto-paginated in any SDK, so a page is returned as\nasked for and later pages are not followed.",
+            "schema": {
+              "type": "integer",
+              "description": "Page number for paginating through results. Defaults to 1. This\noperation is not auto-paginated in any SDK, so a page is returned as\nasked for and later pages are not followed.",
+              "format": "int32"
+            }
           }
         ],
         "responses": {
@@ -28253,7 +28324,7 @@
     },
     "/{accountId}/todos/overdue.json": {
       "get": {
-        "description": "Get every overdue to-do across all accessible projects, oldest-due-date-first.\nA complete, unpaginated array; each item embeds its `bucket`.",
+        "description": "Get every overdue to-do across all accessible projects, oldest-due-date-first,\n50 per page. Each item embeds its `bucket`.",
         "operationId": "GetEverythingOverdueTodos",
         "parameters": [
           {
@@ -28289,6 +28360,16 @@
             "schema": {
               "type": "string",
               "description": "Filter by due date: with, without, or overdue. Unrecognized values are ignored."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page number for paginating through results. Defaults to 1. A positive value selects exactly that page, not a starting offset; see SPEC section 8.",
+            "schema": {
+              "type": "integer",
+              "description": "Page number for paginating through results. Defaults to 1. A positive value selects exactly that page, not a starting offset; see SPEC section 8.",
+              "format": "int32"
             }
           }
         ],
@@ -28347,6 +28428,11 @@
         "tags": [
           "Everything"
         ],
+        "x-basecamp-pagination": {
+          "style": "link",
+          "totalCountHeader": "X-Total-Count",
+          "maxPageSize": 50
+        },
         "x-basecamp-retry": {
           "maxAttempts": 3,
           "baseDelayMs": 1000,
@@ -33814,6 +33900,26 @@
           },
           "description": {
             "type": "string"
+          },
+          "color": {
+            "type": "string",
+            "description": "The project's color, used for it on calendars: white, red, orange,\nyellow, green, blue, aqua, purple, gray, pink or brown. Omitted, Basecamp\nderives one from the project's name. Basecamp answers a value outside the enum\nwith a server error, not a validation error."
+          },
+          "purpose": {
+            "type": "string",
+            "description": "What kind of project it is: `topic` (a regular project, the default),\n`team`, or `company_hq` (the account's Company HQ, at most one per\naccount; a second answers 422). BC3's enum also has `guide`, which marks\na project as a sample nobody can edit afterwards, so it isn't offered."
+          },
+          "admissions": {
+            "type": "string",
+            "description": "invite|employee|team"
+          },
+          "timesheet_enabled": {
+            "type": "boolean",
+            "description": "Turn on the project's timesheet. Basecamp ignores this when the caller\ncan't use timesheets (the account lacks them, or the caller is a client)."
+          },
+          "wallpaper_mode": {
+            "type": "string",
+            "description": "How a wallpaper uploaded later is laid out. UpdateProjectWallpaper\nuploads one."
           }
         },
         "required": [
@@ -35896,10 +36002,14 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Todo"
-            },
-            "x-go-type-skip-optional-pointer": true
+            }
           }
-        }
+        },
+        "required": [
+          "grouped_by",
+          "person",
+          "todos"
+        ]
       },
       "GetBookmarkResponseContent": {
         "$ref": "#/components/schemas/BookmarkStatus"
@@ -38500,6 +38610,14 @@
           "start_date": {
             "type": "string",
             "description": "Date the new project starts on. Template dates are relative to the start\nof the template's first week, and template weeks start on a Sunday, so\nthe project's dates are anchored to the Sunday on or before this date.\nOmitted, they are anchored to the week in which the construction is\nprocessed."
+          },
+          "admissions": {
+            "type": "string",
+            "description": "Who can join the new project: invite, employee or team. Basecamp stores this with the construction\nand applies it when the project is built, so a value outside the enum\nisn't refused up front: the construction fails."
+          },
+          "timesheet_enabled": {
+            "type": "boolean",
+            "description": "Turn on the new project's timesheet. Basecamp ignores this when the\ncaller can't use timesheets (the account lacks them, or the caller is a\nclient)."
           }
         },
         "required": [
@@ -42270,6 +42388,18 @@
           "wallpaper_mode": {
             "type": "string",
             "description": "How the project's wallpaper is laid out. Changes only the layout of a\nwallpaper already attached; UpdateProjectWallpaper uploads one."
+          },
+          "color": {
+            "type": "string",
+            "description": "The project's color, used for it on calendars: white, red, orange,\nyellow, green, blue, aqua, purple, gray, pink or brown. An empty string clears\nit, and Basecamp derives one from the project's name again. A value\noutside the enum answers a server error, not a validation error. The\n`color` a project read returns is something else: the caller's own color\nfor the project on their home screen, null unless they set one."
+          },
+          "purpose": {
+            "type": "string",
+            "description": "What kind of project it is: `topic` (a regular project), `team`, or\n`company_hq` (the account's Company HQ). Changing a `topic` to anything\nelse deletes the project's start and end dates. An account has at most\none `company_hq`; asking for a second answers 422. BC3's enum also has\n`guide`, which marks a project as a sample nobody can edit afterwards,\nso it isn't offered."
+          },
+          "timesheet_enabled": {
+            "type": "boolean",
+            "description": "Turn the project's timesheet on or off. Basecamp ignores this when the\ncaller can't use timesheets (the account lacks them, or the caller is a\nclient)."
           }
         },
         "required": [

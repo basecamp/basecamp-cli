@@ -3333,15 +3333,15 @@ func TestFlattenAccountWideTodosCarriesProjectAndStatus(t *testing.T) {
 	assert.Equal(t, "completed", rows[1]["status"])
 }
 
-func TestTodosListAccountWideOverdueIsUnpaginated(t *testing.T) {
+func TestTodosListAccountWideOverdueRejectsPage(t *testing.T) {
 	app, _ := setupRecordingTestApp(t)
 
 	requireTodosListUsageError(t, app, "--page is not supported with --overdue", "--overdue", "--page", "2")
 }
 
 // --all is a different question from --page. The overdue listing caps at 100 by
-// default, so refusing --all too would leave todo 101 unreachable. The endpoint
-// is unpaginated, so honoring it costs nothing: the array is already in hand.
+// default, so refusing --all too would leave todo 101 unreachable. The listing
+// is read whole, so honoring it costs nothing: the array is already in hand.
 func TestTodosListAccountWideOverdueAcceptsAll(t *testing.T) {
 	body := `[{"id":1,"title":"Bravo","due_on":"2020-03-01"},
 		{"id":2,"title":"Alpha","due_on":"2020-01-01"}]`
@@ -3354,7 +3354,7 @@ func TestTodosListAccountWideOverdueAcceptsAll(t *testing.T) {
 	assert.Equal(t, "2 overdue todos across all projects", envelope["summary"])
 	assert.Empty(t, envelope["notice"], "nothing was withheld, so there is nothing to warn about")
 	assert.Len(t, transport.queriesFor("/99999/todos/overdue.json"), 1,
-		"--all costs no extra request on an unpaginated endpoint")
+		"--all costs no extra request on a listing already read whole")
 }
 
 func TestTodosListAccountWideOverdueSortsBeforeTruncating(t *testing.T) {

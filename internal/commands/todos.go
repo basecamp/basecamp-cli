@@ -461,11 +461,12 @@ func listGroupedTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 }
 
 // listOverdueTodosAcrossProjects fetches the overdue aggregate, which is a flat
-// oldest-due-first array rather than a paginated, project-grouped listing.
+// oldest-due-first list rather than a project-grouped one. The SDK follows its
+// pages, so the whole list is in hand.
 func listOverdueTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags todosListFlags) error {
 	if cmd.Flags().Changed("page") {
 		return output.ErrUsageHint(
-			"--page is not supported with --overdue (the overdue listing is not paginated)",
+			"--page is not supported with --overdue (the overdue listing is read whole)",
 			"Cap the results instead: basecamp todos list --overdue --limit <n>")
 	}
 	if flags.sortField == "position" {
@@ -477,10 +478,11 @@ func listOverdueTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 		return err
 	}
 
-	todos, err := app.Account().Everything().OverdueTodos(cmd.Context(), taskFilters)
+	result, err := app.Account().Everything().OverdueTodos(cmd.Context(), 0, taskFilters)
 	if err != nil {
 		return convertSDKError(err)
 	}
+	todos := result.Todos
 	total := len(todos)
 
 	// Sort before truncating — truncating first would sort only the survivors.
@@ -488,8 +490,8 @@ func listOverdueTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 		sortTodos(todos, flags.sortField, flags.reverse)
 	}
 
-	// The endpoint is unpaginated, so the complete array is already in hand and
-	// --all costs nothing beyond skipping the cap. --limit trims locally.
+	// The complete list is already in hand, so --all costs nothing beyond
+	// skipping the cap. --limit trims locally.
 	limit := flags.limit
 	if limit == 0 {
 		limit = accountWideDefaultLimit
@@ -518,7 +520,10 @@ func listOverdueTodosAcrossProjects(cmd *cobra.Command, app *appctx.App, flags t
 			},
 		),
 	}
-	if total > len(todos) {
+	switch {
+	case result.Meta.Truncated:
+		respOpts = append(respOpts, output.WithNotice("More pages are available; results were truncated"))
+	case total > len(todos):
 		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
 			"Showing %d of %d overdue todos (use --all for the complete list, or --limit to raise the cap)",
 			len(todos), total)))

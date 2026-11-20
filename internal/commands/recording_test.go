@@ -53,6 +53,11 @@ type stubRoute struct {
 	// would walk all the way to the cap and hide the behavior under test.
 	pages []string
 
+	// linked, with pages, serves pages the way Basecamp's Link-paged lists do:
+	// no page number is page 1, and every page but the last names the next in
+	// a Link rel="next" header, so the SDK follows them.
+	linked bool
+
 	// bodies, when set, serves bodies[i] to the i-th request this route
 	// matches and repeats the last entry past the end. Routes match on method
 	// and path alone, so a walk that re-requests one path with a different
@@ -74,6 +79,39 @@ func pagedBody(route stubRoute, rawPage string) string {
 		return "[]"
 	}
 	return route.pages[n-1]
+}
+
+// linkedPageNumber is the page a request to a linked route asks for, 1 when it
+// names none.
+func linkedPageNumber(req *http.Request) int {
+	n, err := strconv.Atoi(req.URL.Query().Get("page"))
+	if err != nil || n < 1 {
+		return 1
+	}
+	return n
+}
+
+// linkedPage serves a linked route's page, or an empty array past its end.
+func linkedPage(route stubRoute, req *http.Request) string {
+	n := linkedPageNumber(req)
+	if n > len(route.pages) {
+		return "[]"
+	}
+	return route.pages[n-1]
+}
+
+// linkedNextPage is the URL of the page after the one requested, or "" on the
+// last page.
+func linkedNextPage(route stubRoute, req *http.Request) string {
+	n := linkedPageNumber(req)
+	if n >= len(route.pages) {
+		return ""
+	}
+	next := *req.URL
+	query := next.Query()
+	query.Set("page", strconv.Itoa(n+1))
+	next.RawQuery = query.Encode()
+	return next.String()
 }
 
 // recordingTransport is an http.RoundTripper that records every request and
@@ -115,10 +153,17 @@ func (t *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 			switch {
 			case route.bodies != nil:
 				responseBody = route.bodies[t.nextBody(index, len(route.bodies))]
+			case route.linked:
+				responseBody = linkedPage(route, req)
 			case route.pages != nil:
 				responseBody = pagedBody(route, req.URL.Query().Get("page"))
 			}
 			header := http.Header{"Content-Type": []string{"application/json"}}
+			if route.linked {
+				if next := linkedNextPage(route, req); next != "" {
+					header.Set("Link", fmt.Sprintf(`<%s>; rel="next"`, next))
+				}
+			}
 			for name, values := range route.header {
 				header[name] = values
 			}

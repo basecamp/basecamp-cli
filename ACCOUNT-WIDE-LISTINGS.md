@@ -51,8 +51,8 @@ under project rules before the account-wide branch is reached is a defect: the
 paginated aggregates accept **any positive page**, while several project-scoped
 commands only permit page 1.
 
-Conversely `--page` must return `ErrUsage` against the **unpaginated** overdue
-endpoints, which take no page argument at all.
+Conversely `--page` must return `ErrUsage` against the overdue listings, which
+the CLI reads whole, following every page, so there is no page to address.
 
 ### I2 — Scope precedence
 
@@ -230,7 +230,7 @@ rows that differ for stated reasons. `--all` is how you ask for the account.
 | `checkins answers` | cap 100 | **changed** from "all pages" |
 | `forwards list` | cap 100 | **changed** from "all pages" |
 | `files list` | cap 100 | **changed** from "all pages" |
-| `todos list --overdue` | cap 100 | unpaginated endpoint; accepts `--all`, rejects `--page` |
+| `todos list --overdue` | cap 100 | read whole, every page followed; accepts `--all`, rejects `--page` |
 | `cards list --overdue` | cap 100 | **changed** from uncapped; same rules as above |
 | `bookmarks list` | cap 100 | personal feed — see below |
 | `drafts list` | cap 100 | personal feed; server caps the full listing at 250 |
@@ -259,7 +259,8 @@ options struct does not honor a page number at all, so it takes `--limit` (a
 real SDK-side bound) and deliberately registers no `--page`. Under I3 a flag
 that cannot act on its value is worse than an absent one.
 
-**The two overdue rows.** Both endpoints are unpaginated, so `--page` has
+**The two overdue rows.** The CLI reads both listings whole, following every
+page Basecamp sends (50 a page since basecamp/bc3#14537), so `--page` has
 nothing to address and stays an error. `--all` is a different question: it means
 "skip the cap", and since the complete array is already in hand it costs no
 extra request. Previously `todos --overdue` capped at 100 *and* rejected `--all`,
