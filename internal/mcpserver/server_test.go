@@ -238,6 +238,41 @@ func TestServerAcceptsSynthesizedPageParam(t *testing.T) {
 	assert.JSONEq(t, `[{"id":2}]`, text)
 }
 
+func TestServerPagesTheOverdueReport(t *testing.T) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/999/reports/todos/overdue.json", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "2" {
+			_, _ = w.Write([]byte(`{"under_a_week_late":[],"over_a_week_late":[{"id":2}],"over_a_month_late":[],"over_three_months_late":[]}`))
+		} else {
+			w.Header().Set("Link", `<http://`+r.Host+`/999/reports/todos/overdue.json?page=2>; rel="next"`)
+			_, _ = w.Write([]byte(`{"under_a_week_late":[{"id":1}],"over_a_week_late":[],"over_a_month_late":[],"over_three_months_late":[]}`))
+		}
+	}))
+
+	srv, err := New(newTestAPI(upstream), Config{})
+	require.NoError(t, err)
+	session := mcptest.Connect(t, srv.BuildMCPServer(slog.New(slog.DiscardHandler)))
+
+	text, isError := mcptest.CallText(t, session, "basecamp_reports", map[string]any{
+		"action": "get_overdue_todos",
+		"params": map[string]any{},
+	})
+	require.False(t, isError, "get_overdue_todos failed: %s", text)
+	var wrapped struct {
+		NextPage int `json:"next_page"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(text), &wrapped))
+	require.Equal(t, 2, wrapped.NextPage)
+
+	text, isError = mcptest.CallText(t, session, "basecamp_reports", map[string]any{
+		"action": "get_overdue_todos",
+		"params": map[string]any{"page": wrapped.NextPage},
+	})
+	require.False(t, isError, "passing next_page back must dispatch, got: %s", text)
+	assert.JSONEq(t, `{"under_a_week_late":[],"over_a_week_late":[{"id":2}],"over_a_month_late":[],"over_three_months_late":[]}`, text)
+}
+
 func TestServerSurfacesAPIErrorsInBand(t *testing.T) {
 	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"Record not found"}`, http.StatusNotFound)
