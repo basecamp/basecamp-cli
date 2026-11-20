@@ -166,7 +166,7 @@ ACTIONS (RO = read-only):
 - get_schedule_entry (RO): Get a single schedule entry by id
 - get_schedule_entry_occurrence (RO): Get a specific occurrence of a recurring schedule entry
 - get_timesheet_entry (RO): Get a single timesheet entry
-- get_timesheet_report (RO): Get account-wide timesheet report
+- get_timesheet_report (RO, paginated): Get account-wide timesheet report, latest first, 50 per page
 - list_schedule_entries (RO, paginated): List entries on a schedule
 - replace_schedule_entry: Replace a schedule entry with a new complete representation
 - update_calendar: Update a calendar's display color
@@ -312,7 +312,7 @@ Gateway tool: call with {"action": "...", "params": {...}}.
 Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
 
 ACTIONS (RO = read-only):
-- get_assigned_todos (RO): Get todos assigned to a specific person
+- get_assigned_todos (RO, paginated): Get todos assigned to a specific person, 50 per page
 - get_overdue_todos (RO): Get one page of overdue todos grouped by lateness, latest first
 - get_person_progress (RO, paginated): Get a person's activity timeline
 - get_progress_report (RO, paginated): Get account-wide activity feed (progress report)
@@ -338,8 +338,8 @@ ACTIONS (RO = read-only):
 - get_everything_not_now_cards (RO, paginated): Cards parked in a project's "Not now" column across all accessible projects, grouped by project (paginated)
 - get_everything_open_cards (RO, paginated): Incomplete cards in active columns across all accessible projects, grouped by project (paginated)
 - get_everything_open_todos (RO, paginated): Active, incomplete to-dos across all accessible projects, grouped by project (paginated)
-- get_everything_overdue_cards (RO): Get every overdue card across all accessible projects, oldest-due-date-first
-- get_everything_overdue_todos (RO): Get every overdue to-do across all accessible projects, oldest-due-date-first
+- get_everything_overdue_cards (RO, paginated): Get every overdue card across all accessible projects, oldest-due-date-first, 50 per page
+- get_everything_overdue_todos (RO, paginated): Get every overdue to-do across all accessible projects, oldest-due-date-first, 50 per page
 - get_everything_unassigned_cards (RO, paginated): Open, unassigned cards across all accessible projects, grouped by project (paginated)
 - get_everything_unassigned_todos (RO, paginated): Open, unassigned to-dos across all accessible projects, grouped by project (paginated)
 
@@ -400,7 +400,7 @@ ACTIONS (RO = read-only):
 - get_bubble_ups (RO, paginated): Get the current user's current and scheduled bubble-ups (paginated, 50 per page)
 - get_gauge_needle (RO): Get a gauge needle by ID
 - get_my_assignments (RO): Get the current user's active assignments grouped into priorities and non_priorities
-- get_my_completed_assignments (RO): Get the current user's completed assignments
+- get_my_completed_assignments (RO, paginated): Get the current user's completed assignments, most recently completed first, 50 per page
 - get_my_due_assignments (RO): Get the current user's assignments filtered by due date scope
 - get_my_note (RO): Get the authenticated user's note — a per-person notebook singleton at /my/notes.json
 - get_my_notifications (RO): Get the current user's notifications (the "Hey!" menu in Basecamp 4)

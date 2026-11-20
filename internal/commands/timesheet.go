@@ -90,10 +90,11 @@ func runTimesheetReport(cmd *cobra.Command, startDate, endDate, personID string)
 		opts.PersonID = pid
 	}
 
-	entries, err := app.Account().Timesheet().Report(cmd.Context(), opts)
+	result, err := app.Account().Timesheet().Report(cmd.Context(), opts)
 	if err != nil {
 		return convertSDKError(err)
 	}
+	entries := result.Entries
 
 	totalHours := sumTimesheetHours(entries)
 

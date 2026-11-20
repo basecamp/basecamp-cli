@@ -219,7 +219,7 @@ func TestCatalogPaginatedActionsTakePage(t *testing.T) {
 			assert.Equal(t, 1, pages, "operation %q must declare exactly one page query parameter", op.ID)
 		}
 	}
-	assert.Equal(t, 63, link, "Link-style paginated operation count")
+	assert.Equal(t, 68, link, "Link-style paginated operation count")
 }
 
 // TestCatalogCursorPaginatedActionsTakeNoPage pins the other half. A
