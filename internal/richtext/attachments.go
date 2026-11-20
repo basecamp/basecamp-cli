@@ -1,12 +1,14 @@
 package richtext
 
 import (
+	"bytes"
 	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
+	"golang.org/x/net/html"
 )
 
 // reTagAttribute matches one attribute of a tag: its name, and its value if it
@@ -25,210 +27,119 @@ var reTagAttribute = regexp.MustCompile(`([^\s"'=<>/]+)(?:\s*=\s*(?:"[^"]*"|'[^'
 // collapsing it loses nothing. An attachment without an sgid carries its
 // content itself (a horizontal rule, say) and is left as written, and so is
 // one that is self-closing or never closed.
-func CollapseAttachments(html string) string {
-	return collapseAttachments(html, nil)
+func CollapseAttachments(s string) string {
+	if !hasAttachmentTag(s) {
+		return s
+	}
+	return collapseAttachments(s, attachmentTagsIn(s, 0, len(s)))
 }
 
-// CollapseAttachmentsInMarkdown is CollapseAttachments for Markdown: it
-// leaves alone an attachment written inside a code span or code block, or
-// escaped with a backslash, which shows the markup as text rather than
-// writing it.
+// CollapseAttachmentsInMarkdown is CollapseAttachments for Markdown. Only an
+// attachment tag the Markdown renderer writes as markup counts: one written
+// in code, escaped with a backslash, or in an HTML block the renderer shows
+// as text is left as written.
 func CollapseAttachmentsInMarkdown(md string) string {
 	if !hasAttachmentTag(md) {
 		return md
 	}
-	code := markdownCodeSpans(md)
-	return collapseAttachments(md, func(i int) bool {
-		return code.contains(i) || escapedInMarkdown(md, i)
-	})
+	return collapseAttachments(md, markdownAttachmentTags(md))
 }
 
 func hasAttachmentTag(s string) bool {
 	return strings.Contains(strings.ToLower(s), "<bc-attachment")
 }
 
-// escapedInMarkdown reports whether the '<' at i follows an odd run of
-// backslashes, which makes it a literal character in Markdown.
-func escapedInMarkdown(s string, i int) bool {
-	n := 0
-	for j := i - 1; j >= 0 && s[j] == '\\'; j-- {
-		n++
-	}
-	return n%2 == 1
+// attachmentTag is one <bc-attachment> tag: where it starts and ends in the
+// string it was read from, and which kind of tag it is.
+type attachmentTag struct {
+	start, end int
+	kind       html.TokenType
 }
 
-// collapseAttachments collapses every attachment element in s. A tag that
-// starts where literal says is text, or inside an HTML comment, is not one.
-func collapseAttachments(s string, literal func(int) bool) string {
-	if !hasAttachmentTag(s) {
-		return s
-	}
-	if literal == nil {
-		literal = func(int) bool { return false }
-	}
-	comments := htmlComments(s, literal)
-	tags := attachmentTags{s: s, lower: asciiLower(s), literal: func(i int) bool {
-		return literal(i) || comments.contains(i)
-	}}
-
+// collapseAttachments collapses the attachment elements tags pair up in s.
+// An opening tag pairs with the next tag when that tag closes it. One that is
+// never closed, or is followed by another attachment first, is left as
+// written, and so is a self-closing one.
+func collapseAttachments(s string, tags []attachmentTag) string {
 	var b strings.Builder
-	last, pos := 0, 0
-	for {
-		el, ok := tags.nextElement(pos)
-		if !ok {
-			break
-		}
-		pos = el.end
-		if el.selfClosing {
+	last := 0
+	for i := 0; i+1 < len(tags); i++ {
+		open, next := tags[i], tags[i+1]
+		if open.kind != html.StartTagToken || next.kind != html.EndTagToken {
 			continue
 		}
-		b.WriteString(s[last:el.start])
-		b.WriteString(collapseAttachment(s[el.start:el.end], s[el.start:el.openEnd]))
-		last = el.end
+		b.WriteString(s[last:open.start])
+		b.WriteString(collapseAttachment(s[open.start:next.end], s[open.start:open.end]))
+		last = next.end
+		i++
 	}
 	b.WriteString(s[last:])
 	return b.String()
 }
 
-// htmlComments returns the byte ranges of s inside HTML comments, an
-// unterminated one running to the end. A "<!--" that literal says is text
-// opens none.
-func htmlComments(s string, literal func(int) bool) textSpanIndex {
-	var index textSpanIndex
-	for from := 0; ; {
-		i := strings.Index(s[from:], "<!--")
-		if i < 0 {
-			return index
+// attachmentTagsIn reads s[start:end] as HTML and returns its attachment
+// tags. A tokenizer reads it, so markup inside a comment or inside another
+// tag's attribute value is not taken for a tag.
+func attachmentTagsIn(s string, start, end int) []attachmentTag {
+	var tags []attachmentTag
+	z := html.NewTokenizer(strings.NewReader(s[start:end]))
+	for pos := start; ; {
+		kind := z.Next()
+		if kind == html.ErrorToken {
+			return tags
 		}
-		start := from + i
-		if literal(start) {
-			from = start + 1
-			continue
+		size := len(z.Raw())
+		isTag := kind == html.StartTagToken || kind == html.EndTagToken || kind == html.SelfClosingTagToken
+		if name, _ := z.TagName(); isTag && bytes.Equal(name, []byte("bc-attachment")) {
+			tags = append(tags, attachmentTag{start: pos, end: pos + size, kind: kind})
 		}
-		end := len(s)
-		if j := strings.Index(s[start+4:], "-->"); j >= 0 {
-			end = start + 4 + j + 3
-		}
-		index = append(index, textSpan{start: start, end: end})
-		from = end
+		pos += size
 	}
 }
 
-// attachmentElement locates one <bc-attachment> in a string: where it starts,
-// where its opening tag ends, and where the element ends. A self-closing tag
-// ends where its opening tag does.
-type attachmentElement struct {
-	start, openEnd, end int
-	selfClosing         bool
-}
+// markdownAttachmentTags returns the attachment tags in md that its renderer
+// writes as markup: inline raw HTML, and the HTML blocks it passes through
+// (isRichTextTag, as renderHTMLBlock decides). Code, backslash escapes and
+// the HTML blocks it escapes hold none.
+func markdownAttachmentTags(md string) []attachmentTag {
+	source := []byte(md)
+	doc := mdConverter.Parser().Parse(text.NewReader(source))
 
-const (
-	attachmentOpen  = "<bc-attachment"
-	attachmentClose = "</bc-attachment"
-)
-
-// attachmentTags finds attachment tags in s. lower is s with its ASCII
-// letters lowered, byte for byte, and a tag starting where literal says is
-// text is passed by.
-type attachmentTags struct {
-	s, lower string
-	literal  func(int) bool
-}
-
-// next returns the start of the first tag beginning with prefix at or after
-// from, followed by the end of its name or the string.
-func (t attachmentTags) next(prefix string, from int) (int, bool) {
-	for from < len(t.s) {
-		i := strings.Index(t.lower[from:], prefix)
-		if i < 0 {
-			return 0, false
+	var tags []attachmentTag
+	read := func(segments []text.Segment) {
+		if len(segments) == 0 {
+			return
 		}
-		start := from + i
-		after := start + len(prefix)
-		if (after == len(t.s) || isTagNameEnd(t.s[after])) && !t.literal(start) {
-			return start, true
-		}
-		from = after
+		tags = append(tags, attachmentTagsIn(md, segments[0].Start, segments[len(segments)-1].Stop)...)
 	}
-	return 0, false
-}
-
-// nextElement finds the first <bc-attachment> element at or after from. The
-// opening tag is read with its quoted attribute values, so a '>' inside one
-// does not end it. An element that is opened and never closed, or is followed
-// by another before its closing tag, is not one: the search moves past its
-// opening tag.
-func (t attachmentTags) nextElement(from int) (attachmentElement, bool) {
-	for {
-		start, ok := t.next(attachmentOpen, from)
-		if !ok {
-			return attachmentElement{}, false
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
 		}
-		after := start + len(attachmentOpen)
-		openEnd, ok := openingTagEnd(t.s, after)
-		if !ok {
-			return attachmentElement{}, false
-		}
-		if strings.HasSuffix(strings.TrimRight(t.s[after:openEnd-1], " \t\n\r"), "/") {
-			return attachmentElement{start: start, openEnd: openEnd, end: openEnd, selfClosing: true}, true
-		}
-		closeStart, ok := t.next(attachmentClose, openEnd)
-		if !ok {
-			return attachmentElement{}, false
-		}
-		if nested, ok := t.next(attachmentOpen, openEnd); ok && nested < closeStart {
-			from = openEnd
-			continue
-		}
-		closeEnd := strings.IndexByte(t.s[closeStart:], '>')
-		if closeEnd < 0 {
-			return attachmentElement{}, false
-		}
-		return attachmentElement{start: start, openEnd: openEnd, end: closeStart + closeEnd + 1}, true
-	}
-}
-
-// asciiLower lowers only ASCII letters, so every index into the result is the
-// same index into s. strings.ToLower can change a string's length: 'İ' grows
-// by a byte.
-func asciiLower(s string) string {
-	b := []byte(s)
-	for i, c := range b {
-		if 'A' <= c && c <= 'Z' {
-			b[i] = c + ('a' - 'A')
-		}
-	}
-	return string(b)
-}
-
-func isTagNameEnd(c byte) bool {
-	return c == '>' || c == '/' || c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
-}
-
-// openingTagEnd returns the index just past the '>' that ends the tag whose
-// attributes start at i, skipping quoted attribute values.
-func openingTagEnd(s string, i int) (int, bool) {
-	var quote byte
-	for ; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case quote != 0:
-			if c == quote {
-				quote = 0
+		switch node := n.(type) {
+		case *ast.RawHTML:
+			read(node.Segments.Sliced(0, node.Segments.Len()))
+		case *ast.HTMLBlock:
+			lines := node.Lines()
+			if isRichTextTag(lines.Value(source)) {
+				segments := lines.Sliced(0, lines.Len())
+				if node.HasClosure() {
+					segments = append(segments, node.ClosureLine)
+				}
+				read(segments)
 			}
-		case c == '"' || c == '\'':
-			quote = c
-		case c == '>':
-			return i + 1, true
+			return ast.WalkSkipChildren, nil
 		}
-	}
-	return 0, false
+		return ast.WalkContinue, nil
+	})
+	sort.Slice(tags, func(i, j int) bool { return tags[i].start < tags[j].start })
+	return tags
 }
 
 // collapseAttachment reduces one <bc-attachment> element to its write form,
 // or returns it unchanged when it names no record.
 func collapseAttachment(element, open string) string {
-	attrs := reTagAttribute.FindAllString(open[len(attachmentOpen):len(open)-1], -1)
+	attrs := reTagAttribute.FindAllString(open[len("<bc-attachment"):len(open)-1], -1)
 
 	kept := make([]string, 0, len(attrs))
 	hasSGID := false
@@ -249,39 +160,4 @@ func collapseAttachment(element, open string) string {
 		return element
 	}
 	return "<bc-attachment " + strings.Join(kept, " ") + "></bc-attachment>"
-}
-
-// markdownCodeSpans returns the byte ranges of md that the Markdown parser
-// reads as code: code spans, and fenced and indented code blocks.
-func markdownCodeSpans(md string) textSpanIndex {
-	source := []byte(md)
-	doc := mdConverter.Parser().Parse(text.NewReader(source))
-
-	var index textSpanIndex
-	add := func(lines *text.Segments) {
-		for i := 0; i < lines.Len(); i++ {
-			seg := lines.At(i)
-			index = append(index, textSpan{start: seg.Start, end: seg.Stop})
-		}
-	}
-	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
-		if !entering {
-			return ast.WalkContinue, nil
-		}
-		switch node := n.(type) {
-		case *ast.FencedCodeBlock, *ast.CodeBlock:
-			add(node.Lines())
-			return ast.WalkSkipChildren, nil
-		case *ast.CodeSpan:
-			for c := node.FirstChild(); c != nil; c = c.NextSibling() {
-				if t, ok := c.(*ast.Text); ok {
-					index = append(index, textSpan{start: t.Segment.Start, end: t.Segment.Stop})
-				}
-			}
-			return ast.WalkSkipChildren, nil
-		}
-		return ast.WalkContinue, nil
-	})
-	sort.Slice(index, func(i, j int) bool { return index[i].start < index[j].start })
-	return index
 }

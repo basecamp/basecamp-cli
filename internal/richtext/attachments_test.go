@@ -123,3 +123,24 @@ func TestCollapseAttachmentsLeavesTagsInComments(t *testing.T) {
 		`<!-- note --><bc-attachment sgid="x"></bc-attachment><!-- unterminated <bc-attachment sgid="y"><figure>Jo</figure></bc-attachment>`,
 		CollapseAttachments(`<!-- note --><bc-attachment sgid="x"><figure>Jo</figure></bc-attachment><!-- unterminated <bc-attachment sgid="y"><figure>Jo</figure></bc-attachment>`))
 }
+
+// Attachment markup inside another tag's attribute value is the value's text,
+// whether it would open an element or close a real one too early.
+func TestCollapseAttachmentsIgnoresTagsInAttributeValues(t *testing.T) {
+	quoted := `<span title='<bc-attachment sgid="x">'>KEEP THIS TEXT</span><span title='</bc-attachment>'>after</span>`
+	assert.Equal(t, quoted, CollapseAttachments(quoted))
+	assert.Equal(t, quoted, CollapseAttachmentsInMarkdown(quoted))
+
+	alt := `<bc-attachment sgid="x"><figure><img alt="</bc-attachment>" src="a.png"><figcaption>Jo</figcaption></figure></bc-attachment>`
+	assert.Equal(t, `<bc-attachment sgid="x"></bc-attachment>`, CollapseAttachments(alt))
+	assert.Equal(t, `<bc-attachment sgid="x"></bc-attachment>`, CollapseAttachmentsInMarkdown(alt))
+}
+
+// The Markdown renderer shows an HTML block it does not support as escaped
+// text, so an attachment written in one is text too.
+func TestCollapseAttachmentsInMarkdownLeavesEscapedHTMLBlocks(t *testing.T) {
+	input := `<section><bc-attachment sgid="x">KEEP THIS TEXT</bc-attachment></section>`
+
+	assert.Equal(t, input, CollapseAttachmentsInMarkdown(input))
+	assert.Contains(t, MarkdownToHTML(CollapseAttachmentsInMarkdown(input)), "KEEP THIS TEXT")
+}
