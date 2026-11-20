@@ -38,6 +38,11 @@ type Rule struct {
 	// trigger is discarded there, so it is cheaper to discard it before any
 	// read.
 	RequiresServed bool
+	// HeardInPings keeps a RequiresServed rule open outside a served project
+	// for a connector that hears the agent's Pings (Policy.HearsPings), so
+	// that the Ping read can say whether the bucket is a Ping. Decide admits
+	// it there only in a Ping, and discards it as no_route anywhere else.
+	HeardInPings bool
 	// Acknowledge says a person asked for something, so the worker's
 	// acknowledgement and the thirty-second guard apply. A completion, a
 	// subscription comment or a boost is not a request.
@@ -58,8 +63,10 @@ var (
 	// is not acknowledged. It requires a served project because nothing in an
 	// unserved one waits on it: blocked(no_route) would post a holding reply
 	// to a thumbs-up. Who may boost is whoever may mention the agent, in
-	// every trust mode, so it is not OperatorOnly.
-	ruleBoosted = Rule{Trigger: TriggerBoosted, RequiresServed: true}
+	// every trust mode, so it is not OperatorOnly. A Ping is never served,
+	// and the agent's lines there are answered as its comments are in a
+	// project, so a boost is heard in a Ping too.
+	ruleBoosted = Rule{Trigger: TriggerBoosted, RequiresServed: true, HeardInPings: true}
 	// Only a line in a Ping admits under pinged, and a Ping is never a served
 	// project, so the rule is not in the matrix: matchPing returns it.
 	rulePinged   = Rule{Trigger: TriggerPinged, Acknowledge: true}
