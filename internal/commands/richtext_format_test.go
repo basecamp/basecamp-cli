@@ -270,3 +270,28 @@ func TestNotesSetFormatHTMLSendsContentExactly(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(transport.last(t).Body), &body))
 	assert.Equal(t, passthroughHTML, body.Note.Content)
 }
+
+// expandedMention is a mention as the API returns it: the avatar figure inside
+// the tag and the rendered mention in its content attribute.
+const expandedMention = `<p dir="auto">Started by <bc-attachment sgid="BAh7mention" content-type="application/vnd.basecamp.mention" content="&lt;bc-mention gid=&quot;gid://bc3/Person/1&quot;&gt;
+  &lt;span&gt;Jason&lt;/span&gt;&lt;/bc-mention&gt;"><figure>
+  <img data-avatar-for-person-id="1" alt="Jason Fried" class="avatar" src="https://example.com/avatar" width="20" height="20">
+  <figcaption>
+    Jason
+  </figcaption>
+</figure></bc-attachment> this week.</p>`
+
+// Writing back a mention as the API returned it stored its avatar as content
+// of its own, split the paragraph, and added a copy on every edit (#905).
+// Basecamp's write form is the bare tag, in either format.
+func TestCommentsUpdateCollapsesAMentionCopiedFromTheAPI(t *testing.T) {
+	want := `<p dir="auto">Started by <bc-attachment sgid="BAh7mention" content-type="application/vnd.basecamp.mention"></bc-attachment> this week.</p>`
+	for _, format := range []string{"html", "markdown"} {
+		t.Run(format, func(t *testing.T) {
+			transport := &mockCommentWriteTransport{}
+			_, err := runCommentWithStderr(t, transport, expandedMention+"\n", "update", "1234", "-", "--format", format)
+			require.NoError(t, err)
+			assert.Equal(t, want, sentContent(t, transport))
+		})
+	}
+}
