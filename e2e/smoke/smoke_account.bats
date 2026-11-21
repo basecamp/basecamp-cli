@@ -67,6 +67,13 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "people preferences shows preferences" {
+  run_smoke basecamp people preferences me --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_not_null '.data.first_week_day'
+}
+
 @test "auth token shows current token" {
   run_smoke basecamp auth token --json
   assert_success
