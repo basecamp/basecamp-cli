@@ -222,3 +222,46 @@ load test_helper
   assert_success
   assert_output_contains "Docs & Files"
 }
+
+
+# Cloud files and Google documents: validation before any request
+
+@test "files cloud-files create without --url shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp files cloud-files create "Plans" --json
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' '--url is required'
+}
+
+@test "files cloud-files update without any fields shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp files cloud-files update 456 --json
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'No update fields specified'
+}
+
+@test "files google-docs create with an unknown --type shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp files google-docs create "Plan" --url "https://example.com/plan" --type spreadsheet --json
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'Invalid --type: spreadsheet'
+}
+
+@test "files google-docs update without any fields shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999, "project_id": 123}'
+
+  run basecamp files google-docs update 789 --json
+  assert_failure
+  assert_json_value '.code' 'usage'
+  assert_json_value '.error' 'No update fields specified'
+}
