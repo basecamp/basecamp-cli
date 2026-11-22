@@ -90,8 +90,9 @@ func suggestKey(data []byte, err error, within ...string) error {
 			if k != key || (path != nil && !slices.Equal(ps, path)) {
 				return false
 			}
+			// Only a struct refuses a key; a map keyed by id takes any.
 			t := typeAt(ps)
-			return t == nil || !keysOf(t, true)[k]
+			return t != nil && t.Kind() == reflect.Struct && !keysOf(t, true)[k]
 		})
 		if at >= 0 {
 			near = closestKey(key, keysOf(typeAt(parents), false))
@@ -129,12 +130,8 @@ func suggestKey(data []byte, err error, within ...string) error {
 // seen in the same object.
 func findKey(data []byte, match func(parents []string, key string, seen map[string]bool) bool) (int, []string) {
 	at, where := -1, []string(nil)
-	seen := map[string]map[string]bool{}
-	walkKeys(data, func(parents []string, k string, offset int) bool {
-		// An object is named by its keys and its offset-free path; two
-		// sibling objects in one array share it, which only makes a
-		// duplicate easier to find, never one that is not there.
-		id := strings.Join(parents, "\x00")
+	seen := map[int]map[string]bool{}
+	walkKeys(data, func(parents []string, k string, offset, id int) bool {
 		if seen[id] == nil {
 			seen[id] = map[string]bool{}
 		}
@@ -235,7 +232,7 @@ func valueOffset(data []byte, path []string) int {
 		return -1
 	}
 	at := -1
-	walkKeys(data, func(parents []string, k string, offset int) bool {
+	walkKeys(data, func(parents []string, k string, offset, _ int) bool {
 		if k != path[len(path)-1] || !slices.Equal(parents, path[:len(path)-1]) {
 			return true
 		}
@@ -253,14 +250,18 @@ func valueOffset(data []byte, path []string) int {
 }
 
 // walkKeys calls visit with each object key in data, the keys of the objects
-// it sits in, and the offset of its opening quote, until visit returns false
-// or the document ends or stops parsing. Array elements add no key.
-func walkKeys(data []byte, visit func(parents []string, key string, offset int) bool) {
+// it sits in, the offset of its opening quote and which object it is in (two
+// objects at one path, siblings in an array, are two), until visit returns false
+// or the document ends or stops parsing. An array element adds "" to the
+// path.
+func walkKeys(data []byte, visit func(parents []string, key string, offset, object int) bool) {
 	type frame struct {
 		object, wantKey bool
 		key             string // the key whose value this container is, "" in an array
+		id              int    // which object this is, counted as each opens
 	}
 	var stack []frame
+	opened := 0
 	pending := "" // the key just read, whose value comes next
 	valueRead := func() {
 		if n := len(stack); n > 0 && stack[n-1].object {
@@ -285,7 +286,8 @@ func walkKeys(data []byte, visit func(parents []string, key string, offset int) 
 			switch d {
 			case '{', '[':
 				valueRead()
-				stack = append(stack, frame{object: d == '{', wantKey: d == '{', key: pending})
+				opened++
+				stack = append(stack, frame{object: d == '{', wantKey: d == '{', key: pending, id: opened})
 				pending = ""
 			default:
 				stack = stack[:len(stack)-1]
@@ -302,7 +304,7 @@ func walkKeys(data []byte, visit func(parents []string, key string, offset int) 
 			if i := bytes.IndexByte(data[start:], '"'); i >= 0 {
 				offset += i
 			}
-			if !visit(parents(), k, offset) {
+			if !visit(parents(), k, offset, stack[n-1].id) {
 				return
 			}
 			continue

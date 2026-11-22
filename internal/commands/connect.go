@@ -18,6 +18,7 @@ import (
 
 	surfguard "github.com/basecamp/surfguard/go"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -855,11 +856,12 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	report.Add(setup.TicketCheck(ctx, reader, kind))
 	projectChecks := setup.ProjectChecks(ctx, reader, next, !exists)
 	if f.reset {
-		// A reset starts from nothing, so the run that fixes this one has to
-		// reset too: without it, setup reads the old file again.
+		// A reset starts from nothing, so the run that fixes this one is this
+		// run again, every flag it had, with a project: without --reset setup
+		// reads the old file again, and without the rest it forgets them.
 		for i, c := range projectChecks {
 			if c.Status == setup.StatusFail && c.Name == "Projects" {
-				projectChecks[i].Hint = "Serve one: basecamp connect setup -P " + richtext.ShellQuote(name) + " --reset --serve <project-id>"
+				projectChecks[i].Hint = "Serve one: " + connectSetupRerun(cmd, name) + " --serve <project-id>"
 			}
 		}
 	}
@@ -935,6 +937,30 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		return nil
 	}
 	return app.OK(report, output.WithSummary("connect.json written; "+summary.Summary()))
+}
+
+// connectSetupRerun is the setup command this run was, every flag it was
+// given as it was given, each value quoted for a shell.
+func connectSetupRerun(cmd *cobra.Command, name string) string {
+	parts := []string{"basecamp connect setup -P", richtext.ShellQuote(name)}
+	cmd.Flags().Visit(func(fl *pflag.Flag) {
+		if fl.Value.Type() == "bool" {
+			if fl.Value.String() == "true" {
+				parts = append(parts, "--"+fl.Name)
+			} else {
+				parts = append(parts, "--"+fl.Name+"=false")
+			}
+			return
+		}
+		values := []string{fl.Value.String()}
+		if slice, ok := fl.Value.(pflag.SliceValue); ok {
+			values = slice.GetSlice()
+		}
+		for _, v := range values {
+			parts = append(parts, "--"+fl.Name, richtext.ShellQuote(v))
+		}
+	})
+	return strings.Join(parts, " ")
 }
 
 // connectSaveFile is setup.Save, as a reset writes over a file it moved

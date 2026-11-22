@@ -2,6 +2,7 @@ package setup
 
 import (
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -224,3 +225,26 @@ func TestParsePlacesTheSecondOfADuplicatedKey(t *testing.T) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// Two objects at one path, siblings in an array, are two objects: a key in
+// each is no duplicate.
+func TestADuplicateIsPlacedInTheObjectThatHasIt(t *testing.T) {
+	data := []byte("{\"list\": [\n  {\"id\": 1},\n  {\"id\": 2},\n  {\"id\": 3, \"id\": 4}\n]}")
+	err := suggestKey(data, errors.New(`key "id" appears twice in one object`))
+	assert.Equal(t, `line 4, column 13: key "id" appears twice in one object`, err.Error())
+}
+
+// A project id is a valid key of the projects map; an unknown key elsewhere
+// with the same spelling is the one refused.
+func TestAnUnknownKeyIsNotPlacedOnAMapsId(t *testing.T) {
+	data := strings.TrimSpace(indentedFile(t))
+	broken := strings.TrimSuffix(data, "}") + `,
+  "ack_boost": {"222": true}
+}`
+	project, stray := lineOf(t, broken, `"222": {`), lineOf(t, broken, `"ack_boost"`)
+	require.Less(t, project, stray, "the valid project id comes first, so a first-match lookup would name it")
+	_, err := Parse([]byte(broken))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown field "222"`)
+	assert.Contains(t, err.Error(), "line "+itoa(stray)+", column 17: ")
+}

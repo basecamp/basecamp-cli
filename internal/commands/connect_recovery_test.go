@@ -314,7 +314,22 @@ func TestBasecampDoctorHasALinePerConnectorProfile(t *testing.T) {
 	require.Len(t, checks, 1)
 	assert.Equal(t, "fail", checks[0].Status)
 	assert.Contains(t, checks[0].Message, "connect.json can't be used: parse connect.json: line 3, column 22")
+	assert.True(t, strings.HasSuffix(checks[0].Message, "; whether its connector is running can't be told"), checks[0].Message)
 	assert.Equal(t, connectResetHint("agent"), checks[0].Hint)
+}
+
+// A connector started before its file broke is still running, and the line
+// for its profile says so.
+func TestBasecampDoctorSaysABrokenProfilesConnectorIsRunning(t *testing.T) {
+	f := newOperatorFixture(t)
+	c := startProfileConnector(t, f.s, "agent")
+	c.awaitRunning(t)
+	breakConnectFile(t, brokenConnectFiles[1].edit)
+
+	checks := checkConnectorProfiles()
+	require.Len(t, checks, 1)
+	assert.Equal(t, "fail", checks[0].Status)
+	assert.True(t, strings.HasSuffix(checks[0].Message, "; its connector is running, and holds requests until the file reads again"), checks[0].Message)
 }
 
 // The file a reset moved aside goes back when the write that should replace
@@ -437,7 +452,7 @@ func TestResetAloneIsNotGuidedSetup(t *testing.T) {
 }
 
 // A reset with no project is refused, as any first setup is, and the hint
-// that fixes it keeps --reset: without it, setup would read the old file.
+// that fixes it is this run again with a project: following it works.
 func TestSetupResetWithNoProjectSaysToResetWithOne(t *testing.T) {
 	f := newOperatorFixture(t)
 	broken := breakConnectFile(t, brokenConnectFiles[1].edit)
@@ -445,7 +460,23 @@ func TestSetupResetWithNoProjectSaysToResetWithOne(t *testing.T) {
 	require.Error(t, err, out)
 	e := usageError(t, err)
 	assert.Equal(t, codeNotReady, e.Code)
-	assert.Equal(t, "Serve one: basecamp connect setup -P agent --reset --serve <project-id>", e.Hint)
+	assert.Equal(t, fmt.Sprintf("Serve one: basecamp connect setup -P agent --operator %d --reset --serve <project-id>", setupOperatorPerson), e.Hint)
 	now, _ := os.ReadFile(connectSetupPath(t, "agent"))
 	assert.Equal(t, broken, now)
+
+	// Follow it.
+	command, ok := strings.CutPrefix(e.Hint, "Serve one: basecamp connect setup -P agent ")
+	require.True(t, ok)
+	args := strings.Fields(strings.ReplaceAll(command, "<project-id>", fmt.Sprint(setupProject)))
+	out, err = runConnectSetupCmd(t, newConnectSetupApp(t, f.s, "agent"), args...)
+	require.NoError(t, err, out)
+	_, err = setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+}
+
+func TestConnectSetupRerunRepeatsEveryFlagAsGiven(t *testing.T) {
+	cmd := newConnectSetupCmd()
+	require.NoError(t, cmd.ParseFlags([]string{"--reset", "--allow", "1", "--allow", "2", "--ack-boost", "On it", "--allow-assignments-from-authorized=false", "--trust", "allowlist"}))
+	assert.Equal(t, "basecamp connect setup -P agent --ack-boost 'On it' --allow 1 --allow 2 --allow-assignments-from-authorized=false --reset --trust allowlist",
+		connectSetupRerun(cmd, "agent"))
 }

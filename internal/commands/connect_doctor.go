@@ -334,6 +334,18 @@ func checkConnectorProfiles() []Check {
 			c.Status = "fail"
 			c.Message = "connect.json can't be used: " + setup.ErrorText(err)
 			c.Hint = connectResetHint(name)
+			// A connector started before the file broke may still run,
+			// holding requests until it reads again: its state says so.
+			if account, person, ok := connectStateIdentity(name, false); ok {
+				state := setup.File{Profile: name, AccountID: account, Agent: setup.Agent{PersonID: person}}
+				if connectorRunning(name, state) {
+					c.Message += "; its connector is running, and holds requests until the file reads again"
+				} else {
+					c.Message += "; its connector is not running"
+				}
+			} else {
+				c.Message += "; whether its connector is running can't be told"
+			}
 		case connectorRunning(name, file):
 			c.Status, c.Message = "pass", "Set up, and its connector is running"
 		default:
