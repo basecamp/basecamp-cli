@@ -2,6 +2,7 @@ package resilience
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -89,34 +90,50 @@ func TestRateLimiterCapsAtMaxTokens(t *testing.T) {
 }
 
 func TestRateLimiterRetryAfter(t *testing.T) {
-	dir := t.TempDir()
-	store := NewStore(dir)
-	rl := NewRateLimiter(store, RateLimiterConfig{
-		MaxTokens:        5,
-		RefillRate:       10,
-		TokensPerRequest: 1,
+	// Filesystem work under race instrumentation can outlast a 50ms block.
+	// Advance virtual time explicitly so the assertions test the deadline.
+	synctest.Test(t, func(t *testing.T) {
+		dir := t.TempDir()
+		store := NewStore(dir)
+		rl := NewRateLimiter(store, RateLimiterConfig{
+			MaxTokens:        5,
+			RefillRate:       10,
+			TokensPerRequest: 1,
+		})
+
+		// Set retry-after for a short duration
+		require.NoError(t, rl.SetRetryAfterDuration(50*time.Millisecond))
+
+		// Should reject requests during retry-after
+		allowed, err := rl.Allow()
+		require.NoError(t, err)
+		assert.False(t, allowed, "expected request to be rejected during retry-after period")
+
+		// Check remaining time
+		remaining, err := rl.RetryAfterRemaining()
+		require.NoError(t, err)
+		assert.Equal(t, 50*time.Millisecond, remaining)
+
+		// Just before expiry, the block still applies.
+		time.Sleep(40 * time.Millisecond)
+		remaining, err = rl.RetryAfterRemaining()
+		require.NoError(t, err)
+		assert.Equal(t, 10*time.Millisecond, remaining)
+		allowed, err = rl.Allow()
+		require.NoError(t, err)
+		assert.False(t, allowed)
+
+		// At the deadline, the block has expired.
+		time.Sleep(10 * time.Millisecond)
+		remaining, err = rl.RetryAfterRemaining()
+		require.NoError(t, err)
+		assert.Zero(t, remaining)
+
+		// Should allow requests now
+		allowed, err = rl.Allow()
+		require.NoError(t, err)
+		assert.True(t, allowed, "expected request to be allowed after retry-after period")
 	})
-
-	// Set retry-after for a short duration
-	require.NoError(t, rl.SetRetryAfterDuration(50*time.Millisecond))
-
-	// Should reject requests during retry-after
-	allowed, err := rl.Allow()
-	require.NoError(t, err)
-	assert.False(t, allowed, "expected request to be rejected during retry-after period")
-
-	// Check remaining time
-	remaining, err := rl.RetryAfterRemaining()
-	require.NoError(t, err)
-	assert.True(t, remaining > 0 && remaining <= 60*time.Millisecond, "expected remaining time between 0-60ms, got %v", remaining)
-
-	// Wait past retry-after
-	time.Sleep(60 * time.Millisecond)
-
-	// Should allow requests now
-	allowed, err = rl.Allow()
-	require.NoError(t, err)
-	assert.True(t, allowed, "expected request to be allowed after retry-after period")
 }
 
 func TestRateLimiterSetRetryAfter(t *testing.T) {
