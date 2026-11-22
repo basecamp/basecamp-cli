@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -329,7 +330,8 @@ func TestBasecampDoctorSaysABrokenProfilesConnectorIsRunning(t *testing.T) {
 	checks := checkConnectorProfiles()
 	require.Len(t, checks, 1)
 	assert.Equal(t, "fail", checks[0].Status)
-	assert.True(t, strings.HasSuffix(checks[0].Message, "; its connector is running, and holds requests until the file reads again"), checks[0].Message)
+	assert.True(t, strings.HasSuffix(checks[0].Message, fmt.Sprintf("; its connector (agent person %d in account %s) is running, and holds requests until the file reads again",
+		f.file.Agent.PersonID, f.file.AccountID)), checks[0].Message)
 }
 
 // The file a reset moved aside goes back when the write that should replace
@@ -479,4 +481,32 @@ func TestConnectSetupRerunRepeatsEveryFlagAsGiven(t *testing.T) {
 	require.NoError(t, cmd.ParseFlags([]string{"--reset", "--allow", "1", "--allow", "2", "--ack-boost", "On it", "--allow-assignments-from-authorized=false", "--trust", "allowlist"}))
 	assert.Equal(t, "basecamp connect setup -P agent --ack-boost 'On it' --allow 1 --allow 2 --allow-assignments-from-authorized=false --reset --trust allowlist",
 		connectSetupRerun(cmd, "agent"))
+}
+
+// Run under the root, so inherited flags reach setup as they do for real: the
+// hint repeats setup's own flags alone, quoted so a shell gives each back as
+// it was.
+func TestConnectSetupRerunLeavesInheritedFlagsOutAndQuotesForAShell(t *testing.T) {
+	root := &cobra.Command{Use: "basecamp"}
+	root.PersistentFlags().CountP("verbose", "v", "")
+	root.PersistentFlags().Bool("json", false, "")
+	connect := &cobra.Command{Use: "connect"}
+	root.AddCommand(connect)
+	cmd := newConnectSetupCmd()
+	var rerun string
+	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		rerun = connectSetupRerun(cmd, "agent")
+		return nil
+	}
+	connect.AddCommand(cmd)
+	root.SetArgs([]string{"connect", "setup", "-v", "--json", "--reset", "--ack-boost", "it's on", "--allow", "1"})
+	require.NoError(t, root.Execute())
+
+	assert.NotContains(t, rerun, "--verbose")
+	assert.NotContains(t, rerun, "--json")
+	// The shell parses the hint's own words.
+	words, err := exec.CommandContext(context.Background(), "/bin/sh", "-c", "set -- "+strings.TrimPrefix(rerun, "basecamp ")+`; for a in "$@"; do printf '%s\n' "$a"; done`).Output()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"connect", "setup", "-P", "agent", "--ack-boost", "it's on", "--allow", "1", "--reset"},
+		strings.Split(strings.TrimSuffix(string(words), "\n"), "\n"))
 }

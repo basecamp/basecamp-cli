@@ -939,11 +939,17 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	return app.OK(report, output.WithSummary("connect.json written; "+summary.Summary()))
 }
 
-// connectSetupRerun is the setup command this run was, every flag it was
-// given as it was given, each value quoted for a shell.
+// connectSetupRerun is the setup command this run was: the profile, and
+// every flag of setup's own it was given, each value quoted for a shell.
+// Inherited flags (-v, --json) are left out: they don't decide what setup
+// writes, and some (a count) can't be written back as given.
 func connectSetupRerun(cmd *cobra.Command, name string) string {
 	parts := []string{"basecamp connect setup -P", richtext.ShellQuote(name)}
+	own := cmd.LocalNonPersistentFlags()
 	cmd.Flags().Visit(func(fl *pflag.Flag) {
+		if own.Lookup(fl.Name) == nil {
+			return
+		}
 		if fl.Value.Type() == "bool" {
 			if fl.Value.String() == "true" {
 				parts = append(parts, "--"+fl.Name)

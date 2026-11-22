@@ -338,10 +338,13 @@ func checkConnectorProfiles() []Check {
 			// holding requests until it reads again: its state says so.
 			if account, person, ok := connectStateIdentity(name, false); ok {
 				state := setup.File{Profile: name, AccountID: account, Agent: setup.Agent{PersonID: person}}
+				// The state is the only witness of which agent ran here: name
+				// it, since the profile's credential may since be another's.
+				who := fmt.Sprintf("its connector (agent person %d in account %s)", person, account)
 				if connectorRunning(name, state) {
-					c.Message += "; its connector is running, and holds requests until the file reads again"
+					c.Message += "; " + who + " is running, and holds requests until the file reads again"
 				} else {
-					c.Message += "; its connector is not running"
+					c.Message += "; " + who + " is not running"
 				}
 			} else {
 				c.Message += "; whether its connector is running can't be told"
