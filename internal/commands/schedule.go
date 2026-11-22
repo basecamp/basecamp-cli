@@ -416,6 +416,8 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	var endsAt string
 	var description string
 	var allDay bool
+	var highlight bool
+	var joinURL string
 	var notify bool
 	var participants string
 	var subscribe string
@@ -479,7 +481,7 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 				return err
 			}
 
-			return runScheduleCreate(cmd, app, scope, *project, *scheduleID, entrySummary, startsAt, endsAt, description, allDay, notify, visibleToClients, draft, participants, subscribe, noSubscribe, attachFiles)
+			return runScheduleCreate(cmd, app, scope, *project, *scheduleID, entrySummary, startsAt, endsAt, description, allDay, notify, visibleToClients, draft, highlight, joinURL, participants, subscribe, noSubscribe, attachFiles)
 		},
 	}
 
@@ -492,6 +494,8 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	cmd.Flags().StringVar(&description, "description", "", "Detailed description; use - to read from stdin")
 	cmd.Flags().StringVar(&description, "desc", "", "Description (alias)")
 	cmd.Flags().BoolVar(&allDay, "all-day", false, "Mark as all-day event")
+	cmd.Flags().BoolVar(&highlight, "highlight", false, "Highlight the entry on the schedule (false removes the highlight)")
+	cmd.Flags().StringVar(&joinURL, "join-url", "", "Join link for the event (empty clears it; returned as join_url)")
 	cmd.Flags().BoolVar(&notify, "notify", false, "Notify participants")
 	cmd.Flags().StringVar(&participants, "participants", "", "Comma-separated person IDs")
 	cmd.Flags().StringVar(&participants, "people", "", "Person IDs (alias)")
@@ -507,7 +511,7 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	return cmd
 }
 
-func runScheduleCreate(cmd *cobra.Command, app *appctx.App, scope followUpScope, project, scheduleID, summary, startsAt, endsAt, description string, allDay, notify, visibleToClients, draft bool, participants, subscribe string, noSubscribe bool, attachFiles []string) error {
+func runScheduleCreate(cmd *cobra.Command, app *appctx.App, scope followUpScope, project, scheduleID, summary, startsAt, endsAt, description string, allDay, notify, visibleToClients, draft, highlight bool, joinURL, participants, subscribe string, noSubscribe bool, attachFiles []string) error {
 	// Resolve subscription flags early (fail fast on bad input)
 	subs, err := applySubscribeFlags(cmd.Context(), app.Names, subscribe, cmd.Flags().Changed("subscribe"), noSubscribe)
 	if err != nil {
@@ -585,6 +589,13 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, scope followUpScope,
 		Subscriptions: subs,
 	}
 
+	if cmd.Flags().Changed("highlight") {
+		req.Highlighted = &highlight
+	}
+	if cmd.Flags().Changed("join-url") {
+		req.URL = &joinURL
+	}
+
 	// Set client visibility only when the flag was provided. Omitting it uses the
 	// server's default: team-only when posting as a team member, but a
 	// client-authenticated caller always creates client-visible records (an
@@ -653,6 +664,8 @@ func newScheduleUpdateCmd(project *string) *cobra.Command {
 	var endsAt string
 	var description string
 	var allDay bool
+	var highlight bool
+	var joinURL string
 	var notify bool
 	var participants string
 	var attachFiles []string
@@ -739,6 +752,15 @@ You can pass either an entry ID or a Basecamp URL:
 			// Build request with provided fields only
 			req := &basecamp.UpdateScheduleEntryRequest{}
 			hasChanges := false
+
+			if cmd.Flags().Changed("highlight") {
+				req.Highlighted = &highlight
+				hasChanges = true
+			}
+			if cmd.Flags().Changed("join-url") {
+				req.URL = &joinURL
+				hasChanges = true
+			}
 
 			if summary != "" {
 				req.Summary = basecamp.Ptr(summary)
@@ -852,6 +874,8 @@ You can pass either an entry ID or a Basecamp URL:
 	cmd.Flags().StringVar(&description, "description", "", "Detailed description; use - to read from stdin")
 	cmd.Flags().StringVar(&description, "desc", "", "Description (alias)")
 	cmd.Flags().BoolVar(&allDay, "all-day", false, "Mark as all-day event")
+	cmd.Flags().BoolVar(&highlight, "highlight", false, "Highlight the entry on the schedule (false removes the highlight)")
+	cmd.Flags().StringVar(&joinURL, "join-url", "", "Join link for the event (empty clears it; returned as join_url)")
 	cmd.Flags().BoolVar(&notify, "notify", false, "Notify participants")
 	cmd.Flags().StringVar(&participants, "participants", "", "Comma-separated person IDs")
 	cmd.Flags().StringVar(&participants, "people", "", "Person IDs (alias)")
