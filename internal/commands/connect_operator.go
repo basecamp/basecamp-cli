@@ -103,7 +103,13 @@ func loadConnectProfileForReport(cmd *cobra.Command) (connectProfile, error) {
 		}
 		_, mismatch := loadConnectFile(p.path, p.name)
 		broken := connectProfile{app: p.app, name: p.name, path: p.path, fileErr: mismatch}
+		// The profile's own state is the better witness of whose connector
+		// ran here than a file copied from elsewhere; that file's agent is
+		// the fallback.
 		broken.file = setup.File{Profile: p.name, AccountID: p.file.AccountID, Agent: setup.Agent{PersonID: p.file.Agent.PersonID}}
+		if account, person, ok := connectStateIdentity(p.name, false); ok {
+			broken.file.AccountID, broken.file.Agent.PersonID = account, person
+		}
 		return broken, nil
 	}
 	app := appctx.FromContext(cmd.Context())

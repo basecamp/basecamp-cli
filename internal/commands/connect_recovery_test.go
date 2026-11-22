@@ -537,3 +537,21 @@ func TestAFileCopiedFromAnotherProfileIsNotSetUp(t *testing.T) {
 	_, err := loadConnectProfile(cmd)
 	require.NoError(t, err)
 }
+
+// A file copied from another profile names that profile's agent; the state
+// this profile's connector left is what status reads.
+func TestACopiedFileDoesNotHideThisProfilesLedger(t *testing.T) {
+	f := newOperatorFixture(t)
+	require.NoError(t, f.ledger(t, false).Close())
+	breakConnectFile(t, func(s string) string {
+		s = strings.Replace(s, `"profile": "agent"`, `"profile": "laptop"`, 1)
+		return strings.Replace(s, fmt.Sprintf(`"person_id": %d`, f.file.Agent.PersonID), fmt.Sprintf(`"person_id": %d`, f.file.Agent.PersonID+1), 1)
+	})
+	p := f.reportProfile(t)
+	require.True(t, p.broken())
+	assert.Equal(t, f.file.Agent.PersonID, p.file.Agent.PersonID, "the state directory's agent, not the copy's")
+
+	out, err := f.run(t, output.FormatJSON, "status")
+	require.NoError(t, err, out)
+	assert.Contains(t, out, `"config"`)
+}
