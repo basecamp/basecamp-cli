@@ -101,6 +101,11 @@ type Manager struct {
 	proxyOnce sync.Once
 	proxyEnv  *proxyEnvState
 
+	// allowPrivate is oauthAllowPrivateEnv as privateOptIn read it, once,
+	// under allowPrivateOnce.
+	allowPrivateOnce sync.Once
+	allowPrivate     bool
+
 	// Warnf receives transport-policy warnings (a proxy ignored for OAuth
 	// traffic, a malformed opt-out value). Test seam; nil means stderr.
 	Warnf func(format string, args ...any)
@@ -1539,6 +1544,9 @@ func (m *Manager) discoverOAuth(ctx context.Context, log func(string)) (*discove
 	if res.IsFallback() {
 		if res.FallbackReason == oauth.FallbackResourceDiscoveryFailed {
 			log(fmt.Sprintf("warning: OAuth discovery failed for %s, using Launchpad fallback", origin))
+			if hint := m.privateBaseURLHint(ctx, origin); hint != "" {
+				log("hint: " + hint)
+			}
 		}
 		lpURL, lpErr := m.launchpadURL()
 		if lpErr != nil {
