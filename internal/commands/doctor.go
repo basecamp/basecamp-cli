@@ -220,12 +220,15 @@ func runDoctorChecks(ctx context.Context, app *appctx.App, verbose bool) []Check
 	// 11. Shell completion
 	checks = append(checks, checkShellCompletion(verbose))
 
-	// 12. Legacy bcq detection
+	// 12. Connector profiles set up on this computer, one line each
+	checks = append(checks, checkConnectorProfiles()...)
+
+	// 13. Legacy bcq detection
 	if legacyCheck := checkLegacyInstall(ctx); legacyCheck != nil {
 		checks = append(checks, *legacyCheck)
 	}
 
-	// 13. AI Agent integration (for each detected agent)
+	// 14. AI Agent integration (for each detected agent)
 	if baselineSkillInstalled() {
 		checks = append(checks, checkSkillVersion())
 	}

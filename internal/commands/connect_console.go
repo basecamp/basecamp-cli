@@ -118,7 +118,7 @@ func (c *connectConsole) checks(ctx context.Context) []console.Check {
 	if err != nil {
 		return []console.Check{{Name: "connect.json", Status: setup.StatusFail,
 			Message: "It cannot be used as it now stands: " + setup.ErrorText(err),
-			Hint:    "Run basecamp connect setup -P " + richtext.ShellQuote(p.name) + " again, then press r."}}
+			Hint:    connectResetHint(p.name) + ", then press r."}}
 	}
 	var checks []console.Check
 	for _, check := range connectDoctorChecks(ctx, p) {

@@ -25,6 +25,7 @@ CMD basecamp connect setup
 FLAG basecamp --operator-profile
 FLAG basecamp --serve
 FLAG basecamp --shadow
+FLAG basecamp --reset
 CMD basecamp connect discard
 CMD basecamp connect ask
 CMD basecamp connect doctor

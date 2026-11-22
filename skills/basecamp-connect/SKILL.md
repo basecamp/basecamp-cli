@@ -650,6 +650,15 @@ Failed checks worth knowing:
 **Never edit connect.json by hand**, and never read it directly: use
 `basecamp connect show -P '<profile>' --json`, which checks the file is safe
 first. Every change goes through setup, which keeps whatever you don't pass.
+A person may still type into the file, and the connector refuses it whole
+when it no longer reads. `connect doctor` then fails its connect.json check,
+naming the line and column or the key that was probably meant, and still runs
+the others; `connect status` still shows the ledger. Don't repair the file:
+set the profile up again with `basecamp connect setup -P '<profile>' --reset`
+and the flags it needs (ask the person which projects, as in step 3). It
+starts from those flags alone, and keeps the old file beside the new one as
+`connect.json.broken-<time>`, so `connect show` can't read what it held:
+tell the person it is there if they want to look.
 
 ### Instructions for writing to Basecamp
 
