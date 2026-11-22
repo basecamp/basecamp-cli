@@ -79,7 +79,6 @@ func TestGaugesListSendsTheNamedProjectsInOrder(t *testing.T) {
 		{"--project", []string{"list", "--project", "456"}, "456"},
 		{"--projects comma-separated", []string{"list", "--projects", "456,123"}, "456,123"},
 		{"--projects repeated", []string{"list", "--projects", "456", "--projects", "123"}, "456,123"},
-		{"--in then --projects", []string{"list", "--in", "789", "--projects", "456,123"}, "789,456,123"},
 		{"repeats dropped", []string{"list", "--projects", "456,123,456"}, "456,123"},
 		{"leading zeros canonical", []string{"list", "--projects", "00456"}, "456"},
 		{"by name", []string{"list", "--projects", "Test Project,456"}, "123,456"},
@@ -107,6 +106,10 @@ func TestGaugesListRefusesBadProjectsBeforeAnyRequest(t *testing.T) {
 	}{
 		{"empty entry", []string{"list", "--projects", "123,,456"}},
 		{"empty --in", []string{"list", "--in", ""}},
+		{"empty --projects", []string{"list", "--projects", ""}},
+		{"empty repeated --projects", []string{"list", "--projects", "123", "--projects", ""}},
+		{"--in with --projects", []string{"list", "--in", "789", "--projects", "456,123"}},
+		{"--projects with --in", []string{"list", "--projects", "456,123", "--in", "789"}},
 		{"zero", []string{"list", "--projects", "0"}},
 		{"negative", []string{"list", "--projects=-5"}},
 		{"unknown name", []string{"list", "--projects", "No Such Project"}},

@@ -26,7 +26,7 @@ A gauge shows the current state of a project via needles positioned on a
 0–100 scale, each colored green, yellow, or red.`,
 		Annotations: map[string]string{
 			"agent_notes": "Gauges track project progress with colored needles (0-100 scale).\n" +
-				"list is account-wide; --in or --projects a,b narrows it to those projects, in that order.\n" +
+				"list is account-wide; --in <project> or --projects a,b (not both) narrows it, in the order named.\n" +
 				"A configured default project never narrows list. needles/create/enable/disable are project-scoped (--in).\n" +
 				"Colors: green, yellow, red. Notify: everyone, working_on, custom.",
 		},
@@ -50,7 +50,7 @@ A gauge shows the current state of a project via needles positioned on a
 }
 
 func newGaugesListCmd(project *string) *cobra.Command {
-	var projects []string
+	var projects repeatedString
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -58,8 +58,9 @@ func newGaugesListCmd(project *string) *cobra.Command {
 		Long: `List gauges across every project in the account, riskiest first.
 
 --in narrows the list to one project, and --projects to several, given as
-names or IDs, comma-separated or repeated. Gauges then come back in the order
-the projects were named. A configured default project does not narrow it.
+names or IDs, comma-separated or repeated; use one or the other. Gauges then
+come back in the order the projects were named. A configured default project
+does not narrow it.
 
   basecamp gauges list
   basecamp gauges list --in MyProject
@@ -75,11 +76,17 @@ the projects were named. A configured default project does not narrow it.
 			// Only a project named on this command narrows the report:
 			// --project/--in is shared with the group, so ask whether it was
 			// given rather than reading a default.
-			var named []string
-			if cmd.Flags().Changed("project") || cmd.Flags().Changed("in") {
-				named = append(named, *project)
+			single := cmd.Flags().Changed("project") || cmd.Flags().Changed("in")
+			several := cmd.Flags().Changed("projects")
+			if single && several {
+				// The API answers in the order named, and the two flags'
+				// relative order on the command line is not recoverable.
+				return output.ErrUsage("Use --in for one project or --projects for several, not both")
 			}
-			named = append(named, projects...)
+			named := []string(projects)
+			if single {
+				named = []string{*project}
+			}
 
 			bucketIDs, err := resolveGaugeProjects(cmd, app, named)
 			if err != nil {
@@ -115,7 +122,9 @@ the projects were named. A configured default project does not narrow it.
 		},
 	}
 
-	cmd.Flags().StringSliceVar(&projects, "projects", nil, "Only these projects' gauges: names or IDs (comma-separated or repeated)")
+	// Not StringSliceVar: it drops an empty value, which would widen
+	// `--projects ""` to the whole account instead of refusing it.
+	cmd.Flags().Var(&projects, "projects", "Only these projects' gauges, in this order: names or IDs (comma-separated or repeated)")
 
 	return cmd
 }
