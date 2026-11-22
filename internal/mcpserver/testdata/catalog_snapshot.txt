@@ -313,7 +313,7 @@ Call {"action": "describe", "params": {"action": "NAME"}} for an action's full p
 
 ACTIONS (RO = read-only):
 - get_assigned_todos (RO): Get todos assigned to a specific person
-- get_overdue_todos (RO): Get overdue todos grouped by lateness
+- get_overdue_todos (RO): Get one page of overdue todos grouped by lateness, latest first
 - get_person_progress (RO, paginated): Get a person's activity timeline
 - get_progress_report (RO, paginated): Get account-wide activity feed (progress report)
 - get_project_timeline (RO, paginated): Get project timeline

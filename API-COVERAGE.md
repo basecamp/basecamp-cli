@@ -243,7 +243,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | **Hill Charts** |
 | hill_charts | 2 | `hillcharts` | ✅ | BC4 | - | show, track/untrack todolists |
 | hill_charts (progress updates) | 3 | `hillcharts updates`, `hillcharts update` | ✅ | BC5 | - | post (`POST /todosets/:id/hills/versions.json`; `hillcharts update --dot <todolist-id\|name>=<0-100>`, repeatable, lists left out keep their position; `--note` Markdown converted to rich text, `-` reads stdin; `--notify` names who is told, nobody otherwise), list (`GET /todosets/:id/hills/versions.json`, paginated, newest first; bare `hillcharts updates` or `updates list`), show (`GET /todosets/:id/hills/versions/:id.json`; an id with `--in`/`--todoset`, or the update's web or API URL, which names its todoset). Each update carries its note (`description`, rich text) and every tracked todolist's position (`dots`; `id` is null for a todolist since deleted or moved). Todoset resolved as `hillcharts show` does |
-| gauges | 7 | `gauges` | ✅ | BC4 | - | list, needles, needle, create, update, delete, enable/disable |
+| gauges | 7 | `gauges` | ✅ | BC4 | - | list (account-wide, or by project), needles, needle, create, update, delete, enable/disable |
 | **Communication** |
 | messages | 10 | `messages`, `message` | ✅ | BC4 | - | list, show, create, update, publish, pin, unpin. Create supports `--subscribe`/`--no-subscribe` and `--draft`. Publish promotes drafts to active. `move`/`copy` file a message onto a message board in another project (see recordings (moves, copies)) |
 | message_boards | 3 | `messageboards` | ✅ | BC4 | - | Container, accessed via project dock |
