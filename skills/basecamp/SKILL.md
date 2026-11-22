@@ -88,23 +88,18 @@ argument-hint: "[action] [args...]"
 
 # Basecamp CLI
 
-The installed CLI is the command reference. This skill sets the operating rules
-and does not duplicate its catalog.
+The CLI is the command reference; this skill sets operating rules.
 
 ## Discovery-first workflow
 
-For each task:
-
 1. Infer the deepest plausible leaf command from the user's words.
-2. If its exact arguments or flags are not already established by a tool result
-   in this conversation, inspect that leaf directly:
+2. Unless a tool result already established its arguments and flags, inspect it:
 
    ```bash
    basecamp <group> <subcommand> --agent --help
    ```
 
-3. If the leaf does not exist, inspect its nearest parent group. Use root help
-   only when the top-level group itself is unclear:
+3. If absent, inspect its parent. Use root help only if the group is unclear:
 
    ```bash
    basecamp <group> --agent --help   # fallback
@@ -288,6 +283,11 @@ basecamp projects logo remove --in "<project>" --json
 - Each command returns the project. `.data.logo` is `{url}`, and is absent when
   the project has none; `projects show` carries the same field. Like the
   wallpaper's, the URL needs authentication.
+
+## Gauges
+
+`gauges list` ignores configured project. Filter with `--in` or
+`--projects` (ordered IDs/names, comma-separated, repeatable), never both.
 
 ## Timesheet entries
 
