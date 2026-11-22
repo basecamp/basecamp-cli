@@ -422,12 +422,17 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	var noSubscribe bool
 	var attachFiles []string
 	var visibleToClients bool
+	var highlight bool
+	var joinURL string
 
 	cmd := &cobra.Command{
 		Use:   "create <summary>",
 		Short: "Create a schedule entry",
-		Long:  "Create a new entry in the project schedule.",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Create a new entry in the project schedule.
+
+  basecamp schedule create "Kickoff" --starts-at 2026-03-04T09:00:00Z --ends-at 2026-03-04T10:00:00Z \
+    --highlight --join-url https://meet.example.com/kickoff`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			entrySummary := summary
 			if len(args) > 0 {
@@ -477,7 +482,7 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 				return err
 			}
 
-			return runScheduleCreate(cmd, app, *project, *scheduleID, entrySummary, startsAt, endsAt, description, allDay, notify, visibleToClients, participants, subscribe, noSubscribe, attachFiles)
+			return runScheduleCreate(cmd, app, *project, *scheduleID, entrySummary, startsAt, endsAt, description, allDay, notify, visibleToClients, participants, subscribe, noSubscribe, attachFiles, highlight, joinURL)
 		},
 	}
 
@@ -499,12 +504,14 @@ func newScheduleCreateCmd(project, scheduleID *string) *cobra.Command {
 	cmd.Flags().BoolVar(&noSubscribe, "no-subscribe", false, "Don't subscribe anyone else (silent, no notifications)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 	cmd.Flags().BoolVar(&visibleToClients, "visible-to-clients", false, "Make the schedule entry visible to clients on the project (omit for the server default; client-authenticated callers always post client-visible)")
+	cmd.Flags().BoolVar(&highlight, "highlight", false, "Highlight the entry on the schedule")
+	cmd.Flags().StringVar(&joinURL, "join-url", "", "Join link for the entry, such as a video call URL")
 
 	addRichTextFormatFlag(cmd)
 	return cmd
 }
 
-func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID, summary, startsAt, endsAt, description string, allDay, notify, visibleToClients bool, participants, subscribe string, noSubscribe bool, attachFiles []string) error {
+func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID, summary, startsAt, endsAt, description string, allDay, notify, visibleToClients bool, participants, subscribe string, noSubscribe bool, attachFiles []string, highlight bool, joinURL string) error {
 	// Resolve subscription flags early (fail fast on bad input)
 	subs, err := applySubscribeFlags(cmd.Context(), app.Names, subscribe, cmd.Flags().Changed("subscribe"), noSubscribe)
 	if err != nil {
@@ -584,6 +591,13 @@ func runScheduleCreate(cmd *cobra.Command, app *appctx.App, project, scheduleID,
 	if cmd.Flags().Changed("visible-to-clients") {
 		req.VisibleToClients = &visibleToClients
 	}
+	if cmd.Flags().Changed("highlight") {
+		req.Highlighted = &highlight
+	}
+	// A new entry has no join link to clear, so an empty one is left out.
+	if joinURL = strings.TrimSpace(joinURL); joinURL != "" {
+		req.URL = &joinURL
+	}
 
 	if participants != "" {
 		var ids []int64
@@ -635,6 +649,10 @@ func newScheduleUpdateCmd(project *string) *cobra.Command {
 	var notify bool
 	var participants string
 	var attachFiles []string
+	var highlight bool
+	var noHighlight bool
+	var joinURL string
+	var noJoinURL bool
 
 	cmd := &cobra.Command{
 		Use:   "update <id|url>",
@@ -643,7 +661,12 @@ func newScheduleUpdateCmd(project *string) *cobra.Command {
 
 You can pass either an entry ID or a Basecamp URL:
   basecamp schedule update 789 --summary "new title" --in my-project
-  basecamp schedule update https://3.basecamp.com/123/buckets/456/schedule_entries/789 --summary "new title"`,
+  basecamp schedule update https://3.basecamp.com/123/buckets/456/schedule_entries/789 --summary "new title"
+
+Highlight and the join link change only when asked; --no-highlight and
+--no-join-url (or --join-url "") remove them:
+  basecamp schedule update 789 --highlight --join-url https://meet.example.com/standup
+  basecamp schedule update 789 --no-highlight --no-join-url`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
@@ -680,6 +703,12 @@ You can pass either an entry ID or a Basecamp URL:
 			}
 			if err := validateAttachPaths(attachFiles); err != nil {
 				return err
+			}
+			if cmd.Flags().Changed("no-highlight") && cmd.Flags().Changed("highlight") {
+				return output.ErrUsage("--highlight and --no-highlight cannot be used together")
+			}
+			if cmd.Flags().Changed("no-join-url") && cmd.Flags().Changed("join-url") {
+				return output.ErrUsage("--join-url and --no-join-url cannot be used together")
 			}
 
 			// Syntactic checks first, then "-", then account and network.
@@ -765,6 +794,16 @@ You can pass either an entry ID or a Basecamp URL:
 				req.Notify = basecamp.Ptr(notify)
 				hasChanges = true
 			}
+			// Both are left out unless asked for, which is how Basecamp keeps
+			// them; false and "" are the explicit removals.
+			if cmd.Flags().Changed("highlight") || noHighlight {
+				req.Highlighted = basecamp.Ptr(highlight && !noHighlight)
+				hasChanges = true
+			}
+			if cmd.Flags().Changed("join-url") || noJoinURL {
+				req.URL = basecamp.Ptr(strings.TrimSpace(joinURL))
+				hasChanges = true
+			}
 			if participants != "" {
 				var ids []int64
 				for idStr := range strings.SplitSeq(participants, ",") {
@@ -835,6 +874,10 @@ You can pass either an entry ID or a Basecamp URL:
 	cmd.Flags().StringVar(&participants, "participants", "", "Comma-separated person IDs")
 	cmd.Flags().StringVar(&participants, "people", "", "Person IDs (alias)")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
+	cmd.Flags().BoolVar(&highlight, "highlight", false, "Highlight the entry on the schedule")
+	cmd.Flags().BoolVar(&noHighlight, "no-highlight", false, "Remove the entry's highlight")
+	cmd.Flags().StringVar(&joinURL, "join-url", "", "Join link for the entry, such as a video call URL (\"\" removes it)")
+	cmd.Flags().BoolVar(&noJoinURL, "no-join-url", false, "Remove the entry's join link")
 
 	allowDash(cmd, "flag:description", "flag:desc")
 
