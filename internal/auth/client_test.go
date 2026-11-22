@@ -1157,3 +1157,33 @@ func TestPrivateNetworkTransport_RefusesLegacyNumericHosts(t *testing.T) {
 	}
 	assert.ErrorIs(t, err, surfguard.ErrBlocked)
 }
+
+// TestPrivateNetworkRoundTripper_RefusesMalformedURLs: the opted-in lane
+// refuses a malformed URL before dialing, as surfguard's RoundTripper does.
+// Each URL is built by hand so net/url's own parsing cannot refuse it first.
+func TestPrivateNetworkRoundTripper_RefusesMalformedURLs(t *testing.T) {
+	policy, err := oauthEndpointPolicy("https://main-api.3.bc4-beta.com", "base URL")
+	require.NoError(t, err)
+	rt := privateNetworkTransport(policy).(privateNetworkRoundTripper)
+
+	for _, u := range []*url.URL{
+		{Scheme: "ftp", Host: "10.20.5.229"},
+		{Scheme: "http", Host: "[example.com]"},
+		{Scheme: "http", Host: "\u24dbocalhost"}, // IDNA-normalizes to localhost
+		{Scheme: "http", Host: ""},
+	} {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://placeholder/", nil)
+		require.NoError(t, err)
+		req.URL = u
+		_, err = rt.RoundTrip(req)
+		assert.ErrorIs(t, err, surfguard.ErrBlocked, "%q", u.Host)
+	}
+}
+
+// TestNoLookup_ShapeOnly: under noLookup, CheckURL never resolves a name: a
+// well-formed one comes back unresolvable rather than judged.
+func TestNoLookup_ShapeOnly(t *testing.T) {
+	err := surfguard.Policy{}.WithResolver(noLookup{}).CheckURL(context.Background(), "https://main-api.3.bc4-beta.com/")
+	assert.ErrorIs(t, err, surfguard.ErrUnresolvable)
+	assert.NotErrorIs(t, err, surfguard.ErrBlocked)
+}

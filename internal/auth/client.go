@@ -102,10 +102,10 @@ func privateNetworkControl(policy surfguard.Policy) func(context.Context, string
 	}
 }
 
-// privateNetworkRoundTripper refuses a request whose URL the lane's policy
-// finds malformed (scheme or host) before the transport dials, as
-// surfguard's own RoundTripper does. Its verdict on the address is left to
-// the dial.
+// privateNetworkRoundTripper refuses a request whose URL is malformed (scheme
+// or host) before the transport dials, as surfguard's own RoundTripper does.
+// The host is judged with no DNS lookup (noLookup): its addresses are left to
+// the dial, so a slow resolver costs a request nothing beyond its own dial.
 type privateNetworkRoundTripper struct {
 	policy surfguard.Policy
 	next   *http.Transport
@@ -121,12 +121,22 @@ func (r privateNetworkRoundTripper) RoundTrip(req *http.Request) (*http.Response
 	if isLegacyNumericHost(req.URL.Hostname()) {
 		return nil, &surfguard.Violation{Host: req.URL.Hostname(), Reason: surfguard.ReasonMalformedHost}
 	}
+	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+		return nil, &surfguard.Violation{Reason: surfguard.ReasonScheme}
+	}
 	var v *surfguard.Violation
-	if err := r.policy.CheckURL(req.Context(), req.URL.String()); errors.As(err, &v) &&
-		(v.Reason == surfguard.ReasonMalformedHost || v.Reason == surfguard.ReasonScheme) {
+	if err := r.policy.WithResolver(noLookup{}).CheckURL(req.Context(), req.URL.String()); errors.As(err, &v) && v.Reason == surfguard.ReasonMalformedHost {
 		return nil, err
 	}
 	return r.next.RoundTrip(req)
+}
+
+// noLookup is a surfguard Resolver that answers every name with no records
+// and never queries DNS, so CheckURL judges only a URL's shape and literals.
+type noLookup struct{}
+
+func (noLookup) LookupNetIP(context.Context, string, string) ([]netip.Addr, error) {
+	return nil, nil
 }
 
 // isLegacyNumericHost reports whether host is an IPv4 address in a spelling
