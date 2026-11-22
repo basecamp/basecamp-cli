@@ -31,18 +31,22 @@ import (
 // warning rather than guessed at.
 const oauthUseProxyEnv = "BASECAMP_OAUTH_USE_PROXY"
 
-// oauthAllowPrivateEnv admits private network addresses (RFC 1918 and IPv6
-// unique local) on the BC5 OAuth lane, for a base URL served inside a private
-// network: a beta preview's API host resolves to the previews load balancer,
-// reachable only on the VPN. It is read like oauthUseProxyEnv: only "1"
+// oauthAllowPrivateEnv admits RFC 1918 private addresses on the BC5 OAuth
+// lane, for a base URL served inside a private network: a beta preview's API
+// host resolves to the previews load balancer, reachable only on the VPN. It is read like oauthUseProxyEnv: only "1"
 // enables it, "" is unset, and anything else is refused with a warning.
 //
 // It is the operator vouching for the network of the base URL they
 // configured, as a local base URL vouches for loopback, so it applies to that
 // lane alone: never to the Launchpad lane, and never to a production base URL
 // (firstPartyOAuthHosts), whose discovery documents must not be able to steer
-// the CLI to an internal address because a variable was left set. Loopback,
-// link-local, cloud metadata and CGNAT space stay refused.
+// the CLI to an internal address because a variable was left set. Within the
+// lane it admits only hosts under the base URL's own domain (privateScope),
+// so a discovery document or redirect cannot send the CLI elsewhere on the
+// private network. Loopback, link-local, cloud metadata, CGNAT and all IPv6
+// space outside the lane's own policy stay refused: IPv6 unique local space
+// holds several clouds' metadata services (GCP's fd20:ce::254, OCI's
+// fd00:c1::a9fe:a9fe, AWS's fd00:ec2::/32), and the previews answer on IPv4.
 const oauthAllowPrivateEnv = "BASECAMP_OAUTH_ALLOW_PRIVATE"
 
 // privateNetworkPrefixes is what oauthAllowPrivateEnv admits.
@@ -50,15 +54,11 @@ var privateNetworkPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("10.0.0.0/8"),
 	netip.MustParsePrefix("172.16.0.0/12"),
 	netip.MustParsePrefix("192.168.0.0/16"),
-	netip.MustParsePrefix("fc00::/7"),
 }
 
 // privateNetworkPolicy judges an address inside privateNetworkPrefixes once
-// the opt-in is on. fd00:ec2::254 is EC2's IPv6 instance metadata service,
-// which sits inside the unique local range and stays refused.
-var privateNetworkPolicy = surfguard.Policy{}.AllowAllPorts().
-	Allow(privateNetworkPrefixes...).
-	Deny(netip.MustParsePrefix("fd00:ec2::254/128"))
+// the opt-in is on.
+var privateNetworkPolicy = surfguard.Policy{}.AllowAllPorts().Allow(privateNetworkPrefixes...)
 
 // privateNetworkAdmits reports whether the opt-in admits addr: it is in
 // privateNetworkPrefixes and privateNetworkPolicy does not refuse it.
@@ -72,17 +72,44 @@ func privateNetworkAdmits(addr netip.Addr) bool {
 	return false
 }
 
-// privateNetworkTransport is an opted-in lane's direct transport. The lane's
-// own policy judges every address, as it does without the opt-in; only an
-// address it refuses that privateNetworkAdmits is let through, so everything
-// else the IANA special-use tables refuse (NAT64, AMT, AS112 and the rest)
-// stays refused. Each dial is judged at connect time, which is what defeats
-// DNS rebinding.
-func privateNetworkTransport(policy surfguard.Policy) http.RoundTripper {
+// privateNetworkTransport is an opted-in lane's direct transport. A request
+// to a host inScope rides a transport whose dial check is the lane's own
+// policy, letting through only an address that policy refuses and
+// privateNetworkAdmits, so everything else the IANA special-use tables refuse
+// (NAT64, AMT, AS112 and the rest) stays refused. Each dial is judged at
+// connect time, which is what defeats DNS rebinding. A request to any other
+// host rides the lane's ordinary transport, as it would without the opt-in.
+func privateNetworkTransport(policy surfguard.Policy, inScope func(host string) bool) http.RoundTripper {
 	t := policy.Transport()
 	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second, ControlContext: privateNetworkControl(policy)}
 	t.DialContext = dialer.DialContext
-	return privateNetworkRoundTripper{policy: policy, next: t}
+	return privateNetworkRoundTripper{policy: policy, next: t, strict: policy.RoundTripper(), inScope: inScope}
+}
+
+// privateScope returns the hosts an opted-in lane anchored on anchorURL may
+// reach at a private address: the anchor's host, and hosts under its parent
+// domain when that parent has at least two labels. A beta preview's API at
+// main-api.3.bc4-beta.com advertises its issuer at main.3.bc4-beta.com, so
+// both sit under 3.bc4-beta.com; a two-label parent (com, internal) would
+// cover too much, so a host like api.internal admits only itself, as an
+// address literal does.
+func privateScope(anchorURL string) func(host string) bool {
+	norm := func(h string) string { return strings.TrimSuffix(strings.ToLower(h), ".") }
+	u, err := url.Parse(anchorURL)
+	if err != nil || u.Hostname() == "" {
+		return func(string) bool { return false }
+	}
+	base := norm(u.Hostname())
+	suffix := ""
+	if _, err := netip.ParseAddr(base); err != nil {
+		if i := strings.IndexByte(base, '.'); i > 0 && strings.Contains(base[i+1:], ".") {
+			suffix = base[i:]
+		}
+	}
+	return func(host string) bool {
+		h := norm(host)
+		return h == base || (suffix != "" && strings.HasSuffix(h, suffix))
+	}
 }
 
 // privateNetworkControl is the opted-in lane's dial check: the lane's policy,
@@ -107,13 +134,18 @@ func privateNetworkControl(policy surfguard.Policy) func(context.Context, string
 // The host is judged with no DNS lookup (noLookup): its addresses are left to
 // the dial, so a slow resolver costs a request nothing beyond its own dial.
 type privateNetworkRoundTripper struct {
-	policy surfguard.Policy
-	next   *http.Transport
+	policy  surfguard.Policy
+	next    *http.Transport
+	strict  http.RoundTripper
+	inScope func(host string) bool
 }
 
 func (r privateNetworkRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req == nil || req.URL == nil {
 		return nil, &surfguard.Violation{Reason: surfguard.ReasonMalformedHost}
+	}
+	if !r.inScope(req.URL.Hostname()) {
+		return r.strict.RoundTrip(req)
 	}
 	// surfguard's dialer rewrites a legacy numeric host (0x0a1405e5,
 	// 012.024.5.229) to the address it means; a plain net.Dialer would send
@@ -164,8 +196,13 @@ func isLegacyNumericHost(host string) bool {
 	return true
 }
 
-// CloseIdleConnections forwards to the transport, as http.Client expects.
-func (r privateNetworkRoundTripper) CloseIdleConnections() { r.next.CloseIdleConnections() }
+// CloseIdleConnections forwards to both transports, as http.Client expects.
+func (r privateNetworkRoundTripper) CloseIdleConnections() {
+	r.next.CloseIdleConnections()
+	if c, ok := r.strict.(interface{ CloseIdleConnections() }); ok {
+		c.CloseIdleConnections()
+	}
+}
 
 // oauthClientTimeout bounds each OAuth HTTP request on the lane clients —
 // the same 30s the pre-lane appctx client carried.
@@ -244,7 +281,11 @@ func (m *Manager) allowPrivateFor(baseURL string) bool {
 	if !m.privateOptIn() {
 		return false
 	}
-	if u, err := url.Parse(baseURL); err != nil || isFirstPartyHost(u.Hostname()) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	if isFirstPartyHost(u.Hostname()) {
 		m.warnf("warning: %s=1 is ignored for a production base URL; OAuth requests keep the SSRF address policy", oauthAllowPrivateEnv)
 		return false
 	}
@@ -564,7 +605,7 @@ func (m *Manager) buildLaneClient(anchorURL, label string, allowPrivate bool) (*
 	}
 	guarded := policy.RoundTripper()
 	if allowPrivate {
-		guarded = privateNetworkTransport(policy)
+		guarded = privateNetworkTransport(policy, privateScope(anchorURL))
 	}
 	st := m.proxyState()
 	tr := &oauthTransport{

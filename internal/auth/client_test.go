@@ -976,15 +976,19 @@ func TestLanes_FirstPartyTransportVerifiesCertificates(t *testing.T) {
 }
 
 // TestPrivateNetworkAdmits pins what BASECAMP_OAUTH_ALLOW_PRIVATE=1 admits:
-// RFC 1918 and IPv6 unique local space, and nothing else the issuer policy
-// refuses.
+// RFC 1918 space, and nothing else the issuer policy refuses: no IPv6 unique
+// local space, which holds several clouds' metadata services.
 func TestPrivateNetworkAdmits(t *testing.T) {
-	for _, a := range []string{"10.20.5.229", "172.16.0.1", "192.168.1.1", "fd00::1", "::ffff:10.20.5.229"} {
+	for _, a := range []string{"10.20.5.229", "172.16.0.1", "192.168.1.1", "::ffff:10.20.5.229"} {
 		assert.True(t, privateNetworkAdmits(netip.MustParseAddr(a)), a)
 	}
 	for _, a := range []string{
 		"127.0.0.1", "169.254.169.254", "100.64.0.1", "fe80::1", "::1",
-		"fd00:ec2::254",    // EC2 IPv6 instance metadata, inside fc00::/7
+		"fd00:ec2::254",      // EC2 IPv6 instance metadata
+		"fd00:ec2::23",       // EC2 IPv6 DNS
+		"fd20:ce::254",       // GCP IPv6 metadata
+		"fd00:c1::a9fe:a9fe", // OCI IPv6 metadata
+		"fd00::1",
 		"192.52.193.1",     // AMT: IANA special use, not private
 		"192.31.196.1",     // AS112
 		"2001:3::1",        // AMT v6
@@ -1091,7 +1095,8 @@ func TestPrivateNetworkControl(t *testing.T) {
 	dial := func(network, address string) error { return check(context.Background(), network, address, nil) }
 
 	assert.NoError(t, dial("tcp4", "10.20.5.229:443"))
-	assert.NoError(t, dial("tcp6", "[fd00::1]:443"))
+	assert.ErrorIs(t, dial("tcp6", "[fd00::1]:443"), surfguard.ErrBlocked, "no IPv6 unique local space")
+	assert.ErrorIs(t, dial("tcp6", "[fd20:ce::254]:80"), surfguard.ErrBlocked, "GCP metadata")
 	assert.NoError(t, dial("tcp4", "8.8.8.8:443"), "public addresses keep the lane's verdict")
 	for _, a := range []string{"169.254.169.254:80", "192.52.193.1:443", "127.0.0.1:443"} {
 		assert.ErrorIs(t, dial("tcp4", a), surfguard.ErrBlocked, a)
@@ -1112,7 +1117,7 @@ func TestPrivateBaseURLHint(t *testing.T) {
 		want   bool
 	}{
 		{"https://10.20.5.229", "", true},
-		{"https://[fd00::1]", "", true},
+		{"https://[fd00::1]", "", false},
 		{"https://10.20.5.229", "1", false},
 		{"https://127.0.0.2", "", false},
 		{"https://169.254.169.254", "", false},
@@ -1164,10 +1169,10 @@ func TestPrivateNetworkTransport_RefusesLegacyNumericHosts(t *testing.T) {
 func TestPrivateNetworkRoundTripper_RefusesMalformedURLs(t *testing.T) {
 	policy, err := oauthEndpointPolicy("https://main-api.3.bc4-beta.com", "base URL")
 	require.NoError(t, err)
-	rt := privateNetworkTransport(policy).(privateNetworkRoundTripper)
+	rt := privateNetworkTransport(policy, privateScope("https://main-api.3.bc4-beta.com")).(privateNetworkRoundTripper)
 
 	for _, u := range []*url.URL{
-		{Scheme: "ftp", Host: "10.20.5.229"},
+		{Scheme: "ftp", Host: "main.3.bc4-beta.com"},
 		{Scheme: "http", Host: "[example.com]"},
 		{Scheme: "http", Host: "\u24dbocalhost"}, // IDNA-normalizes to localhost
 		{Scheme: "http", Host: ""},
@@ -1186,4 +1191,40 @@ func TestNoLookup_ShapeOnly(t *testing.T) {
 	err := surfguard.Policy{}.WithResolver(noLookup{}).CheckURL(context.Background(), "https://main-api.3.bc4-beta.com/")
 	assert.ErrorIs(t, err, surfguard.ErrUnresolvable)
 	assert.NotErrorIs(t, err, surfguard.ErrBlocked)
+}
+
+// TestPrivateScope: an opted-in lane reaches a private address only for the
+// base URL's host and hosts under its parent domain.
+func TestPrivateScope(t *testing.T) {
+	in := privateScope("https://main-api.3.bc4-beta.com")
+	for _, h := range []string{"main-api.3.bc4-beta.com", "main.3.bc4-beta.com", "MAIN.3.bc4-beta.com.", "pr-1-p01.3.bc4-beta.com"} {
+		assert.True(t, in(h), h)
+	}
+	for _, h := range []string{"bc4-beta.com", "evil3.bc4-beta.com", "intranet.37signals.internal", "10.20.5.229", "3.bc4-beta.com.evil.com"} {
+		assert.False(t, in(h), h)
+	}
+
+	short := privateScope("https://api.internal")
+	assert.True(t, short("api.internal"))
+	assert.False(t, short("db.internal"), "a two-label parent admits only the host itself")
+
+	literal := privateScope("https://10.20.5.229")
+	assert.True(t, literal("10.20.5.229"))
+	assert.False(t, literal("10.20.5.230"))
+}
+
+// TestBC5Lane_PrivateOutOfScopeIsRefused: with the opt-in on, a private
+// address under a host outside the base URL's domain (where a discovery
+// document or redirect might point) is refused before any dial.
+func TestBC5Lane_PrivateOutOfScopeIsRefused(t *testing.T) {
+	clearProxyEnv(t)
+	t.Setenv(oauthAllowPrivateEnv, "1")
+	m := laneManager(t, "https://main-api.3.bc4-beta.com")
+	bc5, err := m.bc5Client()
+	require.NoError(t, err)
+	resp, err := doGet(t, bc5, "http://10.20.5.229/")
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	assert.ErrorIs(t, err, surfguard.ErrBlocked, "an address literal outside the base URL's domain keeps the strict policy")
 }
