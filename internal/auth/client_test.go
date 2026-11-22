@@ -1253,3 +1253,66 @@ func TestBC5Lane_PrivateNeedsHTTPS(t *testing.T) {
 	_, err = rt.RoundTrip(req)
 	assert.ErrorIs(t, err, surfguard.ErrBlocked)
 }
+
+// sentinelRoundTripper records that a request reached it and answers with a
+// fixed error, standing in for the strict transport.
+type sentinelRoundTripper struct{ hits *atomic.Int32 }
+
+var errSentinel = errors.New("strict transport")
+
+func (s sentinelRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	s.hits.Add(1)
+	return nil, errSentinel
+}
+
+// TestPrivateNetworkRoundTripper_Routing exercises the in-scope HTTPS path
+// itself, with the strict transport replaced by a sentinel so each case shows
+// which path it took. None makes a connection.
+func TestPrivateNetworkRoundTripper_Routing(t *testing.T) {
+	policy, err := oauthEndpointPolicy("https://main-api.3.bc4-beta.com", "base URL")
+	require.NoError(t, err)
+	newRT := func(inScope func(string) bool) (privateNetworkRoundTripper, *atomic.Int32) {
+		var hits atomic.Int32
+		rt := privateNetworkTransport(policy, inScope).(privateNetworkRoundTripper)
+		rt.strict = sentinelRoundTripper{&hits}
+		return rt, &hits
+	}
+	do := func(rt privateNetworkRoundTripper, ctx context.Context, u *url.URL) error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://placeholder/", nil)
+		require.NoError(t, err)
+		req.URL = u
+		_, err = rt.RoundTrip(req)
+		return err
+	}
+	all := func(string) bool { return true }
+
+	t.Run("malformed and numeric HTTPS hosts are refused on the private path", func(t *testing.T) {
+		rt, hits := newRT(all)
+		// A refusal comes before any dial; the deadline only makes a
+		// regression fail quickly instead of waiting on the network.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		for _, host := range []string{"0x0a1405e5", "012.024.5.229", "[example.com]", "ⓛocalhost", ""} {
+			err := do(rt, ctx, &url.URL{Scheme: "https", Host: host})
+			assert.ErrorIs(t, err, surfguard.ErrBlocked, "%q", host)
+		}
+		assert.Zero(t, hits.Load(), "every case was judged on the private path")
+	})
+
+	t.Run("a well-formed in-scope HTTPS host goes to the private transport", func(t *testing.T) {
+		rt, hits := newRT(all)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // the transport gives up before dialing
+		err := do(rt, ctx, &url.URL{Scheme: "https", Host: "10.20.5.229", Path: "/"})
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.NotErrorIs(t, err, surfguard.ErrBlocked)
+		assert.Zero(t, hits.Load())
+	})
+
+	t.Run("out of scope or plain HTTP goes to the strict transport", func(t *testing.T) {
+		rt, hits := newRT(privateScope("https://main-api.3.bc4-beta.com"))
+		assert.ErrorIs(t, do(rt, context.Background(), &url.URL{Scheme: "https", Host: "intranet.example.com"}), errSentinel)
+		assert.ErrorIs(t, do(rt, context.Background(), &url.URL{Scheme: "http", Host: "main.3.bc4-beta.com"}), errSentinel)
+		assert.Equal(t, int32(2), hits.Load())
+	})
+}
