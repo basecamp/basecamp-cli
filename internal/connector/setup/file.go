@@ -297,7 +297,7 @@ func Parse(data []byte) (File, error) {
 	// admission's, not setup's own: one walk, so the reader that authorizes
 	// and the reader that refuses cannot disagree about what a key says.
 	if err := admission.CheckCanonicalKeys(data); err != nil {
-		return File{}, fmt.Errorf("parse connect.json: %w", locate(data, err))
+		return File{}, fmt.Errorf("parse connect.json: %w", suggestKey(data, locate(data, err)))
 	}
 	// admission.Project refuses a malformed entry itself, so both readers
 	// fail closed. This runs first only to name the project in the message:

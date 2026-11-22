@@ -853,7 +853,17 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	}
 	report.Add(checks...)
 	report.Add(setup.TicketCheck(ctx, reader, kind))
-	report.Add(setup.ProjectChecks(ctx, reader, next, !exists)...)
+	projectChecks := setup.ProjectChecks(ctx, reader, next, !exists)
+	if f.reset {
+		// A reset starts from nothing, so the run that fixes this one has to
+		// reset too: without it, setup reads the old file again.
+		for i, c := range projectChecks {
+			if c.Status == setup.StatusFail && c.Name == "Projects" {
+				projectChecks[i].Hint = "Serve one: basecamp connect setup -P " + richtext.ShellQuote(name) + " --reset --serve <project-id>"
+			}
+		}
+	}
+	report.Add(projectChecks...)
 	// A command the person stopped did not find the connector unready: it
 	// found nothing, and says so as an interruption.
 	if err := ctx.Err(); err != nil {

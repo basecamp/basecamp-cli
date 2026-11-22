@@ -62,28 +62,156 @@ func lineColumn(data []byte, at int) (int, int) {
 	return bytes.Count(before, []byte("\n")) + 1, at - bytes.LastIndexByte(before, '\n')
 }
 
-var unknownFieldPattern = regexp.MustCompile(`unknown field "([^"]*)"`)
+var (
+	unknownFieldPattern = regexp.MustCompile(`unknown field "([^"]*)"`)
+	nonCanonicalPattern = regexp.MustCompile(`key "([^"]*)" is not spelled canonically`)
+	duplicateKeyPattern = regexp.MustCompile(`key "([^"]*)" appears twice in one object`)
+)
 
-// suggestKey adds, to an unknown-key refusal, where the key is in data and
-// the known key it is closest to, when one is close enough to be the key
-// meant. within is the path of the object the key was refused in, when the
-// refusal says (a project's entry); with none, the key's first appearance is
-// named. Any other error is returned as it is.
+// suggestKey adds, to a refusal of a key, where that key is in data and, for
+// one that is misspelled, the key it was probably meant to be: one valid in
+// the object it sits in. within is the path of the object the key was refused
+// in, when the refusal says (a project's entry); with none, the first
+// appearance of the key where the schema does not allow it is named. Any other
+// error is returned as it is.
 func suggestKey(data []byte, err error, within ...string) error {
-	m := unknownFieldPattern.FindStringSubmatch(err.Error())
-	if m == nil {
+	msg := err.Error()
+	var path []string
+	if len(within) > 0 {
+		path = within
+	}
+	var at int
+	var near string
+	switch {
+	case unknownFieldPattern.MatchString(msg):
+		key := unknownFieldPattern.FindStringSubmatch(msg)[1]
+		var parents []string
+		at, parents = findKey(data, func(ps []string, k string, _ map[string]bool) bool {
+			if k != key || (path != nil && !slices.Equal(ps, path)) {
+				return false
+			}
+			t := typeAt(ps)
+			return t == nil || !keysOf(t, true)[k]
+		})
+		if at >= 0 {
+			near = closestKey(key, keysOf(typeAt(parents), false))
+		}
+	case nonCanonicalPattern.MatchString(msg):
+		key := nonCanonicalPattern.FindStringSubmatch(msg)[1]
+		var parents []string
+		at, parents = findKey(data, func(_ []string, k string, _ map[string]bool) bool { return k == key })
+		if at >= 0 {
+			known := keysOf(typeAt(parents), false)
+			if lower := strings.ToLower(key); known[lower] {
+				near = lower
+			} else {
+				near = closestKey(key, known)
+			}
+		}
+	case duplicateKeyPattern.MatchString(msg):
+		key := duplicateKeyPattern.FindStringSubmatch(msg)[1]
+		at, _ = findKey(data, func(_ []string, k string, seen map[string]bool) bool { return k == key && seen[k] })
+	default:
 		return err
 	}
-	key := m[1]
-	msg := err.Error()
-	if offset := keyOffset(data, key, within); offset >= 0 {
-		line, col := lineColumn(data, offset)
+	if at >= 0 {
+		line, col := lineColumn(data, at)
 		msg = fmt.Sprintf("line %d, column %d: %s", line, col, msg)
 	}
-	if near := closestKey(key); near != "" {
+	if near != "" {
 		msg += fmt.Sprintf("; did you mean %q?", near)
 	}
 	return errors.New(msg)
+}
+
+// findKey is the offset and the enclosing keys of the first key in data that
+// match accepts, -1 when none does. match is also given the keys already
+// seen in the same object.
+func findKey(data []byte, match func(parents []string, key string, seen map[string]bool) bool) (int, []string) {
+	at, where := -1, []string(nil)
+	seen := map[string]map[string]bool{}
+	walkKeys(data, func(parents []string, k string, offset int) bool {
+		// An object is named by its keys and its offset-free path; two
+		// sibling objects in one array share it, which only makes a
+		// duplicate easier to find, never one that is not there.
+		id := strings.Join(parents, "\x00")
+		if seen[id] == nil {
+			seen[id] = map[string]bool{}
+		}
+		if match(parents, k, seen[id]) {
+			at, where = offset, parents
+			return false
+		}
+		seen[id][k] = true
+		return true
+	})
+	return at, where
+}
+
+// keyOffset is where key appears in data as a key of the object at path
+// (nil: any object, the first), -1 when it does not.
+func keyOffset(data []byte, key string, path []string) int {
+	at, _ := findKey(data, func(parents []string, k string, _ map[string]bool) bool {
+		return k == key && (path == nil || slices.Equal(parents, path))
+	})
+	return at
+}
+
+// typeAt is the Go type connect.json decodes the object at path into, nil
+// where the path leaves the schema. An array element adds "" to a path.
+func typeAt(path []string) reflect.Type {
+	t := reflect.TypeFor[File]()
+	for _, part := range path {
+		for t.Kind() == reflect.Pointer {
+			t = t.Elem()
+		}
+		switch t.Kind() {
+		case reflect.Map, reflect.Slice, reflect.Array:
+			t = t.Elem()
+		case reflect.Struct:
+			field, ok := fieldByKey(t, part)
+			if !ok {
+				return nil
+			}
+			t = field.Type
+		default:
+			return nil
+		}
+	}
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	return t
+}
+
+func fieldByKey(t reflect.Type, key string) (reflect.StructField, bool) {
+	for i := range t.NumField() {
+		f := t.Field(i)
+		if name, _, _ := strings.Cut(f.Tag.Get("json"), ","); f.IsExported() && name == key {
+			return f, true
+		}
+	}
+	return reflect.StructField{}, false
+}
+
+// keysOf is the keys an object of type t may carry, legacy keys only when
+// asked: they are accepted, and nobody should be told to write one. A type
+// that is not a struct (a map keyed by id) has none.
+func keysOf(t reflect.Type, legacy bool) map[string]bool {
+	keys := map[string]bool{}
+	if t == nil || t.Kind() != reflect.Struct {
+		return keys
+	}
+	for i := range t.NumField() {
+		f := t.Field(i)
+		if !f.IsExported() || (!legacy && strings.HasPrefix(f.Name, "Legacy")) {
+			continue
+		}
+		if name, _, _ := strings.Cut(f.Tag.Get("json"), ","); name != "" && name != "-" {
+			keys[name] = true
+		}
+	}
+	return keys
 }
 
 // locateIn places an error met decoding the value at path, whose offsets
@@ -98,21 +226,6 @@ func locateIn(data []byte, path []string, err error) error {
 		return err
 	}
 	return positioned(data, start+int(typ.Offset)-1, err)
-}
-
-// keyOffset is where key appears in data as a key of the object at path
-// (nil: any object, the first), -1 when it does not. It walks the tokens, so
-// a value that happens to spell the key is not mistaken for it.
-func keyOffset(data []byte, key string, path []string) int {
-	at := -1
-	walkKeys(data, func(parents []string, k string, offset int) bool {
-		if k == key && (path == nil || slices.Equal(parents, path)) {
-			at = offset
-			return false
-		}
-		return true
-	})
-	return at
 }
 
 // valueOffset is where the value of the key path names begins in data, -1
@@ -199,49 +312,17 @@ func walkKeys(data []byte, visit func(parents []string, key string, offset int) 
 	}
 }
 
-// knownKeys is every key connect.json may carry, at any depth, gathered from
-// the json tags of the types Parse decodes into, so it cannot fall behind
-// them. The legacy keys a file may still have are left out: nobody should be
-// told to write one.
-var knownKeys = func() []string {
-	seen := map[string]bool{}
-	var walk func(t reflect.Type)
-	visited := map[reflect.Type]bool{}
-	walk = func(t reflect.Type) {
-		for t.Kind() == reflect.Pointer || t.Kind() == reflect.Map || t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
-			t = t.Elem()
-		}
-		if t.Kind() != reflect.Struct || visited[t] {
-			return
-		}
-		visited[t] = true
-		for i := range t.NumField() {
-			field := t.Field(i)
-			if !field.IsExported() || strings.HasPrefix(field.Name, "Legacy") {
-				continue
-			}
-			name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
-			if name != "" && name != "-" {
-				seen[name] = true
-			}
-			walk(field.Type)
-		}
+// closestKey is the key in known nearest to key, or "" when none is near
+// enough to be a likely misspelling: at most two edits, and fewer than half
+// its length.
+func closestKey(key string, known map[string]bool) string {
+	names := make([]string, 0, len(known))
+	for k := range known {
+		names = append(names, k)
 	}
-	walk(reflect.TypeFor[File]())
-	keys := make([]string, 0, len(seen))
-	for k := range seen {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
-}()
-
-// closestKey is the known key nearest to key, or "" when none is near enough
-// to be a likely misspelling: at most two edits, and fewer than half its
-// length.
-func closestKey(key string) string {
+	slices.Sort(names)
 	best, bestDist := "", 3
-	for _, k := range knownKeys {
+	for _, k := range names {
 		if k == key {
 			return ""
 		}

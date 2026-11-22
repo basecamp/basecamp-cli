@@ -162,13 +162,65 @@ func TestParsePlacesTrailingData(t *testing.T) {
 	assert.Equal(t, "parse connect.json: line "+itoa(lineOf(t, broken, "oops"))+", column 3: trailing data after the object", err.Error())
 }
 
-func TestKnownKeysAreTheTagsParseDecodes(t *testing.T) {
-	for _, want := range []string{"version", "profile", "account_id", "agent", "person_id", "trust", "projects", "watch_completions", "ack_boost", "pings"} {
-		assert.Contains(t, knownKeys, want)
+func TestKeysOfReadTheTagsParseDecodes(t *testing.T) {
+	top := keysOf(typeAt(nil), false)
+	for _, want := range []string{"version", "profile", "account_id", "agent", "trust", "projects", "ack_boost", "pings"} {
+		assert.True(t, top[want], want)
 	}
 	for _, legacy := range []string{"worktrees", "driver", "worker", "concurrency", "deadline", "dangerous"} {
-		assert.NotContains(t, knownKeys, legacy, "nobody is pointed at a key the connector no longer reads")
+		assert.False(t, top[legacy], "nobody is pointed at a key the connector no longer reads: %s", legacy)
+		assert.True(t, keysOf(typeAt(nil), true)[legacy], "and it is still accepted: %s", legacy)
 	}
+	assert.True(t, keysOf(typeAt([]string{"projects", "222"}), false)["watch_completions"])
+	assert.True(t, keysOf(typeAt([]string{"agent"}), false)["person_id"])
+	assert.Nil(t, typeAt([]string{"nowhere"}))
+}
+
+// A key valid at the top level and refused inside another object is placed
+// where it was refused.
+func TestParsePlacesANestedUnknownKeyWhereItIsRefused(t *testing.T) {
+	data := indentedFile(t)
+	broken := strings.Replace(data, `"kind": "agent"`, `"kind": "agent",
+    "profile": "oops"`, 1)
+	require.NotEqual(t, data, broken)
+	_, err := Parse([]byte(broken))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "line "+itoa(lineOf(t, broken, `"oops"`))+", column 5: ")
+}
+
+// A suggestion is a key valid in the object the misspelling sits in.
+func TestParseSuggestsOnlyAKeyValidWhereTheMisspellingIs(t *testing.T) {
+	data := indentedFile(t)
+	broken := strings.Replace(data, `"mode": "operator",`, `"mode": "operator",
+    "agnt": [],`, 1)
+	_, err := Parse([]byte(broken))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown field "agnt"`)
+	assert.NotContains(t, err.Error(), `did you mean "agent"`, "agent is a top-level key, not one of trust's")
+
+	broken = strings.Replace(data, `"operator_id"`, `"operater_id"`, 1)
+	_, err = Parse([]byte(broken))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `did you mean "operator_id"?`)
+}
+
+func TestParsePlacesAKeyThatIsNotSpelledCanonically(t *testing.T) {
+	data := indentedFile(t)
+	broken := strings.Replace(data, `"watch_completions"`, `"watch_Completions"`, 1)
+	_, err := Parse([]byte(broken))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "line "+itoa(lineOf(t, broken, "watch_Completions"))+", column 7: ")
+	assert.Contains(t, err.Error(), `did you mean "watch_completions"?`)
+}
+
+func TestParsePlacesTheSecondOfADuplicatedKey(t *testing.T) {
+	data := indentedFile(t)
+	broken := strings.Replace(data, `"profile": "agent",`, `"profile": "agent",
+  "profile": "agent",`, 1)
+	_, err := Parse([]byte(broken))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "line "+itoa(lineOf(t, broken, `"profile"`)+1)+", column 3: ")
+	assert.Contains(t, err.Error(), "appears twice")
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

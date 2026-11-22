@@ -56,7 +56,7 @@ func (p connectProfile) knowsState() bool {
 // connectResetHint is how a person recovers a connect.json that cannot be
 // used, without editing it.
 func connectResetHint(name string) string {
-	return "Set it up again: basecamp connect setup -P " + richtext.ShellQuote(name) + " --reset (the old file is kept beside the new one)"
+	return "Set it up again: basecamp connect setup -P " + richtext.ShellQuote(name) + " --reset --serve <project-id>, with every other choice it had (--operator-profile, --trust, --allow) given again; the old file is kept beside the new one"
 }
 
 func loadConnectProfile(cmd *cobra.Command) (connectProfile, error) {
@@ -297,8 +297,9 @@ type connectStatusReport struct {
 type connectStatusConfig struct {
 	Error string `json:"error"`
 	Hint  string `json:"hint"`
-	// HeldUnreadable counts records blocked as config_unreadable: requests
-	// a running connector holds and retries until the file reads again.
+	// HeldUnreadable counts records the ledger holds as config_unreadable:
+	// requests held because the file couldn't be read, which a running
+	// connector retries until it can. It says nothing of whether one runs.
 	HeldUnreadable int `json:"held_config_unreadable"`
 }
 
@@ -392,6 +393,9 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	}
 	defer func() { _ = ledger.Close() }()
 	status, err := ledger.Status(cmd.Context())
+	if err != nil && p.broken() {
+		return brokenAnd("its ledger can't be read either: " + errorMessage(err))
+	}
 	if err != nil {
 		return err
 	}
@@ -457,7 +461,7 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 	if c := r.Config; c != nil {
 		fmt.Fprintf(w, "  connect.json can't be used: %s\n", clean(c.Error))
 		if c.HeldUnreadable > 0 {
-			fmt.Fprintf(w, "  A running connector is holding %d request(s), and retries them until it can read the file again.\n", c.HeldUnreadable)
+			fmt.Fprintf(w, "  %d request(s) are held because it couldn't be read; a running connector retries them until it can.\n", c.HeldUnreadable)
 		}
 		fmt.Fprintf(w, "  %s\n\n", clean(c.Hint))
 	}

@@ -4,6 +4,7 @@ package commands
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -101,7 +102,8 @@ func TestDoctorReportsABrokenConnectJSONAndRunsEveryOtherCheck(t *testing.T) {
 			for _, want := range tc.says {
 				assert.Contains(t, file.Message, want)
 			}
-			assert.Equal(t, "Set it up again: basecamp connect setup -P agent --reset (the old file is kept beside the new one)", file.Hint)
+			assert.Equal(t, connectResetHint("agent"), file.Hint)
+			assert.Contains(t, file.Hint, "basecamp connect setup -P agent --reset --serve <project-id>", "a reset serves nothing unless told to")
 
 			// Everything that does not need the file still ran, and passed.
 			assert.Equal(t, setup.StatusPass, byName["Token"].Status, "%+v", checks)
@@ -181,7 +183,7 @@ func TestStatusShowsTheLedgerWhenConnectJSONIsBroken(t *testing.T) {
 			lines := strings.Split(styled, "\n")
 			require.Greater(t, len(lines), 4)
 			assert.True(t, strings.HasPrefix(strings.TrimSpace(lines[2]), "connect.json can't be used:"), "it leads with the problem:\n%s", styled)
-			assert.Contains(t, styled, "is holding 1 request(s)")
+			assert.Contains(t, styled, "1 request(s) are held because it couldn't be read")
 			assert.Contains(t, styled, "Queues")
 		})
 	}
@@ -394,4 +396,56 @@ func TestDoctorOnABrokenFileSaysWhenTheStateIsAnotherAgents(t *testing.T) {
 	assert.Equal(t, setup.StatusWarn, checks["Identity"].Status)
 	assert.Contains(t, checks["Identity"].Message, fmt.Sprintf("connector state is for person %d", other.Agent.PersonID))
 	assert.Equal(t, setup.StatusPass, checks["Ledger"].Status, "the ledger that is there is read: %+v", checks)
+}
+
+// A ledger that opens and then can't be read is no reason to lose the
+// diagnosis either.
+func TestStatusOnABrokenFileWhoseLedgerCantBeReadLeadsWithTheFile(t *testing.T) {
+	f := newOperatorFixture(t)
+	require.NoError(t, f.ledger(t, false).Close())
+	dir, err := connectStateDir("agent", f.file, false)
+	require.NoError(t, err)
+	db, err := sql.Open("sqlite", filepath.Join(dir, connector.LedgerFile))
+	require.NoError(t, err)
+	_, err = db.ExecContext(context.Background(), `INSERT INTO connection (id, state, pid, changed_at, detail) VALUES (1, 'connected', 1, 'not a time', '')`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+	breakConnectFile(t, brokenConnectFiles[1].edit)
+
+	_, err = f.run(t, output.FormatJSON, "status")
+	require.Error(t, err)
+	e := usageError(t, err)
+	assert.Contains(t, e.Message, "connect.json cannot be used")
+	assert.Contains(t, e.Message, "its ledger can't be read either")
+	assert.Contains(t, e.Hint, "--reset")
+}
+
+// --reset is a policy flag: alone at a terminal it runs the scripted setup,
+// not the guided one, which would never reset.
+func TestResetAloneIsNotGuidedSetup(t *testing.T) {
+	prev := connectSetupInteractive
+	t.Cleanup(func() { connectSetupInteractive = prev })
+	connectSetupInteractive = func(*appctx.App) bool { return true }
+
+	bare := newConnectSetupCmd()
+	require.NoError(t, bare.ParseFlags(nil))
+	assert.True(t, connectSetupGuided(bare, &appctx.App{}), "the control: no flags at a terminal is guided")
+
+	reset := newConnectSetupCmd()
+	require.NoError(t, reset.ParseFlags([]string{"--reset"}))
+	assert.False(t, connectSetupGuided(reset, &appctx.App{}))
+}
+
+// A reset with no project is refused, as any first setup is, and the hint
+// that fixes it keeps --reset: without it, setup would read the old file.
+func TestSetupResetWithNoProjectSaysToResetWithOne(t *testing.T) {
+	f := newOperatorFixture(t)
+	broken := breakConnectFile(t, brokenConnectFiles[1].edit)
+	out, err := runConnectSetupCmd(t, newConnectSetupApp(t, f.s, "agent"), "--operator", fmt.Sprint(setupOperatorPerson), "--reset")
+	require.Error(t, err, out)
+	e := usageError(t, err)
+	assert.Equal(t, codeNotReady, e.Code)
+	assert.Equal(t, "Serve one: basecamp connect setup -P agent --reset --serve <project-id>", e.Hint)
+	now, _ := os.ReadFile(connectSetupPath(t, "agent"))
+	assert.Equal(t, broken, now)
 }
