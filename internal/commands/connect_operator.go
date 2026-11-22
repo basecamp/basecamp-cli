@@ -75,7 +75,7 @@ func loadConnectProfile(cmd *cobra.Command) (connectProfile, error) {
 	if err != nil {
 		return connectProfile{}, output.ErrUsage(err.Error())
 	}
-	file, err := setup.Load(path)
+	file, err := loadConnectFile(path, name)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		return connectProfile{}, output.ErrUsageHint(fmt.Sprintf("Profile %q is not set up as a connector", name), "Run: basecamp connect setup -P "+richtext.ShellQuote(name))
@@ -105,7 +105,7 @@ func loadConnectProfileForReport(cmd *cobra.Command) (connectProfile, error) {
 	if pathErr != nil {
 		return p, err
 	}
-	_, loadErr := setup.Load(path)
+	_, loadErr := loadConnectFile(path, name)
 	if loadErr == nil || errors.Is(loadErr, os.ErrNotExist) {
 		return p, err
 	}
@@ -115,6 +115,17 @@ func loadConnectProfileForReport(cmd *cobra.Command) (connectProfile, error) {
 		p.file.AccountID, p.file.Agent.PersonID = account, person
 	}
 	return p, nil
+}
+
+// loadConnectFile is setup.Load, refusing as well a file that names
+// another profile than the directory it sits in: one copied from another
+// profile, which show and setup refuse too.
+func loadConnectFile(path, name string) (setup.File, error) {
+	file, err := setup.Load(path)
+	if err == nil && file.Profile != name {
+		return setup.File{}, fmt.Errorf("connect.json names profile %q, and it is profile %q's", file.Profile, name)
+	}
+	return file, err
 }
 
 // connectStateIdentity is the account and agent of the one connector state

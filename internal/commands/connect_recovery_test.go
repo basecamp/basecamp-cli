@@ -55,7 +55,7 @@ func breakConnectFile(t *testing.T, edit func(string) string) []byte {
 	broken := edit(string(data))
 	require.NotEqual(t, string(data), broken, "the edit must change the file")
 	require.NoError(t, os.WriteFile(path, []byte(broken), 0o600))
-	_, err = setup.Load(path)
+	_, err = loadConnectFile(path, "agent")
 	require.Error(t, err, "the file must now be refused")
 	return []byte(broken)
 }
@@ -509,4 +509,23 @@ func TestConnectSetupRerunLeavesInheritedFlagsOutAndQuotesForAShell(t *testing.T
 	require.NoError(t, err)
 	assert.Equal(t, []string{"connect", "setup", "-P", "agent", "--ack-boost", "it's on", "--allow", "1", "--reset"},
 		strings.Split(strings.TrimSuffix(string(words), "\n"), "\n"))
+}
+
+// A valid file copied from another profile is not this profile's: doctor
+// says so as it does a broken one, as show and setup refuse it.
+func TestAFileCopiedFromAnotherProfileIsNotSetUp(t *testing.T) {
+	f := newOperatorFixture(t)
+	breakConnectFile(t, func(s string) string {
+		return strings.Replace(s, `"profile": "agent"`, `"profile": "laptop"`, 1)
+	})
+	checks := checkConnectorProfiles()
+	require.Len(t, checks, 1)
+	assert.Equal(t, "fail", checks[0].Status)
+	assert.Contains(t, checks[0].Message, `connect.json names profile "laptop", and it is profile "agent"'s`)
+
+	p := f.reportProfile(t)
+	require.True(t, p.broken())
+	file := checksByName(connectDoctorChecks(context.Background(), p))["connect.json"]
+	assert.Equal(t, setup.StatusFail, file.Status)
+	assert.Equal(t, connectResetHint("agent"), file.Hint)
 }

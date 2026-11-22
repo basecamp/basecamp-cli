@@ -324,7 +324,7 @@ func checkConnectorProfiles() []Check {
 		if err != nil {
 			continue
 		}
-		file, err := setup.Load(path)
+		file, err := loadConnectFile(path, name)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
