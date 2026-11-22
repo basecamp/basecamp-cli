@@ -178,10 +178,14 @@ Results can be grouped by project or date.`,
 }
 
 func newReportsOverdueCmd() *cobra.Command {
-	return &cobra.Command{
+	var page int32
+
+	cmd := &cobra.Command{
 		Use:   "overdue",
 		Short: "View overdue todos grouped by lateness",
-		Long: `View all overdue todos grouped by how late they are.
+		Long: `View overdue todos grouped by how late they are, one page at a time,
+most recently due first, so the longest-overdue todos are on the last
+pages. --page reads a later page.
 
 Todos are grouped into categories:
   - Under a week late
@@ -195,7 +199,7 @@ Todos are grouped into categories:
 				return err
 			}
 
-			result, err := app.Account().Reports().OverdueTodos(cmd.Context())
+			result, err := app.Account().Reports().OverdueTodos(cmd.Context(), page)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -207,7 +211,11 @@ Todos are grouped into categories:
 				len(result.OverThreeMonthsLate)
 
 			var summary strings.Builder
-			fmt.Fprintf(&summary, "%d overdue todos", total)
+			if result.Meta.TotalCount > total {
+				fmt.Fprintf(&summary, "%d of %d overdue todos", total, result.Meta.TotalCount)
+			} else {
+				fmt.Fprintf(&summary, "%d overdue todos", total)
+			}
 			if total > 0 {
 				var parts []string
 				if n := len(result.UnderAWeekLate); n > 0 {
@@ -236,21 +244,37 @@ Todos are grouped into categories:
 
 			return app.OK(result,
 				output.WithSummary(summary.String()),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "assigned",
-						Cmd:         "basecamp reports assigned",
-						Description: "View your assigned todos",
-					},
-					output.Breadcrumb{
-						Action:      "schedule",
-						Cmd:         "basecamp reports schedule",
-						Description: "View upcoming schedule",
-					},
-				),
+				output.WithBreadcrumbs(overdueBreadcrumbs(page, result.Meta.Truncated)...),
 			)
 		},
 	}
+
+	cmd.Flags().Int32Var(&page, "page", 0, "Page of the report (default: first page)")
+
+	return cmd
+}
+
+func overdueBreadcrumbs(page int32, more bool) []output.Breadcrumb {
+	breadcrumbs := []output.Breadcrumb{
+		{
+			Action:      "assigned",
+			Cmd:         "basecamp reports assigned",
+			Description: "View your assigned todos",
+		},
+		{
+			Action:      "schedule",
+			Cmd:         "basecamp reports schedule",
+			Description: "View upcoming schedule",
+		},
+	}
+	if more {
+		breadcrumbs = append(breadcrumbs, output.Breadcrumb{
+			Action:      "next",
+			Cmd:         fmt.Sprintf("basecamp reports overdue --page %d", max(page, 1)+1),
+			Description: "Next page of overdue todos",
+		})
+	}
+	return breadcrumbs
 }
 
 func resolveReportsScheduleWindow(startDate, endDate string, now time.Time) (string, string) {

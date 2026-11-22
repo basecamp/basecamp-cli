@@ -317,10 +317,11 @@ func newAssignmentsCompletedCmd() *cobra.Command {
 				return err
 			}
 
-			items, err := app.Account().MyAssignments().Completed(cmd.Context())
+			result, err := app.Account().MyAssignments().Completed(cmd.Context(), 0)
 			if err != nil {
 				return convertSDKError(err)
 			}
+			items := result.Assignments
 
 			return app.OK(items,
 				output.WithSummary(fmt.Sprintf("%d completed assignment(s)", len(items))),

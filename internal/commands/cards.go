@@ -268,8 +268,8 @@ func cardsAccountWideSelector(opts cardsListOptions) (selector, flag string, err
 }
 
 // runCardsListAccountWide lists cards across every accessible project. The
-// paginated aggregates come back grouped by project; --overdue comes back flat
-// and unpaginated.
+// paginated aggregates come back grouped by project; --overdue comes back flat,
+// every page followed.
 func runCardsListAccountWide(cmd *cobra.Command, app *appctx.App, opts cardsListOptions, selector string) error {
 	if err := rejectAccountWideTodolist(app, "card"); err != nil {
 		return err
@@ -313,12 +313,12 @@ func runCardsListAccountWide(cmd *cobra.Command, app *appctx.App, opts cardsList
 	}
 
 	if selector == cardsSelectorOverdue {
-		// --page has nothing to address on an unpaginated endpoint, but --all
+		// --page has nothing to address on a listing read whole, but --all
 		// does: the listing is capped by default, and --all is how you reach
 		// past the cap. Rejecting both would leave card 101 unreachable.
 		if opts.pageSet {
 			return output.ErrUsageHint(
-				"--page is not supported with --overdue (the overdue listing is not paginated)",
+				"--page is not supported with --overdue (the overdue listing is read whole)",
 				"Cap the results instead: basecamp cards list --overdue --limit <n>",
 			)
 		}
@@ -432,8 +432,8 @@ func runCardsListAccountWide(cmd *cobra.Command, app *appctx.App, opts cardsList
 	return app.OK(groups, respOpts...)
 }
 
-// runCardsListOverdue lists overdue cards across every project. The endpoint
-// returns a flat, oldest-due-first array, so it renders like the
+// runCardsListOverdue lists overdue cards across every project. The SDK follows
+// every page of a flat, oldest-due-first list, so it renders like the
 // project-scoped path and accepts the sort flags.
 func runCardsListOverdue(cmd *cobra.Command, app *appctx.App, opts cardsListOptions) error {
 	if opts.sortField == "position" {
@@ -450,18 +450,19 @@ func runCardsListOverdue(cmd *cobra.Command, app *appctx.App, opts cardsListOpti
 		return err
 	}
 
-	cards, err := app.Account().Everything().OverdueCards(cmd.Context(), taskFilters)
+	result, err := app.Account().Everything().OverdueCards(cmd.Context(), 0, taskFilters)
 	if err != nil {
 		return convertSDKError(err)
 	}
+	cards := result.Cards
 
 	// Sort before truncating: truncating first would sort only the survivors.
 	if opts.sortField != "" {
 		sortCards(cards, opts.sortField, opts.reverse)
 	}
 
-	// The endpoint is unpaginated, so the complete array is already in hand and
-	// --all costs nothing beyond skipping the cap. --limit trims locally.
+	// The complete list is already in hand, so --all costs nothing beyond
+	// skipping the cap. --limit trims locally.
 	total := len(cards)
 	limit := opts.limit
 	if limit == 0 {
@@ -476,7 +477,10 @@ func runCardsListOverdue(cmd *cobra.Command, app *appctx.App, opts cardsListOpti
 		output.WithBreadcrumbs(cardsAccountWideBreadcrumbs()...),
 		output.WithDisplayData(flattenOverdueCards(cards)),
 	}
-	if len(cards) < total {
+	switch {
+	case result.Meta.Truncated:
+		respOpts = append(respOpts, output.WithNotice("More pages are available; results were truncated"))
+	case len(cards) < total:
 		respOpts = append(respOpts, output.WithNotice(fmt.Sprintf(
 			"Showing the first %d of %d overdue cards (use --all for the complete list, or --limit to raise the cap)",
 			len(cards), total)))

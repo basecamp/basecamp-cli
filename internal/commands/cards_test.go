@@ -2549,7 +2549,7 @@ const cardsGroupsFixture = `[
 	          {"id":22,"title":"Beta two","status":"active","due_on":"2026-03-01"}]}
 ]`
 
-// cardsOverdueFixture is the flat, unpaginated overdue payload.
+// cardsOverdueFixture is the flat overdue payload, on one page.
 const cardsOverdueFixture = `[
 	{"id":31,"title":"Zeta late","status":"active","due_on":"2025-02-01"},
 	{"id":32,"title":"Alpha late","status":"active","due_on":"2025-01-01"}
@@ -2800,7 +2800,7 @@ func TestCardsListAccountWideRejectsBadPaging(t *testing.T) {
 }
 
 // TestCardsListOverdueRejectsPage tests that --page is refused rather than
-// accepted and dropped: there is no page to address on an unpaginated endpoint.
+// accepted and dropped: the overdue listing is read whole, every page followed.
 func TestCardsListOverdueRejectsPage(t *testing.T) {
 	app, _ := setupRecordingTestApp(t, cardsAllAggregateRoutes()...)
 	err := executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--overdue", "--page", "1")
@@ -2809,9 +2809,9 @@ func TestCardsListOverdueRejectsPage(t *testing.T) {
 
 // --all is a different question from --page. The overdue listing is capped at
 // 100 by default, so rejecting --all as well would leave card 101 unreachable —
-// capped with no escape hatch is the defect, not the fix. The endpoint is
-// unpaginated, so honoring --all costs nothing: the complete array is already
-// in hand.
+// capped with no escape hatch is the defect, not the fix. The listing is read
+// whole, so honoring --all costs nothing: the complete array is already in
+// hand.
 func TestCardsListOverdueAcceptsAll(t *testing.T) {
 	app, transport, buf := setupCardsAccountWideApp(t, output.FormatJSON, cardsAllAggregateRoutes()...)
 	require.NoError(t, executeRecordingCommand(NewCardsCmd(), app, "list", "--all-projects", "--overdue", "--all"))
@@ -2824,7 +2824,7 @@ func TestCardsListOverdueAcceptsAll(t *testing.T) {
 	assert.Len(t, envelope.Data, 2, "--all returns the complete array")
 	assert.Empty(t, envelope.Notice, "nothing was withheld, so there is nothing to warn about")
 	assert.Len(t, transport.queriesFor(cardsAggregatePath("overdue")), 1,
-		"--all costs no extra request on an unpaginated endpoint")
+		"--all costs no extra request on a listing already read whole")
 }
 
 // TestCardsListAccountWideSorting tests that sorting is rejected for the
