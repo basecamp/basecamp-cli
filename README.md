@@ -404,10 +404,10 @@ BASECAMP_OAUTH_ALLOW_PRIVATE=1 BASECAMP_BASE_URL=https://<name>-api.3.bc4-beta.c
 ```
 
 Only `1` enables it. It admits RFC 1918 addresses (10/8, 172.16/12,
-192.168/16) for a non-production base URL only, and only for the base URL's
-host and hosts under its parent domain (`*.3.bc4-beta.com` above), so a
-discovery document or redirect can't send the CLI elsewhere on the private
-network. Loopback, link-local, cloud metadata, IPv6 private and other
+192.168/16) over HTTPS, for a non-production base URL only, and only for the
+base URL's host and hosts under its parent domain (`*.3.bc4-beta.com` above;
+never a public suffix such as `co.uk`), so a discovery document or redirect
+can't send the CLI elsewhere on the private network. Loopback, link-local, cloud metadata, IPv6 private and other
 special-use addresses stay refused, and it is ignored for Basecamp's own
 hosts. Keep it set for that profile's later commands, which refresh the token
 over the same route.

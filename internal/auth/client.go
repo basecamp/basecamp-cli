@@ -17,6 +17,7 @@ import (
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
 	surfguard "github.com/basecamp/surfguard/go"
 	"golang.org/x/net/http/httpproxy"
+	"golang.org/x/net/publicsuffix"
 
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -72,13 +73,15 @@ func privateNetworkAdmits(addr netip.Addr) bool {
 	return false
 }
 
-// privateNetworkTransport is an opted-in lane's direct transport. A request
-// to a host inScope rides a transport whose dial check is the lane's own
+// privateNetworkTransport is an opted-in lane's direct transport. An HTTPS
+// request to a host inScope rides a transport whose dial check is the lane's own
 // policy, letting through only an address that policy refuses and
 // privateNetworkAdmits, so everything else the IANA special-use tables refuse
 // (NAT64, AMT, AS112 and the rest) stays refused. Each dial is judged at
-// connect time, which is what defeats DNS rebinding. A request to any other
-// host rides the lane's ordinary transport, as it would without the opt-in.
+// connect time, which is what defeats DNS rebinding. Any other request (a
+// host outside the scope, or plain HTTP, where no certificate vouches for the
+// private host) rides the lane's ordinary transport, as it would without the
+// opt-in.
 func privateNetworkTransport(policy surfguard.Policy, inScope func(host string) bool) http.RoundTripper {
 	t := policy.Transport()
 	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second, ControlContext: privateNetworkControl(policy)}
@@ -88,10 +91,11 @@ func privateNetworkTransport(policy surfguard.Policy, inScope func(host string) 
 
 // privateScope returns the hosts an opted-in lane anchored on anchorURL may
 // reach at a private address: the anchor's host, and hosts under its parent
-// domain when that parent has at least two labels. A beta preview's API at
-// main-api.3.bc4-beta.com advertises its issuer at main.3.bc4-beta.com, so
-// both sit under 3.bc4-beta.com; a two-label parent (com, internal) would
-// cover too much, so a host like api.internal admits only itself, as an
+// domain when that parent is a registrable domain or below one. A beta
+// preview's API at main-api.3.bc4-beta.com advertises its issuer at
+// main.3.bc4-beta.com, so both sit under 3.bc4-beta.com. A parent that is a
+// public suffix (co.uk, github.io) or a single label (internal) would take in
+// hosts other parties own, so such an anchor admits only itself, as an
 // address literal does.
 func privateScope(anchorURL string) func(host string) bool {
 	norm := func(h string) string { return strings.TrimSuffix(strings.ToLower(h), ".") }
@@ -102,8 +106,11 @@ func privateScope(anchorURL string) func(host string) bool {
 	base := norm(u.Hostname())
 	suffix := ""
 	if _, err := netip.ParseAddr(base); err != nil {
-		if i := strings.IndexByte(base, '.'); i > 0 && strings.Contains(base[i+1:], ".") {
-			suffix = base[i:]
+		if i := strings.IndexByte(base, '.'); i > 0 {
+			parent := base[i+1:]
+			if _, err := publicsuffix.EffectiveTLDPlusOne(parent); err == nil && strings.Contains(parent, ".") {
+				suffix = base[i:]
+			}
 		}
 	}
 	return func(host string) bool {
@@ -144,7 +151,7 @@ func (r privateNetworkRoundTripper) RoundTrip(req *http.Request) (*http.Response
 	if req == nil || req.URL == nil {
 		return nil, &surfguard.Violation{Reason: surfguard.ReasonMalformedHost}
 	}
-	if !r.inScope(req.URL.Hostname()) {
+	if req.URL.Scheme != "https" || !r.inScope(req.URL.Hostname()) {
 		return r.strict.RoundTrip(req)
 	}
 	// surfguard's dialer rewrites a legacy numeric host (0x0a1405e5,
@@ -152,9 +159,6 @@ func (r privateNetworkRoundTripper) RoundTrip(req *http.Request) (*http.Response
 	// it to DNS instead. No OAuth endpoint is named that way, so refuse it.
 	if isLegacyNumericHost(req.URL.Hostname()) {
 		return nil, &surfguard.Violation{Host: req.URL.Hostname(), Reason: surfguard.ReasonMalformedHost}
-	}
-	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
-		return nil, &surfguard.Violation{Reason: surfguard.ReasonScheme}
 	}
 	var v *surfguard.Violation
 	if err := r.policy.WithResolver(noLookup{}).CheckURL(req.Context(), req.URL.String()); errors.As(err, &v) && v.Reason == surfguard.ReasonMalformedHost {

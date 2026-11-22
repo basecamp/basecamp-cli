@@ -1173,6 +1173,7 @@ func TestPrivateNetworkRoundTripper_RefusesMalformedURLs(t *testing.T) {
 
 	for _, u := range []*url.URL{
 		{Scheme: "ftp", Host: "main.3.bc4-beta.com"},
+		{Scheme: "http", Host: "10.20.5.229"},
 		{Scheme: "http", Host: "[example.com]"},
 		{Scheme: "http", Host: "\u24dbocalhost"}, // IDNA-normalizes to localhost
 		{Scheme: "http", Host: ""},
@@ -1206,7 +1207,16 @@ func TestPrivateScope(t *testing.T) {
 
 	short := privateScope("https://api.internal")
 	assert.True(t, short("api.internal"))
-	assert.False(t, short("db.internal"), "a two-label parent admits only the host itself")
+	assert.False(t, short("db.internal"), "a single-label parent admits only the host itself")
+
+	for anchor, other := range map[string]string{
+		"https://customer.co.uk":    "probe.attacker.co.uk",
+		"https://someone.github.io": "attacker.github.io",
+	} {
+		in := privateScope(anchor)
+		assert.True(t, in(strings.TrimPrefix(anchor, "https://")), anchor)
+		assert.False(t, in(other), "a public-suffix parent (%s) admits only the host itself", anchor)
+	}
 
 	literal := privateScope("https://10.20.5.229")
 	assert.True(t, literal("10.20.5.229"))
@@ -1227,4 +1237,19 @@ func TestBC5Lane_PrivateOutOfScopeIsRefused(t *testing.T) {
 		_ = resp.Body.Close()
 	}
 	assert.ErrorIs(t, err, surfguard.ErrBlocked, "an address literal outside the base URL's domain keeps the strict policy")
+}
+
+// TestBC5Lane_PrivateNeedsHTTPS: with the opt-in on, an in-scope host reached
+// over plain HTTP keeps the strict policy: no certificate vouches for it.
+func TestBC5Lane_PrivateNeedsHTTPS(t *testing.T) {
+	clearProxyEnv(t)
+	t.Setenv(oauthAllowPrivateEnv, "1")
+	policy, err := oauthEndpointPolicy("https://main-api.3.bc4-beta.com", "base URL")
+	require.NoError(t, err)
+	// The scope admits the literal, so only the scheme decides.
+	rt := privateNetworkTransport(policy, func(string) bool { return true }).(privateNetworkRoundTripper)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://10.20.5.229:8080/action", nil)
+	require.NoError(t, err)
+	_, err = rt.RoundTrip(req)
+	assert.ErrorIs(t, err, surfguard.ErrBlocked)
 }
