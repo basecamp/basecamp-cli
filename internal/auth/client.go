@@ -1,13 +1,17 @@
 package auth
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp/oauth"
@@ -26,6 +30,132 @@ import (
 // be told apart from intent. Any other non-empty value is refused with a
 // warning rather than guessed at.
 const oauthUseProxyEnv = "BASECAMP_OAUTH_USE_PROXY"
+
+// oauthAllowPrivateEnv admits private network addresses (RFC 1918 and IPv6
+// unique local) on the BC5 OAuth lane, for a base URL served inside a private
+// network: a beta preview's API host resolves to the previews load balancer,
+// reachable only on the VPN. It is read like oauthUseProxyEnv: only "1"
+// enables it, "" is unset, and anything else is refused with a warning.
+//
+// It is the operator vouching for the network of the base URL they
+// configured, as a local base URL vouches for loopback, so it applies to that
+// lane alone: never to the Launchpad lane, and never to a production base URL
+// (firstPartyOAuthHosts), whose discovery documents must not be able to steer
+// the CLI to an internal address because a variable was left set. Loopback,
+// link-local, cloud metadata and CGNAT space stay refused.
+const oauthAllowPrivateEnv = "BASECAMP_OAUTH_ALLOW_PRIVATE"
+
+// privateNetworkPrefixes is what oauthAllowPrivateEnv admits.
+var privateNetworkPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("fc00::/7"),
+}
+
+// privateNetworkPolicy judges an address inside privateNetworkPrefixes once
+// the opt-in is on. fd00:ec2::254 is EC2's IPv6 instance metadata service,
+// which sits inside the unique local range and stays refused.
+var privateNetworkPolicy = surfguard.Policy{}.AllowAllPorts().
+	Allow(privateNetworkPrefixes...).
+	Deny(netip.MustParsePrefix("fd00:ec2::254/128"))
+
+// privateNetworkAdmits reports whether the opt-in admits addr: it is in
+// privateNetworkPrefixes and privateNetworkPolicy does not refuse it.
+func privateNetworkAdmits(addr netip.Addr) bool {
+	addr = addr.Unmap()
+	for _, p := range privateNetworkPrefixes {
+		if p.Contains(addr) {
+			return !privateNetworkPolicy.Blocked(addr)
+		}
+	}
+	return false
+}
+
+// privateNetworkTransport is an opted-in lane's direct transport. The lane's
+// own policy judges every address, as it does without the opt-in; only an
+// address it refuses that privateNetworkAdmits is let through, so everything
+// else the IANA special-use tables refuse (NAT64, AMT, AS112 and the rest)
+// stays refused. Each dial is judged at connect time, which is what defeats
+// DNS rebinding.
+func privateNetworkTransport(policy surfguard.Policy) http.RoundTripper {
+	t := policy.Transport()
+	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second, ControlContext: privateNetworkControl(policy)}
+	t.DialContext = dialer.DialContext
+	return privateNetworkRoundTripper{policy: policy, next: t}
+}
+
+// privateNetworkControl is the opted-in lane's dial check: the lane's policy,
+// and where it refuses, privateNetworkPolicy for an address
+// privateNetworkAdmits.
+func privateNetworkControl(policy surfguard.Policy) func(context.Context, string, string, syscall.RawConn) error {
+	return func(ctx context.Context, network, address string, c syscall.RawConn) error {
+		err := policy.ControlContext(ctx, network, address, c)
+		if err == nil {
+			return nil
+		}
+		ap, perr := netip.ParseAddrPort(address)
+		if perr != nil || !privateNetworkAdmits(ap.Addr()) {
+			return err
+		}
+		return privateNetworkPolicy.ControlContext(ctx, network, address, c)
+	}
+}
+
+// privateNetworkRoundTripper refuses a request whose URL the lane's policy
+// finds malformed (scheme or host) before the transport dials, as
+// surfguard's own RoundTripper does. Its verdict on the address is left to
+// the dial.
+type privateNetworkRoundTripper struct {
+	policy surfguard.Policy
+	next   *http.Transport
+}
+
+func (r privateNetworkRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req == nil || req.URL == nil {
+		return nil, &surfguard.Violation{Reason: surfguard.ReasonMalformedHost}
+	}
+	// surfguard's dialer rewrites a legacy numeric host (0x0a1405e5,
+	// 012.024.5.229) to the address it means; a plain net.Dialer would send
+	// it to DNS instead. No OAuth endpoint is named that way, so refuse it.
+	if isLegacyNumericHost(req.URL.Hostname()) {
+		return nil, &surfguard.Violation{Host: req.URL.Hostname(), Reason: surfguard.ReasonMalformedHost}
+	}
+	var v *surfguard.Violation
+	if err := r.policy.CheckURL(req.Context(), req.URL.String()); errors.As(err, &v) &&
+		(v.Reason == surfguard.ReasonMalformedHost || v.Reason == surfguard.ReasonScheme) {
+		return nil, err
+	}
+	return r.next.RoundTrip(req)
+}
+
+// isLegacyNumericHost reports whether host is an IPv4 address in a spelling
+// other than dotted decimal: every dot-separated part a decimal, octal or 0x
+// hex number. A DNS name's last label is never all digits, and a canonical
+// literal parses as an address.
+func isLegacyNumericHost(host string) bool {
+	if host == "" || strings.Contains(host, ":") {
+		return false
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
+		return false
+	}
+	for _, part := range strings.Split(strings.ToLower(host), ".") {
+		digits := strings.TrimPrefix(part, "0x")
+		if digits == "" && part != "0x" {
+			return false
+		}
+		for _, c := range digits {
+			if (c < '0' || c > '9') && (part == digits || c < 'a' || c > 'f') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// CloseIdleConnections forwards to the transport, as http.Client expects.
+func (r privateNetworkRoundTripper) CloseIdleConnections() { r.next.CloseIdleConnections() }
 
 // oauthClientTimeout bounds each OAuth HTTP request on the lane clients —
 // the same 30s the pre-lane appctx client carried.
@@ -75,6 +205,75 @@ func oauthEndpointPolicy(anchorURL, label string) (surfguard.Policy, error) {
 		policy = policy.AllowLoopback()
 	}
 	return policy, nil
+}
+
+// privateOptIn reports whether oauthAllowPrivateEnv is "1". Read once per
+// Manager, so a malformed value warns once.
+func (m *Manager) privateOptIn() bool {
+	m.allowPrivateOnce.Do(func() {
+		switch v := os.Getenv(oauthAllowPrivateEnv); v {
+		case "":
+		case "1":
+			m.allowPrivate = true
+		default:
+			m.warnf("warning: %s=%q is not understood (only \"1\" enables it); OAuth requests keep the SSRF address policy", oauthAllowPrivateEnv, v)
+		}
+	})
+	return m.allowPrivate
+}
+
+// isFirstPartyHost reports whether host names one of firstPartyOAuthHosts,
+// in any case and with or without the root's trailing dot.
+func isFirstPartyHost(host string) bool {
+	return firstPartyOAuthHosts[strings.TrimSuffix(strings.ToLower(host), ".")]
+}
+
+// allowPrivateFor reports whether a BC5 lane anchored on baseURL admits
+// private addresses: the opt-in is on and baseURL is not a production host.
+func (m *Manager) allowPrivateFor(baseURL string) bool {
+	if !m.privateOptIn() {
+		return false
+	}
+	if u, err := url.Parse(baseURL); err != nil || isFirstPartyHost(u.Hostname()) {
+		m.warnf("warning: %s=1 is ignored for a production base URL; OAuth requests keep the SSRF address policy", oauthAllowPrivateEnv)
+		return false
+	}
+	return true
+}
+
+// privateBaseURLHint explains a failed discovery whose base URL resolves only
+// to addresses the opt-in would admit, naming it. It returns "" when the
+// opt-in is already on, or the host is a production one, unresolvable, or
+// resolves anywhere else (public, loopback, metadata).
+func (m *Manager) privateBaseURLHint(ctx context.Context, origin string) string {
+	if m.httpClient != nil || m.allowPrivateFor(origin) {
+		return ""
+	}
+	u, err := url.Parse(origin)
+	if err != nil || isFirstPartyHost(u.Hostname()) {
+		return ""
+	}
+	addrs := []netip.Addr{}
+	if a, err := netip.ParseAddr(u.Hostname()); err == nil {
+		addrs = append(addrs, a)
+	} else {
+		// A diagnostic, after discovery already failed: never let a stalled
+		// resolver hold up the fallback.
+		lookupCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		if addrs, err = net.DefaultResolver.LookupNetIP(lookupCtx, "ip", u.Hostname()); err != nil {
+			return ""
+		}
+	}
+	if len(addrs) == 0 {
+		return ""
+	}
+	for _, a := range addrs {
+		if !privateNetworkAdmits(a) {
+			return ""
+		}
+	}
+	return fmt.Sprintf("the base URL resolves to a private network address, which OAuth refuses by default; if you trust it (a beta preview on the VPN), set %s=1", oauthAllowPrivateEnv)
 }
 
 // firstPartyOAuthHosts are the hosts 37signals operates that the OAuth flows
@@ -324,7 +523,7 @@ func (m *Manager) bc5Client() (*http.Client, error) {
 		return m.httpClient, nil
 	}
 	m.bc5Lane.once.Do(func() {
-		m.bc5Lane.client, m.bc5Lane.err = m.buildLaneClient(m.cfg.BaseURL, "base URL")
+		m.bc5Lane.client, m.bc5Lane.err = m.buildLaneClient(m.cfg.BaseURL, "base URL", m.allowPrivateFor(m.cfg.BaseURL))
 	})
 	return m.bc5Lane.client, m.bc5Lane.err
 }
@@ -343,19 +542,23 @@ func (m *Manager) launchpadClient() (*http.Client, error) {
 			m.lpLane.err = err
 			return
 		}
-		m.lpLane.client, m.lpLane.err = m.buildLaneClient(lpURL, "Launchpad URL")
+		m.lpLane.client, m.lpLane.err = m.buildLaneClient(lpURL, "Launchpad URL", false)
 	})
 	return m.lpLane.client, m.lpLane.err
 }
 
-func (m *Manager) buildLaneClient(anchorURL, label string) (*http.Client, error) {
+func (m *Manager) buildLaneClient(anchorURL, label string, allowPrivate bool) (*http.Client, error) {
 	policy, err := oauthEndpointPolicy(anchorURL, label)
 	if err != nil {
 		return nil, err
 	}
+	guarded := policy.RoundTripper()
+	if allowPrivate {
+		guarded = privateNetworkTransport(policy)
+	}
 	st := m.proxyState()
 	tr := &oauthTransport{
-		guarded:    policy.RoundTripper(),
+		guarded:    guarded,
 		firstParty: m.firstPartyOAuthPolicy().RoundTripper(),
 		resolve:    st.resolve,
 		optOut:     st.optOut,

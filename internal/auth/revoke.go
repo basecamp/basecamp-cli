@@ -412,7 +412,7 @@ func (m *Manager) revocationClient(baseURL string) (*http.Client, error) {
 	if m.httpClient != nil || baseURL == "" || baseURL == m.cfg.BaseURL {
 		return m.bc5Client()
 	}
-	return m.buildLaneClient(baseURL, "profile base URL")
+	return m.buildLaneClient(baseURL, "profile base URL", m.allowPrivateFor(baseURL))
 }
 
 // credentialIssuer names the authorization server that minted creds. Logins

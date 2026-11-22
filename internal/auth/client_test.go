@@ -29,7 +29,7 @@ import (
 // need a proxy set their own values on top.
 func clearProxyEnv(t *testing.T) {
 	t.Helper()
-	for _, v := range []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy", "REQUEST_METHOD", oauthUseProxyEnv} {
+	for _, v := range []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy", "REQUEST_METHOD", oauthUseProxyEnv, oauthAllowPrivateEnv} {
 		t.Setenv(v, "")
 	}
 }
@@ -973,4 +973,187 @@ func TestLanes_FirstPartyTransportVerifiesCertificates(t *testing.T) {
 	check(t, lp)
 
 	assert.Zero(t, reached.Load(), "no request may reach a server whose certificate failed verification")
+}
+
+// TestPrivateNetworkAdmits pins what BASECAMP_OAUTH_ALLOW_PRIVATE=1 admits:
+// RFC 1918 and IPv6 unique local space, and nothing else the issuer policy
+// refuses.
+func TestPrivateNetworkAdmits(t *testing.T) {
+	for _, a := range []string{"10.20.5.229", "172.16.0.1", "192.168.1.1", "fd00::1", "::ffff:10.20.5.229"} {
+		assert.True(t, privateNetworkAdmits(netip.MustParseAddr(a)), a)
+	}
+	for _, a := range []string{
+		"127.0.0.1", "169.254.169.254", "100.64.0.1", "fe80::1", "::1",
+		"fd00:ec2::254",    // EC2 IPv6 instance metadata, inside fc00::/7
+		"192.52.193.1",     // AMT: IANA special use, not private
+		"192.31.196.1",     // AS112
+		"2001:3::1",        // AMT v6
+		"64:ff9b::a14:5e5", // NAT64 of 10.20.5.229
+		"8.8.8.8",
+	} {
+		assert.False(t, privateNetworkAdmits(netip.MustParseAddr(a)), a)
+	}
+}
+
+// TestBC5Lane_PrivateNetworkOptIn: a beta preview's API host resolves to a
+// private address. The opt-in admits private space on the BC5 lane of a
+// non-production base URL, and nowhere else.
+func TestBC5Lane_PrivateNetworkOptIn(t *testing.T) {
+	const preview = "https://main-api.3.bc4-beta.com"
+
+	t.Run("off by default", func(t *testing.T) {
+		clearProxyEnv(t)
+		assert.False(t, laneManager(t, preview).allowPrivateFor(preview))
+	})
+
+	t.Run("on for a non-production base URL", func(t *testing.T) {
+		clearProxyEnv(t)
+		t.Setenv(oauthAllowPrivateEnv, "1")
+		assert.True(t, laneManager(t, preview).allowPrivateFor(preview))
+	})
+
+	for _, prod := range []string{"https://3.basecampapi.com", "https://API.basecamp.com.", "https://app.basecamp.com"} {
+		t.Run("ignored for "+prod, func(t *testing.T) {
+			clearProxyEnv(t)
+			t.Setenv(oauthAllowPrivateEnv, "1")
+			var warnings []string
+			m := laneManager(t, prod)
+			m.Warnf = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
+			assert.False(t, m.allowPrivateFor(prod))
+			require.NotEmpty(t, warnings)
+			assert.Contains(t, warnings[0], "production base URL")
+		})
+	}
+
+	t.Run("malformed value is off, with a warning", func(t *testing.T) {
+		clearProxyEnv(t)
+		t.Setenv(oauthAllowPrivateEnv, "yes")
+		var warnings []string
+		m := laneManager(t, preview)
+		m.Warnf = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
+		assert.False(t, m.allowPrivateFor(preview))
+		require.NotEmpty(t, warnings)
+		assert.Contains(t, warnings[0], "is not understood")
+	})
+
+	// At the client, every case here is refused before a connection is
+	// made, so none depends on the network around the test.
+	t.Run("lanes refuse what the opt-in does not admit", func(t *testing.T) {
+		clearProxyEnv(t)
+		get := func(client *http.Client, target string) error {
+			resp, err := doGet(t, client, target)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			return err
+		}
+
+		m := laneManager(t, preview)
+		bc5, err := m.bc5Client()
+		require.NoError(t, err)
+		assert.ErrorIs(t, get(bc5, "http://10.20.5.229/"), surfguard.ErrBlocked, "off: private refused")
+
+		t.Setenv(oauthAllowPrivateEnv, "1")
+		m = laneManager(t, preview)
+		bc5, err = m.bc5Client()
+		require.NoError(t, err)
+		for _, target := range []string{
+			"http://169.254.169.254/latest/meta-data/",
+			"http://[fd00:ec2::254]/latest/meta-data/",
+			"http://192.52.193.1/",
+			"http://[64:ff9b::a14:5e5]/",
+			"http://127.0.0.1/",
+		} {
+			assert.ErrorIs(t, get(bc5, target), surfguard.ErrBlocked, "on: %s stays refused", target)
+		}
+
+		lp, err := m.launchpadClient()
+		require.NoError(t, err)
+		assert.ErrorIs(t, get(lp, "http://10.20.5.229/"), surfguard.ErrBlocked, "the Launchpad lane never takes the opt-in")
+	})
+}
+
+// TestPrivateNetworkControl: the opted-in lane's dial check lets a private
+// address through and still refuses the rest, including on a lane whose
+// local anchor admits loopback.
+func TestPrivateNetworkControl(t *testing.T) {
+	clearProxyEnv(t)
+	t.Setenv(oauthAllowPrivateEnv, "1")
+	m := laneManager(t, "https://main-api.3.bc4-beta.com")
+	bc5, err := m.bc5Client()
+	require.NoError(t, err)
+	_, ok := bc5.Transport.(*oauthTransport).guarded.(privateNetworkRoundTripper)
+	require.True(t, ok, "an opted-in BC5 lane rides the private-network transport")
+
+	policy, err := oauthEndpointPolicy("https://main-api.3.bc4-beta.com", "base URL")
+	require.NoError(t, err)
+	check := privateNetworkControl(policy)
+	dial := func(network, address string) error { return check(context.Background(), network, address, nil) }
+
+	assert.NoError(t, dial("tcp4", "10.20.5.229:443"))
+	assert.NoError(t, dial("tcp6", "[fd00::1]:443"))
+	assert.NoError(t, dial("tcp4", "8.8.8.8:443"), "public addresses keep the lane's verdict")
+	for _, a := range []string{"169.254.169.254:80", "192.52.193.1:443", "127.0.0.1:443"} {
+		assert.ErrorIs(t, dial("tcp4", a), surfguard.ErrBlocked, a)
+	}
+	assert.ErrorIs(t, dial("tcp6", "[fd00:ec2::254]:80"), surfguard.ErrBlocked)
+	assert.ErrorIs(t, dial("tcp6", "[64:ff9b::a14:5e5]:443"), surfguard.ErrBlocked)
+	assert.ErrorIs(t, dial("udp", "10.20.5.229:443"), surfguard.ErrBlocked, "the network gate still applies")
+}
+
+// TestPrivateBaseURLHint: a failed discovery against a base URL that resolves
+// to a private address names the opt-in; one that is public, loopback,
+// metadata, special use, or already opted in does not.
+func TestPrivateBaseURLHint(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		origin string
+		optIn  string
+		want   bool
+	}{
+		{"https://10.20.5.229", "", true},
+		{"https://[fd00::1]", "", true},
+		{"https://10.20.5.229", "1", false},
+		{"https://127.0.0.2", "", false},
+		{"https://169.254.169.254", "", false},
+		{"https://[fd00:ec2::254]", "", false},
+		{"https://192.52.193.1", "", false},
+		{"https://8.8.8.8", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.origin+" opt-in="+tc.optIn, func(t *testing.T) {
+			clearProxyEnv(t)
+			t.Setenv(oauthAllowPrivateEnv, tc.optIn)
+			m := laneManager(t, tc.origin)
+			hint := m.privateBaseURLHint(ctx, tc.origin)
+			if tc.want {
+				assert.Contains(t, hint, oauthAllowPrivateEnv+"=1")
+			} else {
+				assert.Empty(t, hint)
+			}
+		})
+	}
+}
+
+// TestPrivateNetworkTransport_RefusesLegacyNumericHosts: the opted-in lane's
+// dialer does not canonicalize numeric spellings as surfguard's does, so
+// they are refused before it runs.
+func TestPrivateNetworkTransport_RefusesLegacyNumericHosts(t *testing.T) {
+	for _, h := range []string{"0x0a1405e5", "012.024.5.229", "167036389", "10.0x14.5.229", "0X0A1405E5", "0x"} {
+		assert.True(t, isLegacyNumericHost(h), h)
+	}
+	for _, h := range []string{"10.20.5.229", "fd00::1", "main-api.3.bc4-beta.com", "cafe", "cafe.beef", "example.com", "a..b", ""} {
+		assert.False(t, isLegacyNumericHost(h), h)
+	}
+
+	clearProxyEnv(t)
+	t.Setenv(oauthAllowPrivateEnv, "1")
+	m := laneManager(t, "https://main-api.3.bc4-beta.com")
+	bc5, err := m.bc5Client()
+	require.NoError(t, err)
+	resp, err := doGet(t, bc5, "http://0x0a1405e5/")
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	assert.ErrorIs(t, err, surfguard.ErrBlocked)
 }

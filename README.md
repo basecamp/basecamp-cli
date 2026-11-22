@@ -394,6 +394,21 @@ serving piloted clients but not yet advertising itself (discovery still 404s).
 It is a temporary escape hatch for that dark pilot, not a configuration
 surface, and will be removed once the server advertises its metadata.
 
+OAuth requests refuse private network addresses, so a discovery document can
+never steer the CLI to an internal host. A beta preview's API
+(`<name>-api.3.bc4-beta.com`) is served from a private address on the VPN; to
+sign in to one, opt in for that base URL:
+
+```bash
+BASECAMP_OAUTH_ALLOW_PRIVATE=1 BASECAMP_BASE_URL=https://<name>-api.3.bc4-beta.com basecamp auth login
+```
+
+Only `1` enables it. It admits private ranges (10/8, 172.16/12, 192.168/16 and
+IPv6 unique local) for a non-production base URL only; loopback, link-local,
+cloud metadata and other special-use addresses stay refused, and it is ignored
+for Basecamp's own hosts. Keep it set for that profile's later commands, which refresh the token
+over the same route.
+
 ## AI Agent Integration
 
 `basecamp` works with any AI agent that can run shell commands.
