@@ -181,7 +181,8 @@ func newReportsOverdueCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "overdue",
 		Short: "View overdue todos grouped by lateness",
-		Long: `View all overdue todos grouped by how late they are.
+		Long: `View the first page of overdue todos grouped by how late they are.
+The response meta.truncated field indicates whether more pages exist.
 
 Todos are grouped into categories:
   - Under a week late
@@ -195,7 +196,7 @@ Todos are grouped into categories:
 				return err
 			}
 
-			result, err := app.Account().Reports().OverdueTodos(cmd.Context())
+			result, err := app.Account().Reports().OverdueTodos(cmd.Context(), 0)
 			if err != nil {
 				return convertSDKError(err)
 			}
