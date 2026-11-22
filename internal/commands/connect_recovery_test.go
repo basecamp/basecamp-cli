@@ -330,7 +330,7 @@ func TestBasecampDoctorSaysABrokenProfilesConnectorIsRunning(t *testing.T) {
 	checks := checkConnectorProfiles()
 	require.Len(t, checks, 1)
 	assert.Equal(t, "fail", checks[0].Status)
-	assert.True(t, strings.HasSuffix(checks[0].Message, fmt.Sprintf("; its connector (agent person %d in account %s) is running, and holds requests until the file reads again",
+	assert.True(t, strings.HasSuffix(checks[0].Message, fmt.Sprintf("; its connector (agent person %d in account %s) is running",
 		f.file.Agent.PersonID, f.file.AccountID)), checks[0].Message)
 }
 
@@ -525,7 +525,15 @@ func TestAFileCopiedFromAnotherProfileIsNotSetUp(t *testing.T) {
 
 	p := f.reportProfile(t)
 	require.True(t, p.broken())
+	assert.Equal(t, f.file.Agent.PersonID, p.file.Agent.PersonID, "the file's agent still says whose state to read")
 	file := checksByName(connectDoctorChecks(context.Background(), p))["connect.json"]
 	assert.Equal(t, setup.StatusFail, file.Status)
 	assert.Equal(t, connectResetHint("agent"), file.Hint)
+
+	// The commands that act on a connector still take the file, as the
+	// connector does, so one already running can still be stopped.
+	cmd := &cobra.Command{}
+	cmd.SetContext(appctx.WithApp(context.Background(), newConnectSetupApp(t, f.s, "agent")))
+	_, err := loadConnectProfile(cmd)
+	require.NoError(t, err)
 }

@@ -342,7 +342,7 @@ func checkConnectorProfiles() []Check {
 				// it, since the profile's credential may since be another's.
 				who := fmt.Sprintf("its connector (agent person %d in account %s)", person, account)
 				if connectorRunning(name, state) {
-					c.Message += "; " + who + " is running, and holds requests until the file reads again"
+					c.Message += "; " + who + " is running"
 				} else {
 					c.Message += "; " + who + " is not running"
 				}
