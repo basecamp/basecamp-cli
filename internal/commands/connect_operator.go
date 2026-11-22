@@ -101,8 +101,9 @@ func loadConnectProfileForReport(cmd *cobra.Command) (connectProfile, error) {
 		if p.file.Profile == p.name {
 			return p, nil
 		}
-		_, mismatch := loadConnectFile(p.path, p.name)
-		broken := connectProfile{app: p.app, name: p.name, path: p.path, fileErr: mismatch}
+		// The refusal is made from the file already read, not a second read
+		// that a repair in between could make succeed.
+		broken := connectProfile{app: p.app, name: p.name, path: p.path, fileErr: profileMismatch(p.file.Profile, p.name)}
 		// The profile's own state is the better witness of whose connector
 		// ran here than a file copied from elsewhere; that file's agent is
 		// the fallback.
@@ -140,9 +141,13 @@ func loadConnectProfileForReport(cmd *cobra.Command) (connectProfile, error) {
 func loadConnectFile(path, name string) (setup.File, error) {
 	file, err := setup.Load(path)
 	if err == nil && file.Profile != name {
-		return setup.File{}, fmt.Errorf("connect.json names profile %q, and it is profile %q's", file.Profile, name)
+		return setup.File{}, profileMismatch(file.Profile, name)
 	}
 	return file, err
+}
+
+func profileMismatch(named, name string) error {
+	return fmt.Errorf("connect.json names profile %q, and it is profile %q's", named, name)
 }
 
 // connectStateIdentity is the account and agent of the one connector state
