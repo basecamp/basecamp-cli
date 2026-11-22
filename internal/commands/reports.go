@@ -195,7 +195,7 @@ Todos are grouped into categories:
 				return err
 			}
 
-			result, err := app.Account().Reports().OverdueTodos(cmd.Context())
+			result, err := app.Account().Reports().OverdueTodos(cmd.Context(), 0)
 			if err != nil {
 				return convertSDKError(err)
 			}

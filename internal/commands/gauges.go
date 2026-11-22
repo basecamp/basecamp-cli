@@ -2,7 +2,9 @@ package commands
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -24,7 +26,8 @@ A gauge shows the current state of a project via needles positioned on a
 0–100 scale, each colored green, yellow, or red.`,
 		Annotations: map[string]string{
 			"agent_notes": "Gauges track project progress with colored needles (0-100 scale).\n" +
-				"list is account-wide. needles/create/enable/disable are project-scoped (--in).\n" +
+				"list is account-wide; --in <project> or --projects a,b (not both) narrows it, in the order named.\n" +
+				"A configured default project never narrows list. needles/create/enable/disable are project-scoped (--in).\n" +
 				"Colors: green, yellow, red. Notify: everyone, working_on, custom.",
 		},
 	}
@@ -33,7 +36,7 @@ A gauge shows the current state of a project via needles positioned on a
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
 	cmd.AddCommand(
-		newGaugesListCmd(),
+		newGaugesListCmd(&project),
 		newGaugesNeedlesCmd(&project),
 		newGaugesNeedleCmd(),
 		newGaugesCreateCmd(&project),
@@ -46,11 +49,23 @@ A gauge shows the current state of a project via needles positioned on a
 	return cmd
 }
 
-func newGaugesListCmd() *cobra.Command {
-	return &cobra.Command{
+func newGaugesListCmd(project *string) *cobra.Command {
+	var projects repeatedString
+
+	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List all gauges across the account",
-		Long:  "List all gauges across every project in the account.",
+		Short: "List gauges across the account, or in chosen projects",
+		Long: `List gauges across every project in the account, riskiest first.
+
+--in narrows the list to one project, and --projects to several, given as
+names or IDs, comma-separated or repeated; use one or the other. Gauges then
+come back in the order the projects were named. A configured default project
+does not narrow it.
+
+  basecamp gauges list
+  basecamp gauges list --in MyProject
+  basecamp gauges list --projects 123,456`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
 
@@ -58,14 +73,44 @@ func newGaugesListCmd() *cobra.Command {
 				return err
 			}
 
-			result, err := app.Account().Gauges().List(cmd.Context(), nil)
+			// Only a project named on this command narrows the report:
+			// --project/--in is shared with the group, so ask whether it was
+			// given rather than reading a default.
+			single := cmd.Flags().Changed("project") || cmd.Flags().Changed("in")
+			several := cmd.Flags().Changed("projects")
+			if single && several {
+				// The API answers in the order named, and the two flags'
+				// relative order on the command line is not recoverable.
+				return output.ErrUsage("Use --in for one project or --projects for several, not both")
+			}
+			named := []string(projects)
+			if single {
+				named = []string{*project}
+			}
+
+			bucketIDs, err := resolveGaugeProjects(cmd, app, named)
+			if err != nil {
+				return err
+			}
+
+			var opts *basecamp.GaugeListOptions
+			if len(bucketIDs) > 0 {
+				opts = &basecamp.GaugeListOptions{BucketIDs: bucketIDs}
+			}
+
+			result, err := app.Account().Gauges().List(cmd.Context(), opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
 			gauges := result.Gauges
 
+			summary := fmt.Sprintf("%d gauge(s)", len(gauges))
+			if len(bucketIDs) > 0 {
+				summary = fmt.Sprintf("%d gauge(s) in %d project(s)", len(gauges), len(bucketIDs))
+			}
+
 			return app.OK(gauges,
-				output.WithSummary(fmt.Sprintf("%d gauge(s)", len(gauges))),
+				output.WithSummary(summary),
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "needles",
@@ -76,6 +121,37 @@ func newGaugesListCmd() *cobra.Command {
 			)
 		},
 	}
+
+	// Not StringSliceVar: it drops an empty value, which would widen
+	// `--projects ""` to the whole account instead of refusing it.
+	cmd.Flags().Var(&projects, "projects", "Only these projects' gauges, in this order: names or IDs (comma-separated or repeated)")
+
+	return cmd
+}
+
+// resolveGaugeProjects turns the projects named on gauges list into bucket
+// IDs, keeping the order they were named in (the API answers in that order)
+// and dropping repeats. None named means the whole account.
+func resolveGaugeProjects(cmd *cobra.Command, app *appctx.App, named []string) ([]int64, error) {
+	var ids []int64
+	for _, raw := range named {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			return nil, output.ErrUsage("Empty project in --in or --projects")
+		}
+		resolved, _, err := app.Names.ResolveProject(cmd.Context(), value)
+		if err != nil {
+			return nil, err
+		}
+		id, err := strconv.ParseInt(resolved, 10, 64)
+		if err != nil || id <= 0 {
+			return nil, output.ErrUsage(fmt.Sprintf("Invalid project ID: %s", value))
+		}
+		if !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }
 
 func newGaugesNeedlesCmd(project *string) *cobra.Command {

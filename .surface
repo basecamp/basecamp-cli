@@ -11742,6 +11742,7 @@ FLAG basecamp gauges list --no-hints type=bool
 FLAG basecamp gauges list --no-stats type=bool
 FLAG basecamp gauges list --profile type=string
 FLAG basecamp gauges list --project type=string
+FLAG basecamp gauges list --projects type=string
 FLAG basecamp gauges list --quiet type=bool
 FLAG basecamp gauges list --stats type=bool
 FLAG basecamp gauges list --styled type=bool
