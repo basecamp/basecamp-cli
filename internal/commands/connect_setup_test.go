@@ -1293,7 +1293,7 @@ func TestConnectSetupRefusesToRebindToAnotherIdentity(t *testing.T) {
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, output.CodeAuth, apiErr.Code)
-	assert.Contains(t, apiErr.Message, "remove")
+	assert.Contains(t, apiErr.Message, "--reset")
 	after, err := os.ReadFile(connectSetupPath(t, "bot"))
 	require.NoError(t, err)
 	assert.Equal(t, before, after)

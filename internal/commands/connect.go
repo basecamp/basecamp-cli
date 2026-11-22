@@ -231,13 +231,13 @@ func runConnectShow(app *appctx.App) error {
 			"The connector's setup is not supported on Windows: this CLI cannot verify who can change connect.json there.")
 	case err != nil:
 		return output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(err),
-			"Nothing of it was shown. Fix or remove "+richtext.SanitizeSingleLine(path)+", then run setup again.")
+			"Nothing of it was shown. "+connectResetHint(name)+", or fix "+richtext.SanitizeSingleLine(path)+" by hand.")
 	}
 	if f.Profile != name {
 		// A policy copied from another profile's directory is not this
 		// profile's, however valid it is on its own: setup refuses it too.
 		return output.ErrUsageHint(fmt.Sprintf("%s names profile %q, not %q", richtext.SanitizeSingleLine(path), f.Profile, name),
-			"Nothing of it was shown. Remove "+richtext.SanitizeSingleLine(path)+" and run setup again for this profile.")
+			"Nothing of it was shown. "+connectResetHint(name)+".")
 	}
 
 	// The generic object renderer drops nested maps, which is where the
@@ -404,6 +404,11 @@ type connectSetupFlags struct {
 	// request with; noAckBoost turns it off.
 	ackBoost   optionalString
 	noAckBoost bool
+
+	// reset sets the profile up afresh from this run's flags alone, over a
+	// connect.json that cannot be used or is for another agent: the old
+	// file is moved aside only when the new one is written.
+	reset bool
 
 	serve             []string
 	classes           []string
@@ -596,6 +601,7 @@ Examples:
 	fl.StringArrayVar(&f.unlistenCampfires, "no-listen-campfire", nil, "Require mentions again: <project-id>:<campfire-id> (repeatable)")
 	fl.Var(&f.ackBoost, "ack-boost", fmt.Sprintf("Boost the connector acknowledges each request with, as the agent, before handing it off (default %s; at most %d characters)", setup.DefaultAckContent, setup.AckContentMax))
 	fl.BoolVar(&f.noAckBoost, "no-ack-boost", false, "Don't acknowledge requests in the connector; the session reading them boosts instead")
+	fl.BoolVar(&f.reset, "reset", false, "Set the profile up afresh from this run's flags, ignoring connect.json; the old file is kept beside the new one as connect.json.broken-<time>")
 	cmd.MarkFlagsMutuallyExclusive("operator", "operator-profile")
 	cmd.MarkFlagsMutuallyExclusive("ack-boost", "no-ack-boost")
 
@@ -643,12 +649,22 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 
 	existing, err := setup.Load(path)
 	exists := err == nil
+	// replacing is a --reset over a file that is there, usable or not: it
+	// is set aside, and this run starts from nothing.
+	replacing := false
 	switch {
+	case f.reset:
+		if _, statErr := os.Lstat(path); statErr == nil {
+			replacing = true
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return fmt.Errorf("could not look at %s: %w", richtext.SanitizeSingleLine(path), statErr)
+		}
+		existing, exists = setup.New(name), false
 	case errors.Is(err, os.ErrNotExist):
 		existing = setup.New(name)
 	case err != nil:
-		return output.ErrUsageHint("connect.json cannot be used: "+err.Error(),
-			"Nothing was changed. Fix or remove "+richtext.SanitizeSingleLine(path)+", then run setup again.")
+		return output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(err),
+			"Nothing was changed. "+connectResetHint(name)+", or fix "+richtext.SanitizeSingleLine(path)+" by hand and run setup again.")
 	}
 	if existing.Profile != name {
 		return output.ErrUsage(fmt.Sprintf("%s names profile %q, not %q", path, existing.Profile, name))
@@ -686,7 +702,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if exists && !accountIDsEqual(existing.AccountID, accountID) {
 		return output.ErrUsageHint(
 			fmt.Sprintf("connect.json was set up in account %s, and profile %q is bound to account %s", existing.AccountID, name, accountID),
-			"Nothing was changed. Remove "+richtext.SanitizeSingleLine(path)+" to set this profile up afresh.")
+			"Nothing was changed. To set this profile up afresh: basecamp connect setup -P "+richtext.ShellQuote(name)+" --reset, with the flags it needs.")
 	}
 	kind, err := connectCredentialKind(ctx, app)
 	if err != nil {
@@ -695,10 +711,10 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	// The credential's own disagreement with connect.json comes first: it is
 	// the wrong credential whatever the flags say.
 	if exists && kind != "" && existing.Agent.Kind != kind {
-		return output.ErrAuth(fmt.Sprintf("connect.json was set up for a %s credential, and profile %q now holds a %s one; remove %s to set this profile up afresh",
-			existing.Agent.Kind, name, kind, richtext.SanitizeSingleLine(path)))
+		return output.ErrAuth(fmt.Sprintf("connect.json was set up for a %s credential, and profile %q now holds a %s one; to set this profile up afresh, run setup again with --reset",
+			existing.Agent.Kind, name, kind))
 	}
-	if err := refuseCredentialConflicts(name, path, kind, expect, exists, existing); err != nil {
+	if err := refuseCredentialConflicts(name, kind, expect, exists, existing); err != nil {
 		return err
 	}
 	if kind == setup.KindBotUser {
@@ -709,8 +725,8 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 			// Rebinding the file to another bot is a deliberate act, not a
 			// flag: connect.json's trust was recorded for the agent it names.
 			return output.ErrAuth(fmt.Sprintf(
-				"connect.json is set up for identity %d, and --expect-identity names %d; remove %s to set this profile up for another bot",
-				existing.Agent.IdentityID, expect, richtext.SanitizeSingleLine(path)))
+				"connect.json is set up for identity %d, and --expect-identity names %d; to set this profile up for another bot, run setup again with --reset",
+				existing.Agent.IdentityID, expect))
 		}
 	}
 
@@ -754,8 +770,8 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	}
 	checks = append(checks, identityCheck)
 	if exists && existing.Agent.PersonID != me.ID {
-		return output.ErrAuth(fmt.Sprintf("connect.json was set up for agent person %d, and profile %q now authenticates as person %d; if this is a different agent on purpose, remove %s and run setup again",
-			existing.Agent.PersonID, name, me.ID, richtext.SanitizeSingleLine(path)))
+		return output.ErrAuth(fmt.Sprintf("connect.json was set up for agent person %d, and profile %q now authenticates as person %d; if this is a different agent on purpose, run setup again with --reset",
+			existing.Agent.PersonID, name, me.ID))
 	}
 	checks = append(checks, setup.ScopeCheck(creds.OAuthType, creds.Scope))
 
@@ -869,7 +885,22 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		if err := next.VerifyAgent(kind, me.ID, expect); err != nil {
 			return output.ErrAuth(err.Error())
 		}
-		return setup.Save(held, path, next)
+		if !replacing {
+			return setup.Save(held, path, next)
+		}
+		aside, err := setup.MoveAside(path, time.Now())
+		if err != nil {
+			return err
+		}
+		if err := connectSaveFile(held, path, next); err != nil {
+			// The old file goes back: a failed reset leaves what was there.
+			if restoreErr := os.Rename(aside, path); restoreErr != nil {
+				return fmt.Errorf("%w; and the old file could not be put back from %s: %w", err, richtext.SanitizeSingleLine(aside), restoreErr)
+			}
+			return err
+		}
+		report.MovedAside = aside
+		return nil
 	})
 	if saveErr != nil {
 		return classifyWriteError(name, saveErr)
@@ -886,11 +917,19 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		return nil
 	case styled:
 		renderChecksStyled(w, title, summary)
-		fmt.Fprintf(w, "  connect.json written: %s\n\n", richtext.SanitizeSingleLine(path))
+		fmt.Fprintf(w, "  connect.json written: %s\n", richtext.SanitizeSingleLine(path))
+		if report.MovedAside != "" {
+			fmt.Fprintf(w, "  The old file was kept as %s\n", richtext.SanitizeSingleLine(report.MovedAside))
+		}
+		fmt.Fprintln(w)
 		return nil
 	}
 	return app.OK(report, output.WithSummary("connect.json written; "+summary.Summary()))
 }
+
+// connectSaveFile is setup.Save, as a reset writes over a file it moved
+// aside; a variable so a test can make the write fail after the move.
+var connectSaveFile = setup.Save
 
 // classifyWriteError puts the last step's failures in the command's exit
 // contract: a credential that is gone or unreadable is auth, another
@@ -1191,15 +1230,15 @@ func parsePositiveID(flag, raw string) (int64, error) {
 // one with no credential (setup does not obtain one), --expect-identity
 // against an Agent's credential or connect.json, and a person's login with
 // nothing pinning it to the bot.
-func refuseCredentialConflicts(name, path, held string, expect int64, exists bool, existing setup.File) error {
+func refuseCredentialConflicts(name, held string, expect int64, exists bool, existing setup.File) error {
 	profile := richtext.ShellQuote(name)
 	switch {
 	// What connect.json already says comes first: a remediation that the
 	// existing file would refuse anyway is no remediation.
 	case expect != 0 && exists && existing.Agent.Kind == setup.KindAgent:
 		return output.ErrUsageHint("--expect-identity is for the bot-user path, and connect.json was set up for an Agent",
-			fmt.Sprintf("Connect the agent again (basecamp auth agent connect -P %s) and drop --expect-identity, or remove %s to set this profile up as a bot user.",
-				profile, richtext.SanitizeSingleLine(path)))
+			fmt.Sprintf("Connect the agent again (basecamp auth agent connect -P %s) and drop --expect-identity, or add --reset to set this profile up as a bot user.",
+				profile))
 	case held == "" && (expect != 0 || (exists && existing.Agent.Kind == setup.KindBotUser)):
 		identity := expect
 		if identity == 0 {

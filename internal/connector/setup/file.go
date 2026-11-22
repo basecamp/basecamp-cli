@@ -37,6 +37,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -296,12 +297,12 @@ func Parse(data []byte) (File, error) {
 	// admission's, not setup's own: one walk, so the reader that authorizes
 	// and the reader that refuses cannot disagree about what a key says.
 	if err := admission.CheckCanonicalKeys(data); err != nil {
-		return File{}, fmt.Errorf("parse connect.json: %w", err)
+		return File{}, fmt.Errorf("parse connect.json: %w", locate(data, err))
 	}
 	// admission.Project refuses a malformed entry itself, so both readers
 	// fail closed. This runs first only to name the project in the message:
-	// a map value's own error cannot say which key it came from, and
-	// connect.json is a file an operator edits by hand.
+	// a map value's own error cannot say which key it came from, and a
+	// person may have typed into the file.
 	if err := refuseMalformedProjects(data); err != nil {
 		return File{}, fmt.Errorf("parse connect.json: %w", err)
 	}
@@ -309,10 +310,13 @@ func Parse(data []byte) (File, error) {
 	dec.DisallowUnknownFields()
 	var f File
 	if err := dec.Decode(&f); err != nil {
-		return File{}, fmt.Errorf("parse connect.json: %w", err)
+		return File{}, fmt.Errorf("parse connect.json: %w", suggestKey(data, locate(data, err)))
 	}
+	end := dec.InputOffset()
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return File{}, errors.New("parse connect.json: trailing data after the object")
+		// What follows the object starts at its first byte that is not space.
+		rest := bytes.TrimLeft(data[end:], " \t\r\n")
+		return File{}, fmt.Errorf("parse connect.json: %w", positioned(data, len(data)-len(rest), errors.New("trailing data after the object")))
 	}
 	// Read, and forgotten: see LegacyWorktrees and admission.Project's
 	// LegacyPath. Both keys are in every connect.json written before the
@@ -363,7 +367,10 @@ func refuseMalformedProjects(data []byte) error {
 		}
 		var p admission.Project
 		if err := json.Unmarshal(entry, &p); err != nil {
-			return fmt.Errorf("project %s: %w", id, err)
+			// The entry's own offsets count from the entry: place them in
+			// the file, by the entry's path.
+			path := []string{"projects", id}
+			return fmt.Errorf("project %s: %w", id, suggestKey(data, locateIn(data, path, err), path...))
 		}
 	}
 	return nil
@@ -442,4 +449,25 @@ func save(path string, f File) error {
 func isAccountID(s string) bool {
 	n, err := strconv.ParseUint(s, 10, 64)
 	return err == nil && n > 0 && strconv.FormatUint(n, 10) == s
+}
+
+// MoveAside renames the connect.json at path to connect.json.broken-<time>
+// beside it, and returns the new path: how setup sets a profile up afresh
+// without deleting what was there. The caller holds the profile's setup lock.
+// A name already taken (two resets in one second) is never overwritten.
+func MoveAside(path string, now time.Time) (string, error) {
+	base := path + ".broken-" + now.UTC().Format("20060102T150405Z")
+	aside := base
+	for i := 2; ; i++ {
+		if _, err := os.Lstat(aside); errors.Is(err, os.ErrNotExist) {
+			break
+		} else if err != nil {
+			return "", fmt.Errorf("could not move %s aside: %w", path, err)
+		}
+		aside = fmt.Sprintf("%s-%d", base, i)
+	}
+	if err := os.Rename(path, aside); err != nil {
+		return "", fmt.Errorf("could not move %s aside: %w", path, err)
+	}
+	return aside, nil
 }
