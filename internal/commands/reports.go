@@ -182,7 +182,8 @@ func newReportsOverdueCmd() *cobra.Command {
 		Use:   "overdue",
 		Short: "View overdue todos grouped by lateness",
 		Long: `View the first page of overdue todos grouped by how late they are.
-The response meta.truncated field indicates whether more pages exist.
+In JSON output, data.meta.truncated indicates whether more pages exist
+(meta.truncated in data-only --agent/--quiet output).
 
 Todos are grouped into categories:
   - Under a week late
