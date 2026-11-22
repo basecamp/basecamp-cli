@@ -120,6 +120,8 @@ func TestScheduleUpdateConflictingFlags(t *testing.T) {
 	}{
 		{"highlight", []string{"--highlight", "--no-highlight"}, "--highlight and --no-highlight"},
 		{"join url", []string{"--join-url", "https://meet.example.com/abc", "--no-join-url"}, "--join-url and --no-join-url"},
+		{"highlight with explicit false", []string{"--highlight", "--no-highlight=false"}, "--highlight and --no-highlight"},
+		{"join url with explicit false", []string{"--join-url", "https://meet.example.com/abc", "--no-join-url=false"}, "--join-url and --no-join-url"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			transport := &mockScheduleCreateTransport{}

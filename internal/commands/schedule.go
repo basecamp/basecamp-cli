@@ -704,10 +704,10 @@ Highlight and the join link change only when asked; --no-highlight and
 			if err := validateAttachPaths(attachFiles); err != nil {
 				return err
 			}
-			if noHighlight && cmd.Flags().Changed("highlight") {
+			if cmd.Flags().Changed("no-highlight") && cmd.Flags().Changed("highlight") {
 				return output.ErrUsage("--highlight and --no-highlight cannot be used together")
 			}
-			if noJoinURL && cmd.Flags().Changed("join-url") {
+			if cmd.Flags().Changed("no-join-url") && cmd.Flags().Changed("join-url") {
 				return output.ErrUsage("--join-url and --no-join-url cannot be used together")
 			}
 
