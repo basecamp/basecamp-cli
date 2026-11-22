@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -159,6 +160,46 @@ func TestCloudFilesUpdateSendsBackWhatItDoesNotChange(t *testing.T) {
 		"title":       "Plan (final)",
 		"description": "<div>Kept</div>",
 	}, sentBody(t, last.Body))
+}
+
+// A description read back holds its mentions expanded; sent back that way,
+// Basecamp stores the figure as content and every edit adds another copy. An
+// update that leaves the description alone sends its mentions back bare.
+func TestLinkUpdatesSendAnUnchangedDescriptionsMentionsBackBare(t *testing.T) {
+	expanded := `<div>Ask <bc-attachment sgid="BAh7" content-type="application/vnd.basecamp.mention" ` +
+		`content="&lt;bc-mention&gt;Jo&lt;/bc-mention&gt;"><figure><img src="https://example.com/jo.png">` +
+		`<figcaption>Jo</figcaption></figure></bc-attachment> first.</div>`
+	bare := `<div>Ask <bc-attachment sgid="BAh7" content-type="application/vnd.basecamp.mention"></bc-attachment> first.</div>`
+	withDescription := func(record string) string {
+		quoted, err := json.Marshal(expanded)
+		if err != nil {
+			panic(err)
+		}
+		return strings.Replace(record, `"description":"<div>Kept</div>"`, `"description":`+string(quoted), 1)
+	}
+
+	for name, c := range map[string]struct {
+		path, record string
+		args         []string
+	}{
+		"cloud file":      {"/99999/cloud_files/456", cloudFileJSON, []string{"cloud-files", "update", "456", "--title", "Plan (final)"}},
+		"google document": {"/99999/google_documents/789", googleDocJSON, []string{"google-docs", "update", "789", "--title", "Spec (final)"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			record := withDescription(c.record)
+			app, transport := setupRecordingTestApp(t,
+				stubRoute{method: http.MethodGet, path: c.path, status: http.StatusOK, body: record},
+				stubRoute{method: http.MethodPut, path: c.path, status: http.StatusOK, body: record},
+			)
+
+			err := executeRecordingCommand(NewFilesCmd(), app, c.args...)
+			require.NoError(t, err)
+
+			last := transport.last(t)
+			assert.Equal(t, http.MethodPut, last.Method)
+			assert.Equal(t, bare, sentBody(t, last.Body)["description"])
+		})
+	}
 }
 
 func TestCloudFilesUpdateURLInfersAKnownServiceOnly(t *testing.T) {

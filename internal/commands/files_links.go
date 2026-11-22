@@ -11,6 +11,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/appctx"
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
+	"github.com/basecamp/basecamp-cli/internal/richtext"
 	"github.com/basecamp/basecamp-cli/internal/urlarg"
 )
 
@@ -22,7 +23,9 @@ import (
 // and GoogleDocumentsController#update build a new recordable from the
 // permitted params alone), so a field the request leaves out is erased. The
 // update commands read the record first and send back every field no flag
-// changes, so only what was asked for changes.
+// changes, so only what was asked for changes. The description goes back with
+// its mentions and files reduced to bare tags (richtext.CollapseAttachments):
+// Basecamp returns them expanded, and stores an expanded one as more content.
 
 // googleDocumentTypes are the document types Basecamp accepts.
 var googleDocumentTypes = []string{"doc", "sheet", "slide", "other"}
@@ -340,7 +343,7 @@ a known one (dropbox.com, figma.com, ...); otherwise the service stays as it is.
 				URL:         current.URL,
 				Service:     current.Service.Code,
 				Title:       current.Title,
-				Description: current.Description,
+				Description: richtext.CollapseAttachments(current.Description),
 			}
 			if cmd.Flags().Changed("url") {
 				req.URL = linkURL
@@ -613,7 +616,7 @@ subscribers alone.
 				URL:           current.URL,
 				DocumentType:  current.DocumentType,
 				Title:         current.Title,
-				Description:   current.Description,
+				Description:   richtext.CollapseAttachments(current.Description),
 				Subscriptions: subs,
 			}
 			if cmd.Flags().Changed("url") {
