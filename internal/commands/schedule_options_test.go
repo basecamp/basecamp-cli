@@ -42,6 +42,7 @@ func TestScheduleEntryHighlightAndJoinURL(t *testing.T) {
 				assert.NotContains(t, body, "join_url")
 				if action == "update" {
 					assert.NotContains(t, body, "status")
+					assert.Equal(t, "Updated", body["summary"])
 				}
 			})
 		}
