@@ -240,17 +240,28 @@ func TestNoAgentWakesAnAgentByBoosting(t *testing.T) {
 }
 
 func TestABoostSettledFromItsPointerCostsNoRead(t *testing.T) {
-	t.Run("in a project connect.json does not serve", func(t *testing.T) {
-		f := newFakeReads()
-		boostOn(f, "Comment", agentID, operatorID)
-		ev := boostEvent(operatorID)
-		ev.BucketID = unservedProj
+	// A connector that hears Pings asks whether the bucket is one, since a
+	// boost in a Ping is heard (ping_boosts_test.go); nothing past that read.
+	for name, hears := range map[string]bool{"in a project connect.json does not serve": false, "in a project connect.json does not serve, by a connector that hears Pings": true} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeReads()
+			boostOn(f, "Comment", agentID, operatorID)
+			ev := boostEvent(operatorID)
+			ev.BucketID = unservedProj
+			p := basePolicy()
+			p.HearsPings = hears
 
-		v := decide(t, newAdmitter(t, basePolicy(), f), ev)
-		assert.Equal(t, StateDiscarded, v.State, "never blocked: a holding reply to a boost answers nobody")
-		assert.Equal(t, ReasonNoRoute, v.Reason)
-		assert.Zero(t, f.totalReads())
-	})
+			v := decide(t, newAdmitter(t, p, f), ev)
+			assert.Equal(t, StateDiscarded, v.State, "never blocked: a holding reply to a boost answers nobody")
+			assert.Equal(t, ReasonNoRoute, v.Reason)
+			if hears {
+				assert.Equal(t, 1, f.pingCalls)
+				assert.Equal(t, 1, f.totalReads(), "the Ping read alone")
+			} else {
+				assert.Zero(t, f.totalReads())
+			}
+		})
+	}
 
 	t.Run("on one of the recording's events", func(t *testing.T) {
 		f := newFakeReads()
