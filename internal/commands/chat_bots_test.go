@@ -108,6 +108,27 @@ func TestChatUploadsListsTheRoomsFiles(t *testing.T) {
 	assert.Contains(t, envelopeBreadcrumbCmds(envelope), "basecamp chat upload <file> --room 789 --in 123")
 }
 
+// The uploads endpoint names only the room, so --room needs no project: none
+// is asked for, and the breadcrumbs leave out --in.
+func TestChatUploadsWithARoomNeedsNoProject(t *testing.T) {
+	transport := &chatBotTransport{respond: chatBotOK}
+	app, buf := newTestAppWithTransport(t, transport)
+	app.Flags.Hints = true
+	app.Config.ProjectID = ""
+
+	require.NoError(t, executeChatCommand(NewChatCmd(), app, "uploads", "--room", "789"))
+
+	require.Len(t, transport.requests, 1)
+	assert.Equal(t, "/99999/chats/789/uploads.json", transport.requests[0].path)
+	var envelope map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
+	cmds := envelopeBreadcrumbCmds(envelope)
+	assert.Contains(t, cmds, "basecamp chat upload <file> --room 789")
+	for _, cmd := range cmds {
+		assert.NotContains(t, cmd, "--in")
+	}
+}
+
 func TestChatUploadsPageAsksForThatPage(t *testing.T) {
 	transport, _, err := runChatBotCommand(t, chatBotOK, "uploads", "--page", "2", "--room", "789")
 	require.NoError(t, err)

@@ -51,6 +51,43 @@ func chatRoomScope(cmd *cobra.Command, app *appctx.App, project, chatID string) 
 	return resolvedProjectID, roomID, nil
 }
 
+// chatUploadsScope is chatRoomScope for a room's files, whose endpoint names
+// only the room. Given --room, the project serves the breadcrumbs alone: one
+// given or configured is resolved if it can be, and none is asked for, so
+// `chat uploads --room 789` runs with no project, as `chat upload` does.
+func chatUploadsScope(cmd *cobra.Command, app *appctx.App, project, chatID string) (string, int64, error) {
+	if chatID == "" {
+		return chatRoomScope(cmd, app, project, chatID)
+	}
+	roomID, err := strconv.ParseInt(chatID, 10, 64)
+	if err != nil {
+		return "", 0, output.ErrUsage("Invalid chat room ID")
+	}
+	projectID := project
+	if projectID == "" {
+		projectID = app.Flags.Project
+	}
+	if projectID == "" {
+		projectID = app.Config.ProjectID
+	}
+	if projectID == "" {
+		return "", roomID, nil
+	}
+	resolvedProjectID, _, err := app.Names.ResolveProject(cmd.Context(), projectID)
+	if err != nil {
+		return "", roomID, nil //nolint:nilerr // the project only adds --in to breadcrumbs
+	}
+	return resolvedProjectID, roomID, nil
+}
+
+// chatInArg is " --in <project>", or "" when no project is known.
+func chatInArg(projectID string) string {
+	if projectID == "" {
+		return ""
+	}
+	return " --in " + projectID
+}
+
 func newChatUploadsCmd(project, chatID *string) *cobra.Command {
 	var limit, page int
 	var all bool
@@ -87,7 +124,7 @@ every one, or --page for a single page.`,
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
-			projectID, roomID, err := chatRoomScope(cmd, app, *project, *chatID)
+			projectID, roomID, err := chatUploadsScope(cmd, app, *project, *chatID)
 			if err != nil {
 				return err
 			}
@@ -120,7 +157,7 @@ every one, or --page for a single page.`,
 				output.WithBreadcrumbs(
 					output.Breadcrumb{
 						Action:      "upload",
-						Cmd:         fmt.Sprintf("basecamp chat upload <file> --room %d --in %s%s", roomID, projectID, followArgs),
+						Cmd:         fmt.Sprintf("basecamp chat upload <file> --room %d%s%s", roomID, chatInArg(projectID), followArgs),
 						Description: "Post a file",
 					},
 					output.Breadcrumb{
@@ -163,7 +200,11 @@ administrator.
 A chatbot's lines_url is how it posts into the chat you named: a POST to it
 adds a line as the bot, with no other credential. It carries the bot's key,
 so treat it like a password. Its command_url, when set, is the HTTPS address
-Basecamp calls when someone addresses the bot in a chat.
+Basecamp calls when someone addresses the bot in a chat. Basecamp doesn't
+sign or authenticate those calls: the unguessable URL is the only thing
+that keeps them trustworthy, so keep it secret too. Anyone who knows it can
+send any payload, creator included, so a bot that does anything sensitive
+must do its own authorization before acting on a command.
 
 Use 'basecamp chat bots list' to see a chat's chatbots.
 Use 'basecamp chat bots create <name>' to add one.`,
