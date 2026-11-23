@@ -165,6 +165,7 @@ func TestVerifyTrust(t *testing.T) {
 		7:          {ID: 7, PersonableType: PersonableAgent},
 		8:          {ID: 8, Client: true},
 		9:          {ID: 9, Name: "Member"},
+		11:         {ID: 11, Name: "Unsaid", ClientUnsaid: true},
 	}
 	r := &fakeReader{people: people}
 	forbidden := &fakeReader{personErr: status(http.StatusForbidden)}
@@ -211,6 +212,12 @@ func TestVerifyTrust(t *testing.T) {
 	t.Run("property 5: not a client", func(t *testing.T) {
 		assert.Equal(t, []string{"Operator=fail"}, verify(r, Trust{Operator: Person{ID: 8}}))
 		assert.Equal(t, []string{"Operator=pass", "Allowlist 8=fail"}, verify(r, Trust{Operator: Person{ID: operatorID}, Allowlist: []int64{8}}))
+		assert.Equal(t, []string{"Operator=pass", "Allowlist 9=pass"}, verify(r, Trust{Operator: Person{ID: operatorID}, Allowlist: []int64{9}}),
+			"the control: a member the read says is no client passes")
+	})
+	t.Run("property 5b: a read that does not say is not a member", func(t *testing.T) {
+		assert.Equal(t, []string{"Operator=fail"}, verify(r, Trust{Operator: Person{ID: 11}}))
+		assert.Equal(t, []string{"Operator=pass", "Allowlist 11=fail"}, verify(r, Trust{Operator: Person{ID: operatorID}, Allowlist: []int64{11}}))
 	})
 	t.Run("property 6: the read answers for the id asked", func(t *testing.T) {
 		liar := &fakeReader{people: map[int64]Person{operatorID: {ID: 9, Name: "Someone else"}}}
@@ -369,5 +376,27 @@ func TestProjectChecksQuoteTheProfileInTheHint(t *testing.T) {
 		out, err := exec.CommandContext(t.Context(), "/bin/sh", "-c", "printf %s "+quoted).Output()
 		require.NoError(t, err)
 		assert.Equal(t, f.Profile, string(out), "first setup %v", firstSetup)
+	}
+}
+
+// fromSDK keeps whether a person's read said they are a client: a read that
+// left the flag out is ClientUnsaid, which the checks refuse.
+func TestFromSDKKeepsWhetherTheReadSaidClient(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		client     *bool
+		wantClient bool
+		wantUnsaid bool
+	}{
+		{"not a client", basecamp.Ptr(false), false, false},
+		{"a client", basecamp.Ptr(true), true, false},
+		{"not said", nil, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := fromSDK(&basecamp.Person{ID: 5, Name: "Annie", Client: tc.client})
+			assert.Equal(t, int64(5), p.ID)
+			assert.Equal(t, tc.wantClient, p.Client)
+			assert.Equal(t, tc.wantUnsaid, p.ClientUnsaid)
+		})
 	}
 }

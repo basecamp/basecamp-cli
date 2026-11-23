@@ -700,7 +700,7 @@ func runPeopleList(cmd *cobra.Command, projectID string, limit, page int, all bo
 			Title:        p.Title,
 			Employee:     p.Employee,
 			Admin:        p.Admin,
-			Client:       p.Client,
+			Client:       basecamp.Deref(p.Client),
 		}
 	}
 
@@ -1148,7 +1148,7 @@ func runPeopleClientsList(cmd *cobra.Command, projectID string) error {
 	}
 	items := make([]clientListItem, 0)
 	for _, p := range result.People {
-		if !p.Client {
+		if !basecamp.Deref(p.Client) {
 			continue
 		}
 		item := clientListItem{ID: p.ID, Name: p.Name, EmailAddress: p.EmailAddress, Title: p.Title}
@@ -1702,7 +1702,7 @@ func clientEnablementError(ctx context.Context, app *appctx.App, bucketID int64,
 	if roster, listErr := app.Account().People().ListProjectPeople(ctx, bucketID, &basecamp.PeopleListOptions{}); listErr == nil {
 		var ids []int64
 		for _, p := range roster.People {
-			if p.Client {
+			if basecamp.Deref(p.Client) {
 				ids = append(ids, p.ID)
 			}
 		}

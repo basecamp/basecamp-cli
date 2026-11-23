@@ -166,9 +166,9 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 			}
 			writeJSON(w, profile)
 		case setupOperatorToken:
-			writeJSON(w, map[string]any{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User"})
+			writeJSON(w, map[string]any{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User", "client": false})
 		case setupBotToken:
-			writeJSON(w, map[string]any{"id": setupBotPerson, "name": "Bot", "personable_type": "User"})
+			writeJSON(w, map[string]any{"id": setupBotPerson, "name": "Bot", "personable_type": "User", "client": false})
 		default:
 			w.WriteHeader(http.StatusUnauthorized)
 		}
@@ -178,14 +178,14 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
-		writeJSON(w, map[string]any{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User"})
+		writeJSON(w, map[string]any{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User", "client": false})
 	})
 	mux.HandleFunc(fmt.Sprintf("/999/people/%d", setupOperatorPerson+1), func(w http.ResponseWriter, r *http.Request) {
 		if bearer(r) != setupOperatorToken {
 			w.WriteHeader(http.StatusForbidden) // as bc3 refuses an Agent today
 			return
 		}
-		writeJSON(w, map[string]any{"id": setupOperatorPerson + 1, "name": "Colleague", "personable_type": "User"})
+		writeJSON(w, map[string]any{"id": setupOperatorPerson + 1, "name": "Colleague", "personable_type": "User", "client": false})
 	})
 	mux.HandleFunc(fmt.Sprintf("/999/people/%d", setupAgentPerson), func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"id": setupAgentPerson, "name": "Marie Chef", "personable_type": "Agent"})
@@ -1625,8 +1625,8 @@ func TestConnectSetupLetsAPersonIntoOnePing(t *testing.T) {
 	s.bodies = map[string]any{fmt.Sprintf("/999/circles/%d", ping): map[string]any{
 		"id": ping, "title": "Launch",
 		"people": []map[string]any{
-			{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User"},
-			{"id": guest, "name": "Jorge", "personable_type": "User"},
+			{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User", "client": false},
+			{"id": guest, "name": "Jorge", "personable_type": "User", "client": false},
 			{"id": setupClientPerson, "name": "Client", "personable_type": "User", "client": true},
 			{"id": setupPeerAgent, "name": "Peer (agent)", "personable_type": "Agent"},
 		},

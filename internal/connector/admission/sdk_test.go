@@ -252,8 +252,11 @@ func (l *listing) client(t *testing.T) *basecamp.AccountClient {
 }
 
 func TestMembershipExcludesClientsAndAgents(t *testing.T) {
+	// unsaidID is listed without a client flag. Trust is not given on a field
+	// that is missing, so the listing does not make them a member.
+	const unsaidID int64 = 1006
 	l := &listing{}
-	l.set(fmt.Sprintf(`[{"id":%d,"personable_type":"User","client":false},{"id":%d,"personable_type":"Client","client":true},{"id":%d,"personable_type":"Agent","client":false}]`, memberID, clientID, otherAgent))
+	l.set(fmt.Sprintf(`[{"id":%d,"personable_type":"User","client":false},{"id":%d,"personable_type":"Client","client":true},{"id":%d,"personable_type":"Agent","client":false},{"id":%d,"personable_type":"User"}]`, memberID, clientID, otherAgent, unsaidID))
 	c := &clock{now: testNow}
 	members := NewMembers(l.client(t), c.Now)
 	seen := testNow.Add(-time.Second)
@@ -261,7 +264,7 @@ func TestMembershipExcludesClientsAndAgents(t *testing.T) {
 	for _, tc := range []struct {
 		id   int64
 		want bool
-	}{{memberID, true}, {clientID, false}, {otherAgent, false}, {strangerID, false}} {
+	}{{memberID, true}, {clientID, false}, {otherAgent, false}, {strangerID, false}, {unsaidID, false}} {
 		got, err := members.NonClientMember(context.Background(), servedProj, tc.id, seen)
 		require.NoError(t, err)
 		assert.Equal(t, tc.want, got, "person %d", tc.id)

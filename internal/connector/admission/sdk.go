@@ -162,8 +162,10 @@ func NewMembers(client *basecamp.AccountClient, now func() time.Time) *Members {
 }
 
 // NonClientMember implements MemberReader. A member for trust is a person the
-// project's listing names who is neither a client nor an Agent principal (the
-// listing serves agents, with client false).
+// project's listing names, says is not a client, and does not mark as an
+// Agent principal (the listing serves agents, with client false). A person
+// the listing does not say either way about is not a member: trust is not
+// given on a field that is missing.
 //
 // "Yes" is served from a cached listing for its TTL. "No" discards the event,
 // so it is served only from a listing read at or after asOf; everyone the
@@ -198,7 +200,7 @@ func (m *Members) NonClientMember(ctx context.Context, bucketID, personID int64,
 	}
 	people := projectPeople{members: make(map[int64]bool, len(res.People))}
 	for _, p := range res.People {
-		if p.ID > 0 && !p.Client && p.PersonableType != personableAgent {
+		if p.ID > 0 && p.Client != nil && !*p.Client && p.PersonableType != personableAgent {
 			people.members[p.ID] = true
 		}
 	}
