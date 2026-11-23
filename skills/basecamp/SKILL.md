@@ -415,9 +415,6 @@ Basecamp stays silent otherwise.
 For destructive or broad operations, preview when the command offers a dry-run
 and do not expand the user's requested scope.
 
-`projects unarchive` also restores from the trash. `projects archive` may get
-403 on the admin pro pack; don't route around it.
-
 ## Schedule options
 
 `schedule create/update`: `--highlight=false` / `--join-url=""` clears; omitted
