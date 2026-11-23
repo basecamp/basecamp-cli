@@ -12,11 +12,13 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
 	surfguard "github.com/basecamp/surfguard/go"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
@@ -63,6 +65,62 @@ off nothing. --hold sets this profile's durable hold: intake and admission run,
 nothing is handed off, and earlier records wait for review, until basecamp
 connect release for this profile. Linux and macOS only.
 
+With --orchestrator the connector does the work itself, with no session
+reading its output: each trusted request goes to a headless session of the
+coding agent named (claude, codex or pi), which follows the basecamp-connect
+skill and hands the work to a worker, a session of its own on the coding
+agent --worker names (the orchestrator's by default), in the repo the request
+belongs to. --orchestrator-model, --orchestrator-effort, --worker-model and
+--worker-effort choose models and reasoning effort; without them each coding
+agent uses its own defaults. Each request gets a worker as it arrives.
+--max-workers caps how many run at once, so a request past the cap waits its
+turn, and --max-workers 0 takes the cap off again.
+
+  basecamp connect -P <profile> --orchestrator claude --worker codex
+  basecamp connect -P <profile> --run
+
+What a start names is kept for the profile, so the next one is --run. Plain
+basecamp connect, with none of these, still only prints requests.
+
+Agents run unattended, as you. --permissions says what they may do:
+
+  full      Any command and any file, without asking first, since nobody is
+            at the keyboard to approve each step. The default.
+  guarded   Each coding agent under its own guardrails. Claude Code runs in
+            its auto mode: it judges each action and stops the ones it finds
+            unsafe. Codex runs each command in its sandbox, where it writes
+            only in the folder it works in and the temporary directory, and
+            decides itself whether a command the sandbox stopped may run
+            outside it. Nobody is asked either way. Pi has no guardrails, and
+            is refused.
+
+An agent that is stopped says so in its reply. Who may give the agent work
+is setup's, and by default it is only its operator: basecamp connect show.
+
+A runner.json beside the profile's connect.json chooses workers by where a
+request came from and which repo its work goes in. The first rule that
+matches wins, and what its worker leaves out comes from how the connector was
+started:
+
+  {"worker": {"adapter": "codex", "effort": "medium"},
+   "rules": [
+     {"repo": "~/code/app", "worker": {"adapter": "claude", "model": "opus"}},
+     {"card_table": 123, "worker": {"effort": "high"}},
+     {"project": 456, "worker": {"adapter": "pi"}},
+     {"ping": true, "worker": {"adapter": "claude", "model": "haiku"}}]}
+
+The rules and the permissions are read again for each request, so an edit to
+them needs no restart. The worker at the top is what the connector starts
+with. max_workers, where --max-workers is kept, is read once, when the
+connector starts: a change to it applies at the next start that does not
+name --max-workers itself. basecamp connect restart starts with the flags
+the connector was started with.
+
+  basecamp connect say "<message>"    talk to the orchestrator
+  basecamp connect workers list       the workers and what each runs on
+  basecamp connect stop               stop it; restart starts it again
+  basecamp connect console            watch it, and talk to it, in a terminal
+
 One connector runs per profile in this state directory. An agent can run
 several connections where Basecamp enables adding them for its kind; otherwise
 a new approval replaces the existing connection. Each profile
@@ -99,12 +157,20 @@ status and doctor say which this profile's does.
 			"stdout_wire": "connect",
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runConnect(cmd, &run)
+			err := runConnect(cmd, &run)
+			if errors.Is(err, errConnectRestart) {
+				// Everything the run held is released: the same command
+				// takes this process over and starts from the beginning.
+				return connectReexec()
+			}
+			return err
 		},
 	}
 	addConnectRunFlags(cmd, &run)
 	cmd.AddCommand(newConnectSetupCmd(), newConnectShowCmd(), newConnectStatusCmd(), newConnectDoctorCmd(),
-		newConnectDiscardCmd(), newConnectAskCmd(), newConnectReleaseCmd(), newConnectShadowCmd(), newConnectImportCmd())
+		newConnectDiscardCmd(), newConnectAskCmd(), newConnectReleaseCmd(), newConnectShadowCmd(), newConnectImportCmd(),
+		newConnectDispatchCmd(), newConnectWorkersCmd(), newConnectSayCmd(), newConnectStopCmd(), newConnectRestartCmd(),
+		newConnectConsoleCmd())
 	return cmd
 }
 
@@ -166,13 +232,13 @@ func runConnectShow(app *appctx.App) error {
 			"The connector's setup is not supported on Windows: this CLI cannot verify who can change connect.json there.")
 	case err != nil:
 		return output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(err),
-			"Nothing of it was shown. Fix or remove "+richtext.SanitizeSingleLine(path)+", then run setup again.")
+			"Nothing of it was shown. "+connectResetHint(name)+", or fix "+richtext.SanitizeSingleLine(path)+" by hand.")
 	}
 	if f.Profile != name {
 		// A policy copied from another profile's directory is not this
 		// profile's, however valid it is on its own: setup refuses it too.
 		return output.ErrUsageHint(fmt.Sprintf("%s names profile %q, not %q", richtext.SanitizeSingleLine(path), f.Profile, name),
-			"Nothing of it was shown. Remove "+richtext.SanitizeSingleLine(path)+" and run setup again for this profile.")
+			"Nothing of it was shown. "+connectResetHint(name)+".")
 	}
 
 	// The generic object renderer drops nested maps, which is where the
@@ -243,6 +309,9 @@ func connectShowDisplay(path string, f setup.File, markdown bool) map[string]any
 		settings := "served"
 		if r.Class != "" {
 			settings += ", class " + r.Class
+		}
+		for _, fire := range r.ListenCampfires {
+			settings += fmt.Sprintf(", listens to Campfire %d without mentions", fire)
 		}
 		if r.WatchCompletions {
 			settings += ", watches completions"
@@ -337,11 +406,18 @@ type connectSetupFlags struct {
 	ackBoost   optionalString
 	noAckBoost bool
 
-	serve   []string
-	classes []string
-	watch   []string
-	unwatch []string
-	unserve []string
+	// reset sets the profile up afresh from this run's flags alone, over a
+	// connect.json that cannot be used or is for another agent: the old
+	// file is moved aside only when the new one is written.
+	reset bool
+
+	serve             []string
+	classes           []string
+	watch             []string
+	unwatch           []string
+	listenCampfires   []string
+	unlistenCampfires []string
+	unserve           []string
 
 	// guided is the guided setup running this one: a setup that passes says
 	// so in a line, since the guided summary names the agent, its owner and
@@ -410,6 +486,15 @@ serves: --serve <project-id>, --unserve <project-id>. Nothing in a project it
 does not serve is handed off, and nobody is told. --watch-completions <project-id>
 makes the agent hear every trusted completion in that project without being
 assigned.
+
+Campfires. --listen-campfire <project-id>:<campfire-id> makes every trusted
+person's new message in that Campfire a request without an @mention, like a
+public Ping. Other Campfires still require mentions. Existing trust rules
+apply; other agents still need mentions and remain capped.
+--no-listen-campfire <project-id>:<campfire-id> restores mentions. Both flags
+are repeatable and require a served project. Setup checks that the agent can
+read the Campfire and that it belongs to that project. Find the Campfire id with
+basecamp chat list --project <project-id>. Restart after changing this setting.
 
 The list is this profile's own. When two connections of one agent serve the
 same project, a request both admit there can be answered twice, so serve
@@ -513,8 +598,11 @@ Examples:
 	fl.StringArrayVar(&f.classes, "class", nil, "Classify a served project: <project-id>=<class>, or <project-id>= to clear it (repeatable)")
 	fl.StringArrayVar(&f.watch, "watch-completions", nil, "Admit every trusted completion in a served project (repeatable)")
 	fl.StringArrayVar(&f.unwatch, "no-watch-completions", nil, "Stop watching a project's completions (repeatable)")
+	fl.StringArrayVar(&f.listenCampfires, "listen-campfire", nil, "Hear trusted messages without mentions: <project-id>:<campfire-id> (repeatable)")
+	fl.StringArrayVar(&f.unlistenCampfires, "no-listen-campfire", nil, "Require mentions again: <project-id>:<campfire-id> (repeatable)")
 	fl.Var(&f.ackBoost, "ack-boost", fmt.Sprintf("Boost the connector acknowledges each request with, as the agent, before handing it off (default %s; at most %d characters)", setup.DefaultAckContent, setup.AckContentMax))
 	fl.BoolVar(&f.noAckBoost, "no-ack-boost", false, "Don't acknowledge requests in the connector; the session reading them boosts instead")
+	fl.BoolVar(&f.reset, "reset", false, "Set the profile up afresh from this run's flags, ignoring connect.json; the old file is kept beside the new one as connect.json.broken-<time>")
 	cmd.MarkFlagsMutuallyExclusive("operator", "operator-profile")
 	cmd.MarkFlagsMutuallyExclusive("ack-boost", "no-ack-boost")
 
@@ -562,12 +650,22 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 
 	existing, err := setup.Load(path)
 	exists := err == nil
+	// replacing is a --reset over a file that is there, usable or not: it
+	// is set aside, and this run starts from nothing.
+	replacing := false
 	switch {
+	case f.reset:
+		if _, statErr := os.Lstat(path); statErr == nil {
+			replacing = true
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return fmt.Errorf("could not look at %s: %w", richtext.SanitizeSingleLine(path), statErr)
+		}
+		existing, exists = setup.New(name), false
 	case errors.Is(err, os.ErrNotExist):
 		existing = setup.New(name)
 	case err != nil:
-		return output.ErrUsageHint("connect.json cannot be used: "+err.Error(),
-			"Nothing was changed. Fix or remove "+richtext.SanitizeSingleLine(path)+", then run setup again.")
+		return output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(err),
+			"Nothing was changed. "+connectResetHint(name)+", or fix "+richtext.SanitizeSingleLine(path)+" by hand and run setup again.")
 	}
 	if existing.Profile != name {
 		return output.ErrUsage(fmt.Sprintf("%s names profile %q, not %q", path, existing.Profile, name))
@@ -605,7 +703,7 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	if exists && !accountIDsEqual(existing.AccountID, accountID) {
 		return output.ErrUsageHint(
 			fmt.Sprintf("connect.json was set up in account %s, and profile %q is bound to account %s", existing.AccountID, name, accountID),
-			"Nothing was changed. Remove "+richtext.SanitizeSingleLine(path)+" to set this profile up afresh.")
+			"Nothing was changed. To set this profile up afresh: basecamp connect setup -P "+richtext.ShellQuote(name)+" --reset, with the flags it needs.")
 	}
 	kind, err := connectCredentialKind(ctx, app)
 	if err != nil {
@@ -614,10 +712,10 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	// The credential's own disagreement with connect.json comes first: it is
 	// the wrong credential whatever the flags say.
 	if exists && kind != "" && existing.Agent.Kind != kind {
-		return output.ErrAuth(fmt.Sprintf("connect.json was set up for a %s credential, and profile %q now holds a %s one; remove %s to set this profile up afresh",
-			existing.Agent.Kind, name, kind, richtext.SanitizeSingleLine(path)))
+		return output.ErrAuth(fmt.Sprintf("connect.json was set up for a %s credential, and profile %q now holds a %s one; to set this profile up afresh, run setup again with --reset",
+			existing.Agent.Kind, name, kind))
 	}
-	if err := refuseCredentialConflicts(name, path, kind, expect, exists, existing); err != nil {
+	if err := refuseCredentialConflicts(name, kind, expect, exists, existing); err != nil {
 		return err
 	}
 	if kind == setup.KindBotUser {
@@ -628,8 +726,8 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 			// Rebinding the file to another bot is a deliberate act, not a
 			// flag: connect.json's trust was recorded for the agent it names.
 			return output.ErrAuth(fmt.Sprintf(
-				"connect.json is set up for identity %d, and --expect-identity names %d; remove %s to set this profile up for another bot",
-				existing.Agent.IdentityID, expect, richtext.SanitizeSingleLine(path)))
+				"connect.json is set up for identity %d, and --expect-identity names %d; to set this profile up for another bot, run setup again with --reset",
+				existing.Agent.IdentityID, expect))
 		}
 	}
 
@@ -673,8 +771,8 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	}
 	checks = append(checks, identityCheck)
 	if exists && existing.Agent.PersonID != me.ID {
-		return output.ErrAuth(fmt.Sprintf("connect.json was set up for agent person %d, and profile %q now authenticates as person %d; if this is a different agent on purpose, remove %s and run setup again",
-			existing.Agent.PersonID, name, me.ID, richtext.SanitizeSingleLine(path)))
+		return output.ErrAuth(fmt.Sprintf("connect.json was set up for agent person %d, and profile %q now authenticates as person %d; if this is a different agent on purpose, run setup again with --reset",
+			existing.Agent.PersonID, name, me.ID))
 	}
 	checks = append(checks, setup.ScopeCheck(creds.OAuthType, creds.Scope))
 
@@ -756,7 +854,18 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 	}
 	report.Add(checks...)
 	report.Add(setup.TicketCheck(ctx, reader, kind))
-	report.Add(setup.ProjectChecks(ctx, reader, next, !exists)...)
+	projectChecks := setup.ProjectChecks(ctx, reader, next, !exists)
+	if f.reset {
+		// A reset starts from nothing, so the run that fixes this one is this
+		// run again, every flag it had, with a project: without --reset setup
+		// reads the old file again, and without the rest it forgets them.
+		for i, c := range projectChecks {
+			if c.Status == setup.StatusFail && c.Name == "Projects" {
+				projectChecks[i].Hint = "Serve one: " + connectSetupRerun(cmd, name) + " --serve <project-id>"
+			}
+		}
+	}
+	report.Add(projectChecks...)
 	// A command the person stopped did not find the connector unready: it
 	// found nothing, and says so as an interruption.
 	if err := ctx.Err(); err != nil {
@@ -788,7 +897,22 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		if err := next.VerifyAgent(kind, me.ID, expect); err != nil {
 			return output.ErrAuth(err.Error())
 		}
-		return setup.Save(held, path, next)
+		if !replacing {
+			return setup.Save(held, path, next)
+		}
+		aside, err := setup.MoveAside(path, time.Now())
+		if err != nil {
+			return err
+		}
+		if err := connectSaveFile(held, path, next); err != nil {
+			// The old file goes back: a failed reset leaves what was there.
+			if restoreErr := os.Rename(aside, path); restoreErr != nil {
+				return fmt.Errorf("%w; and the old file could not be put back from %s: %w", err, richtext.SanitizeSingleLine(aside), restoreErr)
+			}
+			return err
+		}
+		report.MovedAside = aside
+		return nil
 	})
 	if saveErr != nil {
 		return classifyWriteError(name, saveErr)
@@ -805,11 +929,49 @@ func runConnectSetup(cmd *cobra.Command, app *appctx.App, f *connectSetupFlags) 
 		return nil
 	case styled:
 		renderChecksStyled(w, title, summary)
-		fmt.Fprintf(w, "  connect.json written: %s\n\n", richtext.SanitizeSingleLine(path))
+		fmt.Fprintf(w, "  connect.json written: %s\n", richtext.SanitizeSingleLine(path))
+		if report.MovedAside != "" {
+			fmt.Fprintf(w, "  The old file was kept as %s\n", richtext.SanitizeSingleLine(report.MovedAside))
+		}
+		fmt.Fprintln(w)
 		return nil
 	}
 	return app.OK(report, output.WithSummary("connect.json written; "+summary.Summary()))
 }
+
+// connectSetupRerun is the setup command this run was: the profile, and
+// every flag of setup's own it was given, each value quoted for a shell.
+// Inherited flags (-v, --json) are left out: they don't decide what setup
+// writes, and some (a count) can't be written back as given.
+func connectSetupRerun(cmd *cobra.Command, name string) string {
+	parts := []string{"basecamp connect setup -P", richtext.ShellQuote(name)}
+	own := cmd.LocalNonPersistentFlags()
+	cmd.Flags().Visit(func(fl *pflag.Flag) {
+		if own.Lookup(fl.Name) == nil {
+			return
+		}
+		if fl.Value.Type() == "bool" {
+			if fl.Value.String() == "true" {
+				parts = append(parts, "--"+fl.Name)
+			} else {
+				parts = append(parts, "--"+fl.Name+"=false")
+			}
+			return
+		}
+		values := []string{fl.Value.String()}
+		if slice, ok := fl.Value.(pflag.SliceValue); ok {
+			values = slice.GetSlice()
+		}
+		for _, v := range values {
+			parts = append(parts, "--"+fl.Name, richtext.ShellQuote(v))
+		}
+	})
+	return strings.Join(parts, " ")
+}
+
+// connectSaveFile is setup.Save, as a reset writes over a file it moved
+// aside; a variable so a test can make the write fail after the move.
+var connectSaveFile = setup.Save
 
 // classifyWriteError puts the last step's failures in the command's exit
 // contract: a credential that is gone or unreadable is auth, another
@@ -1032,6 +1194,28 @@ func (f *connectSetupFlags) changes() (setup.Changes, error) {
 			ch.WatchCompletions[id] = list.on
 		}
 	}
+	for _, list := range []struct {
+		flag string
+		raw  []string
+		on   bool
+	}{{"--listen-campfire", f.listenCampfires, true}, {"--no-listen-campfire", f.unlistenCampfires, false}} {
+		for _, raw := range list.raw {
+			projectRaw, fireRaw, ok := strings.Cut(raw, ":")
+			project, projectErr := parsePositiveID(list.flag, projectRaw)
+			fire, fireErr := parsePositiveID(list.flag, fireRaw)
+			if !ok || projectErr != nil || fireErr != nil || project == 0 || fire == 0 {
+				return ch, output.ErrUsage(fmt.Sprintf("Invalid %s %q: expected <project-id>:<campfire-id>", list.flag, raw))
+			}
+			if ch.Campfires == nil {
+				ch.Campfires = map[setup.Campfire]bool{}
+			}
+			key := setup.Campfire{Project: project, ID: fire}
+			if prev, seen := ch.Campfires[key]; seen && prev != list.on {
+				return ch, output.ErrUsage(fmt.Sprintf("Campfire %s is given both --listen-campfire and --no-listen-campfire", raw))
+			}
+			ch.Campfires[key] = list.on
+		}
+	}
 	for _, raw := range f.unserve {
 		id, err := parsePositiveID("--unserve", raw)
 		if err != nil || id == 0 {
@@ -1088,15 +1272,15 @@ func parsePositiveID(flag, raw string) (int64, error) {
 // one with no credential (setup does not obtain one), --expect-identity
 // against an Agent's credential or connect.json, and a person's login with
 // nothing pinning it to the bot.
-func refuseCredentialConflicts(name, path, held string, expect int64, exists bool, existing setup.File) error {
+func refuseCredentialConflicts(name, held string, expect int64, exists bool, existing setup.File) error {
 	profile := richtext.ShellQuote(name)
 	switch {
 	// What connect.json already says comes first: a remediation that the
 	// existing file would refuse anyway is no remediation.
 	case expect != 0 && exists && existing.Agent.Kind == setup.KindAgent:
 		return output.ErrUsageHint("--expect-identity is for the bot-user path, and connect.json was set up for an Agent",
-			fmt.Sprintf("Connect the agent again (basecamp auth agent connect -P %s) and drop --expect-identity, or remove %s to set this profile up as a bot user.",
-				profile, richtext.SanitizeSingleLine(path)))
+			fmt.Sprintf("Connect the agent again (basecamp auth agent connect -P %s) and drop --expect-identity, or add --reset to set this profile up as a bot user.",
+				profile))
 	case held == "" && (expect != 0 || (exists && existing.Agent.Kind == setup.KindBotUser)):
 		identity := expect
 		if identity == 0 {
@@ -1188,6 +1372,9 @@ func credentialKindOf(ctx context.Context, mgr *auth.Manager) (string, error) {
 	switch {
 	case errors.Is(err, auth.ErrNoCredential):
 		return "", nil
+	case auth.KeyringUnavailable(err):
+		// Not a statement about the credential, and no login remedy.
+		return "", err
 	case err != nil:
 		return "", output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
 	case creds.OAuthType == "agent":
@@ -1331,12 +1518,58 @@ func (t *managerTokens) AccessToken(ctx context.Context) (string, error) {
 type feedTokens struct {
 	managerTokens
 	// log says a wait the server named past the cap, once per answer that
-	// named it; nothing is said when nil.
+	// named it, and a keyring that stopped answering, once per outage;
+	// nothing is said when nil.
 	log func(string)
+
+	// now is the clock the keyring outage is measured by, and fetch the
+	// manager's AccessToken. Test seams; nil means time.Now and the manager.
+	now   func() time.Time
+	fetch func(context.Context) (string, error)
+
+	mu sync.Mutex
+	// keyringDownSince is when the feed last started failing to get a
+	// token because the OS keyring did not answer; zero while it answers.
+	keyringDownSince time.Time
+}
+
+// connectKeyringOutageLimit is how long the feed waits for a keyring that
+// has stopped answering before it ends the run.
+//
+// The auth manager serves the token it already holds while the keyring is
+// slow, and the store retries the keyring on its own backoff, so a feed
+// that is failing here has neither: the held token is due for renewal and
+// the keyring has not answered for that whole time. Waiting is right for a
+// while — a loaded desktop session catches up — but not forever: a feed
+// that retries quietly for hours delivers nothing and tells no one. Ending
+// the run is how this is seen: the process exits non-zero with the reason,
+// and a supervisor, or the person reading the log, starts it again.
+const connectKeyringOutageLimit = 15 * time.Minute
+
+func (t *feedTokens) clock() time.Time {
+	if t.now != nil {
+		return t.now()
+	}
+	return time.Now()
 }
 
 func (t *feedTokens) AccessToken(ctx context.Context) (string, error) {
-	token, err := t.mgr.AccessToken(ctx)
+	fetch := t.fetch
+	if fetch == nil {
+		fetch = t.mgr.AccessToken
+	}
+	token, err := fetch(ctx)
+	if ctx.Err() == nil && auth.KeyringUnavailable(err) {
+		return token, t.keyringStalled(err)
+	}
+	if ctx.Err() == nil {
+		// The keyring answered — a token, or a failure of something else,
+		// such as a renewal the server refused or could not serve. Either
+		// way this outage is over, and a later one gets its own clock.
+		t.mu.Lock()
+		t.keyringDownSince = time.Time{}
+		t.mu.Unlock()
+	}
 	e := tokenFailureInSDKTerms(err)
 	if e == nil {
 		return token, err
@@ -1345,6 +1578,33 @@ func (t *feedTokens) AccessToken(ctx context.Context) (string, error) {
 		t.log(connectWaitLine(output.AsError(err).Message, named, wait))
 	}
 	return token, e
+}
+
+// keyringStalled is the feed's error for a token the OS keyring did not
+// give up in time. Inside connectKeyringOutageLimit it is a network failure
+// the feed backs off from and retries — said once, when the outage starts,
+// since a feed that only retries prints nothing. Past it, it carries no
+// status, so the feed ends the run on it rather than retrying unseen.
+func (t *feedTokens) keyringStalled(err error) error {
+	now := t.clock()
+	t.mu.Lock()
+	first := t.keyringDownSince.IsZero()
+	if first {
+		t.keyringDownSince = now
+	}
+	down := now.Sub(t.keyringDownSince)
+	t.mu.Unlock()
+
+	if down >= connectKeyringOutageLimit {
+		e := output.ErrAPI(0, fmt.Sprintf("The system keyring has not given up the agent's token for %s, so the connector cannot reach Basecamp: %v", down.Round(time.Second), err))
+		e.Hint = "Start the connector again. If this keeps happening, check that the desktop keyring (the Secret Service: gnome-keyring or KeePassXC) is running and unlocked"
+		e.Cause = err
+		return &basecamp.Error{Code: basecamp.CodeAPI, Message: e.Error(), Retryable: false, Cause: e}
+	}
+	if first && t.log != nil {
+		t.log(fmt.Sprintf("connector: the system keyring did not give up the agent's token in time (%v); retrying, and ending the run if it has not answered within %s", err, connectKeyringOutageLimit))
+	}
+	return &basecamp.Error{Code: basecamp.CodeNetwork, Message: err.Error(), Retryable: true, Cause: err}
 }
 
 // tokenFailureInSDKTerms is a failed renewal as the SDK's error, classified
@@ -1398,6 +1658,10 @@ func tokenRetry(err error) (time.Duration, bool) {
 	}
 	var cliErr *output.Error
 	switch {
+	case auth.KeyringUnavailable(err):
+		// The keyring did not answer, which says nothing about the token:
+		// waited out on the backoff, at start as in the running feed.
+		return 0, true
 	case errors.As(err, &cliErr) && cliErr.Retryable:
 		// Exactly what the server named, never longer than the one cap,
 		// or nothing, which leaves it to the backoff: never a default

@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -915,6 +914,7 @@ func newCardsCreateCmd(project, cardTable *string) *cobra.Command {
 	var column string
 	var assignee string
 	var due string
+	var notify bool
 	var attachFiles []string
 
 	cmd := &cobra.Command{
@@ -926,6 +926,7 @@ Use - as the body argument to read the body from stdin:
   printf 'Card body' | basecamp cards create "My card" - --in myproject`,
 		Example: `  basecamp cards create "My card" --in myproject
   basecamp cards create "Launch review" --due "next friday" --in myproject
+  basecamp cards create "Fix login" --assignee "Annie Bryan" --notify --in myproject
   basecamp cards create --in myproject -- "--title with dashes"`,
 		// Bounded so a stray third token is a usage error rather than being
 		// silently dropped after "-" has already drained stdin.
@@ -1077,35 +1078,24 @@ Use - as the body argument to read the body from stdin:
 				content = richtext.EmbedAttachments(content, refs)
 			}
 
-			// Build request
+			// The card is created already assigned, in one request, so there
+			// is no window where it exists without the person asked for.
 			req := &basecamp.CreateCardRequest{
 				Title:   title,
 				Content: content,
 				DueOn:   parsedDue,
+				Notify:  notify,
+			}
+			if assigneeID != 0 {
+				req.AssigneeIDs = []int64{assigneeID}
 			}
 
 			card, err := app.Account().Cards().Create(cmd.Context(), columnID, req)
 			if err != nil {
 				return convertSDKError(err)
 			}
-
-			if assigneeID != 0 {
-				createdCardID := card.ID
-				card, err = app.Account().Cards().Update(cmd.Context(), createdCardID, &basecamp.UpdateCardRequest{
-					AssigneeIDs: []int64{assigneeID},
-				})
-				if err != nil {
-					sdkErr := convertSDKError(err)
-					var e *output.Error
-					if errors.As(sdkErr, &e) {
-						e.Message = fmt.Sprintf("card %d created but assignment failed: %s", createdCardID, e.Message)
-						return e
-					}
-					return fmt.Errorf("card %d created but assignment failed: %w", createdCardID, sdkErr)
-				}
-				if err := checkAssigneesSaved(assigneeCard, card.ID, []int64{assigneeID}, card.Assignees); err != nil {
-					return err
-				}
+			if err := checkAssigneesSaved(assigneeCard, card.ID, req.AssigneeIDs, card.Assignees); err != nil {
+				return err
 			}
 
 			// Build breadcrumbs - only include --card-table when known
@@ -1151,6 +1141,7 @@ Use - as the body argument to read the body from stdin:
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Person to assign: ID, name, or email")
 	cmd.Flags().StringVar(&assignee, "to", "", "Person to assign (alias for --assignee); the column is --column")
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date (natural language or YYYY-MM-DD)")
+	cmd.Flags().BoolVar(&notify, "notify", false, "Notify the person assigned with --assignee")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
 	allowDash(cmd, "arg:1")
@@ -1168,6 +1159,7 @@ func newCardsUpdateCmd() *cobra.Command {
 	var content string
 	var due string
 	var assignee string
+	var notify bool
 	var attachFiles []string
 
 	cmd := &cobra.Command{
@@ -1177,10 +1169,12 @@ func newCardsUpdateCmd() *cobra.Command {
 
 You can pass either a card ID or a Basecamp URL:
   basecamp cards update 789 --title "new title"
-  basecamp cards update 789 --body "new body"`,
+  basecamp cards update 789 --body "new body"
+  basecamp cards update 789 --assignee "Annie Bryan" --notify`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(title) == "" && strings.TrimSpace(content) == "" && due == "" && !cmd.Flags().Changed("assignee") && len(attachFiles) == 0 {
+			nothingToWrite := strings.TrimSpace(title) == "" && strings.TrimSpace(content) == "" && due == "" && !cmd.Flags().Changed("assignee") && len(attachFiles) == 0
+			if nothingToWrite && !notify {
 				return noChanges(cmd)
 			}
 
@@ -1269,8 +1263,18 @@ You can pass either a card ID or a Basecamp URL:
 				}
 				req.AssigneeIDs = []int64{assigneeID}
 			}
+			req.Notify = notify
 
-			card, err := app.Account().Cards().Update(cmd.Context(), cardID, req)
+			// --notify alone is accepted, as on todos update: Basecamp
+			// notifies only the people a request newly assigns, so it changes
+			// nothing. BC3 refuses a card update that carries no card field,
+			// so the card is read rather than written.
+			var card *basecamp.Card
+			if nothingToWrite {
+				card, err = app.Account().Cards().Get(cmd.Context(), cardID)
+			} else {
+				card, err = app.Account().Cards().Update(cmd.Context(), cardID, req)
+			}
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -1299,6 +1303,7 @@ You can pass either a card ID or a Basecamp URL:
 	cmd.Flags().StringVarP(&content, "body", "b", "", "New body content; use - to read from stdin")
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date (natural language or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "Assignee ID or name")
+	cmd.Flags().BoolVar(&notify, "notify", false, "Notify the person newly assigned with --assignee")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 
 	// Register tab completion for assignee flag

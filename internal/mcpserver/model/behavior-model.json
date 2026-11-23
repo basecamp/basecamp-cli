@@ -185,6 +185,17 @@
         ]
       }
     },
+    "CreateDoor": {
+      "retry": {
+        "max": 2,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
     "CreateEmbed": {
       "idempotent": true,
       "retry": {
@@ -230,6 +241,17 @@
       }
     },
     "CreateGoogleDocument": {
+      "retry": {
+        "max": 2,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "CreateHillChartVersion": {
       "retry": {
         "max": 2,
         "base_delay_ms": 1000,
@@ -575,6 +597,18 @@
       }
     },
     "DeleteChatbot": {
+      "idempotent": true,
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "DeleteDoor": {
       "idempotent": true,
       "retry": {
         "max": 3,
@@ -1061,6 +1095,18 @@
       }
     },
     "GetDocument": {
+      "readonly": true,
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "GetDoor": {
       "readonly": true,
       "retry": {
         "max": 3,
@@ -2182,6 +2228,18 @@
         "style": "link",
         "maxPageSize": 50
       },
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "ListDoors": {
+      "readonly": true,
       "retry": {
         "max": 3,
         "base_delay_ms": 1000,
@@ -3367,6 +3425,18 @@
       }
     },
     "UpdateComment": {
+      "idempotent": true,
+      "retry": {
+        "max": 3,
+        "base_delay_ms": 1000,
+        "backoff": "exponential",
+        "retry_on": [
+          429,
+          503
+        ]
+      }
+    },
+    "UpdateDoor": {
       "idempotent": true,
       "retry": {
         "max": 3,

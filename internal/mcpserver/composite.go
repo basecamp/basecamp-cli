@@ -45,6 +45,7 @@ import (
 const (
 	recordingsDomainKey  = "recordings"
 	recordingsToolName   = "basecamp_recordings"
+	recordingsToolTitle  = "Basecamp Recordings"
 	summarizeAction      = "summarize"
 	messagesDomainKey    = "messages"
 	createCommentAction  = "create_comment"
@@ -96,6 +97,7 @@ func recordingsDomain() *catalog.Domain {
 	return &catalog.Domain{
 		Key:   recordingsDomainKey,
 		Tool:  recordingsToolName,
+		Title: recordingsToolTitle,
 		Blurb: recordingsDomainDesc,
 		Operations: []*catalog.Operation{
 			filingOperation(basecamp.FilingCopy),

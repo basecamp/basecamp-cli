@@ -86,8 +86,10 @@ func (t *mockScheduleCreateTransport) RoundTrip(req *http.Request) (*http.Respon
 		} else if strings.Contains(req.URL.Path, "/schedule_entries/") {
 			// UpdateEntry is a merge-safe composite since SDK v0.13.0: it GETs
 			// the entry first and refuses one missing required fields, so the
-			// stub must serve a complete entry rather than `{}`.
-			body = `{"id": 999, "summary": "Event", "starts_at": "2026-03-04T09:00:00Z", "ends_at": "2026-03-04T09:30:00Z", "all_day": false, "participants": []}`
+			// stub must serve a complete entry rather than `{}`. Populated
+			// options and distinct API/join URLs catch accidental overwrites
+			// during unrelated edits.
+			body = `{"id": 999, "summary": "Event", "starts_at": "2026-03-04T09:00:00Z", "ends_at": "2026-03-04T09:30:00Z", "all_day": false, "participants": [], "url": "https://3.basecampapi.com/99999/buckets/123/schedule_entries/999.json", "join_url": "https://meet.example.com/existing", "highlighted": true}`
 		} else {
 			body = `{}`
 		}

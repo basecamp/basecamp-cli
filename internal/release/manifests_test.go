@@ -216,6 +216,24 @@ func TestStampCodexPluginVersionCleansTemporaryFileAfterFailure(t *testing.T) {
 	assert.Empty(t, temporaryFiles)
 }
 
+func TestStampPluginVersionCleansTemporaryFileAfterFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("release scripts require a POSIX shell")
+	}
+	root := repositoryRoot(t)
+	fixture := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(fixture, ".claude-plugin"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(fixture, ".claude-plugin", "plugin.json"), []byte("not json\n"), 0o644))
+
+	cmd := exec.CommandContext(context.Background(), filepath.Join(root, "scripts", "stamp-plugin-version.sh"), "1.2.3")
+	cmd.Dir = fixture
+	require.Error(t, cmd.Run())
+
+	temporaryFiles, err := filepath.Glob(filepath.Join(fixture, ".claude-plugin", "plugin.json.tmp*"))
+	require.NoError(t, err)
+	assert.Empty(t, temporaryFiles)
+}
+
 func TestReleaseWiringStampsBothStableManifests(t *testing.T) {
 	root := repositoryRoot(t)
 	goreleaser := readFile(t, filepath.Join(root, ".goreleaser.yaml"))
@@ -236,16 +254,26 @@ func TestReleaseWiringSkipsPluginStampsForPrereleases(t *testing.T) {
 	assert.Contains(t, goreleaser, "if .Prerelease")
 	assert.Contains(t, goreleaser, "Skipping plugin version stamps for prerelease")
 
-	// Both stampers must run only inside the stable (non-prerelease) branch:
-	// no invocation before the PRERELEASE guard.
-	guard := strings.Index(releaseScript, `if [[ "${PRERELEASE}" == "true" ]]`)
+	// Both stampers run only in open_release_pr, the first run of a stable
+	// release, and that runs only past the PRERELEASE guard.
+	// e2e/release.bats holds the behavior: a prerelease leaves every manifest
+	// alone.
+	const def = "open_release_pr() {\n"
+	start := strings.Index(releaseScript, def)
+	require.NotEqual(t, -1, start)
+	end := strings.Index(releaseScript[start:], "\n}\n")
+	require.NotEqual(t, -1, end)
+	body := releaseScript[start : start+end]
+	outside := releaseScript[:start] + releaseScript[start+end:]
+	assert.Contains(t, body, `scripts/stamp-plugin-version.sh "${VERSION}"`)
+	assert.Contains(t, body, `scripts/stamp-codex-plugin-version.sh "${VERSION}"`)
+	assert.NotContains(t, outside, "scripts/stamp-plugin-version.sh")
+	assert.NotContains(t, outside, "scripts/stamp-codex-plugin-version.sh")
+
+	guard := strings.Index(outside, `if [[ "${PRERELEASE}" == "true" ]]`)
 	require.NotEqual(t, -1, guard)
-	beforeGuard := releaseScript[:guard]
-	assert.NotContains(t, beforeGuard, "scripts/stamp-plugin-version.sh")
-	assert.NotContains(t, beforeGuard, "scripts/stamp-codex-plugin-version.sh")
-	afterGuard := releaseScript[guard:]
-	assert.Contains(t, afterGuard, `scripts/stamp-plugin-version.sh "${VERSION}"`)
-	assert.Contains(t, afterGuard, `scripts/stamp-codex-plugin-version.sh "${VERSION}"`)
+	assert.NotContains(t, outside[:guard], "open_release_pr")
+	assert.Contains(t, outside[guard:], "open_release_pr")
 }
 
 func TestReleaseWorkflowPromotesStableOnlyAfterAStableRelease(t *testing.T) {

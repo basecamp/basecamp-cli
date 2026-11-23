@@ -2443,3 +2443,60 @@ func TestChatPostPostsHTMLWithAMention(t *testing.T) {
 	assert.Contains(t, content, "<ul><li>one</li></ul>")
 	assert.NotContains(t, content, "&lt;")
 }
+
+// mockChatCreatorTransport serves one line whose creator is creatorJSON.
+type mockChatCreatorTransport struct {
+	creatorJSON string
+}
+
+func (t *mockChatCreatorTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+	if req.Method != "GET" || !strings.Contains(req.URL.Path, "/lines/") {
+		return nil, errors.New("unexpected request " + req.Method + " " + req.URL.Path)
+	}
+	body := `{"id": 111, "content": "Hello", "type": "Chat::Lines::Text", "creator": ` + t.creatorJSON + `}`
+	return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: header}, nil
+}
+
+// TestChatLineKeepsTheCreatorsClientFlag verifies that a line's creator keeps
+// what Basecamp said about being a client. A non-client author used to come
+// out with no client key at all, so the local agent connector's project
+// trust, which requires client == false, refused every Campfire mention from
+// anyone but its operator.
+func TestChatLineKeepsTheCreatorsClientFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		creator string
+		want    string // the client key's raw JSON; "" for no key
+	}{
+		{"not a client", `{"id": 1, "name": "Tester", "client": false, "employee": true}`, "false"},
+		{"a client", `{"id": 1, "name": "Tester", "client": true}`, "true"},
+		{"not said", `{"id": 1, "name": "Tester"}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("BASECAMP_NO_KEYRING", "1")
+
+			app, buf := newChatDeleteTestApp(&mockChatCreatorTransport{creatorJSON: tc.creator})
+			err := executeChatCommand(NewChatCmd(), app, "line", "https://3.basecamp.com/99999/buckets/123/chats/456/lines/111")
+			require.NoError(t, err)
+
+			var out struct {
+				Data struct {
+					ID      int64                      `json:"id"`
+					Creator map[string]json.RawMessage `json:"creator"`
+				} `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &out), buf.String())
+			require.EqualValues(t, 111, out.Data.ID, "the line was printed")
+			require.NotNil(t, out.Data.Creator, "the line carries its creator")
+
+			got, present := out.Data.Creator["client"]
+			if tc.want == "" {
+				assert.False(t, present, "client = %s, want no key", got)
+				return
+			}
+			assert.Equal(t, tc.want, string(got))
+		})
+	}
+}

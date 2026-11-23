@@ -6,15 +6,24 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 59 | 222 |
+| ✅ Implemented | 60 | 228 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **63** | **234** |
+| **Total tracked** | **64** | **240** |
 
-**222 of 222 tracked in-scope endpoints.** Archiving and restoring a project
+**228 of 228 tracked in-scope endpoints.** Archiving and restoring a project
 (`PUT /projects/:id/status/archived.json` and `PUT /projects/:id/status/active.json`,
 modelled by [basecamp/basecamp-sdk#679](https://github.com/basecamp/basecamp-sdk/pull/679))
-land as `projects archive` and `projects unarchive`. Reading a hill chart's progress
+land as `projects archive` and `projects unarchive`. Listing, reading, creating, updating and
+deleting a project's external links (`GET`/`POST /buckets/:id/dock/doors.json`,
+`GET`/`PUT`/`DELETE /dock/doors/:id`, added by
+[bc3#14314](https://github.com/basecamp/bc3/pull/14314) and modelled by the
+basecamp-sdk Doors PR, not yet released; the SDK is pinned to that branch) land as
+`doors`. Posting a hill chart progress update
+(`POST /todosets/:id/hills/versions.json`, added by
+[bc3#14214](https://github.com/basecamp/bc3/pull/14214) and modelled by
+[basecamp/basecamp-sdk#1068](https://github.com/basecamp/basecamp-sdk/pull/1068), not yet
+released; the SDK is pinned to that branch) lands as `hillcharts update`. Reading a hill chart's progress
 updates (`GET /todosets/:id/hills/versions.json` and
 `GET /todosets/:id/hills/versions/:id.json`, modelled by
 [basecamp/basecamp-sdk#1061](https://github.com/basecamp/basecamp-sdk/pull/1061) and
@@ -84,8 +93,9 @@ Out-of-scope sections are excluded from parity totals and scripts: chatbots (dif
 
 **SDK version:** the pin in `go.mod`, with
 `internal/version/sdk-provenance.json` authoritative for the exact commit. That
-pin is basecamp-sdk v0.23.0, which sends a check-in question's time as
-`time_of_day` (basecamp/basecamp-sdk#968). v0.22.0 shipped
+pin is basecamp-sdk v0.36.0, which adds `assignee_ids` to card create and
+`notify` to card update (basecamp/basecamp-sdk#1091). v0.23.0 sends a check-in
+question's time as `time_of_day` (basecamp/basecamp-sdk#968). v0.22.0 shipped
 `Recordings().MoveToVault` (basecamp/basecamp-sdk#960). v0.21.0 shipped the Subtasks service
 (basecamp/basecamp-sdk#883). v0.19.0 shipped the event-feed operations.
 The command surface below largely dates to the v0.12.0 bump, which added 20 exported
@@ -233,10 +243,11 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | todosets | 3 | `todosets` | ✅ | BC4 | - | Container for todolists, accessed via project dock (BC5: `todos_count`, `completed_loose_todos_count`, `todos_url`, `app_todos_url`) |
 | todolist_groups | 8 | `todolistgroups` | ✅ | BC4 | - | list, show, create, update, position, copy |
 | dock_tools | 7 | `tools` | ✅ | BC4 | - | Dock tool management: show, update, trash, enable, disable, reposition (also `tools move --position`; `tools move --to-project` moves a tool to another project through recordings (moves, copies)). `create` is BC5-only (create-by-type: `POST /buckets/{id}/dock/tools.json`), replacing the removed clone call; create-time `visible_to_clients` behind `tools create --visible-to-clients` (chat/kanban only) |
+| dock_doors | 5 | `doors`, `external-links` | ✅ | BC5 | - | External links (doors) in a project's dock: list (`GET /buckets/:id/dock/doors.json`, not paginated), show, create (`POST` on the same route; `door` wrapper, `visible_to_clients` top level and private when omitted), update (`PUT /dock/doors/:id`, partial), delete (`DELETE`, status deleted, not trashed). `--service` is inferred from the URL's host when omitted, falling back to `other`; `--description` is Markdown converted to rich text |
 | **Hill Charts** |
 | hill_charts | 2 | `hillcharts` | ✅ | BC4 | - | show, track/untrack todolists |
-| hill_charts (progress updates) | 2 | `hillcharts updates` | ✅ | BC5 | - | list (`GET /todosets/:id/hills/versions.json`, paginated, newest first; bare `hillcharts updates` or `updates list`), show (`GET /todosets/:id/hills/versions/:id.json`; an id with `--in`/`--todoset`, or the update's web or API URL, which names its todoset). Each update carries its note (`description`, rich text) and every tracked todolist's position (`dots`; `id` is null for a todolist since deleted or moved). Todoset resolved as `hillcharts show` does |
-| gauges | 7 | `gauges` | ✅ | BC4 | - | list, needles, needle, create, update, delete, enable/disable |
+| hill_charts (progress updates) | 3 | `hillcharts updates`, `hillcharts update` | ✅ | BC5 | - | post (`POST /todosets/:id/hills/versions.json`; `hillcharts update --dot <todolist-id\|name>=<0-100>`, repeatable, lists left out keep their position; `--note` Markdown converted to rich text, `-` reads stdin; `--notify` names who is told, nobody otherwise), list (`GET /todosets/:id/hills/versions.json`, paginated, newest first; bare `hillcharts updates` or `updates list`), show (`GET /todosets/:id/hills/versions/:id.json`; an id with `--in`/`--todoset`, or the update's web or API URL, which names its todoset). Each update carries its note (`description`, rich text) and every tracked todolist's position (`dots`; `id` is null for a todolist since deleted or moved). Todoset resolved as `hillcharts show` does |
+| gauges | 7 | `gauges` | ✅ | BC4 | - | list (--project/--in or --projects filter), needles, needle, create, update, delete, enable/disable |
 | **Communication** |
 | messages | 10 | `messages`, `message` | ✅ | BC4 | - | list, show, create, update, publish, pin, unpin. Create supports `--subscribe`/`--no-subscribe` and `--draft`. Publish promotes drafts to active. `move`/`copy` file a message onto a message board in another project (see recordings (moves, copies)) |
 | message_boards | 3 | `messageboards` | ✅ | BC4 | - | Container, accessed via project dock |
@@ -250,7 +261,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | spotlights | 2 | `spotlight`, `unspotlight` | ✅ | BC5 | - | `POST`/`DELETE /recordings/{id}/spotlight.json` put a recording's card on, or take it off, its project or template home page; both idempotent. No endpoint reads spotlight state or lists spotlights, so there is no `check` or list. Reordering spotlights (`PUT /recordings/:id/spotlight/position`) has no SDK operation, so it is not covered |
 | **Cards (Kanban)** |
 | card_tables | 3 | `cards` | ✅ | BC4 | - | Accessed via project dock |
-| card_table_cards | 9 | `cards` | ✅ | BC4 | - | list, show, create, update, move |
+| card_table_cards | 9 | `cards` | ✅ | BC4 | - | list, show, create, update, move. `cards create --assignee` assigns in the create request (`assignee_ids`, SDK v0.36.0, basecamp/basecamp-sdk#1091); `--notify` is sent as `notify: true` on create and card-update writes, including `assign --card`, so Basecamp tells the people newly assigned; `cards update --notify` alone only reads the card |
 | card_table_columns | 11 | `cards columns` | ✅ | BC4 | - | list columns. SDK v0.12.0 added `Subscribe`/`Unsubscribe`; `cards column watch\|unwatch` already performs the same action through the generic recording-subscription endpoint and returns the resulting subscription details the specific endpoint does not, so the CLI keeps one spelling |
 | card_table_steps | 4 | `cards steps` | ✅ | BC4 | - | Workflow steps on cards. The card-scoped aliases of `subtasks`, which bc3 keeps serving; `cards step move --position` is 1-based (the SDK refuses 0 since basecamp/basecamp-sdk#883) |
 | card_table_wormholes | 3 | `cards wormholes` | ✅ | BC5 | - | list (via `wormholes[]` on card table), create, update, delete; `cards move --to-wormhole` teleports a card across projects and reports the new card once it lands |
@@ -275,7 +286,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 | **Schedule** |
 | calendars | 2 | `calendars` | ✅ | BC5 | - | show, update (color only). No index endpoint, so there is no `calendars list` — address one by id or pasted URL. The eleven colors are validated client-side for an immediate answer that names the alternatives; since v0.13.0 the SDK also carries the server's field-keyed 422 message |
 | schedules | 2 | `schedule` | ✅ | BC4 | - | Schedule container + settings |
-| schedule_entries | 5 | `schedule` | ✅ | BC4 | - | list, show, create, update, occurrences. Create supports `--subscribe`/`--no-subscribe` |
+| schedule_entries | 5 | `schedule` | ✅ | BC4 | - | list, show, create, update, occurrences. Create supports `--subscribe`/`--no-subscribe`; `--draft` sends `status: drafted` via SDK `CreateEntry`, otherwise `status: active`. Create and update support `--highlight` (including `--highlight=false`) and `--join-url` (including an empty string to clear); omission preserves existing values on update. The join link is written as `url` and read as `join_url`; response `url` remains the API address. Open the returned draft link in Basecamp to edit and publish. Status updates/publication are excluded: the SDK update/replace requests expose no status field; generic archive/trash/restore commands cover recording lifecycle, not draft publication. |
 | events | 1 | `events` | ✅ | BC4 | - | Recording change audit trail |
 | **Event Feed** |
 | event_feed | 3 | `events poll`, `events ticket`, `inbox` | ✅ | BC5 | - | The account-wide event feed: `GET /events.json` (`events poll`), `GET /inbox.json` (`inbox`, agent principals only), `POST /events/stream_ticket.json` (`events ticket`). Pagination is the body envelope — a durable `position` and a `next` continuation URL — not the Link-header page walk, so `--all` walks `next` rather than page numbers. The live WebSocket lane the ticket opens is out of scope for the CLI: the SDK's cable client carries a WebSocket dependency the CLI does not take. The mint is a CLI command only — it is excluded from the MCP surface, whose dispatcher would return the bearer verbatim into a model transcript and which could not open the socket anyway |

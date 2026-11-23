@@ -63,6 +63,10 @@ load smoke_helper
   mark_out_of_scope "Alias for todolistgroups — tested via canonical form"
 }
 
+@test "external-links is out of scope" {
+  mark_out_of_scope "Alias for doors — tested via canonical form"
+}
+
 @test "webhook is out of scope" {
   mark_out_of_scope "Alias for webhooks — tested via canonical form"
 }

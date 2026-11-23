@@ -136,6 +136,42 @@ load test_helper
 }
 
 
+@test "hillcharts update with nothing to post shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp hillcharts update --todoset 12345 --json
+  assert_failure
+  assert_output_contains "No update fields specified"
+}
+
+@test "hillcharts update rejects a --dot without a position" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp hillcharts update --todoset 12345 --dot Design
+  assert_failure
+  assert_output_contains "needs a position"
+}
+
+@test "hillcharts update rejects a position outside 0 to 100" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp hillcharts update --todoset 12345 --dot "Design=101"
+  assert_failure
+  assert_output_contains "whole number from 0 to 100"
+}
+
+@test "hillcharts update --note - with nothing piped shows error" {
+  create_credentials
+  create_global_config '{"account_id": 99999}'
+
+  run basecamp hillcharts update --todoset 12345 --note - < /dev/null
+  assert_failure
+}
+
+
 # Help
 
 @test "hillcharts --help shows help" {

@@ -101,6 +101,11 @@ type Manager struct {
 	proxyOnce sync.Once
 	proxyEnv  *proxyEnvState
 
+	// allowPrivate is oauthAllowPrivateEnv as privateOptIn read it, once,
+	// under allowPrivateOnce.
+	allowPrivateOnce sync.Once
+	allowPrivate     bool
+
 	// Warnf receives transport-policy warnings (a proxy ignored for OAuth
 	// traffic, a malformed opt-out value). Test seam; nil means stderr.
 	Warnf func(format string, args ...any)
@@ -268,6 +273,23 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 	return m.storedAccessToken(ctx, "Not authenticated for")
 }
 
+// heldOnlyKey marks a request that may use only the credential this process
+// already holds (WithHeldCredentialOnly).
+type heldOnlyKey struct{}
+
+// errNothingHeld refuses a held-only token when no fresh credential is held.
+var errNothingHeld = errors.New("no credential held for a request that may not read or renew one")
+
+// WithHeldCredentialOnly marks ctx so its token comes only from the credential
+// this process already read or wrote: no credential-store or keyring read and
+// no renewal. With nothing held, or a token due for renewal, the token is
+// refused and the request is never sent. It is for requests that ride along
+// after a command's own, such as the feedback detection, so they cannot stall
+// on a keyring or renew a token for themselves.
+func WithHeldCredentialOnly(ctx context.Context) context.Context {
+	return context.WithValue(ctx, heldOnlyKey{}, true)
+}
+
 // StoredAccessToken returns a valid access token from the credential store,
 // renewing it if needed. Unlike AccessToken, this ignores the BASECAMP_TOKEN
 // environment variable and always uses stored OAuth credentials.
@@ -300,8 +322,18 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 	defer m.mu.Unlock()
 
 	credKey := m.credentialKey()
+	if heldOnly, _ := ctx.Value(heldOnlyKey{}).(bool); heldOnly {
+		held := m.store.heldCredential(credKey)
+		if held == nil || needsRenewal(held) {
+			return "", errNothingHeld
+		}
+		return m.servableToken(credKey, held)
+	}
 	creds, err := m.store.LoadContext(ctx, credKey)
 	if err != nil {
+		if held := m.heldWhileKeyringStalls(ctx, credKey, err); held != nil {
+			return m.servableToken(credKey, held)
+		}
 		return "", m.unreadable(missing, credKey, err)
 	}
 	m.remember(creds)
@@ -326,7 +358,13 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 			// had already answered leaves the store, not this copy,
 			// holding the live credential.
 			if creds, loadErr = m.store.LoadContext(ctx, credKey); loadErr != nil {
-				return m.unreadable("Failed to load renewed credentials for", credKey, loadErr)
+				// The renewal was saved, and the store holds what it saved:
+				// a keyring too slow to read it back still has it.
+				if held := m.heldWhileKeyringStalls(ctx, credKey, loadErr); held != nil {
+					creds = held
+				} else {
+					return m.unreadable("Failed to load renewed credentials for", credKey, loadErr)
+				}
 			}
 		}
 		var tokenErr error
@@ -337,6 +375,30 @@ func (m *Manager) storedAccessToken(ctx context.Context, missing string) (string
 		return "", err
 	}
 	return token, nil
+}
+
+// heldWhileKeyringStalls is the credential to serve when the store could
+// not be read because the OS keyring did not answer: the one the store last
+// read or wrote for credKey, while it is still comfortably inside its
+// lifetime. Nil otherwise — the store answered, the caller's own wait
+// ended, nothing is held, or what is held is due for renewal, which needs
+// the store.
+//
+// The keyring holds the same credential it did a moment ago; it is only
+// slow, or restarting. A long-running process — the connector above all —
+// would otherwise lose its token to one bad moment of a loaded desktop
+// session. Nothing is written: the store remains the record, and the first
+// read that succeeds replaces what is held.
+func (m *Manager) heldWhileKeyringStalls(ctx context.Context, credKey string, err error) *Credentials {
+	if ctx.Err() != nil || !KeyringUnavailable(err) {
+		return nil
+	}
+	held := m.store.heldCredential(credKey)
+	if held == nil || needsRenewal(held) {
+		return nil
+	}
+	m.remember(held)
+	return held
 }
 
 // needsRenewal reports whether a stored access token is inside the refresh
@@ -374,9 +436,10 @@ func (m *Manager) unreadable(missing, credKey string, err error) error {
 	case errors.Is(err, ErrNoCredential), errors.Is(err, ErrInvalidCredentials):
 		// The store spoke: nothing is stored, or nothing readable is.
 		// That IS "not authenticated", and a login is the remedy.
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		// The caller's own wait ended. Theirs to report, and the error
-		// must stay matchable as what it is.
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded), errors.Is(err, ErrKeyringUnavailable):
+		// The caller's own wait ended, or the keyring did not answer.
+		// Neither is a statement about the credential, and the error must
+		// stay matchable as what it is.
 		return err
 	default:
 		var e *output.Error
@@ -1481,6 +1544,9 @@ func (m *Manager) discoverOAuth(ctx context.Context, log func(string)) (*discove
 	if res.IsFallback() {
 		if res.FallbackReason == oauth.FallbackResourceDiscoveryFailed {
 			log(fmt.Sprintf("warning: OAuth discovery failed for %s, using Launchpad fallback", origin))
+			if hint := m.privateBaseURLHint(ctx, origin); hint != "" {
+				log("hint: " + hint)
+			}
 		}
 		lpURL, lpErr := m.launchpadURL()
 		if lpErr != nil {

@@ -117,14 +117,15 @@ var (
 // richTextTags are the tags MarkdownToHTML keeps when they are written inside
 // Markdown: the content elements of Basecamp's rich text. Any other tag is
 // escaped, so prose such as "a Vec<String>" stays text, and so does markup the
-// rich text has no element for.
+// rich text has no element for. details and summary fold a block of detail
+// under a one-line summary, which Basecamp's rich text keeps and shows folded.
 var richTextTags = map[string]bool{
 	"a": true, "b": true, "bc-attachment": true, "blockquote": true, "br": true,
-	"caption": true, "code": true, "del": true, "div": true, "em": true,
+	"caption": true, "code": true, "del": true, "details": true, "div": true, "em": true,
 	"figcaption": true, "figure": true, "h1": true, "h2": true, "h3": true,
 	"h4": true, "h5": true, "h6": true, "hr": true, "i": true, "img": true,
 	"li": true, "ol": true, "p": true, "pre": true, "s": true, "span": true,
-	"strike": true, "strong": true, "table": true, "tbody": true, "td": true,
+	"strike": true, "strong": true, "summary": true, "table": true, "tbody": true, "td": true,
 	"tfoot": true, "th": true, "thead": true, "tr": true, "u": true, "ul": true,
 }
 
@@ -483,9 +484,11 @@ func MarkdownToHTML(md string) string {
 }
 
 // HasRichTextHTML reports whether MarkdownToHTML would keep any raw HTML from
-// md other than <bc-attachment> markup: whether the Markdown parser finds an
-// inline tag or an HTML block whose tag is in richTextTags. HTML inside code is
-// not raw HTML to the parser, so it never counts.
+// md other than <bc-attachment> markup and a fold's own tags: whether the
+// Markdown parser finds an inline tag or an HTML block whose tag is in
+// richTextTags. HTML inside code is not raw HTML to the parser, so it never
+// counts. A fold written the way the basecamp skill says, <details> and
+// <summary> around Markdown, is Markdown content, so it never counts either.
 func HasRichTextHTML(md string) bool {
 	if md == "" {
 		return false
@@ -506,13 +509,26 @@ func HasRichTextHTML(md string) bool {
 		default:
 			return ast.WalkContinue, nil
 		}
-		if isRichTextTag(raw) && !reLeadingAttachmentTag.Match(raw) {
+		if isRichTextTag(raw) && !reLeadingAttachmentTag.Match(raw) && !isFoldMarkup(raw) {
 			found = true
 			return ast.WalkStop, nil
 		}
 		return ast.WalkSkipChildren, nil
 	})
 	return found
+}
+
+// reFoldMarkup matches raw HTML made only of a fold's own bare tags, <details>,
+// <summary> and their closing tags, with text between them. Every "<" in it
+// must open one of those four tags, so a tag with attributes, any other tag, a
+// comment or a declaration does not match.
+var reFoldMarkup = regexp.MustCompile(`(?i)^(?:[^<]|</?(?:details|summary)>)*$`)
+
+// isFoldMarkup reports whether raw HTML holds only a fold's own tags, <details>
+// and <summary>, with nothing but text between them. An HTML block that also
+// holds anything else, such as a whole fold written as HTML, is not.
+func isFoldMarkup(raw []byte) bool {
+	return reFoldMarkup.Match(raw)
 }
 
 // reLeadingAttachmentTag matches a <bc-attachment> open or close tag at the

@@ -39,7 +39,7 @@ func CommandCategories() []CommandCategory {
 				{Name: "subtasks", Category: "core", Description: "Manage subtasks on to-dos and cards", Actions: []string{"list", "show", "create", "update", "complete", "uncomplete", "move", "delete"}},
 				{Name: "todolists", Category: "core", Description: "Manage to-do lists", Actions: []string{"list", "show", "create", "update", "position", "copy", "trash", "archive", "restore"}},
 				{Name: "todosets", Category: "core", Description: "Manage to-do set containers", Actions: []string{"list", "show"}},
-				{Name: "hillcharts", Category: "core", Description: "Manage hill charts", Actions: []string{"show", "track", "untrack", "updates"}},
+				{Name: "hillcharts", Category: "core", Description: "Manage hill charts", Actions: []string{"show", "track", "untrack", "updates", "update"}},
 				{Name: "gauges", Category: "core", Description: "Manage gauges", Actions: []string{"list", "needles", "needle", "create", "update", "delete", "enable", "disable"}},
 				{Name: "todolistgroups", Category: "core", Description: "Manage to-do list groups", Actions: []string{"list", "show", "create", "update", "position", "copy"}},
 				{Name: "messages", Category: "core", Description: "Manage messages", Actions: []string{"list", "show", "create", "update", "publish", "pin", "unpin", "move", "copy", "trash", "archive", "restore"}},
@@ -147,7 +147,9 @@ func CommandCategories() []CommandCategory {
 				{Name: "commands", Category: "additional", Description: "List all commands"},
 				{Name: "completion", Category: "additional", Description: "Generate shell completions", Actions: []string{"bash", "zsh", "fish", "powershell", "refresh", "status"}},
 				{Name: "tools", Category: "additional", Description: "Manage project dock tools", Actions: []string{"show", "create", "update", "trash", "enable", "disable", "reposition", "move"}},
+				{Name: "doors", Category: "additional", Description: "Manage a project's external links", Actions: []string{"list", "show", "create", "update", "delete"}},
 				{Name: "skill", Category: "additional", Description: "Manage the embedded agent skill file", Actions: []string{"install"}},
+				{Name: "instructions", Category: "additional", Description: "Print the instructions agents follow when writing to Basecamp"},
 				{Name: "tui", Category: "additional", Description: "Launch the Basecamp workspace", Experimental: true, DevOnly: true},
 				{Name: "bonfire", Category: "additional", Description: "Multi-chat orchestration", Actions: []string{"split", "layout"}, Experimental: true, DevOnly: true},
 				{Name: "api", Category: "additional", Description: "Raw API access"},
@@ -157,6 +159,22 @@ func CommandCategories() []CommandCategory {
 			},
 		},
 	}
+}
+
+// withVisibleFeedback lists feedback under Additional Commands while it is
+// shown in help. It is not in the static catalog because it ships dark.
+func withVisibleFeedback(cmd *cobra.Command, categories []CommandCategory) []CommandCategory {
+	fb, _, err := cmd.Root().Find([]string{"feedback"})
+	if err != nil || fb == cmd.Root() || fb.Hidden {
+		return categories
+	}
+	for i := range categories {
+		if categories[i].Name == "Additional Commands" {
+			categories[i].Commands = append(categories[i].Commands,
+				CommandInfo{Name: "feedback", Category: "additional", Description: fb.Short})
+		}
+	}
+	return categories
 }
 
 // CatalogCommandNames returns all command names from the catalog.
@@ -186,7 +204,7 @@ func NewCommandsCmd() *cobra.Command {
 		Long:    "List all available basecamp commands organized by category.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
-			categories := CommandCategories()
+			categories := withVisibleFeedback(cmd, CommandCategories())
 
 			// For styled terminal output, render grouped columns directly
 			if app.Output.EffectiveFormat() == output.FormatStyled {

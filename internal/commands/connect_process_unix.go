@@ -4,6 +4,7 @@ package commands
 
 import (
 	"errors"
+	"os"
 	"syscall"
 )
 
@@ -29,4 +30,15 @@ func processPresence(pid int) string {
 	default:
 		return pidUnknown
 	}
+}
+
+// connectReexec starts the connector again in this process, with the
+// arguments and environment it was started with. It returns only when it
+// could not.
+func connectReexec() error {
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	return syscall.Exec(executable, os.Args, os.Environ()) //nolint:gosec // G204: this binary, with its own arguments
 }

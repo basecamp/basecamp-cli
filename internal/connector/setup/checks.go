@@ -39,6 +39,11 @@ type Person struct {
 	Name           string
 	PersonableType string
 	Client         bool
+	// ClientUnsaid marks a person read through the SDK (fromSDK) whose read
+	// left the client flag out. The checks refuse them as they refuse a
+	// client. It is false on a Person built any other way, such as the
+	// agent's boss taken from its profile, so it says nothing about those.
+	ClientUnsaid bool
 }
 
 // Reader is what the checks read, as the agent, in the agent's account.
@@ -55,6 +60,8 @@ type Reader interface {
 	Project(ctx context.Context, id int64) error
 	// ProjectPeople reads a project's people.
 	ProjectPeople(ctx context.Context, id int64) error
+	// Campfire verifies a readable Campfire belongs to the named project.
+	Campfire(ctx context.Context, projectID, campfireID int64) error
 	// Ping reads a Ping the reader is in.
 	Ping(ctx context.Context, id int64) (Ping, error)
 }
@@ -136,6 +143,18 @@ func (r SDKReader) ProjectPeople(ctx context.Context, id int64) error {
 	return err
 }
 
+// Campfire implements Reader.
+func (r SDKReader) Campfire(ctx context.Context, projectID, campfireID int64) error {
+	fire, err := r.Client.Campfires().Get(ctx, campfireID)
+	if err != nil {
+		return err
+	}
+	if fire == nil || fire.ID != campfireID || fire.Bucket == nil || fire.Bucket.ID != projectID {
+		return fmt.Errorf("Campfire %d was not returned in project %d", campfireID, projectID)
+	}
+	return nil
+}
+
 // Ping implements Reader.
 func (r SDKReader) Ping(ctx context.Context, id int64) (Ping, error) {
 	p, err := r.Client.Pings().Get(ctx, id)
@@ -153,7 +172,7 @@ func fromSDK(p *basecamp.Person) Person {
 	if p == nil {
 		return Person{}
 	}
-	return Person{ID: p.ID, Name: p.Name, PersonableType: p.PersonableType, Client: p.Client}
+	return Person{ID: p.ID, Name: p.Name, PersonableType: p.PersonableType, Client: basecamp.Deref(p.Client), ClientUnsaid: p.Client == nil}
 }
 
 // httpStatus is the status a failed read answered with, 0 when it did not
@@ -368,6 +387,8 @@ func verifyPerson(ctx context.Context, r Reader, name string, p Person, agentID 
 		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is an Agent; agents never authorize", p.ID)
 	case p.Client:
 		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is a client of the account; only members are trusted", p.ID)
+	case p.ClientUnsaid:
+		c.Status, c.Message = StatusFail, fmt.Sprintf("Basecamp did not say whether person %d is a client; only members are trusted", p.ID)
 	default:
 		c.Status = StatusPass
 		c.Message = fmt.Sprintf("Person %d, %s%s", p.ID, richtext.SanitizeSingleLine(p.Name), source)
@@ -419,6 +440,16 @@ func ProjectChecks(ctx context.Context, r Reader, f File, firstSetup bool) []Che
 	checks := make([]Check, 0, len(ids))
 	for _, id := range ids {
 		checks = append(checks, projectCheck(ctx, r, f.Agent.Kind, id))
+		fires := slices.Clone(f.Projects[id].ListenCampfires)
+		slices.Sort(fires)
+		for _, fire := range fires {
+			c := Check{Name: fmt.Sprintf("Campfire %d in project %d", fire, id), Status: StatusPass, Message: "Readable by the agent in this project"}
+			if err := r.Campfire(ctx, id, fire); err != nil {
+				c.Status, c.Message = StatusFail, "Could not verify the Campfire in this project: "+ErrorText(err)
+				c.Hint = fmt.Sprintf("Check the Campfire id with basecamp chat list --project %d, or remove the setting with basecamp connect setup -P %s --no-listen-campfire %d:%d.", id, richtext.ShellQuote(f.Profile), id, fire)
+			}
+			checks = append(checks, c)
+		}
 	}
 	return checks
 }
@@ -539,6 +570,8 @@ func verifyPingPerson(ping Ping, readErr error, pingID, id, agentID int64, recor
 		c.Message = fmt.Sprintf("Person %d is an Agent; agents never authorize, and are allowed only with --allow-agent", id)
 	case p.Client:
 		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is a client of the account; only members are trusted", id)
+	case p.ClientUnsaid:
+		c.Status, c.Message = StatusFail, fmt.Sprintf("Basecamp did not say whether person %d is a client; only members are trusted", id)
 	default:
 		c.Status = StatusPass
 		c.Message = fmt.Sprintf("Person %d, %s, may ask by mention in Ping %d alone", id, richtext.SanitizeSingleLine(p.Name), pingID)

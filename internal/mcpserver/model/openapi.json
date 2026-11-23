@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Basecamp",
-    "version": "2026-10-27",
+    "version": "2026-11-05",
     "description": "Basecamp API",
     "contact": {
       "name": "Basecamp",
@@ -2827,6 +2827,228 @@
         ],
         "x-basecamp-retry": {
           "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
+    "/{accountId}/buckets/{bucketId}/dock/doors.json": {
+      "get": {
+        "description": "List the active external links in a project\nThey come in the order they appear in the project's External links section.\nNot paginated: a project has a handful at most. Clients see only the\nexternal links visible to them. Listing needs only access to the project,\nnot permission to edit it.",
+        "operationId": "ListDoors",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "bucketId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ListDoors 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDoorsResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Dock"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      },
+      "post": {
+        "description": "Create an external link in a project\nIt goes at the end of the project's External links section. The link's\nfields go under the `door` key and `visible_to_clients` sits beside it.\nOmitting `visible_to_clients` keeps the link private to the team, whatever\nthe visibility of the project's other tools; a client caller always creates\na client-visible link. An unusable `url` (e.g. a `javascript:` address) is a\n422 with Rails' default error body, which names no field. Needs permission\nto edit the project. The `door[image]`\nthumbnail is multipart-only and not modelled.",
+        "operationId": "CreateDoor",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDoorRequestContent"
+              }
+            }
+          },
+          "required": true
+        },
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "bucketId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "CreateDoor 201 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateDoorResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ValidationError 422 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Dock"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 2,
           "baseDelayMs": 1000,
           "backoff": "exponential",
           "retryOn": [
@@ -8500,6 +8722,316 @@
         },
         "tags": [
           "Messages"
+        ],
+        "x-basecamp-idempotent": {
+          "natural": true
+        },
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
+    "/{accountId}/dock/doors/{doorId}": {
+      "delete": {
+        "description": "Delete an external link (returns 204 No Content)\nIts status becomes \"deleted\" and it leaves the project's External links section. It does not\ngo to the trash: Basecamp permanently destroys it about five days later.\nNeeds permission to edit the project.",
+        "operationId": "DeleteDoor",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "doorId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "DeleteDoor 204 response"
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Dock"
+        ],
+        "x-basecamp-idempotent": {
+          "natural": true
+        },
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      },
+      "get": {
+        "description": "Get an external link by id\nA door hidden from a client, an unknown id, or the id of a recording that is\nnot a door is a 404.",
+        "operationId": "GetDoor",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "doorId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GetDoor 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDoorResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Dock"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      },
+      "put": {
+        "description": "Update an external link\nA partial update: every field is optional, and those left out keep their\nvalues. Omit `door` entirely to change only `visible_to_clients`; omit\n`visible_to_clients` to keep the current visibility. An unusable `url` is a\n422 with Rails' default error body, as for CreateDoor. Needs permission to\nedit the project.",
+        "operationId": "UpdateDoor",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDoorRequestContent"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "doorId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "UpdateDoor 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateDoorResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ValidationError 422 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Dock"
         ],
         "x-basecamp-idempotent": {
           "natural": true
@@ -22557,7 +23089,7 @@
     },
     "/{accountId}/reports/todos/overdue.json": {
       "get": {
-        "description": "Get overdue todos grouped by lateness",
+        "description": "Get one page of overdue todos grouped by lateness, latest first.\n\nPages hold 15, 30, 50, then 100 to-dos, and each page fills the same four\ngroups with only its own to-dos, so a group can continue onto the next\npage. A `Link: rel=\"next\"` header names the next page and `X-Total-Count`\nthe total. This operation is not auto-paginated in any SDK: the response\nis an object of four arrays, which no pagination key can name.",
         "operationId": "GetOverdueTodos",
         "parameters": [
           {
@@ -22570,6 +23102,16 @@
               "description": "Basecamp account ID (numeric string)"
             },
             "required": true
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page number for paginating through results. Defaults to 1. This\noperation is not auto-paginated in any SDK, so a page is returned as\nasked for and later pages are not followed.",
+            "schema": {
+              "type": "integer",
+              "description": "Page number for paginating through results. Defaults to 1. This\noperation is not auto-paginated in any SDK, so a page is returned as\nasked for and later pages are not followed.",
+              "format": "int32"
+            }
           }
         ],
         "responses": {
@@ -28970,6 +29512,125 @@
             503
           ]
         }
+      },
+      "post": {
+        "description": "Post a progress update on a todoset's hill chart.\n\nMoves the todolists named in `dots` and saves a progress update, as\nupdating the hill chart in Basecamp does. Todolists left out of `dots` keep\ntheir current position, so one dot can move without sending the others.\nEvery field is optional: with none, the update records the chart as it\nstands. To track or untrack a todolist, use `UpdateHillChartSettings`.\n\nAnswers 201 with the new progress update, in the shape\n`GetHillChartVersion` returns, including where every tracked todolist now\nsits. Answers 422, with an `error` message and nothing saved, when `dots`\nisn't a list of objects, a todolist appears in it more than once or isn't\ntracked on the chart, a `position` isn't a whole number from 0 to 100, or\nthe chart tracks no todolists.",
+        "operationId": "CreateHillChartVersion",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateHillChartVersionRequestContent"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          },
+          {
+            "name": "todosetId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "CreateHillChartVersion 201 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateHillChartVersionResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "ValidationError 422 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Todos"
+        ],
+        "x-basecamp-retry": {
+          "maxAttempts": 2,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
       }
     },
     "/{accountId}/todosets/{todosetId}/hills/versions/{versionId}": {
@@ -32665,8 +33326,17 @@
               "path": "github.com/basecamp/basecamp-sdk/go/pkg/types"
             }
           },
+          "assignee_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "People to assign to the new card. BC3 keeps only the ids it finds among\nthe card table's reachable people and silently drops the rest."
+          },
           "notify": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Notify the people assigned through assignee_ids. Off unless true."
           }
         },
         "required": [
@@ -32827,6 +33497,49 @@
       "CreateDocumentResponseContent": {
         "$ref": "#/components/schemas/Document"
       },
+      "CreateDoorPayload": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "description": "Short identifier for the external service: figma, dropbox, google_drive,\ngithub, notion, trello, slack, zoom, airtable, jira, miro, \u2026 or `other`\nfor a generic link."
+          },
+          "url": {
+            "type": "string",
+            "description": "The address the link points to. Supply an HTTP or HTTPS URL; a value\nwithout a scheme is prefixed with `https://`."
+          },
+          "title": {
+            "type": "string",
+            "description": "Name shown in the External links section. Defaults to \"Untitled\"."
+          },
+          "description": {
+            "type": "string",
+            "description": "Rich-text (HTML) description shown beneath the title."
+          }
+        },
+        "required": [
+          "service",
+          "url"
+        ]
+      },
+      "CreateDoorRequestContent": {
+        "type": "object",
+        "properties": {
+          "door": {
+            "$ref": "#/components/schemas/CreateDoorPayload"
+          },
+          "visible_to_clients": {
+            "type": "boolean",
+            "description": "Whether the project's clients can see the external link. Omitted means\nfalse: the link is private to the team. A client caller always creates a\nclient-visible link regardless of what is sent."
+          }
+        },
+        "required": [
+          "door"
+        ]
+      },
+      "CreateDoorResponseContent": {
+        "$ref": "#/components/schemas/Door"
+      },
       "CreateEmbedRequestContent": {
         "type": "object",
         "properties": {
@@ -32942,6 +33655,33 @@
       },
       "CreateGoogleDocumentResponseContent": {
         "$ref": "#/components/schemas/GoogleDocument"
+      },
+      "CreateHillChartVersionRequestContent": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "A note about the update, as rich text (HTML)."
+          },
+          "dots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HillChartDotPosition"
+            },
+            "description": "Todolists to move, each with its ID and new position. Todolists left\nout keep their current position."
+          },
+          "subscriptions": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "People to notify of the update and subscribe to it. If absent, nobody\nelse is notified."
+          }
+        }
+      },
+      "CreateHillChartVersionResponseContent": {
+        "$ref": "#/components/schemas/HillChartVersion"
       },
       "CreateLineupMarkerRequestContent": {
         "type": "object",
@@ -33084,6 +33824,26 @@
           },
           "description": {
             "type": "string"
+          },
+          "color": {
+            "type": "string",
+            "description": "The project's color, used for it on calendars: white, red, orange,\nyellow, green, blue, aqua, purple, gray, pink or brown. Omitted, Basecamp\nderives one from the project's name. Basecamp answers a value outside the enum\nwith a server error, not a validation error."
+          },
+          "purpose": {
+            "type": "string",
+            "description": "What kind of project it is: `topic` (a regular project, the default),\n`team`, or `company_hq` (the account's Company HQ, at most one per\naccount; a second answers 422). BC3's enum also has `guide`, which marks\na project as a sample nobody can edit afterwards, so it isn't offered."
+          },
+          "admissions": {
+            "type": "string",
+            "description": "invite|employee|team"
+          },
+          "timesheet_enabled": {
+            "type": "boolean",
+            "description": "Turn on the project's timesheet. Basecamp ignores this when the caller\ncan't use timesheets (the account lacks them, or the caller is a client)."
+          },
+          "wallpaper_mode": {
+            "type": "string",
+            "description": "How a wallpaper uploaded later is laid out. UpdateProjectWallpaper\nuploads one."
           }
         },
         "required": [
@@ -33790,6 +34550,91 @@
           "id",
           "inherits_status",
           "parent",
+          "status",
+          "title",
+          "type",
+          "updated_at",
+          "url",
+          "visible_to_clients"
+        ]
+      },
+      "Door": {
+        "type": "object",
+        "description": "An external link (`Door` recording), as ListDoors, GetDoor, CreateDoor and\nUpdateDoor render it: the shared recording envelope plus the outside `url`,\nthe `service` struct and `description`. Docked, so it carries no `parent`.",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string"
+          },
+          "visible_to_clients": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "x-go-type": "time.Time",
+            "x-go-type-import": {
+              "path": "time"
+            }
+          },
+          "updated_at": {
+            "type": "string",
+            "x-go-type": "time.Time",
+            "x-go-type-import": {
+              "path": "time"
+            }
+          },
+          "title": {
+            "type": "string"
+          },
+          "inherits_status": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "description": "The external link's outside address (e.g. the Figma URL) \u2014 NOT this\nrecord's API URL. The door partial renders the shared recording partial\nand then `json.(recording.recordable, :url, :service, :description)`,\nwhich overwrites the recording's url key. `app_url` is still this record's\nBasecamp URL (a redirector to the outside address)."
+          },
+          "app_url": {
+            "type": "string"
+          },
+          "bookmark_url": {
+            "type": "string"
+          },
+          "subscription_url": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "description": "Ordinal position within the project's External links section.",
+            "format": "int32"
+          },
+          "bucket": {
+            "$ref": "#/components/schemas/RecordingBucket"
+          },
+          "creator": {
+            "$ref": "#/components/schemas/Person"
+          },
+          "service": {
+            "$ref": "#/components/schemas/DoorService"
+          },
+          "description": {
+            "type": "string",
+            "description": "Rich-text (HTML) description shown beneath the link."
+          }
+        },
+        "required": [
+          "app_url",
+          "bucket",
+          "created_at",
+          "creator",
+          "id",
+          "inherits_status",
+          "service",
           "status",
           "title",
           "type",
@@ -35140,6 +35985,9 @@
       "GetDocumentResponseContent": {
         "$ref": "#/components/schemas/Document"
       },
+      "GetDoorResponseContent": {
+        "$ref": "#/components/schemas/Door"
+      },
       "GetEmbedResponseContent": {
         "$ref": "#/components/schemas/Embed"
       },
@@ -35746,6 +36594,26 @@
           "position"
         ]
       },
+      "HillChartDotPosition": {
+        "type": "object",
+        "description": "Where to move one tracked todolist in a progress update.",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "The todolist's ID. It must be tracked on the hill chart.",
+            "format": "int64"
+          },
+          "position": {
+            "type": "integer",
+            "description": "A whole number from 0 to 100, on the same scale as the hill chart's dots.",
+            "format": "int32"
+          }
+        },
+        "required": [
+          "id",
+          "position"
+        ]
+      },
       "HillChartVersion": {
         "type": "object",
         "description": "A progress update on a hill chart: the note someone wrote when they\nupdated the chart, and where each tracked todolist sat at that moment.",
@@ -36137,6 +37005,12 @@
         "type": "array",
         "items": {
           "$ref": "#/components/schemas/Document"
+        }
+      },
+      "ListDoorsResponseContent": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Door"
         }
       },
       "ListEventBoostsResponseContent": {
@@ -37656,6 +38530,14 @@
           "start_date": {
             "type": "string",
             "description": "Date the new project starts on. Template dates are relative to the start\nof the template's first week, and template weeks start on a Sunday, so\nthe project's dates are anchored to the Sunday on or before this date.\nOmitted, they are anchored to the week in which the construction is\nprocessed."
+          },
+          "admissions": {
+            "type": "string",
+            "description": "Who can join the new project: invite, employee or team. Basecamp stores this with the construction\nand applies it when the project is built, so a value outside the enum\nisn't refused up front: the construction fails."
+          },
+          "timesheet_enabled": {
+            "type": "boolean",
+            "description": "Turn on the new project's timesheet. Basecamp ignores this when the\ncaller can't use timesheets (the account lacks them, or the caller is a\nclient)."
           }
         },
         "required": [
@@ -41010,6 +41892,10 @@
               "type": "integer",
               "format": "int64"
             }
+          },
+          "notify": {
+            "type": "boolean",
+            "description": "Notify people newly assigned through assignee_ids in this same request.\nOff unless true, and has no effect without assignee_ids: people already\nassigned are not notified again."
           }
         }
       },
@@ -41104,6 +41990,42 @@
       },
       "UpdateCommentResponseContent": {
         "$ref": "#/components/schemas/Comment"
+      },
+      "UpdateDoorPayload": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "description": "Short identifier for the external service, as for CreateDoor."
+          },
+          "url": {
+            "type": "string",
+            "description": "The address the link points to."
+          },
+          "title": {
+            "type": "string",
+            "description": "Name shown in the External links section."
+          },
+          "description": {
+            "type": "string",
+            "description": "Rich-text (HTML) description shown beneath the title."
+          }
+        }
+      },
+      "UpdateDoorRequestContent": {
+        "type": "object",
+        "properties": {
+          "door": {
+            "$ref": "#/components/schemas/UpdateDoorPayload"
+          },
+          "visible_to_clients": {
+            "type": "boolean",
+            "description": "Whether the project's clients can see the external link. Omitted keeps\nthe current visibility."
+          }
+        }
+      },
+      "UpdateDoorResponseContent": {
+        "$ref": "#/components/schemas/Door"
       },
       "UpdateFolderRequestContent": {
         "type": "object",
@@ -41386,6 +42308,18 @@
           "wallpaper_mode": {
             "type": "string",
             "description": "How the project's wallpaper is laid out. Changes only the layout of a\nwallpaper already attached; UpdateProjectWallpaper uploads one."
+          },
+          "color": {
+            "type": "string",
+            "description": "The project's color, used for it on calendars: white, red, orange,\nyellow, green, blue, aqua, purple, gray, pink or brown. An empty string clears\nit, and Basecamp derives one from the project's name again. A value\noutside the enum answers a server error, not a validation error. The\n`color` a project read returns is something else: the caller's own color\nfor the project on their home screen, null unless they set one."
+          },
+          "purpose": {
+            "type": "string",
+            "description": "What kind of project it is: `topic` (a regular project), `team`, or\n`company_hq` (the account's Company HQ). Changing a `topic` to anything\nelse deletes the project's start and end dates. An account has at most\none `company_hq`; asking for a second answers 422. BC3's enum also has\n`guide`, which marks a project as a sample nobody can edit afterwards,\nso it isn't offered."
+          },
+          "timesheet_enabled": {
+            "type": "boolean",
+            "description": "Turn the project's timesheet on or off. Basecamp ignores this when the\ncaller can't use timesheets (the account lacks them, or the caller is a\nclient)."
           }
         },
         "required": [

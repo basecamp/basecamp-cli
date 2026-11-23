@@ -49,7 +49,9 @@ var connectSetupPolicyFlags = []string{
 	"serve", "unserve", "class", "watch-completions", "no-watch-completions",
 	"allow-assignments-from-authorized",
 	"allow-agent", "disallow-agent", "agent-thread-cap", "agent-daily-cap",
+	"listen-campfire", "no-listen-campfire",
 	"allow-in-ping", "disallow-in-ping", "ack-boost", "no-ack-boost",
+	"reset",
 }
 
 // connectGOOS is the platform guided setup checks before connecting. A
@@ -466,9 +468,9 @@ func guidedConnectFile(ctx context.Context, w io.Writer, r *output.Renderer, pat
 		return nil, output.ErrUsageHint("Your connector's settings (connect.json) were changed by another command while setup was asking, so nothing was changed",
 			runGuidedSetupAgain(agent.Profile))
 	}
-	aside := path + ".broken-" + time.Now().UTC().Format("20060102T150405Z")
-	if err := os.Rename(path, aside); err != nil {
-		return nil, fmt.Errorf("could not move %s aside: %w", richtext.SanitizeSingleLine(path), err)
+	aside, err := setup.MoveAside(path, time.Now())
+	if err != nil {
+		return nil, err
 	}
 	fmt.Fprintln(w, r.Muted.Render("Moved the old file to "+richtext.SanitizeSingleLine(aside)))
 	fmt.Fprintln(w)

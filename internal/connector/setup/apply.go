@@ -49,12 +49,21 @@ type Changes struct {
 	// WatchCompletions turns watch_completions on (true) or off (false) for
 	// a served project.
 	WatchCompletions map[int64]bool
+	// Campfires sets whether a served project's Campfire hears trusted lines
+	// without a mention. Omitted Campfires keep their settings.
+	Campfires map[Campfire]bool
 	// Remove stops serving projects.
 	Remove []int64
 
 	// AckBoost sets how the connector acknowledges a request; nil keeps the
 	// file's.
 	AckBoost *AckBoost
+}
+
+// Campfire identifies a Campfire within a served project.
+type Campfire struct {
+	Project int64
+	ID      int64
 }
 
 // PingPerson is a person in one Ping.
@@ -70,6 +79,7 @@ func Apply(f File, ch Changes) (File, error) {
 	out := f
 	out.Projects = make(map[int64]admission.Project, len(f.Projects))
 	for id, r := range f.Projects {
+		r.ListenCampfires = slices.Clone(r.ListenCampfires)
 		out.Projects[id] = r
 	}
 	out.Trust.AllowlistIDs = slices.Clone(f.Trust.AllowlistIDs)
@@ -136,6 +146,22 @@ func Apply(f File, ch Changes) (File, error) {
 		out.Projects[id] = r
 	}
 
+	for fire, on := range ch.Campfires {
+		r, served := out.Projects[fire.Project]
+		if !served {
+			return File{}, fmt.Errorf("Campfire %d: project %d is not served; serve it with --serve %d", fire.ID, fire.Project, fire.Project)
+		}
+		if fire.ID <= 0 {
+			return File{}, fmt.Errorf("%d is not a Campfire id", fire.ID)
+		}
+		if on && !slices.Contains(r.ListenCampfires, fire.ID) {
+			r.ListenCampfires = append(r.ListenCampfires, fire.ID)
+			slices.Sort(r.ListenCampfires)
+		} else if !on {
+			r.ListenCampfires = slices.DeleteFunc(r.ListenCampfires, func(id int64) bool { return id == fire.ID })
+		}
+		out.Projects[fire.Project] = r
+	}
 	return out, nil
 }
 

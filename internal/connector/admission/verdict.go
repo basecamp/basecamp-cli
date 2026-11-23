@@ -61,10 +61,9 @@ type Snapshot struct {
 	// Role is whose request this is: an operator's or a participant's.
 	Role Role `json:"role,omitempty"`
 	// Owner says the operator connect.json names asked, in words they wrote:
-	// they mentioned the agent, wrote to it in their direct Ping, or assigned
-	// it a recording they wrote. A
-	// comment on a followed thread, a completion and a boost are never the
-	// owner's word; an operator's go on a declared ask is a separate
+	// they mentioned the agent, wrote to it in their direct Ping or an opted-in
+	// Campfire, or assigned it a recording they wrote. A comment on a followed
+	// thread, a completion and a boost are never the owner's word; an operator's go on a declared ask is a separate
 	// approval (AskRecordingID) and does not make one. Someone named with --allow is an operator but never the
 	// owner, and neither is the owner bringing in someone else's words: an
 	// allowlisted person's to-do the owner moves in is that person's.
@@ -526,14 +525,15 @@ func (a *Admitter) Decide(ctx context.Context, ev Event) (out Verdict, err error
 		UpdatedAt: summary.UpdatedAt,
 		Role:      v.Role,
 		// Only a request the owner made, in words the owner wrote: a mention,
-		// or an assignment of a recording they wrote. A comment on a thread
-		// the agent follows asks it nothing, a completion is context, and an
-		// assigned recording someone else wrote is that person's words. A
+		// a direct Ping or opted-in Campfire line, or an assignment of a recording
+		// they wrote. A comment on a thread the agent follows asks it nothing,
+		// a completion is context, and an assigned recording someone else wrote
+		// is that person's words. A
 		// boost is never Owner either, even the operator's go on a declared
 		// ask (AskRecordingID): Owner is the owner's word on the connector
 		// itself, and a go approves only what its ask names, never that.
 		Owner: v.Role == RoleOperator && ev.Performer() == policy.Trust.OperatorID &&
-			(rule.Trigger == TriggerMentioned || rule.Trigger == TriggerAssigned || rule.Trigger == TriggerPinged) &&
+			(rule.Trigger == TriggerMentioned || rule.Trigger == TriggerAssigned || rule.Trigger == TriggerPinged || rule.Trigger == TriggerCampfire) &&
 			summary.Creator.ID == policy.Trust.OperatorID,
 	}
 	if summary.Bucket != nil && ping == nil {
@@ -575,6 +575,17 @@ func (a *decision) match(ctx context.Context, ev Event, policy Policy, gate Gate
 				continue
 			}
 			author, state, reason, err := a.authorTrusted(ctx, ev, summary, gate.Agent)
+			if err != nil || state != "" {
+				return Rule{}, "", state, reason, err
+			}
+			return rule, author, "", "", nil
+
+		case TriggerCampfire:
+			project, served := policy.served(ev.BucketID)
+			if !served || summary.CampfireID <= 0 || !slices.Contains(project.ListenCampfires, summary.CampfireID) {
+				continue
+			}
+			author, state, reason, err := a.authorTrusted(ctx, ev, summary, false)
 			if err != nil || state != "" {
 				return Rule{}, "", state, reason, err
 			}
