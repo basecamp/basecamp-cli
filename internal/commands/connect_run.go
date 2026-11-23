@@ -220,7 +220,7 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	case errors.Is(err, os.ErrNotExist):
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q is not set up as a connector", name), "Run: basecamp connect setup -P "+shellQuote(name))
 	case err != nil:
-		return output.ErrUsage("connect.json cannot be used: " + err.Error())
+		return output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(err), connectResetHint(name))
 	}
 	// Which coding agents do the work, when the run does it itself: settled
 	// before anything is read from Basecamp, so a mistyped agent or one that

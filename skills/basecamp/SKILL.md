@@ -88,23 +88,18 @@ argument-hint: "[action] [args...]"
 
 # Basecamp CLI
 
-The installed CLI is the command reference. This skill sets the operating rules
-and does not duplicate its catalog.
+The CLI is the command reference; this skill sets operating rules.
 
 ## Discovery-first workflow
 
-For each task:
-
 1. Infer the deepest plausible leaf command from the user's words.
-2. If its exact arguments or flags are not already established by a tool result
-   in this conversation, inspect that leaf directly:
+2. Unless a tool result already established its arguments and flags, inspect it:
 
    ```bash
    basecamp <group> <subcommand> --agent --help
    ```
 
-3. If the leaf does not exist, inspect its nearest parent group. Use root help
-   only when the top-level group itself is unclear:
+3. If absent, inspect its parent. Use root help only if the group is unclear:
 
    ```bash
    basecamp <group> --agent --help   # fallback
@@ -117,8 +112,7 @@ For each task:
 5. Execute with an explicit output mode, then read structured errors and
    breadcrumbs before deciding what to do next.
 
-Leaf help is cheap and local; root help returns the full catalog and costs many
-tokens. Do not load it to confirm global flags this skill documents. For obvious Docs & Files requests, route
+Do not load root help to confirm global flags documented here. For obvious Docs & Files requests, route
 straight to `files list`, `files download`, or `files uploads create` before
 trying parent or root help. A subcommand's `inherited_flags` is intentionally
 short; global flags such as `--agent`, `--jq`, `--profile`, and `--verbose` still
@@ -171,13 +165,6 @@ With `--agent --jq`, it filters the data-only payload. Use `--md`
 for human-facing listings, but remember that `--md` alone does not suppress
 interactive prompts. Add enough scope to remove ambiguity or set
 `BASECAMP_NONINTERACTIVE=1`.
-
-Generic examples, not command discovery:
-
-```bash
-basecamp <leaf-command> --jq '.data | length'
-basecamp <leaf-command> --jq '[.data[] | {id, name}]'
-```
 
 ## Project, account, and pagination scope
 
@@ -296,6 +283,11 @@ basecamp projects logo remove --in "<project>" --json
 - Each command returns the project. `.data.logo` is `{url}`, and is absent when
   the project has none; `projects show` carries the same field. Like the
   wallpaper's, the URL needs authentication.
+
+## Gauges
+
+`gauges list` ignores configured project. Filter with `--in` or
+`--projects` (ordered IDs/names, comma-separated, repeatable), never both.
 
 ## Timesheet entries
 
@@ -422,3 +414,9 @@ Basecamp stays silent otherwise.
 
 For destructive or broad operations, preview when the command offers a dry-run
 and do not expand the user's requested scope.
+
+## Schedule options
+
+`schedule create/update`: `--highlight=false` / `--join-url=""` clears; omitted
+flags preserve on update. Read join links as `join_url`. Create `--draft` saves
+unpublished; publish via the returned Basecamp link.
