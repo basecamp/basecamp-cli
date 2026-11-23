@@ -150,22 +150,25 @@ every one, or --page for a single page.`,
 
 			nav := chatRoomNav(strconv.FormatInt(roomID, 10), projectID)
 			followArgs := follow.args(app.Config.AccountID)
+			crumbs := []output.Breadcrumb{{
+				Action:      "upload",
+				Cmd:         fmt.Sprintf("basecamp chat upload <file> --room %d%s%s", roomID, chatInArg(projectID), followArgs),
+				Description: "Post a file",
+			}}
+			// chat messages needs a project even with --room, so it is offered
+			// only when one is known.
+			if projectID != "" {
+				crumbs = append(crumbs, output.Breadcrumb{
+					Action:      "messages",
+					Cmd:         nav.messages(0) + followArgs,
+					Description: "View messages",
+				})
+			}
 			respOpts := []output.ResponseOption{
 				output.WithSummary(fmt.Sprintf("%d files posted in chat", len(lines))),
 				output.WithEntity("chat_line"),
 				output.WithDisplayData(chatLinesDisplayData(lines)),
-				output.WithBreadcrumbs(
-					output.Breadcrumb{
-						Action:      "upload",
-						Cmd:         fmt.Sprintf("basecamp chat upload <file> --room %d%s%s", roomID, chatInArg(projectID), followArgs),
-						Description: "Post a file",
-					},
-					output.Breadcrumb{
-						Action:      "messages",
-						Cmd:         nav.messages(0) + followArgs,
-						Description: "View messages",
-					},
-				),
+				output.WithBreadcrumbs(crumbs...),
 			}
 			if notice := output.TruncationNoticeWithTotal(len(lines), result.Meta.TotalCount); notice != "" {
 				respOpts = append(respOpts, output.WithNotice(notice))

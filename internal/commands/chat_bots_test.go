@@ -109,7 +109,7 @@ func TestChatUploadsListsTheRoomsFiles(t *testing.T) {
 }
 
 // The uploads endpoint names only the room, so --room needs no project: none
-// is asked for, and the breadcrumbs leave out --in.
+// is asked for, and the breadcrumbs offer only what runs without one.
 func TestChatUploadsWithARoomNeedsNoProject(t *testing.T) {
 	transport := &chatBotTransport{respond: chatBotOK}
 	app, buf := newTestAppWithTransport(t, transport)
@@ -123,10 +123,8 @@ func TestChatUploadsWithARoomNeedsNoProject(t *testing.T) {
 	var envelope map[string]any
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), buf.String())
 	cmds := envelopeBreadcrumbCmds(envelope)
-	assert.Contains(t, cmds, "basecamp chat upload <file> --room 789")
-	for _, cmd := range cmds {
-		assert.NotContains(t, cmd, "--in")
-	}
+	assert.Equal(t, []string{"basecamp chat upload <file> --room 789"}, cmds,
+		"chat messages needs a project, so it isn't offered without one")
 }
 
 func TestChatUploadsPageAsksForThatPage(t *testing.T) {
