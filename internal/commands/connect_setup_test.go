@@ -166,9 +166,9 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 			}
 			writeJSON(w, profile)
 		case setupOperatorToken:
-			writeJSON(w, map[string]any{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User"})
+			writeJSON(w, map[string]any{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User", "client": false})
 		case setupBotToken:
-			writeJSON(w, map[string]any{"id": setupBotPerson, "name": "Bot", "personable_type": "User"})
+			writeJSON(w, map[string]any{"id": setupBotPerson, "name": "Bot", "personable_type": "User", "client": false})
 		default:
 			w.WriteHeader(http.StatusUnauthorized)
 		}
@@ -178,14 +178,14 @@ func startConnectSetupServer(t *testing.T) *connectSetupServer {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
-		writeJSON(w, map[string]any{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User"})
+		writeJSON(w, map[string]any{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User", "client": false})
 	})
 	mux.HandleFunc(fmt.Sprintf("/999/people/%d", setupOperatorPerson+1), func(w http.ResponseWriter, r *http.Request) {
 		if bearer(r) != setupOperatorToken {
 			w.WriteHeader(http.StatusForbidden) // as bc3 refuses an Agent today
 			return
 		}
-		writeJSON(w, map[string]any{"id": setupOperatorPerson + 1, "name": "Colleague", "personable_type": "User"})
+		writeJSON(w, map[string]any{"id": setupOperatorPerson + 1, "name": "Colleague", "personable_type": "User", "client": false})
 	})
 	mux.HandleFunc(fmt.Sprintf("/999/people/%d", setupAgentPerson), func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]any{"id": setupAgentPerson, "name": "Marie Chef", "personable_type": "Agent"})
@@ -1293,7 +1293,7 @@ func TestConnectSetupRefusesToRebindToAnotherIdentity(t *testing.T) {
 	var apiErr *output.Error
 	require.ErrorAs(t, err, &apiErr)
 	assert.Equal(t, output.CodeAuth, apiErr.Code)
-	assert.Contains(t, apiErr.Message, "remove")
+	assert.Contains(t, apiErr.Message, "--reset")
 	after, err := os.ReadFile(connectSetupPath(t, "bot"))
 	require.NoError(t, err)
 	assert.Equal(t, before, after)
@@ -1625,8 +1625,8 @@ func TestConnectSetupLetsAPersonIntoOnePing(t *testing.T) {
 	s.bodies = map[string]any{fmt.Sprintf("/999/circles/%d", ping): map[string]any{
 		"id": ping, "title": "Launch",
 		"people": []map[string]any{
-			{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User"},
-			{"id": guest, "name": "Jorge", "personable_type": "User"},
+			{"id": setupOperatorPerson, "name": "Operator", "personable_type": "User", "client": false},
+			{"id": guest, "name": "Jorge", "personable_type": "User", "client": false},
 			{"id": setupClientPerson, "name": "Client", "personable_type": "User", "client": true},
 			{"id": setupPeerAgent, "name": "Peer (agent)", "personable_type": "Agent"},
 		},
@@ -1679,4 +1679,72 @@ func TestConnectSetupLetsAPersonIntoOnePing(t *testing.T) {
 	f, err = run("--disallow-in-ping", fmt.Sprintf("%d:%d", ping, guest))
 	require.NoError(t, err)
 	assert.Nil(t, f.Pings)
+}
+
+func TestConnectSetupCampfireOptIn(t *testing.T) {
+	s := startConnectSetupServer(t)
+	s.bodies = map[string]any{"/999/chats/8000": map[string]any{"id": 8000, "bucket": map[string]any{"id": setupProject}}}
+	app := connectSetupApp(t, s, "agent")
+	fire := fmt.Sprintf("%d:8000", setupProject)
+	out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), "--serve", fmt.Sprint(setupProject), "--listen-campfire", fire)
+	require.NoError(t, err, out)
+	f, err := setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Equal(t, []int64{8000}, f.Projects[setupProject].ListenCampfires)
+	assert.Contains(t, connectShowDisplay("", f, false)[fmt.Sprintf("project_%d", setupProject)], "listens to Campfire 8000 without mentions")
+	out, err = runConnectSetupCmd(t, app, "--serve", fmt.Sprint(setupProject))
+	require.NoError(t, err, out)
+	f, err = setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Equal(t, []int64{8000}, f.Projects[setupProject].ListenCampfires)
+	s.mu.Lock()
+	delete(s.bodies, "/999/chats/8000")
+	s.mu.Unlock()
+	out, err = runConnectSetupCmd(t, app, "--no-listen-campfire", fire)
+	require.NoError(t, err, out)
+	f, err = setup.Load(connectSetupPath(t, "agent"))
+	require.NoError(t, err)
+	assert.Empty(t, f.Projects[setupProject].ListenCampfires)
+}
+
+func TestConnectSetupCampfireFlagsRefuseBadInput(t *testing.T) {
+	for _, raw := range []string{"", "123", "0:8000", "123:0", "123:-1", "123:8000:9", "abc:8000"} {
+		_, err := (&connectSetupFlags{listenCampfires: []string{raw}}).changes()
+		require.Error(t, err, raw)
+	}
+	_, err := (&connectSetupFlags{listenCampfires: []string{"123:8000"}, unlistenCampfires: []string{"123:8000"}}).changes()
+	require.ErrorContains(t, err, "both")
+}
+
+func TestConnectSetupRefusesAnUnverifiedCampfire(t *testing.T) {
+	for name, body := range map[string]any{
+		"missing":         nil,
+		"another project": map[string]any{"id": 8000, "bucket": map[string]any{"id": setupProject2}},
+		"no project":      map[string]any{"id": 8000},
+		"another id":      map[string]any{"id": 9000, "bucket": map[string]any{"id": setupProject}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := startConnectSetupServer(t)
+			if body != nil {
+				s.bodies = map[string]any{"/999/chats/8000": body}
+			}
+			app := connectSetupApp(t, s, "agent")
+			out, err := runConnectSetupCmd(t, app, "--operator", fmt.Sprint(setupOperatorPerson), "--serve", fmt.Sprint(setupProject))
+			require.NoError(t, err, out)
+			path := connectSetupPath(t, "agent")
+			before, err := os.ReadFile(path)
+			require.NoError(t, err)
+			out, err = runConnectSetupCmd(t, app, "--listen-campfire", fmt.Sprintf("%d:8000", setupProject))
+			require.Error(t, err, out)
+			assert.Contains(t, err.Error(), "Campfire 8000")
+			if body != nil {
+				assert.Contains(t, err.Error(), "was not returned in project")
+			} else {
+				assert.Contains(t, err.Error(), "HTTP 404")
+			}
+			after, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, before, after)
+		})
+	}
 }

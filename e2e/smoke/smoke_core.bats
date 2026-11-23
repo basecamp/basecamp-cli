@@ -38,6 +38,13 @@ setup_file() {
   assert_json_value '.ok' 'true'
 }
 
+@test "instructions reports whether any are linked" {
+  run_smoke basecamp instructions --json
+  assert_success
+  assert_json_value '.ok' 'true'
+  assert_json_value '.data.configured | type' 'boolean'
+}
+
 @test "config project shows project config" {
   ensure_project || return 0
   run_smoke basecamp config project -p "$QA_PROJECT" --json

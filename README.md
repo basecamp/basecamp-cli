@@ -271,6 +271,18 @@ basecamp connect setup -P my-agent --serve 12345        # who may give it work, 
 basecamp connect -P my-agent                            # the watcher
 ```
 
+Campfires normally require an @mention. For a small Campfire where every
+trusted message should reach the agent, opt it in and restart the connector:
+
+```bash
+basecamp chat list --project 12345 -P my-agent --json
+basecamp connect setup -P my-agent --listen-campfire 12345:67890
+```
+
+Use the Campfire id from the listing. Existing trust rules still apply, and
+other agents still need mentions. To restore mentions, run setup with
+`--no-listen-campfire 12345:67890` and restart.
+
 An approval may add a connection or replace an existing one: read the approval
 page before proceeding. Personal and team agents can have several connections
 where Basecamp enables adding them for that kind of agent. Otherwise a new
@@ -382,6 +394,24 @@ serving piloted clients but not yet advertising itself (discovery still 404s).
 It is a temporary escape hatch for that dark pilot, not a configuration
 surface, and will be removed once the server advertises its metadata.
 
+OAuth requests refuse private network addresses, so a discovery document can
+never steer the CLI to an internal host. A beta preview's API
+(`<name>-api.3.bc4-beta.com`) is served from a private address on the VPN; to
+sign in to one, opt in for that base URL:
+
+```bash
+BASECAMP_OAUTH_ALLOW_PRIVATE=1 BASECAMP_BASE_URL=https://<name>-api.3.bc4-beta.com basecamp auth login
+```
+
+Only `1` enables it. It admits RFC 1918 addresses (10/8, 172.16/12,
+192.168/16) over HTTPS, for a non-production base URL only, and only for the
+base URL's host and hosts under its parent domain (`*.3.bc4-beta.com` above;
+never a public suffix such as `co.uk`), so a discovery document or redirect
+can't send the CLI elsewhere on the private network. Loopback, link-local, cloud metadata, IPv6 private and other
+special-use addresses stay refused, and it is ignored for Basecamp's own
+hosts. Keep it set for that profile's later commands, which refresh the token
+over the same route.
+
 ## AI Agent Integration
 
 `basecamp` works with any AI agent that can run shell commands.
@@ -396,7 +426,7 @@ CLI needs upgrading.
 
 **Claude Code:** `basecamp setup claude` — installs the plugin with skills, hooks, and agent workflow support.
 
-**Codex:** `basecamp setup codex` — registers the 37signals marketplace and installs the native plugin with Basecamp skills, diagnostics, and opt-in commit-reference hooks. In Codex, review and trust the plugin hooks with `/hooks`, then start a new thread to load the skills and hooks. The plugin does not inject Basecamp context at session start; Codex selects the skill when a request is relevant or explicitly references Basecamp.
+**Codex:** `basecamp setup codex` — registers the 37signals marketplace and installs the native plugin with Basecamp skills, diagnostics, and opt-in commit-reference hooks. In Codex, review and trust the plugin hooks with `/hooks`, then start a new thread to load the skills and hooks. The plugin does not inject Basecamp context at session start (beyond a pointer to `basecamp instructions` when instructions are set, plus their gist when it can be read without the network); Codex selects the skill when a request is relevant or explicitly references Basecamp.
 
 Manual Codex installation uses the same marketplace:
 
@@ -501,6 +531,31 @@ basecamp mcp --domains projects,todos    # narrow the served surface (fails clos
 
 A leftover `~/.config/basecamp/client.json` (from the removed development
 client-registration flow) is obsolete and safe to delete.
+
+### Trusting repository configuration
+
+Repository and local configs may set ordinary defaults such as `project_id`
+and `todolist_id` without approval. Settings that control connections, including
+`base_url`, `profiles`, and `default_profile`, require explicit trust:
+
+```bash
+basecamp config trust /path/to/.basecamp/config.json
+```
+
+Review the file and its server addresses before trusting it. Trust applies to
+its current security-sensitive settings, not just its path. If those settings
+change, the CLI ignores them and warns until you review and trust the file
+again. Formatting changes and changes to ordinary top-level defaults retain
+trust.
+
+**Upgrading from path-only trust:** previously trusted configs must be reviewed
+and trusted again before their security-sensitive settings apply. Global
+configuration and saved credentials are unchanged. Until reapproval, trust-gated
+connection, cache, and LLM settings are ignored, including `base_url`, `profiles`,
+`default_profile`, `cache_dir`, `cache_enabled`, and LLM provider, endpoint, model,
+and budget settings. Ordinary top-level defaults such as `account_id`,
+`project_id`, and `todolist_id` still apply. Check the effective server address,
+account, and project with `basecamp config show` before making changes.
 
 ## Troubleshooting
 

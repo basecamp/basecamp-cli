@@ -19,6 +19,17 @@ type releaseKey struct{}
 // request hooks, which only see method and URL.
 type operationKey struct{}
 
+// quotaKey marks a request whose 429 is that endpoint's own quota.
+type quotaKey struct{}
+
+// WithEndpointQuota marks ctx's requests as answered 429 by a quota on that
+// one endpoint (feedback: a few reports a day per person), not by throttling.
+// Their 429 sets no block, Retry-After or not: honoring a quota's hours-long
+// Retry-After would stop every later command, against every endpoint.
+func WithEndpointQuota(ctx context.Context) context.Context {
+	return context.WithValue(ctx, quotaKey{}, true)
+}
+
 // GatingHooks implements basecamp.GatingHooks to provide resilience patterns
 // for SDK operations. It gates requests through circuit breaker, rate limiter,
 // and bulkhead before they execute.
@@ -169,6 +180,9 @@ func (h *GatingHooks) OnRequestStart(ctx context.Context, info basecamp.RequestI
 // It honors Retry-After headers from 429/503 responses to back off the rate limiter.
 func (h *GatingHooks) OnRequestEnd(ctx context.Context, info basecamp.RequestInfo, result basecamp.RequestResult) {
 	if h.rateLimiter == nil {
+		return
+	}
+	if quota, _ := ctx.Value(quotaKey{}).(bool); quota && result.StatusCode == 429 {
 		return
 	}
 

@@ -341,3 +341,38 @@ func TestTheLineSaysWhetherTheOwnerAsked(t *testing.T) {
 		})
 	}
 }
+
+// A run that does the work itself is given each request after its line is
+// written and before its record is closed. A delivery that fails leaves the
+// record open, so the request is delivered again rather than lost; one that
+// succeeds closes it, and it is not delivered twice.
+func TestARequestIsDeliveredBeforeItsRecordIsClosed(t *testing.T) {
+	ledger := newTestLedger(t)
+	admitOn(t, ledger, 1, "recording:1")
+	var out bytes.Buffer
+	opts := handoffOptions(ledger, &out)
+	var delivered []int64
+	fail := true
+	opts.Deliver = func(ctx context.Context, line HandoffLine) error {
+		record, ok, err := ledger.Get(ctx, line.EventID)
+		require.NoError(t, err)
+		require.True(t, ok)
+		assert.Equal(t, StateAdmitted, record.State, "the record is still open while it is delivered")
+		if fail {
+			return assert.AnError
+		}
+		delivered = append(delivered, line.EventID)
+		return nil
+	}
+
+	require.ErrorIs(t, handOffReady(context.Background(), opts), assert.AnError)
+	assert.Equal(t, StateAdmitted, getRecord(t, ledger, 1).State)
+
+	fail = false
+	require.NoError(t, handOffReady(context.Background(), opts))
+	require.NoError(t, handOffReady(context.Background(), opts))
+	assert.Equal(t, []int64{1}, delivered)
+	r := getRecord(t, ledger, 1)
+	assert.Equal(t, StateDiscarded, r.State)
+	assert.Equal(t, ReasonHandedOff, r.Reason)
+}

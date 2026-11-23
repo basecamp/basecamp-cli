@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -26,6 +28,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/admission"
 	"github.com/basecamp/basecamp-cli/internal/connector/ndjson"
+	"github.com/basecamp/basecamp-cli/internal/connector/runner"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
 	"github.com/basecamp/basecamp-cli/internal/richtext"
@@ -43,6 +46,8 @@ type connectRunFlags struct {
 	// --pings=false is a choice, not the flag's absence.
 	pingsSet   bool
 	noPingsSet bool
+	// runner turns on the runner: the connector does the work itself.
+	runner connectRunnerFlags
 }
 
 func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
@@ -55,6 +60,7 @@ func addConnectRunFlags(cmd *cobra.Command, f *connectRunFlags) {
 	fl.BoolVar(&f.shadow, "shadow", false, "Admit and log in an isolated state directory; dispatch and post nothing")
 	fl.Int64Var(&f.since, "since", 0, "Enter the feed just after this event id, whatever the ledger holds")
 	fl.BoolVar(&f.hold, "hold", false, "Set this profile's durable hold: intake and admission run, nothing is dispatched or posted until release, and earlier records wait for review")
+	addConnectRunnerFlags(cmd, &f.runner)
 }
 
 func connectStateHome() (string, error) {
@@ -214,7 +220,19 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	case errors.Is(err, os.ErrNotExist):
 		return output.ErrUsageHint(fmt.Sprintf("Profile %q is not set up as a connector", name), "Run: basecamp connect setup -P "+shellQuote(name))
 	case err != nil:
-		return output.ErrUsage("connect.json cannot be used: " + err.Error())
+		return output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(err), connectResetHint(name))
+	}
+	// Which coding agents do the work, when the run does it itself: settled
+	// before anything is read from Basecamp, so a mistyped agent or one that
+	// is not installed ends the start rather than the first request.
+	var start connectRunnerStart
+	if f.runner.requested() {
+		if f.shadow {
+			return output.ErrUsage("A shadow run hands nothing off, so it has no orchestrator: drop --shadow, or the flags that have the connector do the work (--orchestrator and --worker, their -model and -effort, --permissions, --max-workers, --run)")
+		}
+		if start, err = connectRunnerSettle(f.runner, connectRunnerConfigPath(path)); err != nil {
+			return err
+		}
 	}
 
 	account, err := connectAccount(app, name)
@@ -224,20 +242,9 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if !accountIDsEqual(account, file.AccountID) {
 		return output.ErrUsage(fmt.Sprintf("connect.json was set up in account %s, and profile %q is bound to account %s", file.AccountID, name, account))
 	}
-	kind, err := connectCredentialKind(ctx, app)
-	if err != nil {
-		return err
-	}
-	if kind == "" {
-		return output.ErrAuth(fmt.Sprintf("Profile %q holds no credential", name))
-	}
-	creds, err := app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
-	if err != nil {
-		return output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
-	}
 	// A look at the lock first, under the agent connect.json names: a
 	// second connector for an agent already running says so now, not after
-	// waiting out a rate limit for a token it would never use. Only a look:
+	// waiting out a silent keyring or a rate limit for a credential it would never use. Only a look:
 	// until the credential is proven to be that agent, holding its lock
 	// through the wait could keep the agent's real connector from starting.
 	// The lock is taken for the run once the identity is verified.
@@ -248,8 +255,40 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 	if err := connectLockFree(stateDir, file.AccountID, file.Agent.PersonID); err != nil {
 		return err
 	}
-
 	logger := slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), nil))
+	// The first credential read waits out a keyring that does not answer,
+	// as the token wait below does: a slow keyring says nothing about the
+	// credential, and the connector starts once the keyring answers.
+	var kind string
+	var creds *auth.Credentials
+	readSignals, stopReadSignals := connector.NotifyShutdown()
+	err = awaitConnectToken(ctx, keyringBoundedStartRead(time.Now, func(ctx context.Context) error {
+		var err error
+		if kind, err = connectCredentialKind(ctx, app); err != nil || kind == "" {
+			return err
+		}
+		creds, err = app.Auth.GetStore().LoadContext(ctx, app.Auth.CredentialKey())
+		if err != nil && !auth.KeyringUnavailable(err) {
+			return output.ErrAuth("The stored credential could not be read: " + setup.ErrorText(err))
+		}
+		return err
+	}), connectStartWait{Log: func(line string) { logger.Warn(line) }, Signals: readSignals, Waiting: "the agent's credential from the system keyring"})
+	stopReadSignals()
+	select {
+	case sig, ok := <-readSignals:
+		// Delivered after the wait had finished, before the stop took.
+		if ok {
+			return connectStoppedBySignal(sig)
+		}
+	default:
+	}
+	if err != nil {
+		return err
+	}
+	if kind == "" {
+		return output.ErrAuth(fmt.Sprintf("Profile %q holds no credential", name))
+	}
+
 	tokens := &managerTokens{mgr: app.Auth}
 	// Every read below needs a token first. One the running feed would
 	// wait for is waited for here too, rather than ending the start.
@@ -296,6 +335,13 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return err
 	}
 	defer func() { _ = lock.Release() }()
+	if f.runner.requested() {
+		// Under the lock, the identity verified: what this start named is
+		// kept for the profile only now that the start is going ahead.
+		if err := start.keep(connectRunnerConfigPath(path)); err != nil {
+			return err
+		}
+	}
 	pings, savePings, err := connectRunPings(lock, name, file, f.shadow, pingsFlag, len(buckets) > 0, creds)
 	if err != nil {
 		return err
@@ -344,6 +390,20 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 			"since", hold.HeldAt, "by", richtext.SanitizeSingleLine(hold.HeldBy))
 	}
 	lines := ndjson.NewWriter(cmd.OutOrStdout())
+	var connectorLog *os.File
+	if f.runner.requested() {
+		// The orchestrator searches the connector's output the way the skill
+		// searches the output file of a connector it started, so the lines
+		// are kept as well as printed.
+		if _, err := ensurePrivateChain(stateDir, filepath.Base(connectRunnerDir(stateDir))); err != nil {
+			return output.ErrUsage("The connector's state directory cannot be used: " + err.Error())
+		}
+		if connectorLog, err = openConnectorLog(connectRunnerDir(stateDir)); err != nil {
+			return err
+		}
+		defer func() { _ = connectorLog.Close() }()
+		lines = ndjson.NewWriter(io.MultiWriter(cmd.OutOrStdout(), connectorLog))
+	}
 
 	queue, err := connector.NewQueue(connector.DefaultBacklogWarn, connector.DefaultBacklogPause)
 	if err != nil {
@@ -408,6 +468,27 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		os.Exit(connector.ExitCodeForSignal(sig))
 	}()
 
+	// The runner, when the run does the work itself. Its stop is the one the
+	// orchestrator or the person asks for with `basecamp connect stop`.
+	var (
+		work    *runner.Runner
+		restart atomic.Bool
+		deliver func(context.Context, connector.HandoffLine) error
+	)
+	if f.runner.requested() {
+		startLine := fmt.Sprintf("It runs as profile %s; pings=%t (%s).", name, heard.Hears, heard.Describe())
+		work, err = newConnectRunner(name, stateDir, path, start, connectorLog, startLine, reads.Summaries, connectOnHoldAbove(accountClient, logger), ledger.Held,
+			func(again bool) {
+				restart.Store(again)
+				logger.Info("connector: stopping, asked through its runner", "restart", again)
+				cancel()
+			}, logger)
+		if err != nil {
+			return output.ErrUsage("The runner cannot start: " + err.Error())
+		}
+		deliver = work.Deliver
+	}
+
 	stopState, stopDetail := connector.ConnectionStopped, ""
 	defer func() {
 		// Whatever ended the run, status says it is not running any more.
@@ -462,8 +543,12 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 				Ledger: ledger, Served: served.Current, Buckets: buckets, Pings: policy.HearsPings, AgentID: agentID,
 				Lines: lines, Logger: logger, Started: started,
 				AckContent: file.Ack().Content, Booster: connector.SDKBooster{Client: accountClient},
+				Deliver: deliver,
 			})
 		})
+	}
+	if work != nil {
+		runPart("runner", work.Run)
 	}
 	wg.Wait()
 
@@ -483,6 +568,8 @@ func runConnect(cmd *cobra.Command, f *connectRunFlags) error {
 		return err
 	case ctx.Err() != nil:
 		return ctx.Err()
+	case restart.Load():
+		return errConnectRestart
 	}
 	return nil
 }
@@ -801,4 +888,40 @@ func connectActorTypes(policy admission.Policy) []string {
 		return []string{"agent", "person"}
 	}
 	return []string{"person"}
+}
+
+// connectStartRead is a start-up credential read in the shape the start's
+// token wait takes, so a keyring that does not answer is waited out on the
+// same rule (tokenRetry) rather than ending the start.
+type connectStartRead func(ctx context.Context) error
+
+func (r connectStartRead) AccessToken(ctx context.Context) (string, error) { return "", r(ctx) }
+
+// keyringBoundedStartRead is read as a connectStartRead that waits out a
+// keyring that does not answer for connectKeyringOutageLimit, as the
+// running feed does, and then ends the start with the reason rather than
+// waiting unseen for a keyring that may never answer again.
+func keyringBoundedStartRead(now func() time.Time, read func(context.Context) error) connectStartRead {
+	var downSince time.Time
+	return func(ctx context.Context) error {
+		err := read(ctx)
+		if ctx.Err() != nil || !auth.KeyringUnavailable(err) {
+			downSince = time.Time{}
+			return err
+		}
+		if downSince.IsZero() {
+			downSince = now()
+		}
+		if down := now().Sub(downSince); down >= connectKeyringOutageLimit {
+			return &output.Error{
+				Code:    output.CodeKeyringUnavailable,
+				Message: fmt.Sprintf("The system keyring has not given up the agent's credential for %s, so the connector cannot start: %s", down.Round(time.Second), output.AsError(err).Message),
+				Hint: "Nothing was changed, and the credential is still in the keyring: start the connector again. " +
+					"If this keeps happening, check that the desktop keyring (the Secret Service: gnome-keyring or KeePassXC) is running and unlocked.",
+				// Neither retryable nor wrapping the outage: the start's
+				// wait must end on it (tokenRetry), not wait again.
+			}
+		}
+		return err
+	}
 }

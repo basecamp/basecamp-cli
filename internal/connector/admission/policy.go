@@ -139,6 +139,9 @@ type Project struct {
 	// completion in it is admitted as trigger completed, without the agent
 	// being assigned or subscribed.
 	WatchCompletions bool `json:"watch_completions,omitempty"`
+	// ListenCampfires names Campfires whose trusted human messages are requests
+	// without a mention. Other Campfires still require one.
+	ListenCampfires []int64 `json:"listen_campfires,omitempty"`
 
 	// LegacyPath is the directory a connector that routed projects to
 	// directories ran this project's work in. Nothing reads it: a task runs
@@ -416,9 +419,14 @@ func (p Policy) Validate() error {
 	if err := p.validatePings(); err != nil {
 		return err
 	}
-	for bucket := range p.Projects {
+	for bucket, project := range p.Projects {
 		if bucket <= 0 {
 			return fmt.Errorf("admission: served project %d: not a bucket id", bucket)
+		}
+		for _, id := range project.ListenCampfires {
+			if id <= 0 {
+				return fmt.Errorf("admission: served project %d: %d is not a Campfire id", bucket, id)
+			}
 		}
 	}
 	return nil

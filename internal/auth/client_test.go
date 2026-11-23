@@ -29,7 +29,7 @@ import (
 // need a proxy set their own values on top.
 func clearProxyEnv(t *testing.T) {
 	t.Helper()
-	for _, v := range []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy", "REQUEST_METHOD", oauthUseProxyEnv} {
+	for _, v := range []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy", "REQUEST_METHOD", oauthUseProxyEnv, oauthAllowPrivateEnv} {
 		t.Setenv(v, "")
 	}
 }
@@ -973,4 +973,346 @@ func TestLanes_FirstPartyTransportVerifiesCertificates(t *testing.T) {
 	check(t, lp)
 
 	assert.Zero(t, reached.Load(), "no request may reach a server whose certificate failed verification")
+}
+
+// TestPrivateNetworkAdmits pins what BASECAMP_OAUTH_ALLOW_PRIVATE=1 admits:
+// RFC 1918 space, and nothing else the issuer policy refuses: no IPv6 unique
+// local space, which holds several clouds' metadata services.
+func TestPrivateNetworkAdmits(t *testing.T) {
+	for _, a := range []string{"10.20.5.229", "172.16.0.1", "192.168.1.1", "::ffff:10.20.5.229"} {
+		assert.True(t, privateNetworkAdmits(netip.MustParseAddr(a)), a)
+	}
+	for _, a := range []string{
+		"127.0.0.1", "169.254.169.254", "100.64.0.1", "fe80::1", "::1",
+		"fd00:ec2::254",      // EC2 IPv6 instance metadata
+		"fd00:ec2::23",       // EC2 IPv6 DNS
+		"fd20:ce::254",       // GCP IPv6 metadata
+		"fd00:c1::a9fe:a9fe", // OCI IPv6 metadata
+		"fd00::1",
+		"192.52.193.1",     // AMT: IANA special use, not private
+		"192.31.196.1",     // AS112
+		"2001:3::1",        // AMT v6
+		"64:ff9b::a14:5e5", // NAT64 of 10.20.5.229
+		"8.8.8.8",
+	} {
+		assert.False(t, privateNetworkAdmits(netip.MustParseAddr(a)), a)
+	}
+}
+
+// TestBC5Lane_PrivateNetworkOptIn: a beta preview's API host resolves to a
+// private address. The opt-in admits private space on the BC5 lane of a
+// non-production base URL, and nowhere else.
+func TestBC5Lane_PrivateNetworkOptIn(t *testing.T) {
+	const preview = "https://main-api.3.bc4-beta.com"
+
+	t.Run("off by default", func(t *testing.T) {
+		clearProxyEnv(t)
+		assert.False(t, laneManager(t, preview).allowPrivateFor(preview))
+	})
+
+	t.Run("on for a non-production base URL", func(t *testing.T) {
+		clearProxyEnv(t)
+		t.Setenv(oauthAllowPrivateEnv, "1")
+		assert.True(t, laneManager(t, preview).allowPrivateFor(preview))
+	})
+
+	for _, prod := range []string{"https://3.basecampapi.com", "https://API.basecamp.com.", "https://app.basecamp.com"} {
+		t.Run("ignored for "+prod, func(t *testing.T) {
+			clearProxyEnv(t)
+			t.Setenv(oauthAllowPrivateEnv, "1")
+			var warnings []string
+			m := laneManager(t, prod)
+			m.Warnf = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
+			assert.False(t, m.allowPrivateFor(prod))
+			require.NotEmpty(t, warnings)
+			assert.Contains(t, warnings[0], "production base URL")
+		})
+	}
+
+	t.Run("malformed value is off, with a warning", func(t *testing.T) {
+		clearProxyEnv(t)
+		t.Setenv(oauthAllowPrivateEnv, "yes")
+		var warnings []string
+		m := laneManager(t, preview)
+		m.Warnf = func(format string, args ...any) { warnings = append(warnings, fmt.Sprintf(format, args...)) }
+		assert.False(t, m.allowPrivateFor(preview))
+		require.NotEmpty(t, warnings)
+		assert.Contains(t, warnings[0], "is not understood")
+	})
+
+	// At the client, every case here is refused before a connection is
+	// made, so none depends on the network around the test.
+	t.Run("lanes refuse what the opt-in does not admit", func(t *testing.T) {
+		clearProxyEnv(t)
+		get := func(client *http.Client, target string) error {
+			resp, err := doGet(t, client, target)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			return err
+		}
+
+		m := laneManager(t, preview)
+		bc5, err := m.bc5Client()
+		require.NoError(t, err)
+		assert.ErrorIs(t, get(bc5, "http://10.20.5.229/"), surfguard.ErrBlocked, "off: private refused")
+
+		t.Setenv(oauthAllowPrivateEnv, "1")
+		m = laneManager(t, preview)
+		bc5, err = m.bc5Client()
+		require.NoError(t, err)
+		for _, target := range []string{
+			"http://169.254.169.254/latest/meta-data/",
+			"http://[fd00:ec2::254]/latest/meta-data/",
+			"http://192.52.193.1/",
+			"http://[64:ff9b::a14:5e5]/",
+			"http://127.0.0.1/",
+		} {
+			assert.ErrorIs(t, get(bc5, target), surfguard.ErrBlocked, "on: %s stays refused", target)
+		}
+
+		lp, err := m.launchpadClient()
+		require.NoError(t, err)
+		assert.ErrorIs(t, get(lp, "http://10.20.5.229/"), surfguard.ErrBlocked, "the Launchpad lane never takes the opt-in")
+	})
+}
+
+// TestPrivateNetworkControl: the opted-in lane's dial check lets a private
+// address through and still refuses the rest, including on a lane whose
+// local anchor admits loopback.
+func TestPrivateNetworkControl(t *testing.T) {
+	clearProxyEnv(t)
+	t.Setenv(oauthAllowPrivateEnv, "1")
+	m := laneManager(t, "https://main-api.3.bc4-beta.com")
+	bc5, err := m.bc5Client()
+	require.NoError(t, err)
+	_, ok := bc5.Transport.(*oauthTransport).guarded.(privateNetworkRoundTripper)
+	require.True(t, ok, "an opted-in BC5 lane rides the private-network transport")
+
+	policy, err := oauthEndpointPolicy("https://main-api.3.bc4-beta.com", "base URL")
+	require.NoError(t, err)
+	check := privateNetworkControl(policy)
+	dial := func(network, address string) error { return check(context.Background(), network, address, nil) }
+
+	assert.NoError(t, dial("tcp4", "10.20.5.229:443"))
+	assert.ErrorIs(t, dial("tcp6", "[fd00::1]:443"), surfguard.ErrBlocked, "no IPv6 unique local space")
+	assert.ErrorIs(t, dial("tcp6", "[fd20:ce::254]:80"), surfguard.ErrBlocked, "GCP metadata")
+	assert.NoError(t, dial("tcp4", "8.8.8.8:443"), "public addresses keep the lane's verdict")
+	for _, a := range []string{"169.254.169.254:80", "192.52.193.1:443", "127.0.0.1:443"} {
+		assert.ErrorIs(t, dial("tcp4", a), surfguard.ErrBlocked, a)
+	}
+	assert.ErrorIs(t, dial("tcp6", "[fd00:ec2::254]:80"), surfguard.ErrBlocked)
+	assert.ErrorIs(t, dial("tcp6", "[64:ff9b::a14:5e5]:443"), surfguard.ErrBlocked)
+	assert.ErrorIs(t, dial("udp", "10.20.5.229:443"), surfguard.ErrBlocked, "the network gate still applies")
+}
+
+// TestPrivateBaseURLHint: a failed discovery against a base URL that resolves
+// to a private address names the opt-in; one that is public, loopback,
+// metadata, special use, or already opted in does not.
+func TestPrivateBaseURLHint(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		origin string
+		optIn  string
+		want   bool
+	}{
+		{"https://10.20.5.229", "", true},
+		{"https://[fd00::1]", "", false},
+		{"https://10.20.5.229", "1", false},
+		{"https://127.0.0.2", "", false},
+		{"https://169.254.169.254", "", false},
+		{"https://[fd00:ec2::254]", "", false},
+		{"https://192.52.193.1", "", false},
+		{"https://8.8.8.8", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.origin+" opt-in="+tc.optIn, func(t *testing.T) {
+			clearProxyEnv(t)
+			t.Setenv(oauthAllowPrivateEnv, tc.optIn)
+			m := laneManager(t, tc.origin)
+			hint := m.privateBaseURLHint(ctx, tc.origin)
+			if tc.want {
+				assert.Contains(t, hint, oauthAllowPrivateEnv+"=1")
+			} else {
+				assert.Empty(t, hint)
+			}
+		})
+	}
+}
+
+// TestPrivateNetworkTransport_RefusesLegacyNumericHosts: the opted-in lane's
+// dialer does not canonicalize numeric spellings as surfguard's does, so
+// they are refused before it runs.
+func TestPrivateNetworkTransport_RefusesLegacyNumericHosts(t *testing.T) {
+	for _, h := range []string{"0x0a1405e5", "012.024.5.229", "167036389", "10.0x14.5.229", "0X0A1405E5", "0x"} {
+		assert.True(t, isLegacyNumericHost(h), h)
+	}
+	for _, h := range []string{"10.20.5.229", "fd00::1", "main-api.3.bc4-beta.com", "cafe", "cafe.beef", "example.com", "a..b", ""} {
+		assert.False(t, isLegacyNumericHost(h), h)
+	}
+
+	clearProxyEnv(t)
+	t.Setenv(oauthAllowPrivateEnv, "1")
+	m := laneManager(t, "https://main-api.3.bc4-beta.com")
+	bc5, err := m.bc5Client()
+	require.NoError(t, err)
+	resp, err := doGet(t, bc5, "http://0x0a1405e5/")
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	assert.ErrorIs(t, err, surfguard.ErrBlocked)
+}
+
+// TestPrivateNetworkRoundTripper_RefusesMalformedURLs: the opted-in lane
+// refuses a malformed URL before dialing, as surfguard's RoundTripper does.
+// Each URL is built by hand so net/url's own parsing cannot refuse it first.
+func TestPrivateNetworkRoundTripper_RefusesMalformedURLs(t *testing.T) {
+	policy, err := oauthEndpointPolicy("https://main-api.3.bc4-beta.com", "base URL")
+	require.NoError(t, err)
+	rt := privateNetworkTransport(policy, privateScope("https://main-api.3.bc4-beta.com")).(privateNetworkRoundTripper)
+
+	for _, u := range []*url.URL{
+		{Scheme: "ftp", Host: "main.3.bc4-beta.com"},
+		{Scheme: "http", Host: "10.20.5.229"},
+		{Scheme: "http", Host: "[example.com]"},
+		{Scheme: "http", Host: "\u24dbocalhost"}, // IDNA-normalizes to localhost
+		{Scheme: "http", Host: ""},
+	} {
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://placeholder/", nil)
+		require.NoError(t, err)
+		req.URL = u
+		_, err = rt.RoundTrip(req)
+		assert.ErrorIs(t, err, surfguard.ErrBlocked, "%q", u.Host)
+	}
+}
+
+// TestNoLookup_ShapeOnly: under noLookup, CheckURL never resolves a name: a
+// well-formed one comes back unresolvable rather than judged.
+func TestNoLookup_ShapeOnly(t *testing.T) {
+	err := surfguard.Policy{}.WithResolver(noLookup{}).CheckURL(context.Background(), "https://main-api.3.bc4-beta.com/")
+	assert.ErrorIs(t, err, surfguard.ErrUnresolvable)
+	assert.NotErrorIs(t, err, surfguard.ErrBlocked)
+}
+
+// TestPrivateScope: an opted-in lane reaches a private address only for the
+// base URL's host and hosts under its parent domain.
+func TestPrivateScope(t *testing.T) {
+	in := privateScope("https://main-api.3.bc4-beta.com")
+	for _, h := range []string{"main-api.3.bc4-beta.com", "main.3.bc4-beta.com", "MAIN.3.bc4-beta.com.", "pr-1-p01.3.bc4-beta.com"} {
+		assert.True(t, in(h), h)
+	}
+	for _, h := range []string{"bc4-beta.com", "evil3.bc4-beta.com", "intranet.37signals.internal", "10.20.5.229", "3.bc4-beta.com.evil.com"} {
+		assert.False(t, in(h), h)
+	}
+
+	short := privateScope("https://api.internal")
+	assert.True(t, short("api.internal"))
+	assert.False(t, short("db.internal"), "a single-label parent admits only the host itself")
+
+	for anchor, other := range map[string]string{
+		"https://customer.co.uk":    "probe.attacker.co.uk",
+		"https://someone.github.io": "attacker.github.io",
+	} {
+		in := privateScope(anchor)
+		assert.True(t, in(strings.TrimPrefix(anchor, "https://")), anchor)
+		assert.False(t, in(other), "a public-suffix parent (%s) admits only the host itself", anchor)
+	}
+
+	literal := privateScope("https://10.20.5.229")
+	assert.True(t, literal("10.20.5.229"))
+	assert.False(t, literal("10.20.5.230"))
+}
+
+// TestBC5Lane_PrivateOutOfScopeIsRefused: with the opt-in on, a private
+// address under a host outside the base URL's domain (where a discovery
+// document or redirect might point) is refused before any dial.
+func TestBC5Lane_PrivateOutOfScopeIsRefused(t *testing.T) {
+	clearProxyEnv(t)
+	t.Setenv(oauthAllowPrivateEnv, "1")
+	m := laneManager(t, "https://main-api.3.bc4-beta.com")
+	bc5, err := m.bc5Client()
+	require.NoError(t, err)
+	resp, err := doGet(t, bc5, "http://10.20.5.229/")
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	assert.ErrorIs(t, err, surfguard.ErrBlocked, "an address literal outside the base URL's domain keeps the strict policy")
+}
+
+// TestBC5Lane_PrivateNeedsHTTPS: with the opt-in on, an in-scope host reached
+// over plain HTTP keeps the strict policy: no certificate vouches for it.
+func TestBC5Lane_PrivateNeedsHTTPS(t *testing.T) {
+	clearProxyEnv(t)
+	t.Setenv(oauthAllowPrivateEnv, "1")
+	policy, err := oauthEndpointPolicy("https://main-api.3.bc4-beta.com", "base URL")
+	require.NoError(t, err)
+	// The scope admits the literal, so only the scheme decides.
+	rt := privateNetworkTransport(policy, func(string) bool { return true }).(privateNetworkRoundTripper)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://10.20.5.229:8080/action", nil)
+	require.NoError(t, err)
+	_, err = rt.RoundTrip(req)
+	assert.ErrorIs(t, err, surfguard.ErrBlocked)
+}
+
+// sentinelRoundTripper records that a request reached it and answers with a
+// fixed error, standing in for the strict transport.
+type sentinelRoundTripper struct{ hits *atomic.Int32 }
+
+var errSentinel = errors.New("strict transport")
+
+func (s sentinelRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	s.hits.Add(1)
+	return nil, errSentinel
+}
+
+// TestPrivateNetworkRoundTripper_Routing exercises the in-scope HTTPS path
+// itself, with the strict transport replaced by a sentinel so each case shows
+// which path it took. None makes a connection.
+func TestPrivateNetworkRoundTripper_Routing(t *testing.T) {
+	policy, err := oauthEndpointPolicy("https://main-api.3.bc4-beta.com", "base URL")
+	require.NoError(t, err)
+	newRT := func(inScope func(string) bool) (privateNetworkRoundTripper, *atomic.Int32) {
+		var hits atomic.Int32
+		rt := privateNetworkTransport(policy, inScope).(privateNetworkRoundTripper)
+		rt.strict = sentinelRoundTripper{&hits}
+		return rt, &hits
+	}
+	do := func(rt privateNetworkRoundTripper, ctx context.Context, u *url.URL) error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://placeholder/", nil)
+		require.NoError(t, err)
+		req.URL = u
+		_, err = rt.RoundTrip(req)
+		return err
+	}
+	all := func(string) bool { return true }
+
+	t.Run("malformed and numeric HTTPS hosts are refused on the private path", func(t *testing.T) {
+		rt, hits := newRT(all)
+		// A refusal comes before any dial; the deadline only makes a
+		// regression fail quickly instead of waiting on the network.
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		for _, host := range []string{"0x0a1405e5", "012.024.5.229", "[example.com]", "ⓛocalhost", ""} {
+			err := do(rt, ctx, &url.URL{Scheme: "https", Host: host})
+			assert.ErrorIs(t, err, surfguard.ErrBlocked, "%q", host)
+		}
+		assert.Zero(t, hits.Load(), "every case was judged on the private path")
+	})
+
+	t.Run("a well-formed in-scope HTTPS host goes to the private transport", func(t *testing.T) {
+		rt, hits := newRT(all)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // the transport gives up before dialing
+		err := do(rt, ctx, &url.URL{Scheme: "https", Host: "10.20.5.229", Path: "/"})
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.NotErrorIs(t, err, surfguard.ErrBlocked)
+		assert.Zero(t, hits.Load())
+	})
+
+	t.Run("out of scope or plain HTTP goes to the strict transport", func(t *testing.T) {
+		rt, hits := newRT(privateScope("https://main-api.3.bc4-beta.com"))
+		assert.ErrorIs(t, do(rt, context.Background(), &url.URL{Scheme: "https", Host: "intranet.example.com"}), errSentinel)
+		assert.ErrorIs(t, do(rt, context.Background(), &url.URL{Scheme: "http", Host: "main.3.bc4-beta.com"}), errSentinel)
+		assert.Equal(t, int32(2), hits.Load())
+	})
 }

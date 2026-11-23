@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 	"github.com/spf13/cobra"
@@ -24,7 +25,8 @@ A gauge shows the current state of a project via needles positioned on a
 0–100 scale, each colored green, yellow, or red.`,
 		Annotations: map[string]string{
 			"agent_notes": "Gauges track project progress with colored needles (0-100 scale).\n" +
-				"list is account-wide. needles/create/enable/disable are project-scoped (--in).\n" +
+				"list is account-wide unless --project/--in or --projects is given; configured project is ignored.\n" +
+				"needles/create/enable/disable are project-scoped (--in).\n" +
 				"Colors: green, yellow, red. Notify: everyone, working_on, custom.",
 		},
 	}
@@ -33,7 +35,7 @@ A gauge shows the current state of a project via needles positioned on a
 	cmd.PersistentFlags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 
 	cmd.AddCommand(
-		newGaugesListCmd(),
+		newGaugesListCmd(&project),
 		newGaugesNeedlesCmd(&project),
 		newGaugesNeedleCmd(),
 		newGaugesCreateCmd(&project),
@@ -46,19 +48,67 @@ A gauge shows the current state of a project via needles positioned on a
 	return cmd
 }
 
-func newGaugesListCmd() *cobra.Command {
-	return &cobra.Command{
+func newGaugesListCmd(project *string) *cobra.Command {
+	var projects []string
+
+	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List all gauges across the account",
-		Long:  "List all gauges across every project in the account.",
+		Short: "List gauges across the account or chosen projects",
+		Long: `List gauges across every project in the account, or filter by project.
+
+Use --project/--in for one project, or --projects for a comma-separated list
+of project IDs or names (repeatable). These forms cannot be combined.
+Without an explicit filter, the configured default project is ignored.
+Filtered gauges follow the supplied project order; unavailable gauges are omitted.
+
+  basecamp gauges list
+  basecamp gauges list --in MyProject
+  basecamp gauges list --projects "Marketing,Engineering"
+  basecamp gauges list --projects 30,10 --projects 20`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := appctx.FromContext(cmd.Context())
+
+			// Account-wide reports use only explicit scope, never ambient config.
+			single := *project
+			if single == "" {
+				single = app.Flags.Project
+			}
+			explicitSingle := single != "" || cmd.Flags().Changed("project") || cmd.Flags().Changed("in")
+			if cmd.Flags().Changed("projects") && explicitSingle {
+				return output.ErrUsage("--projects cannot be combined with --project/--in")
+			}
+			filters := projects
+			if explicitSingle {
+				filters = []string{single}
+			}
+			if (explicitSingle || cmd.Flags().Changed("projects")) && len(filters) == 0 {
+				return output.ErrUsage("Project filter needs a value")
+			}
+			for _, filter := range filters {
+				if strings.TrimSpace(filter) == "" {
+					return output.ErrUsage("Project filter needs a value")
+				}
+			}
 
 			if err := ensureAccount(cmd, app); err != nil {
 				return err
 			}
 
-			result, err := app.Account().Gauges().List(cmd.Context(), nil)
+			opts := &basecamp.GaugeListOptions{}
+			for _, filter := range filters {
+				resolved, _, err := app.Names.ResolveProject(cmd.Context(), strings.TrimSpace(filter))
+				if err != nil {
+					return err
+				}
+				id, err := strconv.ParseInt(resolved, 10, 64)
+				if err != nil || id <= 0 {
+					return output.ErrUsage("Invalid project ID")
+				}
+				opts.BucketIDs = append(opts.BucketIDs, id)
+			}
+
+			result, err := app.Account().Gauges().List(cmd.Context(), opts)
 			if err != nil {
 				return convertSDKError(err)
 			}
@@ -76,6 +126,8 @@ func newGaugesListCmd() *cobra.Command {
 			)
 		},
 	}
+	cmd.Flags().StringSliceVar(&projects, "projects", nil, "Filter by project IDs or names (comma-separated; repeatable)")
+	return cmd
 }
 
 func newGaugesNeedlesCmd(project *string) *cobra.Command {

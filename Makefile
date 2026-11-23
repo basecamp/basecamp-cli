@@ -680,7 +680,7 @@ help:
 	@echo ""
 	@echo "Release:"
 	@echo "  release-check    Full pre-flight (check + replace-check + vuln + race + surface compat)"
-	@echo "  release          Cut a release (VERSION=x.y.z, DRY_RUN=1 optional)"
+	@echo "  release          Cut a release: stable opens the release PR, re-run after merge tags (VERSION=x.y.z, DRY_RUN=1 optional)"
 	@echo "  test-release     Dry-run goreleaser pipeline (notarize disabled via empty env)"
 	@echo ""
 	@echo "Security:"

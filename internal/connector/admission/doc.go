@@ -32,7 +32,8 @@
 //     trusted performer; a boost on one of a recording's events is not), or,
 //     in a Ping, pinged (an operator's line in a direct Ping, the agent and
 //     its writer alone; in a group Ping, and from a participant anywhere,
-//     only a mention counts).
+//     only a mention counts), or campfire (a trusted human's new line in a
+//     served project's listen_campfires opt-in, without a mention).
 //  6. Whether the project is served, its class, the reply destination, the
 //     conversation key and the content snapshot come from the policy and the
 //     summary, never from the pointer.
@@ -52,7 +53,7 @@
 // mode, unless allow_assignments opts in the people the allowlist names; the
 // assigner is the feed's performer, which Basecamp writes, so naming someone
 // trusts that person and not a payload that claims to be them. For the triggers that carry an instruction in content (mentioned,
-// subscribed) the recording's author must be trusted too, because the
+// subscribed, campfire) the recording's author must be trusted too, because the
 // performer of a *.created event is not always the person who wrote it — a
 // to-do moved in from another project is created by the mover.
 //
@@ -72,6 +73,13 @@
 // participant's request whoever brought them in.
 // Admission only labels; what a participant may get the agent to do is the
 // policy of whoever reads the request.
+//
+// A Campfire requires mentions by default. listen_campfires opts individual
+// rooms in a served project into hearing trusted human messages as requests.
+// Performer and author trust still apply, and a member admitted by project
+// trust remains a participant. Allowed agents still reach the connector only
+// through mentioned, under the same caps. Campfire requests are acknowledged
+// and answered in the room where they were written.
 //
 // A Ping is no project, so project trust has no members there: an operator
 // gives the agent work in any Ping, in every trust mode, in words an operator

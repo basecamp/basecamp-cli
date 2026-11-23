@@ -59,6 +59,77 @@ picker's `(Global)` row, the prose lists in the installers and the docs are the 
 by hand. `setup <id>` never fabricates an agent's home directory: a skill-only agent that is not
 detected is reported missing, not created.
 
+## The connector doing the work itself
+
+`basecamp connect -P <profile>` prints each trusted request for the session that started it,
+which is how the basecamp-connect skill runs in Claude Code. With `--orchestrator <agent>` the
+connector does that session's job itself, on any coding agent that can take a prompt without a
+terminal, run shell commands and continue an earlier session. `internal/connector/runner` is
+all of it:
+
+- **The workflow is the skill.** `skills/basecamp-connect/SKILL.md` and `subagent.md` are
+  embedded (`skills.Connect`) and given to the agents as they are. `instructions.go` adds only
+  the table that maps the Claude Code mechanisms they name (the monitor, background subagents)
+  onto the runner's commands. Change behavior in the skill, never there.
+- **An adapter is one CLI**: the arguments of a headless turn and how its event stream reads
+  (`adapter.go`: `claude -p`, `codex exec`, `pi -p`). A new coding agent is a new adapter and a
+  stream fixture in `adapter_test.go`. `go test -tags runner_live ./internal/connector/runner
+  -run TestInstalled` holds each adapter to the installed CLI and spends a few model requests.
+- **The orchestrator's tools are CLI commands** that reach the running connector over a unix
+  socket in its state directory: `basecamp connect dispatch`, `workers list|send|stop`, `say`,
+  `stop`, `restart` (`internal/commands/connect_runner.go`).
+- **Which agent does what**: the start's flags, then `runner.json` beside the profile's
+  `connect.json` (hand-written, read again for every dispatch), whose rules choose a worker by
+  repo, project, card table, to-do list, any recording a request sits under, or a Ping.
+- **A worker is kept for its thread.** A later request on the same card, to-do, message or
+  chat goes to the worker that handled the first, continued in its session, and waits its turn
+  if that worker is busy. A new worker starts only when the session cannot take it: the work
+  is in another repo or on another coding agent, `--again` was given, or the CLI no longer
+  has the session. The orchestrator's own session is never rotated; each CLI's compaction is
+  relied on, and both kinds of session are told where their instructions are kept.
+- **State** is `runner/state.json` in the connector's state directory: the orchestrator's
+  inbox and session, and every worker. The handoff gives the runner each request before it
+  closes the record (`HandoffOptions.Deliver`), so a crash repeats a request rather than
+  losing it if the connector starts again within `HandoffGrace` (a minute), and a worker a
+  stop interrupted is continued in its own session at the next start. A start ends what a
+  crash left running first, and does not start beside a process it cannot confirm ended; a
+  turn's process is recorded before its agent is told anything, and a session is not given
+  another turn while what its last one started cannot be confirmed ended.
+
+**The console** (`basecamp connect console`, `internal/connector/console`) is the person's
+view of all this in a terminal: what is worked on, what was done, doctor's checks, the
+coding agents installed, the settings, and a line to the orchestrator. It is a process of
+its own that reads what `status` reads (`connectConsole.snapshot`) and writes nothing, so
+it runs beside a connector, before one starts and after one stops; what the person types
+goes over the runner's socket, as `say` does. Everything it draws that someone else wrote
+(a recording's title, a worker's report) goes through `plain` or `text` first: keep it so.
+`console.Run` is the one place it starts a bubbletea program, listed in
+`internal/tui/launchers_test.go`.
+
+**What agents may do** is one switch, `--permissions`, kept in `runner.json` and read for
+every turn. `full`, the default, starts each CLI with its permission prompts off: a headless
+turn has nobody to answer one. `guarded` starts each under its own unattended guardrails
+(`Adapter.Guarded`): Claude Code in its auto mode, and Codex in its workspace-write sandbox
+with the network on and its automatic review, which lets Codex's own reviewer answer a
+request to run a stopped command outside the sandbox. Without that review a sandboxed Codex
+can neither commit in a repo (its git data is read-only there) nor read `connect.json`
+(inside the sandbox `/` belongs to nobody the CLI knows, so the check that the file is the
+person's own fails). That check is the trust anchor's and is not loosened: instead an agent
+is told which runner started it (`runner.SocketEnv`), so `dispatch` and the other runner commands
+reach the socket without reading the file. Pi has no guardrails and is refused under
+`guarded`. What a mode means is told to the worker (`guardedNote`), the person at start
+(`PermissionsNotice`) and in the skill; keep the three in step. A `runner.json` that cannot
+be read starts no agent: it is never read as `full`.
+
+**What a start names is kept** (`SaveStart`): the orchestrator, the worker, the
+permissions and a cap on workers go into `runner.json`, and `--run` starts with them.
+Plain `basecamp connect` never reads them, so the Claude Code skill's path is untouched.
+
+**How many workers run at once** has no cap unless a start names one with
+`--max-workers`: every request gets a worker as it arrives. A cap is `max_workers` in
+`runner.json`, and `--max-workers 0` takes a kept one off. Unlike the rules and the
+permissions, which are read again as the connector runs, a cap is read once, at a start.
+
 ## Basecamp API Reference
 
 API documentation: https://github.com/basecamp/bc3-api

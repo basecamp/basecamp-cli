@@ -25,6 +25,7 @@ CMD basecamp connect setup
 FLAG basecamp --operator-profile
 FLAG basecamp --serve
 FLAG basecamp --shadow
+FLAG basecamp --reset
 CMD basecamp connect discard
 CMD basecamp connect ask
 CMD basecamp connect doctor
@@ -33,4 +34,19 @@ CMD basecamp connect release
 CMD basecamp connect shadow promote
 CMD basecamp connect show
 CMD basecamp connect status
+# The connector doing the work itself (--orchestrator): hidden with the rest.
+FLAG basecamp --orchestrator
+FLAG basecamp --run
+CMD basecamp connect console
+CMD basecamp connect restart
+CMD basecamp connect say
+CMD basecamp connect stop
+CMD basecamp connect workers list
 FLAG basecamp --unserve
+# Per-Campfire policy flags on the hidden connect setup command.
+FLAG basecamp --listen-campfire
+FLAG basecamp --no-listen-campfire
+# Not drift: feedback is hidden on purpose until detection (GET
+# /{account}/feedback.json answers 200) or BASECAMP_FEEDBACK=1 shows it, and the
+# skill names it only where `basecamp commands` lists it.
+CMD basecamp feedback

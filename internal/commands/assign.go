@@ -21,6 +21,7 @@ func NewAssignCmd() *cobra.Command {
 	var project string
 	var isCard bool
 	var isStep bool
+	var notify bool
 
 	cmd := &cobra.Command{
 		Use:   "assign <id|url>...",
@@ -34,9 +35,14 @@ func NewAssignCmd() *cobra.Command {
 	  - A numeric person ID
 	  - An email address (will be resolved to ID)
 
+	Basecamp tells the person about a to-do or card only with --notify, and
+	only where this command newly assigns them. It always notifies a person
+	assigned to a card step, so --notify changes nothing there.
+
 	Examples:
 	  basecamp assign 123 --to me                     # Assign to-do
 	  basecamp assign 123 456 --to me                  # Assign multiple to-dos
+	  basecamp assign 123 --to "Annie Bryan" --notify  # Assign and notify
 	  basecamp assign 456 --card --to me               # Assign card
 	  basecamp assign 789 --step --to me               # Assign card step`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -46,7 +52,7 @@ func NewAssignCmd() *cobra.Command {
 			if isCard && isStep {
 				return output.ErrUsage("Cannot use --card and --step together")
 			}
-			return assignItems(cmd, args, &assignee, project, isCard, isStep)
+			return assignItems(cmd, args, &assignee, project, isCard, isStep, notify)
 		},
 	}
 
@@ -55,6 +61,7 @@ func NewAssignCmd() *cobra.Command {
 	cmd.Flags().StringVar(&project, "in", "", "Project ID (alias for --project)")
 	cmd.Flags().BoolVar(&isCard, "card", false, "Assign to a card instead of a to-do")
 	cmd.Flags().BoolVar(&isStep, "step", false, "Assign to a card step instead of a to-do")
+	cmd.Flags().BoolVar(&notify, "notify", false, "Notify the person newly assigned (card steps always notify)")
 
 	completer := completion.NewCompleter(nil)
 	_ = cmd.RegisterFlagCompletionFunc("to", completer.PeopleNameCompletion())
@@ -128,7 +135,7 @@ type assignResult struct {
 	breadcrumbs []output.Breadcrumb
 }
 
-func assignItems(cmd *cobra.Command, args []string, assignee *string, project string, isCard, isStep bool) error {
+func assignItems(cmd *cobra.Command, args []string, assignee *string, project string, isCard, isStep, notify bool) error {
 	app := appctx.FromContext(cmd.Context())
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
@@ -159,7 +166,7 @@ func assignItems(cmd *cobra.Command, args []string, assignee *string, project st
 	var assigneeIDInt int64
 
 	for _, itemID := range extractedIDs {
-		res, err := assignOneItem(cmd, app, itemID, isCard, isStep, resolvedProjectID,
+		res, err := assignOneItem(cmd, app, itemID, isCard, isStep, notify, resolvedProjectID,
 			assignee, &assigneeResolved, &assigneeID, &assigneeIDInt)
 		if err != nil {
 			var fatal *fatalAssignError
@@ -347,7 +354,7 @@ func batchFailError(action string, failed []string, firstErr error) error {
 // assignOneItem validates one item and assigns it. The assignee is resolved
 // lazily on the first call where *assigneeResolved is false, preserving
 // PR #279 ordering (validate before person picker).
-func assignOneItem(cmd *cobra.Command, app *appctx.App, itemID string, isCard, isStep bool, resolvedProjectID string,
+func assignOneItem(cmd *cobra.Command, app *appctx.App, itemID string, isCard, isStep, notify bool, resolvedProjectID string,
 	assignee *string, assigneeResolved *bool, assigneeID *string, assigneeIDInt *int64) (*assignResult, error) {
 
 	switch {
@@ -364,7 +371,7 @@ func assignOneItem(cmd *cobra.Command, app *appctx.App, itemID string, isCard, i
 			}
 			*assigneeID, *assigneeIDInt, *assigneeResolved = aID, aIDInt, true
 		}
-		return doAssignCard(cmd, app, itemID, *assigneeID, *assigneeIDInt, resolvedProjectID, card)
+		return doAssignCard(cmd, app, itemID, *assigneeID, *assigneeIDInt, resolvedProjectID, card, notify)
 	case isStep:
 		step, err := validateStep(cmd, app, itemID)
 		if err != nil {
@@ -392,7 +399,7 @@ func assignOneItem(cmd *cobra.Command, app *appctx.App, itemID string, isCard, i
 			}
 			*assigneeID, *assigneeIDInt, *assigneeResolved = aID, aIDInt, true
 		}
-		return doAssignTodo(cmd, app, itemID, *assigneeID, *assigneeIDInt, resolvedProjectID, todo)
+		return doAssignTodo(cmd, app, itemID, *assigneeID, *assigneeIDInt, resolvedProjectID, todo, notify)
 	}
 }
 
@@ -546,7 +553,7 @@ func notFoundOrConvert(err error, typeName, itemIDStr string) error {
 }
 
 // doAssignTodo assigns a person to a to-do.
-func doAssignTodo(cmd *cobra.Command, app *appctx.App, todoIDStr, assigneeID string, assigneeIDInt int64, resolvedProjectID string, todo *basecamp.Todo) (*assignResult, error) {
+func doAssignTodo(cmd *cobra.Command, app *appctx.App, todoIDStr, assigneeID string, assigneeIDInt int64, resolvedProjectID string, todo *basecamp.Todo, notify bool) (*assignResult, error) {
 	todoID, err := strconv.ParseInt(todoIDStr, 10, 64)
 	if err != nil {
 		return nil, output.ErrUsage("Invalid to-do ID")
@@ -565,6 +572,7 @@ func doAssignTodo(cmd *cobra.Command, app *appctx.App, todoIDStr, assigneeID str
 
 	updated, err := app.Account().Todos().Update(cmd.Context(), todoID, &basecamp.UpdateTodoRequest{
 		AssigneeIDs: assigneeIDs,
+		Notify:      notify,
 	})
 	if err != nil {
 		return nil, convertSDKError(err)
@@ -595,7 +603,7 @@ func doAssignTodo(cmd *cobra.Command, app *appctx.App, todoIDStr, assigneeID str
 }
 
 // doAssignCard assigns a person to a card.
-func doAssignCard(cmd *cobra.Command, app *appctx.App, cardIDStr, assigneeID string, assigneeIDInt int64, resolvedProjectID string, card *basecamp.Card) (*assignResult, error) {
+func doAssignCard(cmd *cobra.Command, app *appctx.App, cardIDStr, assigneeID string, assigneeIDInt int64, resolvedProjectID string, card *basecamp.Card, notify bool) (*assignResult, error) {
 	cardID, err := strconv.ParseInt(cardIDStr, 10, 64)
 	if err != nil {
 		return nil, output.ErrUsage("Invalid card ID")
@@ -614,6 +622,7 @@ func doAssignCard(cmd *cobra.Command, app *appctx.App, cardIDStr, assigneeID str
 
 	updated, err := app.Account().Cards().Update(cmd.Context(), cardID, &basecamp.UpdateCardRequest{
 		AssigneeIDs: assigneeIDs,
+		Notify:      notify,
 	})
 	if err != nil {
 		return nil, convertSDKError(err)

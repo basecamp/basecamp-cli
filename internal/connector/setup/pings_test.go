@@ -90,6 +90,7 @@ func TestVerifyPings(t *testing.T) {
 		{ID: operatorID, Name: "Operator"},
 		{ID: guest, Name: "Jorge"},
 		{ID: 9, Name: "A client", Client: true},
+		{ID: 11, Name: "Unsaid", ClientUnsaid: true},
 		{ID: peerAgent, Name: "Peer (agent)", PersonableType: PersonableAgent},
 	}}}}
 	verify := func(r Reader, id int64, recorded bool) Check {
@@ -112,6 +113,7 @@ func TestVerifyPings(t *testing.T) {
 	assert.Equal(t, StatusFail, verify(r, peerAgent, false).Status, "no agent is a participant")
 	assert.Equal(t, StatusFail, verify(r, peerAgent, true).Status, "recorded or not")
 	assert.Equal(t, StatusFail, verify(r, 9, false).Status, "a client is refused, as project trust refuses one")
+	assert.Equal(t, StatusFail, verify(r, 11, false).Status, "so is one the read did not say is no client")
 	assert.Equal(t, StatusFail, verify(r, agentID, false).Status, "the agent itself")
 	assert.Equal(t, StatusFail, verify(r, guest2, false).Status, "someone not in the Ping")
 	assert.Equal(t, StatusWarn, verify(r, guest2, true).Status, "one recorded who has since left is a warning")

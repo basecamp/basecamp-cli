@@ -58,6 +58,7 @@ type Parsed struct {
 	Type           string // e.g., "todos", "messages", "cards"
 	RecordingID    string
 	CampfireID     string // parent campfire ID for chat-line URLs (chats/{campfireId}/lines/{lineId})
+	ForwardID      string // parent forward for nested inbox reply URLs
 	PingID         string // the Ping (a Circle bucket) named by circles/{pingId} and circles/{pingId}@{lineId} URLs
 	CommentID      string
 	IsCollection   bool   // URL points to a list of items, not an individual resource
@@ -234,6 +235,10 @@ func Parse(input string) *Parsed {
 	// URLs simply lack this key — the map read then yields "" (a nil Params on
 	// structural matches reads the same way), leaving CampfireID empty.
 	campfireID := m.Params["campfireId"]
+	var forwardID string
+	if pathType == "replies" {
+		forwardID = m.Params["forwardId"]
+	}
 
 	return &Parsed{
 		AccountID:      m.AccountID,
@@ -241,6 +246,7 @@ func Parse(input string) *Parsed {
 		Type:           pathType,
 		RecordingID:    resourceID,
 		CampfireID:     campfireID,
+		ForwardID:      forwardID,
 		PingID:         m.Params["pingId"],
 		CommentID:      m.CommentID,
 		IsCollection:   isCollection,
