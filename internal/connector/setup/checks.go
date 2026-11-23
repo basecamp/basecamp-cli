@@ -39,6 +39,11 @@ type Person struct {
 	Name           string
 	PersonableType string
 	Client         bool
+	// ClientUnsaid marks a person read through the SDK (fromSDK) whose read
+	// left the client flag out. The checks refuse them as they refuse a
+	// client. It is false on a Person built any other way, such as the
+	// agent's boss taken from its profile, so it says nothing about those.
+	ClientUnsaid bool
 }
 
 // Reader is what the checks read, as the agent, in the agent's account.
@@ -167,7 +172,7 @@ func fromSDK(p *basecamp.Person) Person {
 	if p == nil {
 		return Person{}
 	}
-	return Person{ID: p.ID, Name: p.Name, PersonableType: p.PersonableType, Client: p.Client}
+	return Person{ID: p.ID, Name: p.Name, PersonableType: p.PersonableType, Client: basecamp.Deref(p.Client), ClientUnsaid: p.Client == nil}
 }
 
 // httpStatus is the status a failed read answered with, 0 when it did not
@@ -382,6 +387,8 @@ func verifyPerson(ctx context.Context, r Reader, name string, p Person, agentID 
 		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is an Agent; agents never authorize", p.ID)
 	case p.Client:
 		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is a client of the account; only members are trusted", p.ID)
+	case p.ClientUnsaid:
+		c.Status, c.Message = StatusFail, fmt.Sprintf("Basecamp did not say whether person %d is a client; only members are trusted", p.ID)
 	default:
 		c.Status = StatusPass
 		c.Message = fmt.Sprintf("Person %d, %s%s", p.ID, richtext.SanitizeSingleLine(p.Name), source)
@@ -563,6 +570,8 @@ func verifyPingPerson(ping Ping, readErr error, pingID, id, agentID int64, recor
 		c.Message = fmt.Sprintf("Person %d is an Agent; agents never authorize, and are allowed only with --allow-agent", id)
 	case p.Client:
 		c.Status, c.Message = StatusFail, fmt.Sprintf("Person %d is a client of the account; only members are trusted", id)
+	case p.ClientUnsaid:
+		c.Status, c.Message = StatusFail, fmt.Sprintf("Basecamp did not say whether person %d is a client; only members are trusted", id)
 	default:
 		c.Status = StatusPass
 		c.Message = fmt.Sprintf("Person %d, %s, may ask by mention in Ping %d alone", id, richtext.SanitizeSingleLine(p.Name), pingID)

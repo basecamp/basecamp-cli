@@ -476,7 +476,7 @@ func (h *Hub) People() *Pool[[]PersonInfo] {
 					Title:      pp.Title,
 					Admin:      pp.Admin,
 					Owner:      pp.Owner,
-					Client:     pp.Client,
+					Client:     basecamp.Deref(pp.Client),
 					PersonType: pp.PersonableType,
 					Company:    company,
 				})
