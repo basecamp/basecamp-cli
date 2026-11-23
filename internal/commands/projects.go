@@ -36,6 +36,7 @@ func NewProjectsCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		newProjectsListCmd(),
+		newProjectsRecentCmd(),
 		newProjectsShowCmd(),
 		newProjectsCreateCmd(),
 		newProjectsUpdateCmd(),
@@ -71,6 +72,38 @@ func newProjectsListCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&reverse, "reverse", false, "Reverse sort order")
 
 	return cmd
+}
+
+func newProjectsRecentCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "recent",
+		Short: "List recently visited projects",
+		Long:  "List the current user's recently visited projects, most recent visit first.\n\nBasecamp keeps the 50 most recent visits and returns only active projects\nyou can still access. The result is a single page, not all projects.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app := appctx.FromContext(cmd.Context())
+			if app == nil {
+				return fmt.Errorf("app not initialized")
+			}
+			scope := newFollowUpScope(app)
+			if err := ensureAccount(cmd, app); err != nil {
+				return err
+			}
+			projects, err := app.Account().Projects().ListRecent(cmd.Context())
+			if err != nil {
+				return convertSDKError(err)
+			}
+			return app.OK(projects,
+				output.WithEntity("project"),
+				output.WithSummary(fmt.Sprintf("%d recent projects", len(projects))),
+				output.WithBreadcrumbs(output.Breadcrumb{
+					Action:      "show",
+					Cmd:         "basecamp projects show <id>" + scope.args(app.Config.AccountID),
+					Description: "Show project details",
+				}),
+			)
+		},
+	}
 }
 
 func runProjectsList(cmd *cobra.Command, status string, limit, page int, all bool, sortField string, reverse bool) error {
