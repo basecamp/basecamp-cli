@@ -949,7 +949,7 @@ func TestCheckCodexIntegrationIncludesVersion(t *testing.T) {
 		}
 	}
 	require.Equal(t, []string{"Codex Plugin", "Codex Plugin Version"}, names)
-	assert.Equal(t, 1, strings.Count(readCodexSetupCalls(t, logPath), "plugin list --available --json"))
+	assert.Equal(t, 1, strings.Count(readCodexSetupCalls(t, logPath), "plugin list --available --json --marketplace 37signals"))
 }
 
 func TestCheckCodexIntegrationWarnsOnVersionMismatch(t *testing.T) {

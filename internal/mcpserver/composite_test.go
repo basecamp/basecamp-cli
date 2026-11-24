@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -61,7 +60,7 @@ func (l *upstreamLog) seen() []string {
 func compositeSession(t *testing.T, routes map[string]http.HandlerFunc) (*mcp.ClientSession, *upstreamLog) {
 	t.Helper()
 	log := &upstreamLog{}
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.record(r.URL.Path)
 		for prefix, handler := range routes {
 			if strings.HasPrefix(r.URL.Path, prefix) {
@@ -73,7 +72,6 @@ func compositeSession(t *testing.T, routes map[string]http.HandlerFunc) (*mcp.Cl
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":"unexpected"}`))
 	}))
-	t.Cleanup(upstream.Close)
 
 	srv, err := New(newTestAPI(upstream), Config{})
 	require.NoError(t, err)
@@ -415,10 +413,9 @@ func TestCreateCommentRefusesAMalformedMentionsParameter(t *testing.T) {
 // --- read-only mode -------------------------------------------------------
 
 func TestReadOnlyModeKeepsSummarizeAndDropsCreateComment(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := newUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected upstream request: %s %s", r.Method, r.URL.Path)
 	}))
-	t.Cleanup(upstream.Close)
 
 	srv, err := New(newTestAPI(upstream), Config{ReadOnly: true})
 	require.NoError(t, err)

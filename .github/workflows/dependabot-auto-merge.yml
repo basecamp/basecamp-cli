@@ -1,6 +1,6 @@
 name: Dependabot Auto-Merge
 
-# Approves and enables auto-merge for Dependabot's patch and minor bumps, after
+# Enables auto-merge for Dependabot's patch and minor bumps, after
 # refreshing the flake's vendorHash when the bump moved go.sum.
 #
 # A Go bump changes go.sum and leaves nix/package.nix's vendorHash stale, so
@@ -78,18 +78,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # CI is the safety gate — auto-merging action updates is circular.
-      - name: Approve patch and minor updates (excluding actions)
-        if: >-
-          (
-            steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-            steps.metadata.outputs.update-type == 'version-update:semver-minor'
-          ) &&
-          steps.metadata.outputs.package-ecosystem != 'github_actions'
-        run: gh pr review --approve "$PR_URL"
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Enable auto-merge for patch and minor updates (excluding actions)
         if: >-
           (

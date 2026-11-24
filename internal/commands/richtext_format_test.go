@@ -120,7 +120,10 @@ func TestCommentsCreateRejectsUnknownFormat(t *testing.T) {
 // Content that used to be sent as written because it looked like HTML is now
 // read as Markdown. The caller is told once, on stderr, how to keep the old
 // result — unless the format was chosen explicitly, or the only tags are the
-// mention and attachment markup Markdown content carries routinely.
+// mention and attachment markup Markdown content carries routinely, or a fold's
+// <details> and <summary>, which the basecamp skill tells agents to write in
+// Markdown. Warning on a fold pointed agents at --format html, where every block
+// is stored touching.
 func TestRichTextHTMLInMarkdownWarns(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -139,6 +142,13 @@ func TestRichTextHTMLInMarkdownWarns(t *testing.T) {
 		{"html in a tilde fence", []string{"create", "789", "~~~\n<p>x</p>\n~~~"}, false},
 		{"html in indented code", []string{"create", "789", "Example:\n\n    <p>x</p>"}, false},
 		{"angle brackets in prose", []string{"create", "789", "A Vec<String> here"}, false},
+		{"a fold in markdown", []string{"create", "789", "The fix landed.\n\n<details><summary>▶ How it was measured</summary>\n\n- Five **runs**\n\n</details>"}, false},
+		{"a fold written inline", []string{"create", "789", "Done. <details><summary>Steps</summary>ran it twice</details>"}, false},
+		{"a fold written as html", []string{"create", "789", "<details><summary>Steps</summary><p>ran it twice</p></details>"}, true},
+		{"html beside a fold", []string{"create", "789", "<p>A</p>\n\n<details><summary>Steps</summary>\n\nran it\n\n</details>"}, true},
+		{"a summary holding other tags", []string{"create", "789", "<details><summary><strong>Steps</strong></summary>\n\nran it\n\n</details>"}, true},
+		{"a fold holding a comment", []string{"create", "789", "<details><summary>Steps</summary><!-- a note -->\n\nran it\n\n</details>"}, true},
+		{"a fold tag with an attribute", []string{"create", "789", "<details data-x=\"<p>\"><summary>Steps</summary>\n\nran it\n\n</details>"}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -259,4 +269,29 @@ func TestNotesSetFormatHTMLSendsContentExactly(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(transport.last(t).Body), &body))
 	assert.Equal(t, passthroughHTML, body.Note.Content)
+}
+
+// expandedMention is a mention as the API returns it: the avatar figure inside
+// the tag and the rendered mention in its content attribute.
+const expandedMention = `<p dir="auto">Started by <bc-attachment sgid="BAh7mention" content-type="application/vnd.basecamp.mention" content="&lt;bc-mention gid=&quot;gid://bc3/Person/1&quot;&gt;
+  &lt;span&gt;Jason&lt;/span&gt;&lt;/bc-mention&gt;"><figure>
+  <img data-avatar-for-person-id="1" alt="Jason Fried" class="avatar" src="https://example.com/avatar" width="20" height="20">
+  <figcaption>
+    Jason
+  </figcaption>
+</figure></bc-attachment> this week.</p>`
+
+// Writing back a mention as the API returned it stored its avatar as content
+// of its own, split the paragraph, and added a copy on every edit (#905).
+// Basecamp's write form is the bare tag, in either format.
+func TestCommentsUpdateCollapsesAMentionCopiedFromTheAPI(t *testing.T) {
+	want := `<p dir="auto">Started by <bc-attachment sgid="BAh7mention" content-type="application/vnd.basecamp.mention"></bc-attachment> this week.</p>`
+	for _, format := range []string{"html", "markdown"} {
+		t.Run(format, func(t *testing.T) {
+			transport := &mockCommentWriteTransport{}
+			_, err := runCommentWithStderr(t, transport, expandedMention+"\n", "update", "1234", "-", "--format", format)
+			require.NoError(t, err)
+			assert.Equal(t, want, sentContent(t, transport))
+		})
+	}
 }

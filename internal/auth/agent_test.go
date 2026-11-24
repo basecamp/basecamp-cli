@@ -652,6 +652,7 @@ func (c *countingStore) Delete(string) error       { return nil }
 func (c *countingStore) MigrateToKeyring() error   { return nil }
 func (c *countingStore) UsingKeyring() bool        { return false }
 func (c *countingStore) FallbackWarning() string   { return "" }
+func (c *countingStore) ProbeError() error         { return nil }
 
 // TestMintedScopeMustBeOneTheCLICanStore: the response scope is stored
 // with the credential, written into the profile entry, and printed. A

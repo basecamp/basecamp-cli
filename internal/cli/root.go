@@ -20,6 +20,7 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/commands"
 	"github.com/basecamp/basecamp-cli/internal/completion"
 	"github.com/basecamp/basecamp-cli/internal/config"
+	"github.com/basecamp/basecamp-cli/internal/feedback"
 	"github.com/basecamp/basecamp-cli/internal/harness"
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -149,8 +150,9 @@ func NewRootCmd() *cobra.Command {
 			}
 			// Profile-scoped cache (only if cache dir was not explicitly set
 			// via flag or env). A not-yet-registered name is unvalidated
-			// input, so it does not become a path component.
-			if profileKnown && flags.CacheDir == "" && os.Getenv("BASECAMP_CACHE_DIR") == "" {
+			// input, and a registered one may come from a repo config, so
+			// neither becomes a path component unless it is a single one.
+			if profileKnown && profileNameIsPathSafe(profileName) && flags.CacheDir == "" && os.Getenv("BASECAMP_CACHE_DIR") == "" {
 				cfg.CacheDir = filepath.Join(cfg.CacheDir, "profiles", profileName)
 			}
 
@@ -210,6 +212,7 @@ func NewRootCmd() *cobra.Command {
 
 	cmd.PersistentPostRunE = func(cmd *cobra.Command, args []string) error {
 		app := appctx.FromContext(cmd.Context())
+		commands.RefreshFeedbackDetection(cmd, app)
 		if app != nil {
 			app.Close()
 		}
@@ -301,6 +304,16 @@ func postRunNoticesEnabled(app *appctx.App) bool {
 	return app == nil || (!app.IsMachineOutput() && !app.SuppressPostRunNotices)
 }
 
+// newFeedbackCmd returns the feedback command, which ships dark: it stays out
+// of help and completions until Basecamp has advertised it on this machine or
+// BASECAMP_FEEDBACK forces it on. Deciding reads one small cached file and
+// makes no request.
+func newFeedbackCmd() *cobra.Command {
+	cmd := commands.NewFeedbackCmd()
+	cmd.Hidden = !feedback.DefaultStore().Visible()
+	return cmd
+}
+
 // Execute runs the root command.
 func Execute() {
 	cmd := NewRootCmd()
@@ -349,6 +362,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewTodosetsCmd())
 	cmd.AddCommand(commands.NewHillchartsCmd())
 	cmd.AddCommand(commands.NewToolsCmd())
+	cmd.AddCommand(commands.NewDoorsCmd())
 	cmd.AddCommand(commands.NewConfigCmd())
 	cmd.AddCommand(commands.NewTodolistgroupsCmd())
 	cmd.AddCommand(commands.NewCommandsCmd())
@@ -364,6 +378,7 @@ func Execute() {
 	cmd.AddCommand(commands.NewMigrateCmd())
 	cmd.AddCommand(commands.NewProfileCmd())
 	cmd.AddCommand(commands.NewSkillCmd())
+	cmd.AddCommand(commands.NewInstructionsCmd())
 	cmd.AddCommand(commands.NewAttachmentsCmd())
 	cmd.AddCommand(commands.NewEmbedsCmd())
 	cmd.AddCommand(commands.NewAttachCmd())
@@ -383,6 +398,8 @@ func Execute() {
 	cmd.AddCommand(commands.NewMCPCmd())
 	cmd.AddCommand(commands.NewConnectCmd())
 
+	cmd.AddCommand(newFeedbackCmd())
+
 	// Tier-2 stdin guard: reject a stray literal "-" when stdin is piped,
 	// everywhere a command doesn't explicitly accept it — except cobra's
 	// generated meta commands, which are deliberately exempt (see
@@ -391,6 +408,11 @@ func Execute() {
 
 	// Use ExecuteC to get the executed command (for correct context access)
 	executedCmd, err := cmd.ExecuteC()
+
+	// Help of a feedback command that ships dark fails as running it does.
+	if err == nil {
+		err = commands.UnavailableFeedbackHelp(executedCmd)
+	}
 
 	// Bare group command with a positional that matches no subcommand
 	// (e.g. "cards 12345", or "cards 12345 --in X"): Cobra stops at the group
@@ -452,6 +474,7 @@ func Execute() {
 			if app := appctx.FromContext(executedCmd.Context()); app != nil {
 				writeErr := app.Err(err)
 				if writeErr == nil {
+					commands.FeedbackHint(os.Stderr, executedCmd, app, err)
 					os.Exit(output.ExitCodeFor(apiErr.Code))
 				}
 
@@ -1097,4 +1120,10 @@ func stdinDashNote(cmd *cobra.Command, args []ArgInfo) string {
 		return ""
 	}
 	return "Pass - to read from stdin: " + strings.Join(parts, ", ")
+}
+
+// profileNameIsPathSafe reports whether a profile name stays one directory
+// below the cache dir.
+func profileNameIsPathSafe(name string) bool {
+	return name != "." && filepath.IsLocal(name) && filepath.Base(name) == name
 }

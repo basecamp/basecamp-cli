@@ -168,6 +168,9 @@ type Intake struct {
 	// re-entry after a refused position.
 	enteredByReentry bool
 	reentryLog       string
+	// live is the check that replaces a socket which stays connected and
+	// stops delivering (feed_liveness.go).
+	live liveness
 	// abortErr ends the run: set when continuing could only mean entering
 	// the feed somewhere unsafe.
 	abortErr error
@@ -332,9 +335,11 @@ func (in *Intake) CheckpointKey() eventfeed.CheckpointKey { return in.key }
 
 // Run consumes the feed until ctx is canceled or the feed terminates.
 //
-// It reconnects on its own for two reasons only — membership, and a stored
-// position refused before this run had a safe re-entry of its own. Everything
-// else the feed can recover from, it recovers from inside the package.
+// It reconnects on its own for three reasons only — membership, a stored
+// position refused before this run had a safe re-entry of its own, and a
+// socket that stays connected but stops delivering (feed_liveness.go).
+// Everything else the feed can recover from, it recovers from inside the
+// package.
 func (in *Intake) Run(ctx context.Context) error {
 	in.resetRunState()
 	// Repairs get a child lifetime that ends when Run does, whatever the
@@ -404,6 +409,7 @@ func (in *Intake) resetRunState() {
 	// suppress that record's retry for the life of the process; a duplicate
 	// offer is what admission's revision guard is for (Copilot on #770).
 	in.retriedBlocked = nil
+	in.live = liveness{}
 	select {
 	case <-in.reconnect:
 	default:
@@ -548,7 +554,7 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 		// event seen in the ledger and never queued, since the re-served page
 		// no longer reports it new. The reconnect waits for the hand-off; the
 		// feed stays paused either way.
-		if err := in.ingest(ctx, event, LaneOf(event)); err != nil {
+		if err := in.ingestFeed(ctx, event); err != nil {
 			if in.reconnectRequested() {
 				return errReconnect
 			}
@@ -571,6 +577,28 @@ func (in *Intake) runOnce(ctx context.Context, since int64) error {
 	// account lane as unrecoverable, so it ends the feed here as a terminal
 	// rather than resuming as if it were the epoch's.
 	return feedErr
+}
+
+// ingestFeed ingests one of the feed's deliveries and counts the time it
+// took, ledger write and hand-off alike: while it runs the feed is not read,
+// and the socket's frames wait in the SDK where the poll can overtake them.
+// The observer's callbacks and the signal handler are counted the same way.
+func (in *Intake) ingestFeed(ctx context.Context, event eventfeed.Event) error {
+	defer in.holding(time.Now())
+	return in.ingest(ctx, event, LaneOf(event))
+}
+
+// holding counts time since began as time the feed was not read, for the
+// liveness check. Deferred at the top of the feed's deliveries (ingestFeed),
+// every observer callback and the signal handler. The checkpoint store's
+// Load and Save are not timed: Load runs before the first socket, and a save
+// follows a page whose poll head is already frozen, so it cannot let the
+// poll overtake a live frame.
+func (in *Intake) holding(began time.Time) {
+	d := time.Since(began)
+	in.mu.Lock()
+	in.live.busy(d)
+	in.mu.Unlock()
 }
 
 // ingest is the whole of intake: one pointer written, one id handed over.
@@ -603,6 +631,9 @@ func (in *Intake) ingest(ctx context.Context, event eventfeed.Event, lane Lane) 
 	// this event arrived on, and the event must not be stranded between the
 	// ledger and the queue by it.
 	in.noteBucket(event.BucketID)
+	in.mu.Lock()
+	in.live.note(lane)
+	in.mu.Unlock()
 	return nil
 }
 
@@ -702,22 +733,42 @@ func (in *Intake) confirmPollServed(ctx context.Context, position string) {
 }
 
 func (in *Intake) observer(ctx context.Context) eventfeed.Observer {
+	// Every callback runs on the goroutine that reads the feed, so each one
+	// is timed: what it spends is time the socket's frames wait (holding).
 	return eventfeed.Observer{
-		Connected: func() { in.log.Info("feed socket connected") },
-		Confirmed: func() { in.log.Info("feed subscription confirmed") },
+		Connected: func() {
+			defer in.holding(time.Now())
+			in.log.Info("feed socket connected")
+		},
+		Confirmed: func() {
+			defer in.holding(time.Now())
+			in.mu.Lock()
+			in.live.connected()
+			in.mu.Unlock()
+			in.log.Info("feed subscription confirmed")
+		},
 		Disconnected: func(reason string, err error) {
+			defer in.holding(time.Now())
 			// The reason is the peer's own text, and a log is read in a
 			// terminal like everything else the connector writes.
 			in.log.Warn("feed socket disconnected", "reason", richtext.SanitizeSingleLine(reason), "error", err)
 		},
-		CatchUpStarted: func(eventfeed.Cursor) { in.log.Info("feed catch-up walk started") },
+		CatchUpStarted: func(eventfeed.Cursor) {
+			defer in.holding(time.Now())
+			in.mu.Lock()
+			in.live.walkStarted()
+			in.mu.Unlock()
+			in.log.Info("feed catch-up walk started")
+		},
 		PageDelivered: func(_ int, position string) {
+			defer in.holding(time.Now())
 			// Detached deliberately: the position the page just moved must be
 			// recorded even if the run's context is on its way down, or a
 			// shutdown mid-page loses the id the next re-entry needs.
 			in.confirmPollServed(context.WithoutCancel(ctx), position) //nolint:contextcheck // detached on purpose, see above
 		},
 		CaughtUp: func() {
+			defer in.holding(time.Now())
 			// A replay that reached the head without meeting the epoch is
 			// over; nothing after this is part of it.
 			in.setReplaying(false)
@@ -725,8 +776,20 @@ func (in *Intake) observer(ctx context.Context) eventfeed.Observer {
 			// delivery has write-time brakes that write no addressing and say
 			// nothing, so a quiet feed is never proof of a quiet project.
 			in.log.Info("feed walk reached its head and the buffer drained")
+			// The SDK runs this on the goroutine that consumes the events, so
+			// every event the walk delivered has been counted by now.
+			in.mu.Lock()
+			deaf := in.live.walkDone()
+			strikes, next := in.live.strikes, in.live.span()
+			in.mu.Unlock()
+			if deaf {
+				in.log.Warn("feed socket is connected but not delivering: the repair poll keeps finding events it never sent; resubscribing",
+					"resubscribes", strikes, "next_check_walks", next)
+				in.requestReconnect()
+			}
 		},
 		Checkpoint: func(string) {
+			defer in.holding(time.Now())
 			in.mu.Lock()
 			in.checkpointed = true
 			// A saved position is progress, whether or not its page carried
@@ -736,23 +799,33 @@ func (in *Intake) observer(ctx context.Context) eventfeed.Observer {
 			in.mu.Unlock()
 		},
 		CheckpointSaveFailed: func(err error) {
+			defer in.holding(time.Now())
 			in.log.Error("could not save the feed position", "error", err)
 		},
 		Gap: func(epochAfterID int64, resumeOrigin string) {
+			defer in.holding(time.Now())
 			in.log.Warn("feed served a 410", "epoch_after_id", epochAfterID, "resume_origin", resumeOrigin)
 		},
 		PositionRejected: func(kind eventfeed.PollErrorKind) {
+			defer in.holding(time.Now())
 			in.log.Warn("feed rejected the held position", "kind", kind.String())
 			in.onPositionRejected(ctx)
 		},
 		FilterConflict: func(positionDigest, filtersDigest string) {
+			defer in.holding(time.Now())
 			in.log.Warn("feed position was minted for a different filter set",
 				"position_digest", positionDigest, "filters_digest", filtersDigest)
 		},
 		StaleConnection: func(d time.Duration) {
+			defer in.holding(time.Now())
 			in.log.Warn("feed socket went stale", "since_last_frame", d)
 		},
 		BufferOverflow: func(dropped int) {
+			defer in.holding(time.Now())
+			// Dropped frames the poll then finds are not a deaf socket.
+			in.mu.Lock()
+			in.live.taint()
+			in.mu.Unlock()
 			in.log.Warn("live buffer overflowed", "dropped", dropped)
 		},
 		// In-band renewal. A server that bounds the stream by its token's
@@ -762,12 +835,15 @@ func (in *Intake) observer(ctx context.Context) eventfeed.Observer {
 		// the reconnect after that `remote` close is the ordinary one. The
 		// lines are what tell that close apart from an unexplained one.
 		StreamDeadline: func(expiresAt time.Time) {
+			defer in.holding(time.Now())
 			in.log.Info("feed stream deadline advertised; renewing in band before it", "expires_at", expiresAt.UTC())
 		},
 		Renewed: func(expiresAt time.Time) {
+			defer in.holding(time.Now())
 			in.log.Info("feed stream renewed in band", "expires_at", expiresAt.UTC())
 		},
 		RenewFailed: func(kind eventfeed.RenewFailure, retrying bool) {
+			defer in.holding(time.Now())
 			msg := "feed stream renewal failed; retrying"
 			if !retrying {
 				msg = "feed stream renewal gave up; the server closes the socket at its deadline, and the connector reconnects and catches up"
@@ -781,6 +857,7 @@ func (in *Intake) observer(ctx context.Context) eventfeed.Observer {
 // runs synchronously on the delivery path, so it does only what must happen
 // before the disposition takes effect and starts the rest elsewhere.
 func (in *Intake) handleSignal(signal eventfeed.Signal) eventfeed.Disposition {
+	defer in.holding(time.Now())
 	ctx := context.WithoutCancel(context.Background())
 
 	switch s := signal.(type) {

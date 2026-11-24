@@ -90,7 +90,7 @@ func TestCheckCodexPluginCommandFailure(t *testing.T) {
 
 	assert.Equal(t, "fail", check.Status)
 	assert.Contains(t, check.Message, "Cannot query")
-	assert.Contains(t, check.Hint, "codex plugin list --available --json")
+	assert.Contains(t, check.Hint, "codex plugin list --available --json --marketplace 37signals")
 }
 
 func TestCheckCodexPluginVersionMatching(t *testing.T) {
@@ -157,7 +157,7 @@ func TestCheckCodexPluginUsesSupportedJSONCommand(t *testing.T) {
 
 	assert.Equal(t, "pass", check.Status)
 	assert.Equal(t, "/usr/local/bin/codex", gotPath)
-	assert.Equal(t, []string{"plugin", "list", "--available", "--json"}, gotArgs)
+	assert.Equal(t, []string{"plugin", "list", "--available", "--json", "--marketplace", "37signals"}, gotArgs)
 }
 
 func TestCodexAgentInfoWiring(t *testing.T) {
@@ -198,7 +198,7 @@ func stubCodexList(t *testing.T, output string, commandErr error) {
 	original := runCodexCommand
 	runCodexCommand = func(_ context.Context, path string, args ...string) ([]byte, error) {
 		assert.Equal(t, "/usr/local/bin/codex", path)
-		assert.Equal(t, []string{"plugin", "list", "--available", "--json"}, args)
+		assert.Equal(t, []string{"plugin", "list", "--available", "--json", "--marketplace", "37signals"}, args)
 		return []byte(output), commandErr
 	}
 	t.Cleanup(func() { runCodexCommand = original })

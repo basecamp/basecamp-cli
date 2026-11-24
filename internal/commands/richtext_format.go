@@ -48,8 +48,11 @@ func addRichTextFormatFlag(cmd *cobra.Command) {
 }
 
 // richTextToHTML is the one place a command turns rich-text input into the
-// HTML Basecamp stores. With --format html the content is returned exactly as
-// given. Otherwise it is read as Markdown, whatever it contains.
+// HTML Basecamp stores. With --format html the content is returned as given.
+// Otherwise it is read as Markdown, whatever it contains. Either way, a
+// mention or file attachment copied from what the API returned is first
+// reduced to the bare tag Basecamp expects (richtext.CollapseAttachments):
+// sent back expanded, it corrupts the post.
 //
 // Content that holds HTML tags was sent as written before Markdown became the
 // only default, so when --format was left unset and the Markdown keeps raw HTML
@@ -61,8 +64,9 @@ func richTextToHTML(cmd *cobra.Command, content string) string {
 		panic(cmd.CommandPath() + " reads rich text but has no --format flag; call addRichTextFormatFlag")
 	}
 	if flag.Value.String() == string(richTextHTML) {
-		return content
+		return richtext.CollapseAttachments(content)
 	}
+	content = richtext.CollapseAttachmentsInMarkdown(content)
 	if !flag.Changed && richtext.HasRichTextHTML(content) {
 		fmt.Fprintln(cmd.ErrOrStderr(), "Warning: content contains HTML tags and was read as Markdown, the default. "+
 			"Supported tags are kept and the Markdown around them is converted. "+

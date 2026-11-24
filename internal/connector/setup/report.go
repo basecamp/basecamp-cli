@@ -20,6 +20,9 @@ type Report struct {
 	// Projects is how many Basecamp projects the file serves.
 	Projects int
 	Written  bool
+	// MovedAside is where a --reset moved the connect.json it replaced, ""
+	// when it replaced none.
+	MovedAside string
 
 	checks []Check
 }
@@ -60,7 +63,8 @@ func (r *Report) MarshalJSON() ([]byte, error) {
 		TrustMode     string  `json:"trust_mode"`
 		Projects      int     `json:"projects"`
 		Written       bool    `json:"written"`
+		MovedAside    string  `json:"moved_aside,omitempty"`
 		Ready         bool    `json:"ready"`
 		Checks        []Check `json:"checks"`
-	}{r.Path, r.Profile, r.AccountID, r.AgentPersonID, r.AgentKind, r.OperatorID, r.TrustMode, r.Projects, r.Written, r.Ready(), r.Checks()})
+	}{r.Path, r.Profile, r.AccountID, r.AgentPersonID, r.AgentKind, r.OperatorID, r.TrustMode, r.Projects, r.Written, r.MovedAside, r.Ready(), r.Checks()})
 }

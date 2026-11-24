@@ -15,6 +15,7 @@ import (
 
 	"github.com/basecamp/basecamp-sdk/go/pkg/basecamp"
 
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/connector"
 	"github.com/basecamp/basecamp-cli/internal/connector/setup"
 	"github.com/basecamp/basecamp-cli/internal/output"
@@ -45,30 +46,11 @@ func runConnectDoctor(cmd *cobra.Command, _ []string) error {
 	if os.Getenv("BASECAMP_TOKEN") != "" {
 		return errEnvTokenShadows("doctor checks the agent its profile holds, and BASECAMP_TOKEN would override it")
 	}
-	p, err := loadConnectProfile(cmd)
+	p, err := loadConnectProfileForReport(cmd)
 	if err != nil {
 		return err
 	}
-	checks := []setup.Check{{Name: "connect.json", Status: setup.StatusPass,
-		Message: fmt.Sprintf("Agent person %d in account %s", p.file.Agent.PersonID, p.file.AccountID)}}
-	if !connectSupportedOS(runtime.GOOS) {
-		checks = append(checks, connectUnsupportedOSCheck(runtime.GOOS))
-	}
-
-	agent, agentErr := verifiedConnectAgent(ctx, p)
-	if agentErr != nil {
-		checks = append(checks, setup.Check{Name: "Token and identity", Status: setup.StatusFail, Message: errorMessage(agentErr),
-			Hint: "Reconnect the agent's profile, then run basecamp connect setup again."})
-	} else {
-		checks = append(checks,
-			setup.Check{Name: "Token", Status: setup.StatusPass, Message: "The profile's credential yields a token"},
-			setup.Check{Name: "Identity", Status: setup.StatusPass, Message: fmt.Sprintf("Person %d, as connect.json names", agent.personID)},
-			setup.TicketCheck(ctx, agent.reader, agent.kind),
-			feedCheck(ctx, agent.client.ForAccount(agent.account)),
-		)
-	}
-	checks = append(checks, pingsCheck(ctx, p))
-	checks = append(checks, ledgerChecks(ctx, p)...)
+	checks := connectDoctorChecks(ctx, p)
 
 	result := summarizeChecks(asDoctorChecks(checks))
 	title := "Connector doctor for profile " + strconv.Quote(p.name)
@@ -83,6 +65,71 @@ func runConnectDoctor(cmd *cobra.Command, _ []string) error {
 		return doctorNotReady(checks)
 	}
 	return p.app.OK(result, output.WithSummary(result.Summary()))
+}
+
+// connectDoctorChecks are doctor's checks of a set-up profile, in the order
+// they are shown. They write nothing to the connector's ledger and post
+// nothing to Basecamp.
+//
+// A connect.json that cannot be used fails its own row, with the command that
+// recovers it, and every check that does not need it still runs: the token,
+// the identity, the ticket and the feed as the profile's credential sees
+// them, and the Pings and the ledger of the connector state the profile has.
+func connectDoctorChecks(ctx context.Context, p connectProfile) []setup.Check {
+	checks := []setup.Check{connectFileCheck(p)}
+	if !connectSupportedOS(runtime.GOOS) {
+		checks = append(checks, connectUnsupportedOSCheck(runtime.GOOS))
+	}
+
+	agent, agentErr := verifiedConnectAgent(ctx, p)
+	switch {
+	case agentErr != nil:
+		checks = append(checks, setup.Check{Name: "Token and identity", Status: setup.StatusFail, Message: errorMessage(agentErr),
+			Hint: "Reconnect the agent's profile, then run basecamp connect setup again."})
+	default:
+		identity := setup.Check{Name: "Identity", Status: setup.StatusPass, Message: fmt.Sprintf("Person %d, as connect.json names", agent.personID)}
+		if p.broken() {
+			identity.Status = setup.StatusWarn
+			identity.Message = fmt.Sprintf("Person %d; connect.json can't be read to confirm it is the agent it names", agent.personID)
+			switch {
+			case !p.knowsState():
+				// The credential says whose state this is, where nothing
+				// else on disk can: the ledger and Pings below read it.
+				p.file.AccountID, p.file.Agent.PersonID = agent.account, agent.personID
+			case p.file.Agent.PersonID != agent.personID || !accountIDsEqual(p.file.AccountID, agent.account):
+				// The state on disk is the evidence of what ran; the ledger
+				// below is that one's, and the disagreement is said.
+				identity.Message = fmt.Sprintf("Person %d in account %s, and this profile's connector state is for person %d in account %s; connect.json can't be read to say which is the agent",
+					agent.personID, agent.account, p.file.Agent.PersonID, p.file.AccountID)
+			}
+		}
+		checks = append(checks,
+			setup.Check{Name: "Token", Status: setup.StatusPass, Message: "The profile's credential yields a token"},
+			identity,
+			setup.TicketCheck(ctx, agent.reader, agent.kind),
+			feedCheck(ctx, agent.client.ForAccount(agent.account)),
+		)
+	}
+	if !p.knowsState() {
+		skip := setup.Check{Status: setup.StatusSkip, Message: "Skipped: without connect.json or the profile's credential, which connector is this profile's can't be told"}
+		pings, ledger := skip, skip
+		pings.Name, ledger.Name = "Pings", "Ledger"
+		return append(checks, pings, ledger)
+	}
+	checks = append(checks, pingsCheck(ctx, p))
+	checks = append(checks, ledgerChecks(ctx, p)...)
+	return checks
+}
+
+// connectFileCheck is doctor's row for connect.json itself.
+func connectFileCheck(p connectProfile) setup.Check {
+	if p.broken() {
+		return setup.Check{Name: "connect.json", Status: setup.StatusFail,
+			Message: "It can't be used: " + setup.ErrorText(p.fileErr),
+			Hint:    connectResetHint(p.name)}
+	}
+	return setup.Check{Name: "connect.json", Status: setup.StatusPass,
+		Message: fmt.Sprintf("Agent person %d in account %s", p.file.Agent.PersonID, p.file.AccountID)}
 }
 
 func errorMessage(err error) string {
@@ -252,4 +299,64 @@ func pingsCheck(ctx context.Context, p connectProfile) setup.Check {
 		c.Hint = "Only one connector should answer Pings. Start all but one of them with --no-pings: basecamp connect -P " + richtext.ShellQuote(p.name) + " --no-pings"
 	}
 	return c
+}
+
+// checkConnectorProfiles is basecamp doctor's line for each connector
+// profile set up on this computer: whether its connect.json can be used, and
+// whether its connector is running. It reads local files alone, so it says
+// nothing about the credential or Basecamp; `basecamp connect doctor` does.
+// Where the connector does not run, it says nothing at all.
+func checkConnectorProfiles() []Check {
+	if !connectSupportedOS(runtime.GOOS) {
+		return nil
+	}
+	entries, err := os.ReadDir(filepath.Join(config.GlobalConfigDir(), "connect"))
+	if err != nil {
+		return nil
+	}
+	var checks []Check
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.IsDir() || !isValidProfileName(name) {
+			continue
+		}
+		path, err := setup.Path(config.GlobalConfigDir(), name)
+		if err != nil {
+			continue
+		}
+		file, err := loadConnectFile(path, name)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		c := Check{Name: "Connector " + strconv.Quote(name)}
+		switch {
+		case err != nil:
+			c.Status = "fail"
+			c.Message = "connect.json can't be used: " + setup.ErrorText(err)
+			c.Hint = connectResetHint(name)
+			// A connector started before the file broke may still run,
+			// holding requests until it reads again: its state says so.
+			if account, person, ok := connectStateIdentity(name, false); ok {
+				state := setup.File{Profile: name, AccountID: account, Agent: setup.Agent{PersonID: person}}
+				// The state is the only witness of which agent ran here: name
+				// it, since the profile's credential may since be another's.
+				who := fmt.Sprintf("its connector (agent person %d in account %s)", person, account)
+				if connectorRunning(name, state) {
+					c.Message += "; " + who + " is running"
+				} else {
+					c.Message += "; " + who + " is not running"
+				}
+			} else {
+				c.Message += "; whether its connector is running can't be told"
+			}
+		case connectorRunning(name, file):
+			c.Status, c.Message = "pass", "Set up, and its connector is running"
+		default:
+			c.Status = "pass"
+			c.Message = "Set up; its connector is not running now"
+			c.Hint = "Start it with basecamp connect -P " + richtext.ShellQuote(name) + ", or check it with basecamp connect doctor -P " + richtext.ShellQuote(name)
+		}
+		checks = append(checks, c)
+	}
+	return checks
 }

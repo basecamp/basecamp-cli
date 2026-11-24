@@ -85,6 +85,11 @@ type Store struct {
 	inner       credStore
 	warnOnce    sync.Once
 
+	// opts is what inner was built with; stall is the keyring-stall
+	// recovery state (keyring_stall.go).
+	opts  credstore.StoreOptions
+	stall keyringStall
+
 	// lockWarnOnce fires the one warning a process gets when credential
 	// locking is impossible on this host (see lock.go).
 	lockWarnOnce sync.Once
@@ -100,6 +105,7 @@ type credStore interface {
 	MigrateToKeyring() error
 	UsingKeyring() bool
 	FallbackWarning() string
+	ProbeError() error
 }
 
 // newCredStore is replaceable in tests to avoid real keyring access.
@@ -130,6 +136,23 @@ var sessionIsHeadless = func() bool {
 // unbounded so an unlock prompt is not cut off mid-answer.
 const headlessProbeTimeout = 10 * time.Second
 
+// slowKeyringTimeout is the probe and operation bound of the store built
+// when the first, ten-second probe timed out and credentials.json holds
+// nothing for the key being read. On a loaded machine the Secret Service
+// can take seconds per call (a store and clear measured 3.7s, a search
+// 3.6s, with the daemon waiting on swap), so the probe's several round
+// trips pass ten seconds while the credential sits in the keyring, intact.
+// A miss there is not an answer; a patient look at the keyring is.
+const slowKeyringTimeout = 60 * time.Second
+
+// probeTimeoutIsSlowness reports whether a timed-out probe means a keyring
+// that is slow rather than one this session cannot use. On Linux the bound
+// exists because the Secret Service can stall (#800), so a timeout says
+// nothing about what the keyring holds. Elsewhere the probe is bounded only
+// in a headless session, where a timeout is a locked keychain nobody can
+// unlock and the file fallback is the design (#568). Replaceable in tests.
+var probeTimeoutIsSlowness = func() bool { return runtime.GOOS == "linux" }
+
 // NewStore creates a credential store. The OS keyring is not touched until
 // the first credential operation.
 func NewStore(fallbackDir string) *Store {
@@ -152,9 +175,10 @@ func (s *Store) ensure() credStore {
 		} else if sessionIsHeadless() {
 			opts.ProbeTimeout = headlessProbeTimeout
 		}
+		s.opts = opts
 		s.inner = newCredStore(opts)
 	})
-	return s.inner
+	return s.current()
 }
 
 // warnFallback prints the keyring fallback warning once per process, on the
@@ -167,6 +191,12 @@ func (s *Store) ensure() credStore {
 func (s *Store) warnFallback() {
 	inner := s.ensure()
 	s.warnOnce.Do(func() {
+		if !inner.UsingKeyring() && probeTimedOutOnSlowness(inner) {
+			// Not a fallback: reads go to the keyring itself and writes
+			// wait for it (keyring_stall.go). Only the delay is news.
+			fmt.Fprintf(os.Stderr, "warning: the system keyring was slow to answer (%v); waiting longer for it\n", inner.ProbeError())
+			return
+		}
 		if w := inner.FallbackWarning(); w != "" {
 			fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 		}
@@ -192,21 +222,28 @@ func (s *Store) LoadContext(ctx context.Context, origin string) (*Credentials, e
 func (s *Store) load(origin string, req lockRequest) (*Credentials, error) {
 	s.warnFallback()
 	var data []byte
+	var gen uint64
 	err := s.withStoreReadLock(req, func() error {
 		var loadErr error
-		data, loadErr = s.ensure().Load(origin)
+		data, gen, loadErr = s.read(origin, req)
 		return loadErr
 	})
 	if err != nil {
+		if errors.Is(err, ErrKeyringUnavailable) {
+			return nil, s.operationError(err)
+		}
 		if isMissingCredential(err) {
+			s.forget(origin)
 			return nil, fmt.Errorf("%w: %w", ErrNoCredential, err)
 		}
 		return nil, s.operationError(err)
 	}
 	var creds Credentials
 	if err := json.Unmarshal(data, &creds); err != nil {
+		s.forget(origin)
 		return nil, fmt.Errorf("%w: %w", ErrInvalidCredentials, err)
 	}
+	s.keepRead(origin, &creds, gen)
 	return &creds, nil
 }
 
@@ -235,7 +272,7 @@ func isMissingCredential(err error) bool {
 // two processes saving DIFFERENT keys at once would otherwise drop one of
 // them. See lock.go.
 func (s *Store) Save(origin string, creds *Credentials) error {
-	return s.save(s.withStoreLock, origin, creds)
+	return s.save(s.withStoreLock, nil, origin, creds)
 }
 
 // SaveContext is Save for a caller that can be canceled: the wait for the
@@ -244,23 +281,41 @@ func (s *Store) Save(origin string, creds *Credentials) error {
 // frees up. A login uses it so a Ctrl-C between its last check and the
 // write cannot store the credential the person stopped.
 func (s *Store) SaveContext(ctx context.Context, origin string, creds *Credentials) error {
-	return s.save(func(fn func() error) error { return s.withStoreLockContext(ctx, fn) }, origin, creds)
+	return s.save(func(fn func() error) error { return s.withStoreLockContext(ctx, fn) }, ctx.Err, origin, creds)
 }
 
 // save marshals creds and writes them under the lock the caller chose.
-func (s *Store) save(under func(func() error) error, origin string, creds *Credentials) error {
+// abandoned, when set, is asked again once the store to write to is known:
+// reaching a slow keyring can take a minute, and a caller that stopped
+// meanwhile must not have its credential written after all.
+func (s *Store) save(under func(func() error) error, abandoned func() error, origin string, creds *Credentials) error {
 	s.warnFallback()
 	data, err := json.Marshal(creds)
 	if err != nil {
 		return err
 	}
-	return s.operationError(under(func() error { return s.ensure().Save(origin, data) }))
+	err = s.operationError(under(func() error {
+		return s.mutate(origin, false, abandoned, func(store credStore) error { return store.Save(origin, data) })
+	}))
+	if err != nil {
+		// Whether the write landed is unknown: hold nothing for this key.
+		s.forget(origin)
+		return err
+	}
+	s.keep(origin, creds)
+	return nil
 }
 
 // Delete removes credentials for the given origin. Locked for the same
 // reason Save is: the file backend rewrites the whole document.
 func (s *Store) Delete(origin string) error {
-	return s.operationError(s.withStoreLock(func() error { return s.ensure().Delete(origin) }))
+	// Forgotten before and after: a read that began before the delete, or
+	// one that ran beside it, holds nothing once the delete returns.
+	s.forget(origin)
+	defer s.forget(origin)
+	return s.operationError(s.withStoreLock(func() error {
+		return s.mutate(origin, true, nil, func(store credStore) error { return store.Delete(origin) })
+	}))
 }
 
 // MigrateToKeyring migrates credentials from file to keyring. It reads
@@ -282,7 +337,13 @@ func (s *Store) MigrateToKeyring() error {
 }
 
 // UsingKeyring returns true if the store is using the system keyring.
-func (s *Store) UsingKeyring() bool { return s.ensure().UsingKeyring() }
+func (s *Store) UsingKeyring() bool {
+	inner := s.ensure()
+	// A probe that timed out on a slow keyring left a file-backed store,
+	// but credentials are still read from, and written to, the keyring
+	// (readKeyringDirectly, reachSlowKeyring): report where they live.
+	return inner.UsingKeyring() || probeTimedOutOnSlowness(inner)
+}
 
 // operationError offers the file-storage remedy only while the keyring is the
 // store in use. After a failed initial probe the store is already on the file

@@ -276,12 +276,8 @@ func (l *Ledger) status(ctx context.Context) (Status, error) {
 	if err := statusConnection(ctx, tx, &s); err != nil {
 		return Status{}, err
 	}
-	hold, ok, err := readHold(ctx, tx)
-	if err != nil {
+	if err := statusHold(ctx, tx, &s); err != nil {
 		return Status{}, err
-	}
-	if ok {
-		s.Hold = &HoldStatus{Generation: hold.Generation, Cause: string(hold.Cause), HeldBy: hold.HeldBy, HeldAt: hold.HeldAt}
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM generations`).Scan(&s.Generation); err != nil {
 		return Status{}, fmt.Errorf("connector: status generation: %w", err)
@@ -294,6 +290,37 @@ func (l *Ledger) status(ctx context.Context) (Status, error) {
 		}
 	}
 	return s, nil
+}
+
+// Glance is the part of Status that someone watching a connector reads
+// again and again: its own record of itself, its hold, and the records
+// waiting for a person. Each is a read of a row or of the held records
+// alone. Status's counts and diagnostics read the whole of the ledger's
+// history, which only grows, and are for when a person asks.
+func (l *Ledger) Glance(ctx context.Context) (Status, error) {
+	tx, err := l.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return Status{}, fmt.Errorf("connector: begin glance: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var s Status
+	for _, step := range []func(context.Context, *sql.Tx, *Status) error{statusConnection, statusHold, statusHeld} {
+		if err := step(ctx, tx, &s); err != nil {
+			return Status{}, err
+		}
+	}
+	return s, nil
+}
+
+func statusHold(ctx context.Context, tx *sql.Tx, s *Status) error {
+	hold, ok, err := readHold(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if ok {
+		s.Hold = &HoldStatus{Generation: hold.Generation, Cause: string(hold.Cause), HeldBy: hold.HeldBy, HeldAt: hold.HeldAt}
+	}
+	return nil
 }
 
 func statusConnection(ctx context.Context, tx *sql.Tx, s *Status) error {
@@ -644,4 +671,75 @@ WHERE (state IN (?, ?, ?, ?) OR (state = ? AND reason = ?))
 		string(StateAdmitted), string(StateQueued), string(StateHeld), string(StateDispatched),
 		string(StateBlocked), ReasonSpawnFailed, operatorID).Scan(&n)
 	return n, err
+}
+
+// RequestStatus is one request the connector let in and what became of it:
+// ids, states and timestamps, as the rest of status is. The recording's URL
+// is shown so a person can open what was asked.
+type RequestStatus struct {
+	EventID      int64     `json:"event_id"`
+	EventType    string    `json:"event_type"`
+	Trigger      string    `json:"trigger,omitempty"`
+	BucketID     int64     `json:"bucket_id"`
+	RecordingURL string    `json:"recording_url,omitempty"`
+	State        string    `json:"state"`
+	Reason       string    `json:"reason,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// recentRequestsReach is how many of the latest discarded records
+// RecentRequests looks through for the requests among them.
+const recentRequestsReach = 10000
+
+// RecentRequests lists the latest requests that passed admission, newest
+// first: those handed to a session, those waiting, held or blocked, those a
+// start found too old to run and those a person closed without running.
+// What admission turned away is not a request and is not listed.
+//
+// It is read by someone watching, again and again, so what it costs must
+// not grow with the ledger's history. Nearly every record of a busy account
+// is discarded, and nearly all of those were never requests: each state's
+// latest records are read off the index, newest first, and for the
+// discarded ones the search for requests stops recentRequestsReach records
+// back. A request discarded longer ago than that is not listed.
+func (l *Ledger) RecentRequests(ctx context.Context, limit int) ([]RequestStatus, error) {
+	return l.recentRequests(ctx, limit, recentRequestsReach)
+}
+
+func (l *Ledger) recentRequests(ctx context.Context, limit, reach int) ([]RequestStatus, error) {
+	const columns = `id, event_type, trigger_name, bucket_id, recording_url, state, reason, updated_at`
+	states := []RecordState{StateAdmitted, StateQueued, StateDispatched, StateHeld, StateBlocked, StateCompleted}
+	var query strings.Builder
+	args := make([]any, 0, 2*len(states)+8)
+	query.WriteString(`SELECT ` + columns + ` FROM (`)
+	for _, state := range states {
+		query.WriteString(`
+SELECT * FROM (SELECT ` + columns + ` FROM events WHERE state = ? ORDER BY id DESC LIMIT ?) UNION ALL`)
+		args = append(args, string(state), limit)
+	}
+	query.WriteString(`
+SELECT * FROM (SELECT ` + columns + ` FROM (SELECT ` + columns + ` FROM events WHERE state = ? ORDER BY id DESC LIMIT ?)
+  WHERE reason IN (?, ?, ?, ?) ORDER BY id DESC LIMIT ?)
+) ORDER BY id DESC LIMIT ?`)
+	args = append(args, string(StateDiscarded), reach, ReasonHandedOff, ReasonBeforeThisRun, ReasonUnreadable, ReasonByOperator, limit, limit)
+	rows, err := l.db.QueryContext(ctx, query.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("connector: recent requests: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	requests := []RequestStatus{}
+	for rows.Next() {
+		var (
+			r       RequestStatus
+			updated string
+		)
+		if err := rows.Scan(&r.EventID, &r.EventType, &r.Trigger, &r.BucketID, &r.RecordingURL, &r.State, &r.Reason, &updated); err != nil {
+			return nil, err
+		}
+		if r.UpdatedAt, err = parseStamp(updated); err != nil {
+			return nil, err
+		}
+		requests = append(requests, r)
+	}
+	return requests, rows.Err()
 }

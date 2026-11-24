@@ -11,9 +11,9 @@ ACTIONS (RO = read-only):
 - list_projects (RO, paginated): List projects (active by default; optionally archived/trashed)
 - list_recent_projects (RO): List the projects the current user has most recently visited, most recent visit first
 - record_project_visit: Record that the current user visited a project, moving it to the front of ListRecentProjects (returns 204 No Content)
-- remove_project_logo: Remove the project's logo (returns 204 even when absent)
-- remove_project_wallpaper: Remove the project's wallpaper (returns 204 No Content)
-- trash_project: Trash a project (returns 204 No Content)
+- remove_project_logo (destructive): Remove the project's logo (returns 204 even when absent)
+- remove_project_wallpaper (destructive): Remove the project's wallpaper (returns 204 No Content)
+- trash_project (destructive): Trash a project (returns 204 No Content)
 - unarchive_project: Restore a project to active status from trash as well as from the archive (returns 204 No Content)
 - update_project: Update an existing project
 
@@ -32,7 +32,7 @@ ACTIONS (RO = read-only):
 - create_todolist: Create a new todolist in a todoset
 - create_todolist_group: Create a new group in a todolist
 - create_todoset_todo: Create a to-do directly under a project's to-do set, outside any to-do list
-- delete_subtask: Delete a subtask
+- delete_subtask (destructive): Delete a subtask
 - get_hill_chart (RO): Get the hill chart for a todoset
 - get_hill_chart_version (RO): Get one progress update from a todoset's hill chart
 - get_subtask (RO): Get a subtask by ID
@@ -66,7 +66,7 @@ ACTIONS (RO = read-only):
 - create_card_column: Create a column in a card table
 - create_card_step: Create a step on a card
 - create_wormhole: Add a wormhole to a card table: a standing shortcut that sends cards to a column on another card table, usually in another project
-- delete_wormhole: Permanently delete a card table's wormhole, the shortcut that sends cards to another card table
+- delete_wormhole (destructive): Permanently delete a card table's wormhole, the shortcut that sends cards to another card table
 - disable_card_column_on_hold: Disable on-hold section in a column
 - enable_card_column_on_hold: Enable on-hold section in a column
 - get_card (RO): Get a card by ID
@@ -80,7 +80,7 @@ ACTIONS (RO = read-only):
 - set_card_column_color: Set the color of a column
 - set_card_step_completion: Set card step completion status (PUT with completion: "on" to complete, "" to uncomplete)
 - subscribe_to_card_column: Subscribe to a card column (watch for changes)
-- unsubscribe_from_card_column: Unsubscribe from a card column (stop watching for changes)
+- unsubscribe_from_card_column (destructive): Unsubscribe from a card column (stop watching for changes)
 - update_card: Update an existing card
 - update_card_column: Update an existing column
 - update_card_step: Update an existing step
@@ -96,7 +96,7 @@ ACTIONS (RO = read-only):
 - create_comment: Create a new comment on a recording. Accepts a synthetic mentions parameter, expanded client-side.
 - create_message: Create a new message on a message board
 - create_message_type: Create a new message type in a project
-- delete_message_type: Delete a message type
+- delete_message_type (destructive): Delete a message type
 - get_comment (RO): Get a single comment by id
 - get_message (RO): Get a single message by id
 - get_message_board (RO): Get a message board
@@ -120,8 +120,8 @@ ACTIONS (RO = read-only):
 - create_campfire_line: Create a new line (message) in a campfire
 - create_chatbot: Create a new chatbot for a campfire
 - create_ping: Create a Ping with people, or return the one that already holds exactly them
-- delete_campfire_line: Delete a campfire line; allowed for the line's creator or an admin
-- delete_chatbot: Delete a chatbot
+- delete_campfire_line (destructive): Delete a campfire line; allowed for the line's creator or an admin
+- delete_chatbot (destructive): Delete a chatbot
 - get_campfire (RO): Get a campfire by ID
 - get_campfire_line (RO): Get a campfire line by ID
 - get_chatbot (RO): Get a chatbot by ID
@@ -143,7 +143,7 @@ Call {"action": "describe", "params": {"action": "NAME"}} for an action's full p
 ACTIONS (RO = read-only):
 - create_event_boost: Create a boost on a specific event within a recording
 - create_recording_boost: Create a boost on a recording
-- delete_boost: Delete a boost
+- delete_boost (destructive): Delete a boost
 - get_boost (RO): Get a single boost
 - list_event_boosts (RO, paginated): List boosts on a specific event within a recording
 - list_recording_boosts (RO, paginated): List boosts on a recording
@@ -158,7 +158,7 @@ Call {"action": "describe", "params": {"action": "NAME"}} for an action's full p
 ACTIONS (RO = read-only):
 - create_schedule_entry: Create a new schedule entry
 - create_timesheet_entry: Create a timesheet entry on a recording
-- destroy_timesheet_entry: Permanently delete a timesheet entry, which never appears in the trash and cannot be restored; this is the only way to remove one, since bc3 answers 403 to TrashRecording and ArchiveRecording for every timesheet entry, and it answers 403 when the caller may not remove the entry
+- destroy_timesheet_entry (destructive): Permanently delete a timesheet entry, which never appears in the trash and cannot be restored; this is the only way to remove one, since bc3 answers 403 to TrashRecording and ArchiveRecording for every timesheet entry, and it answers 403 when the caller may not remove the entry
 - get_calendar (RO): Get a calendar by its bucket id
 - get_project_timesheet (RO, paginated): Get timesheet for a specific project
 - get_recording_timesheet (RO, paginated): Get timesheet for a specific recording
@@ -188,7 +188,7 @@ ACTIONS (RO = read-only):
 - create_upload: Create a new upload in a vault
 - create_upload_version: Replace an upload's file with a new version
 - create_vault: Create a new vault (subfolder) in a vault
-- delete_folder: Delete a folder and unpin its projects from the home screen (returns 204 No Content)
+- delete_folder (destructive): Delete a folder and unpin its projects from the home screen (returns 204 No Content)
 - get_cloud_file (RO): Get a single cloud file by id
 - get_document (RO): Get a single document by id
 - get_embed (RO): Get an embed by its sgid
@@ -229,7 +229,7 @@ ACTIONS (RO = read-only):
 - list_pingable_people (RO, paginated): List all account users who can be pinged
 - list_project_people (RO, paginated): List all active people on a project
 - subscribe: Subscribe the current user to a recording
-- unsubscribe: Unsubscribe the current user from a recording
+- unsubscribe (destructive): Unsubscribe the current user from a recording
 - update_my_preferences: Update the current user's preferences
 - update_my_profile: Update the current authenticated user's profile (returns 204 No Content)
 - update_project_access: Update project access (grant/revoke/create people)
@@ -237,7 +237,7 @@ ACTIONS (RO = read-only):
 - update_subscription: Update subscriptions by adding or removing specific users
 
 == basecamp_automation
-Automatic check-ins (questionnaires, questions, answers, reminders), project templates and the template library, webhooks, lineup markers, dock tools, recording lifecycle (archive/trash), change events, and search.
+Automatic check-ins (questionnaires, questions, answers, reminders), project templates and the template library, webhooks, lineup markers, dock tools and external links (doors), recording lifecycle (archive/trash), change events, and search.
 
 Gateway tool: call with {"action": "...", "params": {...}}.
 Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
@@ -245,6 +245,7 @@ Call {"action": "describe", "params": {"action": "NAME"}} for an action's full p
 ACTIONS (RO = read-only):
 - archive_recording: Archive a recording; bc3 answers 403 for types it never lets be archived, timesheet entries among them
 - create_answer: Create a new answer for a question
+- create_door: Create an external link in a project It goes at the end of the project's External links section
 - create_lineup_marker: Create a new lineup marker
 - create_project_from_template: Create a project from a template (asynchronous)
 - create_question: Create a new question in a questionnaire
@@ -255,14 +256,16 @@ ACTIONS (RO = read-only):
 - create_templatification: Templatify a to-do list or card table
 - create_tool: Create a tool in a project dock
 - create_webhook: Create a new webhook for a project
-- delete_lineup_marker: Delete a lineup marker
-- delete_template: Delete a template (trash it)
-- delete_tool: Remove a tool from the dock: deletes an external link or an empty extra tool, and disables any other tool (returns 204 No Content either way)
-- delete_webhook: Delete a webhook
+- delete_door (destructive): Delete an external link (returns 204 No Content) Its status becomes "deleted" and it leaves the project's External links section
+- delete_lineup_marker (destructive): Delete a lineup marker
+- delete_template (destructive): Delete a template (trash it)
+- delete_tool (destructive): Remove a tool from the dock: deletes an external link or an empty extra tool, and disables any other tool (returns 204 No Content either way)
+- delete_webhook (destructive): Delete a webhook
 - disable_tool: Disable a tool (hide it from the project dock)
 - enable_tool: Enable a tool (show it on the project dock)
 - get_answer (RO): Get a single answer by id
 - get_answers_by_person (RO, paginated): Get all answers from a specific person for a question
+- get_door (RO): Get an external link by id A door hidden from a client, an unknown id, or the id of a recording that is not a door is a 404
 - get_project_construction (RO): Get the status of a project construction
 - get_question (RO): Get a single question by id
 - get_question_reminders (RO, paginated): Get pending check-in reminders for the current user
@@ -276,6 +279,7 @@ ACTIONS (RO = read-only):
 - get_tool (RO): Get a dock tool by id
 - get_webhook (RO): Get a single webhook by id
 - list_answers (RO, paginated): List all answers for a question
+- list_doors (RO): List the active external links in a project They come in the order they appear in the project's External links section
 - list_events (RO, paginated): List all events for a recording
 - list_lineup_markers (RO): List all lineup markers for the account
 - list_question_answerers (RO, paginated): List all people who have answered a question (answerers)
@@ -289,10 +293,11 @@ ACTIONS (RO = read-only):
 - resume_question: Resume a paused check-in question (resumes sending reminders)
 - search (RO, paginated): Search for content across the account
 - spotlight_recording: Put a recording's card in the spotlight area on its project or template home page
-- trash_recording: Trash a recording; bc3 answers 403 for types it never lets be trashed, timesheet entries among them (DestroyTimesheetEntry removes those, permanently)
+- trash_recording (destructive): Trash a recording; bc3 answers 403 for types it never lets be trashed, timesheet entries among them (DestroyTimesheetEntry removes those, permanently)
 - unarchive_recording: Unarchive a recording (restore to active status)
 - unspotlight_recording: Remove a recording from the spotlight area
 - update_answer: Update an existing answer
+- update_door: Update an external link A partial update: every field is optional, and those left out keep their values
 - update_lineup_marker: Update an existing lineup marker
 - update_question: Update an existing question's title, schedule or both
 - update_question_notification_settings: Update notification settings for a check-in question
@@ -308,7 +313,7 @@ Call {"action": "describe", "params": {"action": "NAME"}} for an action's full p
 
 ACTIONS (RO = read-only):
 - get_assigned_todos (RO): Get todos assigned to a specific person
-- get_overdue_todos (RO): Get overdue todos grouped by lateness
+- get_overdue_todos (RO): Get one page of overdue todos grouped by lateness, latest first
 - get_person_progress (RO, paginated): Get a person's activity timeline
 - get_progress_report (RO, paginated): Get account-wide activity feed (progress report)
 - get_project_timeline (RO, paginated): Get project timeline
@@ -386,10 +391,10 @@ ACTIONS (RO = read-only):
 - create_bookmark: Bookmark a recording for the current user
 - create_bubble_up: Bubble up a recording for the current user, resurfacing it in the current user's readings (the BC5 successor to "save")
 - create_gauge_needle: Create a gauge needle (progress update) for a project
-- delete_bookmark: Remove the current user's bookmark from a recording (returns 204 No Content)
-- delete_bubble_up: Remove the current user's bubble-up from a recording (returns 204 No Content)
+- delete_bookmark (destructive): Remove the current user's bookmark from a recording (returns 204 No Content)
+- delete_bubble_up (destructive): Remove the current user's bubble-up from a recording (returns 204 No Content)
 - deprioritize_assignment: Remove a recording from Up Next (returns 204 No Content)
-- destroy_gauge_needle: Destroy a gauge needle
+- destroy_gauge_needle (destructive): Destroy a gauge needle
 - get_account (RO): Get the account for the current access token
 - get_bookmark (RO): Report whether the current user has bookmarked the recording
 - get_bubble_ups (RO, paginated): Get the current user's current and scheduled bubble-ups (paginated, 50 per page)
@@ -405,7 +410,7 @@ ACTIONS (RO = read-only):
 - list_my_drafts (RO, paginated): List the current user's drafts across their active projects, most recently updated first (paginated, capped at 250 like /my/assignments)
 - mark_as_read: Mark specified items as read
 - prioritize_assignment: Add a recording to Up Next — the current user's ordered list of prioritized assignments (the priorities returned by GetMyAssignments)
-- remove_account_logo: Remove the account logo
+- remove_account_logo (destructive): Remove the account logo
 - reorder_up_next: Move an already-prioritized recording to a new 1-based position in Up Next (returns 204 No Content)
 - toggle_gauge: Enable or disable the gauge for a project
 - update_account_name: Rename the current account

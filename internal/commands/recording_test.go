@@ -59,6 +59,9 @@ type stubRoute struct {
 	// query — the event feed's position/next envelope, which carries no page
 	// number — needs the sequence to vary at all.
 	bodies []string
+
+	// header, when set, adds response headers (Retry-After on a 429).
+	header http.Header
 }
 
 // pagedBody picks the response for a page-aware route.
@@ -115,9 +118,13 @@ func (t *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error
 			case route.pages != nil:
 				responseBody = pagedBody(route, req.URL.Query().Get("page"))
 			}
+			header := http.Header{"Content-Type": []string{"application/json"}}
+			for name, values := range route.header {
+				header[name] = values
+			}
 			return &http.Response{
 				StatusCode: route.status,
-				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Header:     header,
 				Body:       io.NopCloser(strings.NewReader(responseBody)),
 				Request:    req,
 			}, nil

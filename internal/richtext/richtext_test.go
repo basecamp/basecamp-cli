@@ -574,9 +574,21 @@ func TestMarkdownToHTMLConvertsMarkdownBesideHTML(t *testing.T) {
 		},
 		{
 			name:    "unsupported inline tag is text",
-			input:   "Use <details>open</details> and <strong>this</strong>",
-			want:    []string{"&lt;details&gt;open&lt;/details&gt;", "<strong>this</strong>"},
-			notWant: []string{"<details>"},
+			input:   "Use <abbr>open</abbr> and <strong>this</strong>",
+			want:    []string{"&lt;abbr&gt;open&lt;/abbr&gt;", "<strong>this</strong>"},
+			notWant: []string{"<abbr>"},
+		},
+		{
+			name:    "a fold keeps its tags and converts the Markdown inside it",
+			input:   "The fix landed.\n\n<details><summary>How it was measured</summary>\n\n- Five **runs**\n- On [the board](https://example.com/b)\n\n</details>",
+			want:    []string{"<p>The fix landed.</p>", "<details><summary>How it was measured</summary>", "<li>Five <strong>runs</strong></li>", `<a href="https://example.com/b">the board</a>`, "</details>"},
+			notWant: []string{"&lt;details&gt;", "&lt;summary&gt;", "**runs**"},
+		},
+		{
+			name:    "a fold written inline keeps its tags",
+			input:   "Done. <details><summary>Steps</summary>ran it twice</details>",
+			want:    []string{"<details><summary>Steps</summary>ran it twice</details>"},
+			notWant: []string{"&lt;details&gt;"},
 		},
 		{
 			name:  "angle brackets in prose stay text",

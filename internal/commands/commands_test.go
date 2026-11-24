@@ -100,6 +100,7 @@ func buildRootWithAllCommands() *cobra.Command {
 	root.AddCommand(commands.NewTodosetsCmd())
 	root.AddCommand(commands.NewHillchartsCmd())
 	root.AddCommand(commands.NewToolsCmd())
+	root.AddCommand(commands.NewDoorsCmd())
 	root.AddCommand(commands.NewConfigCmd())
 	root.AddCommand(commands.NewTodolistgroupsCmd())
 	root.AddCommand(commands.NewCommandsCmd())
@@ -118,6 +119,7 @@ func buildRootWithAllCommands() *cobra.Command {
 	root.AddCommand(commands.NewAttachCmd())
 	root.AddCommand(commands.NewUploadCmd())
 	root.AddCommand(commands.NewSkillCmd())
+	root.AddCommand(commands.NewInstructionsCmd())
 	root.AddCommand(commands.NewGaugesCmd())
 	root.AddCommand(commands.NewAssignmentsCmd())
 	root.AddCommand(commands.NewBookmarksCmd())
@@ -132,6 +134,7 @@ func buildRootWithAllCommands() *cobra.Command {
 	root.AddCommand(commands.NewBonfireCmd())
 	root.AddCommand(commands.NewMCPCmd())
 	root.AddCommand(commands.NewConnectCmd())
+	root.AddCommand(commands.NewFeedbackCmd())
 	commands.InstallDashGuard(root)
 	root.InitDefaultHelpCmd()
 	return root

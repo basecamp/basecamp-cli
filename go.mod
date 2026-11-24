@@ -2,15 +2,15 @@ module github.com/basecamp/basecamp-cli
 
 go 1.26.7
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.1.0
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/basecamp/basecamp-sdk/go v0.34.0
+	github.com/basecamp/basecamp-sdk/go v0.39.0
 	github.com/basecamp/cli v0.2.2-0.20261023171439-c9bce8206df9
-	github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d
+	github.com/basecamp/mcp v0.0.0-20261118214004-663b2e5d2836
 	github.com/basecamp/surfguard/go v0.1.0
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -19,9 +19,10 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gofrs/flock v0.13.1
 	github.com/itchyny/gojq v0.12.19
-	github.com/modelcontextprotocol/go-sdk v1.8.0
+	github.com/modelcontextprotocol/go-sdk v1.8.1-0.20261014132652-7c486efa8223
 	github.com/sigstore/sigstore-go v1.3.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
@@ -91,7 +92,6 @@ require (
 	github.com/go-openapi/swag/yamlutils v0.27.3 // indirect
 	github.com/go-openapi/validate v0.26.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
-	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/certificate-transparency-go v1.3.3 // indirect
 	github.com/google/go-containerregistry v0.21.7 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
@@ -141,7 +141,8 @@ require (
 	go.opentelemetry.io/otel/metric v1.47.0 // indirect
 	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2 // indirect
+	golang.org/x/crypto/openpgp v0.1.0-deprecated // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/term v0.47.0 // indirect

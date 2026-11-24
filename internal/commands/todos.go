@@ -1245,6 +1245,7 @@ func newTodosCreateCmd() *cobra.Command {
 	var description string
 	var attachFiles []string
 	var notifyOnCompletion string
+	var notify bool
 	var loose bool
 
 	cmd := &cobra.Command{
@@ -1258,6 +1259,11 @@ project's to-do set instead, outside any list:
   basecamp todos create "Call the vendor back" --loose --in <project>
 
 --loose needs no list, so it neither prompts for one nor accepts --list.
+
+--notify tells the person given with --assignee about the new todo; Basecamp
+does not notify them otherwise:
+
+  basecamp todos create "Call the vendor back" --assignee "Annie Bryan" --notify --in <project>
 
 Use - as the content argument to read the todo title from stdin:
   printf 'Call the vendor back' | basecamp todos create - --in <project>`,
@@ -1379,6 +1385,7 @@ Use - as the content argument to read the todo title from stdin:
 			// Content is plain text (todo title) - do not wrap in HTML
 			req := &basecamp.CreateTodoRequest{
 				Content: content,
+				Notify:  notify,
 			}
 
 			// Process description with Markdown + attachments
@@ -1491,6 +1498,7 @@ Use - as the content argument to read the todo title from stdin:
 	cmd.Flags().StringVar(&description, "description", "", "Extended description (Markdown); use - to read from stdin")
 	cmd.Flags().StringArrayVar(&attachFiles, "attach", nil, "Attach file (repeatable)")
 	cmd.Flags().StringVar(&notifyOnCompletion, "notify-on-completion", "", "People to notify when done (names or IDs, comma-separated)")
+	cmd.Flags().BoolVar(&notify, "notify", false, "Notify the person assigned with --assignee")
 	// Not --todoset: that flag already means "which to-do set", and this one
 	// means "no list at all".
 	cmd.Flags().BoolVar(&loose, "loose", false, "Create on the to-do set, outside any list")
@@ -1740,7 +1748,7 @@ Set or clear the people notified when the todo is completed:
 	cmd.Flags().StringVar(&assignee, "to", "", "Assignees (alias for --assignee)")
 	cmd.Flags().StringVarP(&due, "due", "d", "", "Due date (natural language or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&startsOn, "starts-on", "", "Start date (natural language or YYYY-MM-DD)")
-	cmd.Flags().BoolVar(&notify, "notify", false, "Notify assignees")
+	cmd.Flags().BoolVar(&notify, "notify", false, "Notify the people newly assigned with --assignee")
 	cmd.Flags().BoolVar(&noDue, "no-due", false, "Clear the due date")
 	cmd.Flags().BoolVar(&noStartsOn, "no-starts-on", false, "Clear the start date")
 	cmd.Flags().BoolVar(&noDescription, "no-description", false, "Clear the description")

@@ -37,6 +37,26 @@ type connectProfile struct {
 	name string
 	path string
 	file setup.File
+	// fileErr is why connect.json cannot be used, for the commands that
+	// report on a profile whose file is broken (loadConnectProfileForReport).
+	// file then holds only what says which connector's state is this
+	// profile's — its account and agent, from the state directory or the
+	// profile's credential — and is no policy: nothing may act on it.
+	fileErr error
+}
+
+// broken reports whether connect.json could not be used.
+func (p connectProfile) broken() bool { return p.fileErr != nil }
+
+// knowsState reports whether p names whose connector state is this profile's.
+func (p connectProfile) knowsState() bool {
+	return p.file.AccountID != "" && p.file.Agent.PersonID > 0
+}
+
+// connectResetHint is how a person recovers a connect.json that cannot be
+// used, without editing it.
+func connectResetHint(name string) string {
+	return "Set it up again: basecamp connect setup -P " + richtext.ShellQuote(name) + " --reset --serve <project-id>, with every other choice it had (--operator-profile, --trust, --allow) given again; the old file is kept beside the new one"
 }
 
 func loadConnectProfile(cmd *cobra.Command) (connectProfile, error) {
@@ -60,9 +80,108 @@ func loadConnectProfile(cmd *cobra.Command) (connectProfile, error) {
 	case errors.Is(err, os.ErrNotExist):
 		return connectProfile{}, output.ErrUsageHint(fmt.Sprintf("Profile %q is not set up as a connector", name), "Run: basecamp connect setup -P "+richtext.ShellQuote(name))
 	case err != nil:
-		return connectProfile{}, output.ErrUsage("connect.json cannot be used: " + err.Error())
+		return connectProfile{}, output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(err), connectResetHint(name))
 	}
 	return connectProfile{app: app, name: name, path: path, file: file}, nil
+}
+
+// loadConnectProfileForReport is loadConnectProfile for the commands that
+// report on a connector (doctor, status): a connect.json that cannot be used
+// is the first thing they report, not a reason to report nothing. It is
+// returned in fileErr, beside the account and agent of the profile's one
+// connector state directory, when there is exactly one, so the ledger it
+// left can still be read. A profile that was never set up is still refused.
+func loadConnectProfileForReport(cmd *cobra.Command) (connectProfile, error) {
+	p, err := loadConnectProfile(cmd)
+	if err == nil {
+		// A file naming another profile is one show and setup refuse: the
+		// report says so. The commands that act on the connector still take
+		// it, as the connector itself does, so one already running stays
+		// under their control.
+		if p.file.Profile == p.name {
+			return p, nil
+		}
+		// The refusal is made from the file already read, not a second read
+		// that a repair in between could make succeed.
+		broken := connectProfile{app: p.app, name: p.name, path: p.path, fileErr: profileMismatch(p.file.Profile, p.name)}
+		// The profile's own state is the better witness of whose connector
+		// ran here than a file copied from elsewhere; that file's agent is
+		// the fallback.
+		broken.file = setup.File{Profile: p.name, AccountID: p.file.AccountID, Agent: setup.Agent{PersonID: p.file.Agent.PersonID}}
+		if account, person, ok := connectStateIdentity(p.name, false); ok {
+			broken.file.AccountID, broken.file.Agent.PersonID = account, person
+		}
+		return broken, nil
+	}
+	app := appctx.FromContext(cmd.Context())
+	if app == nil || app.Config.ActiveProfile == "" || !isValidProfileName(app.Config.ActiveProfile) {
+		return p, err
+	}
+	name := app.Config.ActiveProfile
+	path, pathErr := setup.Path(config.GlobalConfigDir(), name)
+	if pathErr != nil {
+		return p, err
+	}
+	_, loadErr := loadConnectFile(path, name)
+	if loadErr == nil || errors.Is(loadErr, os.ErrNotExist) {
+		return p, err
+	}
+	p = connectProfile{app: app, name: name, path: path, fileErr: loadErr}
+	p.file.Profile = name
+	if account, person, ok := connectStateIdentity(name, false); ok {
+		p.file.AccountID, p.file.Agent.PersonID = account, person
+	}
+	return p, nil
+}
+
+// loadConnectFile is setup.Load, refusing as well a file that names
+// another profile than the directory it sits in: one copied from another
+// profile, which show and setup refuse too. Only what reports uses it; the
+// commands that act on a running connector take what the connector took.
+func loadConnectFile(path, name string) (setup.File, error) {
+	file, err := setup.Load(path)
+	if err == nil && file.Profile != name {
+		return setup.File{}, profileMismatch(file.Profile, name)
+	}
+	return file, err
+}
+
+func profileMismatch(named, name string) error {
+	return fmt.Errorf("connect.json names profile %q, and it is profile %q's", named, name)
+}
+
+// connectStateIdentity is the account and agent of the one connector state
+// directory a profile has, read from its name (StateDirName): the identity
+// a connect.json that can no longer be read once named. shadow looks among
+// the shadow connector's, which a shadow-only profile has alone. None, or
+// more than one, says nothing.
+func connectStateIdentity(profile string, shadow bool) (string, int64, bool) {
+	home, err := connectStateHome()
+	if err != nil {
+		return "", 0, false
+	}
+	parts := connectStateParts(profile, setup.File{}, shadow)
+	entries, err := os.ReadDir(filepath.Join(append([]string{home}, parts[:len(parts)-1]...)...))
+	if err != nil {
+		return "", 0, false
+	}
+	var account string
+	var person int64
+	found := 0
+	for _, entry := range entries {
+		rest, ok := strings.CutSuffix(entry.Name(), "-"+profile)
+		if !ok || !entry.IsDir() {
+			continue
+		}
+		a, p, ok := strings.Cut(rest, "-")
+		id, err := strconv.ParseInt(p, 10, 64)
+		if !ok || err != nil || id <= 0 || connector.StateDirName(a, id, profile) != entry.Name() {
+			continue
+		}
+		account, person = a, id
+		found++
+	}
+	return account, person, found == 1
 }
 
 // operatorName is who a decision is recorded as: the local user who ran it.
@@ -195,11 +314,26 @@ record's recording URL is shown so a person can open what was asked.`,
 
 // connectStatusReport is status's output.
 type connectStatusReport struct {
-	Profile    string             `json:"profile"`
-	Shadow     bool               `json:"shadow"`
-	LockHolder *connectLockHolder `json:"lock_holder,omitempty"`
-	Pings      connectStatusPings `json:"pings"`
-	Status     connector.Status   `json:"status"`
+	Profile string `json:"profile"`
+	Shadow  bool   `json:"shadow"`
+	// Config is present when connect.json cannot be used: the ledger is
+	// still shown, from the profile's connector state.
+	Config     *connectStatusConfig `json:"config,omitempty"`
+	LockHolder *connectLockHolder   `json:"lock_holder,omitempty"`
+	Pings      connectStatusPings   `json:"pings"`
+	Status     connector.Status     `json:"status"`
+}
+
+// connectStatusConfig is a connect.json that cannot be used, as status
+// reports it: why, how to recover, and how much work a running connector is
+// holding until it can be read again.
+type connectStatusConfig struct {
+	Error string `json:"error"`
+	Hint  string `json:"hint"`
+	// HeldUnreadable counts records the ledger holds as config_unreadable:
+	// requests held because the file couldn't be read, which a running
+	// connector retries until it can. It says nothing of whether one runs.
+	HeldUnreadable int `json:"held_config_unreadable"`
 }
 
 // connectStatusPings is whether the profile's connector hears the agent's
@@ -249,15 +383,38 @@ type connectLockHolder struct {
 }
 
 func runConnectStatus(cmd *cobra.Command, shadow bool) error {
-	p, err := loadConnectProfile(cmd)
+	p, err := loadConnectProfileForReport(cmd)
 	if err != nil {
 		return err
+	}
+	if p.broken() && shadow {
+		// A shadow's state is its own: a profile may have only that.
+		p.file.AccountID, p.file.Agent.PersonID = "", 0
+		if account, person, ok := connectStateIdentity(p.name, true); ok {
+			p.file.AccountID, p.file.Agent.PersonID = account, person
+		}
+	}
+	// brokenAnd is the refusal when connect.json can't be used and there is
+	// no ledger to show instead: the file is what to fix, so it leads.
+	brokenAnd := func(why string) error {
+		return output.ErrUsageHint("connect.json cannot be used: "+setup.ErrorText(p.fileErr)+"; and "+why, connectResetHint(p.name))
+	}
+	if p.broken() && !p.knowsState() {
+		// Status reads no credential, so with connect.json unreadable only
+		// the state directory can say whose ledger this is, and it doesn't.
+		return brokenAnd("no one connector state for profile " + strconv.Quote(p.name) + " was found to show instead")
 	}
 	dir, err := connectStatePath(p.name, p.file, shadow)
 	if err != nil {
 		return err
 	}
 	ledger, err := connector.OpenLedgerReadOnly(cmd.Context(), filepath.Join(dir, connector.LedgerFile))
+	if err != nil && p.broken() {
+		if errors.Is(err, os.ErrNotExist) {
+			return brokenAnd("its connector has no ledger to show")
+		}
+		return brokenAnd("its ledger can't be read either: " + errorMessage(err))
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		if shadow {
 			return output.ErrUsageHint(fmt.Sprintf("Profile %q has no shadow ledger", p.name), "Run the shadow connector first: basecamp connect -P "+richtext.ShellQuote(p.name)+" --shadow")
@@ -269,6 +426,9 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 	}
 	defer func() { _ = ledger.Close() }()
 	status, err := ledger.Status(cmd.Context())
+	if err != nil && p.broken() {
+		return brokenAnd("its ledger can't be read either: " + errorMessage(err))
+	}
 	if err != nil {
 		return err
 	}
@@ -277,6 +437,10 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 		status.Tasks[i].Taker = recordedTakerState(t)
 	}
 	report := connectStatusReport{Profile: p.name, Shadow: shadow, Status: status}
+	if p.broken() {
+		report.Config = &connectStatusConfig{Error: setup.ErrorText(p.fileErr), Hint: connectResetHint(p.name),
+			HeldUnreadable: status.Blocked[string(admission.ReasonConfigUnreadable)]}
+	}
 	if holder, ok := connector.InstanceHolder(dir, p.file.AccountID, p.file.Agent.PersonID); ok {
 		report.LockHolder = &connectLockHolder{PID: holder.PID, StartedAt: holder.StartedAt, PIDStatus: processPresence(holder.PID), Pings: holder.Pings, PingsBecause: holder.PingsBecause}
 	}
@@ -302,6 +466,9 @@ func runConnectStatus(cmd *cobra.Command, shadow bool) error {
 
 func connectStatusSummary(r connectStatusReport) string {
 	parts := []string{}
+	if r.Config != nil {
+		parts = append(parts, fmt.Sprintf("connect.json can't be used (%d held until it can)", r.Config.HeldUnreadable))
+	}
 	if c := r.Status.Connection; c != nil && c.State == connector.ConnectionDisconnected {
 		parts = append(parts, "disconnected")
 	}
@@ -324,6 +491,13 @@ func renderConnectStatus(w io.Writer, r connectStatusReport) {
 		title += " (shadow)"
 	}
 	fmt.Fprintf(w, "%s\n\n", title)
+	if c := r.Config; c != nil {
+		fmt.Fprintf(w, "  connect.json can't be used: %s\n", clean(c.Error))
+		if c.HeldUnreadable > 0 {
+			fmt.Fprintf(w, "  %d request(s) are held because it couldn't be read; a running connector retries them until it can.\n", c.HeldUnreadable)
+		}
+		fmt.Fprintf(w, "  %s\n\n", clean(c.Hint))
+	}
 	if s.Connection != nil && s.Connection.State == connector.ConnectionDisconnected {
 		fmt.Fprintf(w, "  Disconnected: %s. Reconnect it: basecamp connect setup -P %s\n\n", clean(s.Connection.Detail), richtext.ShellQuote(r.name()))
 	}
@@ -445,7 +619,9 @@ func verifiedConnectAgent(ctx context.Context, p connectProfile) (connectAgent, 
 	if err != nil {
 		return connectAgent{}, err
 	}
-	if !accountIDsEqual(account, p.file.AccountID) {
+	// A connect.json that cannot be used names no account to hold the
+	// profile to; the one its state directory names, if any, is no policy.
+	if !p.broken() && !accountIDsEqual(account, p.file.AccountID) {
 		return connectAgent{}, output.ErrUsage(fmt.Sprintf("connect.json was set up in account %s, and profile %q is bound to account %s", p.file.AccountID, p.name, account))
 	}
 	kind, err := connectCredentialKind(ctx, app)
@@ -466,11 +642,24 @@ func verifiedConnectAgent(ctx context.Context, p connectProfile) (connectAgent, 
 	if err != nil {
 		return connectAgent{}, output.ErrAuth(fmt.Sprintf("Could not read who profile %q is: %s", p.name, setup.ErrorText(err)))
 	}
-	if _, err := checkConnectIdentity(ctx, app, client, kind, creds.OAuthType, me, p.file.Agent.IdentityID); err != nil {
-		return connectAgent{}, err
-	}
-	if err := p.file.VerifyAgent(kind, me.ID, p.file.Agent.IdentityID); err != nil {
-		return connectAgent{}, output.ErrAuth(err.Error())
+	switch {
+	case p.broken() && kind != setup.KindAgent:
+		// A bot user is proved by the identity connect.json pins, and there
+		// is no connect.json to read it from: say who it is, prove nothing.
+		if me.ID <= 0 {
+			return connectAgent{}, output.ErrAuth(fmt.Sprintf("The profile's credential read back no person id (%d); it cannot be the agent", me.ID))
+		}
+	case p.broken():
+		if _, err := checkConnectIdentity(ctx, app, client, kind, creds.OAuthType, me, 0); err != nil {
+			return connectAgent{}, err
+		}
+	default:
+		if _, err := checkConnectIdentity(ctx, app, client, kind, creds.OAuthType, me, p.file.Agent.IdentityID); err != nil {
+			return connectAgent{}, err
+		}
+		if err := p.file.VerifyAgent(kind, me.ID, p.file.Agent.IdentityID); err != nil {
+			return connectAgent{}, output.ErrAuth(err.Error())
+		}
 	}
 	return connectAgent{account: account, personID: me.ID, tokens: tokens, client: client, reader: reader, kind: kind}, nil
 }

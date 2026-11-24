@@ -40,8 +40,12 @@ before running a command to bypass the keyring and use plaintext credentials
 in the config directory (credentials.json, mode 0600).
 
 On Linux, keyring probes and operations time out after 10 seconds. An initial
-probe failure uses the warned file fallback. A later operation timeout returns
-an error without switching storage; a timed-out write may still complete.`,
+probe that fails because no keyring answers at all uses the warned file
+fallback. One that only times out means a slow keyring: a credential the file
+does not hold is read from the keyring directly, with a longer limit, and
+writes wait for the keyring rather than going to the file. A later operation
+timeout returns an error without switching storage; a timed-out write may
+still complete.`,
 	}
 
 	cmd.AddCommand(

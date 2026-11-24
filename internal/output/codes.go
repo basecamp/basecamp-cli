@@ -64,6 +64,12 @@ const (
 	CodeLockUnavailable = "lock_unavailable"
 )
 
+// CodeKeyringUnavailable marks a credential the OS keyring did not give up
+// in time: the keyring is slow or not answering, which says nothing about
+// whether a credential is stored. It is a cue to try again, not to log in,
+// and exits with the try-again status as CodeBusy does, never ExitAuth.
+const CodeKeyringUnavailable = "keyring_unavailable"
+
 // CodeInProgress marks work Basecamp accepted and is still doing in the
 // background when the command stopped waiting for it, such as a card being
 // moved or copied to another project. It is not a failure to retry: the hint
@@ -81,7 +87,7 @@ func ExitCodeFor(code string) int {
 		return ExitInterrupted
 	case CodeTerminated:
 		return ExitTerminated
-	case CodeBusy, CodeLockUnavailable:
+	case CodeBusy, CodeLockUnavailable, CodeKeyringUnavailable:
 		return ExitRateLimit
 	}
 	return clioutput.ExitCodeFor(code)

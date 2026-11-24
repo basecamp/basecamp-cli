@@ -65,6 +65,9 @@ func TestFollowUpNamesTheProfileHoweverItWasChosen(t *testing.T) {
 			t.Setenv("BASECAMP_PROFILE", c.env)
 			t.Setenv("BASECAMP_ACCOUNT_ID", "")
 			t.Setenv("BASECAMP_BASE_URL", "")
+			// The request list below is the command's alone: keep the
+			// daily feedback detection after it out of the way.
+			t.Setenv("BASECAMP_FEEDBACK", "0")
 			dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "basecamp")
 			require.NoError(t, os.MkdirAll(dir, 0o700))
 			require.NoError(t, os.WriteFile(filepath.Join(dir, "config.json"),

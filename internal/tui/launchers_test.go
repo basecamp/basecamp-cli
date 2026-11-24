@@ -36,8 +36,9 @@ var (
 	// bubbleteaLaunchers maps a file that may call tea.NewProgram to the sole
 	// function within it that may do so.
 	bubbleteaLaunchers = map[string]string{
-		"internal/tui/picker.go":   "runPicker",
-		"internal/commands/tui.go": "", // dev build tag; not in a shipped binary
+		"internal/tui/picker.go":                "runPicker",
+		"internal/connector/console/console.go": "Run",
+		"internal/commands/tui.go":              "", // dev build tag; not in a shipped binary
 	}
 
 	// huhImporters may import huh at all. huh launches bubbletea internally, so
