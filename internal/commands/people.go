@@ -649,6 +649,9 @@ func runPeoplePreferences(cmd *cobra.Command, weekStart, timeFormat, timeZone st
 		changed = true
 	}
 
+	// Read before ensureAccount, so an account picked or given for this run
+	// alone is named in the follow-up command.
+	scope := newFollowUpScope(app)
 	if err := ensureAccount(cmd, app); err != nil {
 		return err
 	}
@@ -661,7 +664,9 @@ func runPeoplePreferences(cmd *cobra.Command, weekStart, timeFormat, timeZone st
 		return app.OK(prefs,
 			output.WithSummary(preferencesSummary(prefs)),
 			output.WithBreadcrumbs(output.Breadcrumb{
-				Action: "update", Cmd: "basecamp people preferences me --week-start <day>", Description: "Change your preferences",
+				Action:      "update",
+				Cmd:         "basecamp people preferences me --week-start <day>" + scope.args(app.Config.AccountID),
+				Description: "Change your preferences",
 			}),
 		)
 	}

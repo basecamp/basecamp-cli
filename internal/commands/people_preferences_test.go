@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/basecamp/basecamp-cli/internal/config"
 	"github.com/basecamp/basecamp-cli/internal/output"
 )
 
@@ -94,6 +95,36 @@ func TestPeoplePreferencesShow(t *testing.T) {
 	assert.Equal(t, "twelve_hour", result.Data.TimeFormat)
 	assert.Equal(t, "Central Time (US & Canada)", result.Data.TimeZoneName)
 	assert.Equal(t, "Your preferences: week starts Sunday, 12-hour time, Central Time (US & Canada)", result.Summary)
+}
+
+// The update breadcrumb is pasted into a fresh shell, so it names the profile
+// and an account given for this run alone; otherwise it could change another
+// person's preferences.
+func TestPeoplePreferencesBreadcrumbKeepsProfileAndAccount(t *testing.T) {
+	for name, c := range map[string]struct {
+		profile, accountSource, want string
+	}{
+		"inherited":     {"", string(config.SourceGlobal), "basecamp people preferences me --week-start <day>"},
+		"flag account":  {"", string(config.SourceFlag), "basecamp people preferences me --week-start <day> --account 99999"},
+		"named profile": {"work", string(config.SourceFlag), "basecamp people preferences me --week-start <day> --profile work --account 99999"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			capture := &preferencesCapture{}
+			server := setupPreferencesMockServer(t, "99999", capture)
+			app, buf := setupPeopleMockApp(t, server)
+			app.Config.ActiveProfile = c.profile
+			app.Config.Sources = map[string]string{"account_id": c.accountSource}
+
+			require.NoError(t, executePeopleCommand(NewPeopleCmd(), app, "preferences", "me"))
+
+			var result struct {
+				Breadcrumbs []output.Breadcrumb `json:"breadcrumbs"`
+			}
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
+			require.Len(t, result.Breadcrumbs, 1)
+			assert.Equal(t, c.want, result.Breadcrumbs[0].Cmd)
+		})
+	}
 }
 
 func TestPeoplePreferencesDefaultsToMe(t *testing.T) {
