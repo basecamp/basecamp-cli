@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +92,37 @@ func TestARequestFromBeforeTheRunIsNotHandedOff(t *testing.T) {
 	r := getRecord(t, ledger, 1)
 	assert.Equal(t, StateDiscarded, r.State)
 	assert.Equal(t, ReasonBeforeThisRun, r.Reason)
+}
+
+func TestAnOldRequestIsLoggedOnlyAfterDiscardSucceeds(t *testing.T) {
+	for _, failSave := range []bool{false, true} {
+		name := "saved"
+		if failSave {
+			name = "save_failed"
+		}
+		t.Run(name, func(t *testing.T) {
+			ledger := newTestLedger(t)
+			admitOn(t, ledger, 1, "recording:1")
+			record := getRecord(t, ledger, 1)
+			var out, logs bytes.Buffer
+			opts := handoffOptions(ledger, &out)
+			opts.Started = opts.Started.Add(time.Hour)
+			opts.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+			if failSave {
+				require.NoError(t, ledger.Close())
+			}
+			err := handOff(t.Context(), opts, record)
+			if failSave {
+				require.Error(t, err)
+				assert.NotContains(t, logs.String(), "is not handed off")
+			} else {
+				require.NoError(t, err)
+				assert.Contains(t, logs.String(), "is not handed off")
+				assert.Equal(t, ReasonBeforeThisRun, getRecord(t, ledger, 1).Reason)
+			}
+			assert.Empty(t, out.String())
+		})
+	}
 }
 
 // Only the projects the agent serves, narrowed to the run's --project.
