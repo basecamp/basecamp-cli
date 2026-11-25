@@ -113,10 +113,10 @@ func TestPiStream(t *testing.T) {
 
 func TestATurnsArgumentsNeverCarryThePromptAndAlwaysTurnPromptsOff(t *testing.T) {
 	spec := Spec{Model: "m", Effort: "high"}
-	assert.Equal(t, []string{"-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions", "--session-id", "new", "--model", "m", "--effort", "high"},
+	assert.Equal(t, []string{"-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions", "--settings", claudeTurnSettings, "--session-id", "new", "--model", "m", "--effort", "high"},
 		claudeAdapter{}.Args(Turn{Role: RoleWorker, Spec: spec, NewID: "new"}))
 	// The orchestrator's own monitor and subagents are the connector's here.
-	assert.Equal(t, []string{"-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions", "--resume", "old", "--disallowedTools", "Task,Agent,Monitor"},
+	assert.Equal(t, []string{"-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions", "--settings", claudeTurnSettings, "--resume", "old", "--disallowedTools", "Task,Agent,Monitor"},
 		claudeAdapter{}.Args(Turn{Role: RoleOrchestrator, Resume: "old", NewID: "ignored"}))
 	assert.Equal(t, []string{"exec", "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-m", "m", "-c", `model_reasoning_effort="high"`, "-"},
 		codexAdapter{}.Args(Turn{Spec: spec}))
@@ -130,7 +130,7 @@ func TestATurnsArgumentsNeverCarryThePromptAndAlwaysTurnPromptsOff(t *testing.T)
 	// Claude Code in its auto mode, Codex in its sandbox with the network on
 	// and the directories it is given. Pi has none to start under.
 	guarded := Turn{Role: RoleWorker, NewID: "new", Permissions: PermissionsGuarded}
-	assert.Equal(t, []string{"-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--session-id", "new"}, claudeAdapter{}.Args(guarded))
+	assert.Equal(t, []string{"-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--settings", claudeTurnSettings, "--session-id", "new"}, claudeAdapter{}.Args(guarded))
 	sandboxed := []string{"-c", `sandbox_mode="workspace-write"`, "-c", "sandbox_workspace_write.network_access=true", "-c", `approval_policy="on-request"`, "-c", `approvals_reviewer="auto_review"`}
 	assert.Equal(t, slices.Concat([]string{"exec", "--json", "--skip-git-repo-check"}, sandboxed, []string{"-"}), codexAdapter{}.Args(guarded))
 	guarded.Resume = "old"
