@@ -162,12 +162,22 @@ func (claudeAdapter) NewSessionID() string { return newUUID() }
 // runs the ones it finds safe and stops the rest, with no prompt.
 func (claudeAdapter) Guarded() bool { return true }
 
+// claudeTurnSettings turns off, for the connector's turns only, plugins that
+// break a session the connector continues for days. OpenAI's Codex plugin
+// appends its exports to the session's env file on every SessionStart, and a
+// resume is one, so every turn adds a copy. Claude Code inlines that file
+// into each Bash command's single `bash -c` argument, and past Linux's 128 KiB
+// limit on one argument (MAX_ARG_STRLEN) no command starts, not even `echo`.
+// An orchestrator hit that after 375 turns. --settings merges over the
+// person's own settings, so their other plugins stay on.
+const claudeTurnSettings = `{"enabledPlugins":{"codex@openai-codex":false}}`
+
 func (claudeAdapter) Args(t Turn) []string {
 	mode := "bypassPermissions"
 	if t.guarded() {
 		mode = "auto"
 	}
-	args := []string{"-p", "--output-format", "stream-json", "--verbose", "--permission-mode", mode}
+	args := []string{"-p", "--output-format", "stream-json", "--verbose", "--permission-mode", mode, "--settings", claudeTurnSettings}
 	if t.Resume != "" {
 		args = append(args, "--resume", t.Resume)
 	} else if t.NewID != "" {
