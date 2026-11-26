@@ -2512,3 +2512,35 @@ func TestMessageRenderDetailHeadline(t *testing.T) {
 	assert.Contains(t, out, "Weekly update", "detail should show subject as headline")
 	assert.Contains(t, out, "Here is the update", "detail should show HTML-stripped content")
 }
+
+// A chatbot's name and its URLs are what a reader needs from it: lines_url is
+// how the bot posts, and command_url where Basecamp calls it. The generic
+// table drops URL columns and narrows away the rest, so the chatbot schema
+// keeps all three in the styled list, the Markdown list and the detail view.
+func TestChatbotSchemaKeepsNameAndURLs(t *testing.T) {
+	schema := LookupByName("chatbot")
+	require.NotNil(t, schema, "chatbot schema must be registered")
+
+	bot := map[string]any{
+		"id":           float64(42),
+		"service_name": "deploys",
+		"command_url":  "https://example.com/hook",
+		"lines_url":    "https://3.basecampapi.com/99999/integrations/KEY/buckets/123/chats/789/lines.json",
+		"url":          "https://3.basecampapi.com/99999/buckets/123/chats/789/integrations/42.json",
+		"created_at":   "2026-01-15T10:00:00Z",
+	}
+	styles := NewStyles(tui.NoColorTheme(), false)
+
+	var list strings.Builder
+	require.NoError(t, RenderList(&list, schema, []map[string]any{bot}, styles, enUS))
+	var md strings.Builder
+	require.NoError(t, RenderListMarkdown(&md, schema, []map[string]any{bot}, enUS, ""))
+	var detail strings.Builder
+	require.NoError(t, RenderDetail(&detail, schema, bot, styles, enUS))
+
+	for name, out := range map[string]string{"list": list.String(), "markdown": md.String(), "detail": detail.String()} {
+		assert.Contains(t, out, "deploys", name)
+		assert.Contains(t, out, "integrations/KEY", name)
+		assert.Contains(t, out, "https://example.com/hook", name)
+	}
+}

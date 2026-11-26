@@ -1,0 +1,49 @@
+entity: chatbot
+kind: integration
+
+# A Campfire chatbot (`chat bots`). Its name and the URLs are the whole of it:
+# lines_url is how the bot posts (it carries the bot's key) and command_url is
+# where Basecamp calls it, so both stay in every view, URLs included, where the
+# generic table would drop them as link columns.
+
+identity:
+  label: service_name
+  id: id
+
+headline:
+  default:
+    template: "{{.service_name}}"
+
+fields:
+  service_name:
+    role: title
+    emphasis: primary
+    format: text
+
+  command_url:
+    role: detail
+    format: text
+
+  lines_url:
+    role: detail
+    format: text
+
+  id:
+    role: meta
+    emphasis: muted
+
+  created_at:
+    role: meta
+    emphasis: muted
+    format: relative_time
+
+views:
+  list:
+    columns: [id, service_name, command_url, lines_url]
+  detail:
+    sections:
+      - fields: [service_name]
+      - heading: URLs
+        fields: [lines_url, command_url]
+      - heading: Metadata
+        fields: [id, created_at]
