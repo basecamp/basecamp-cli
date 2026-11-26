@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -31,7 +32,9 @@ func NewProjectsCmd() *cobra.Command {
 		Example: `  $ basecamp projects list
   $ basecamp projects list --status archived
   $ basecamp projects show 12345
-  $ basecamp projects create "New project"`,
+  $ basecamp projects create "New project"
+  $ basecamp projects archive 12345
+  $ basecamp projects unarchive 12345`,
 	}
 
 	cmd.AddCommand(
@@ -40,6 +43,8 @@ func NewProjectsCmd() *cobra.Command {
 		newProjectsCreateCmd(),
 		newProjectsUpdateCmd(),
 		newProjectsDeleteCmd(),
+		newProjectsArchiveCmd(),
+		newProjectsUnarchiveCmd(),
 		newProjectsWallpaperCmd(),
 		newProjectsLogoCmd(),
 	)
@@ -430,6 +435,91 @@ func newProjectsDeleteCmd() *cobra.Command {
 			}, output.WithSummary("Project moved to trash"))
 		},
 	}
+}
+
+func newProjectsArchiveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:         "archive <id>",
+		Short:       "Archive a project",
+		Annotations: map[string]string{"agent_notes": "Accounts on the admin pro pack may restrict archiving to admins and the project's creator; others get 403\nbasecamp projects list --status archived lists archived projects"},
+		Long: `Archive a project, removing it from the active project list.
+basecamp projects unarchive brings it back.
+
+Accounts on the admin pro pack may restrict archiving to admins and the
+project's creator; others are refused.`,
+		Example: "  $ basecamp projects archive 12345",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runProjectStatusChange(cmd, args, (*basecamp.ProjectsService).Archive, "archived", "Project archived", "unarchive", "Restore the project")
+		},
+	}
+}
+
+func newProjectsUnarchiveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:         "unarchive <id>",
+		Short:       "Restore a project from the archive or the trash",
+		Annotations: map[string]string{"agent_notes": "Restores a trashed project as well as an archived one\nRestoring counts against the account's project limit; at the limit it fails with code limit_exceeded"},
+		Long: `Restore a project to active status, from the archive or from the trash.
+
+Restoring counts against the account's project limit, so it fails when the
+account is already at that limit.`,
+		Example: "  $ basecamp projects unarchive 12345",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runProjectStatusChange(cmd, args, (*basecamp.ProjectsService).Unarchive, "active", "Project restored", "", "")
+		},
+	}
+}
+
+// runProjectStatusChange makes the change, which answers with no body, and
+// reports the status it set. inverse names the command that undoes it, offered
+// as a follow-up; unarchive has none, since a project it restored may have
+// come from the trash rather than the archive.
+func runProjectStatusChange(cmd *cobra.Command, args []string, change func(*basecamp.ProjectsService, context.Context, int64) error, status, summary, inverse, inverseDescription string) error {
+	if len(args) == 0 {
+		return missingArg(cmd, "<id>")
+	}
+	projectID, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return output.ErrUsage("Invalid project ID")
+	}
+
+	app := appctx.FromContext(cmd.Context())
+	if app == nil {
+		return fmt.Errorf("app not initialized")
+	}
+	scope := newFollowUpScope(app)
+
+	// Resolve account if not configured (enables interactive prompt)
+	if err := ensureAccount(cmd, app); err != nil {
+		return err
+	}
+
+	if err := change(app.Account().Projects(), cmd.Context(), projectID); err != nil {
+		return convertSDKError(err)
+	}
+
+	scopeArgs := scope.args(app.Config.AccountID)
+	crumbs := []output.Breadcrumb{{
+		Action:      "show",
+		Cmd:         fmt.Sprintf("basecamp projects show %d", projectID) + scopeArgs,
+		Description: "View the project",
+	}}
+	if inverse != "" {
+		crumbs = append(crumbs, output.Breadcrumb{
+			Action:      inverse,
+			Cmd:         fmt.Sprintf("basecamp projects %s %d", inverse, projectID) + scopeArgs,
+			Description: inverseDescription,
+		})
+	}
+	return app.OK(map[string]any{
+		"id":     projectID,
+		"status": status,
+	},
+		output.WithSummary(summary),
+		output.WithBreadcrumbs(crumbs...),
+	)
 }
 
 // projectImageFormats match the server's shared image validation, not the narrower web picker.

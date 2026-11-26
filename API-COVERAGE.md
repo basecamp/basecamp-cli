@@ -6,12 +6,15 @@ Coverage of Basecamp 3 API endpoints. Source: [bc3-api/sections](https://github.
 
 | Status | Sections | Endpoints |
 |--------|----------|-----------|
-| ✅ Implemented | 59 | 226 |
+| ✅ Implemented | 60 | 228 |
 | ⚠️ Blocked | 0 | 0 |
 | ⏭️ Out of scope | 4 | 12 |
-| **Total tracked** | **63** | **238** |
+| **Total tracked** | **64** | **240** |
 
-**226 of 226 tracked in-scope endpoints.** Listing, reading, creating, updating and
+**228 of 228 tracked in-scope endpoints.** Archiving and restoring a project
+(`PUT /projects/:id/status/archived.json` and `PUT /projects/:id/status/active.json`,
+modelled by [basecamp/basecamp-sdk#679](https://github.com/basecamp/basecamp-sdk/pull/679))
+land as `projects archive` and `projects unarchive`. Listing, reading, creating, updating and
 deleting a project's external links (`GET`/`POST /buckets/:id/dock/doors.json`,
 `GET`/`PUT`/`DELETE /dock/doors/:id`, added by
 [bc3#14314](https://github.com/basecamp/bc3/pull/14314) and modelled by the
@@ -231,6 +234,7 @@ cannot faithfully cover at least one endpoint for a reason outside the CLI. A
 |---------|-----------|-------------|--------|-------|----------|-------|
 | **Core** |
 | projects | 9 | `projects` | ✅ | BC4 | - | list, show, create, update, delete |
+| projects (status) | 2 | `projects archive`, `projects unarchive` | ✅ | BC5 | - | archive (`PUT /projects/:id/status/archived.json`; 403 where the admin pro pack restricts archiving to admins and the project's creator), unarchive (`PUT /projects/:id/status/active.json`, from the archive or the trash; 507 at the account's project limit). Both answer 204; the CLI reports the ID and the status it set |
 | projects (logo) | 2 | `projects logo` | ✅ | BC5 | - | set (`PUT /projects/:id/logo.json`, multipart `logo`), remove (`DELETE` on the same route; 204 with or without a logo). PNG, JPEG, GIF, WebP, AVIF, HEIF or HEIC up to 5 MB, checked before the upload using a local MIME hint; the server applies its shared image validations. People and agents who can edit the project may change it; others get 403. Project JSON carries `logo {url}` when one is attached, so `projects show` shows it. `GET /projects/:id/logo.json` only redirects to the image `logo.url` already names, so the CLI does not wrap it. Project-scoped via `--in`/`--project` |
 | projects (wallpaper) | 2 | `projects wallpaper` | ✅ | BC5 | - | set (`PUT /projects/:id/wallpaper.json`, multipart `wallpaper` with an optional `mode`), remove (`DELETE` on the same route; 204 with or without a wallpaper). `mode` sends `wallpaper_mode` through the existing `PUT /projects/:id.json`, with the current name the SDK requires. PNG, JPEG, GIF, WebP, AVIF, HEIF or HEIC up to 10 MB, checked before the upload using a local MIME hint; the server applies its shared image validations. People and personal assistants follow project-edit permissions; shared agents are refused with 403. Project JSON carries `wallpaper {url, mode}` when one is attached, so `projects show` shows it. Project-scoped via `--in`/`--project` |
 | todos | 12 | `todos`, `todo`, `done`, `reopen` | ✅ | BC4 | - | list, show, create, update, complete, uncomplete, position, copy (BC5: `steps` shown on `todos show`, plus `subtasks_count`/`subtasks_completed_count`/`subtasks_url`; edit via `subtasks`). `todos create --loose` creates on the to-do set, outside any list |
