@@ -182,21 +182,33 @@ func trimTruncated(s string) string {
 // lastSentenceEnd returns the byte offset just past the last sentence end in
 // s, or -1. A '.', '!' or '?' ends a sentence only when whitespace or the end
 // of s follows it, so "12.5%" or "v1.2" is not cut; the full-width '。', '！'
-// and '？' end one wherever they appear.
+// and '？' end one wherever they appear. Closing quotes and brackets right
+// after a terminator stay with the sentence, so `He said "Done."` is kept.
 func lastSentenceEnd(s string) int {
-	end := -1
-	prev, prevEnd := rune(0), 0
+	end, pending := -1, -1
 	for i, r := range s {
-		if (prev == '.' || prev == '!' || prev == '?') && unicode.IsSpace(r) {
-			end = prevEnd
-		}
-		prev, prevEnd = r, i+utf8.RuneLen(r)
-		if r == '\u3002' || r == '\uff01' || r == '\uff1f' {
-			end = prevEnd
+		w := i + utf8.RuneLen(r)
+		switch {
+		case r == '.' || r == '!' || r == '?':
+			pending = w
+		case r == '\u3002' || r == '\uff01' || r == '\uff1f':
+			end, pending = w, w
+		case pending >= 0 && strings.ContainsRune(sentenceClosers, r):
+			if end == i {
+				end = w
+			}
+			pending = w
+		case pending >= 0 && unicode.IsSpace(r):
+			end, pending = pending, -1
+		default:
+			pending = -1
 		}
 	}
-	if prev == '.' || prev == '!' || prev == '?' {
-		end = len(s)
+	if pending >= 0 {
+		end = pending
 	}
 	return end
 }
+
+// sentenceClosers may follow a sentence terminator and still belong to it.
+const sentenceClosers = "\"')]}\u201d\u2019\u00bb\u300d\u300f\uff09"

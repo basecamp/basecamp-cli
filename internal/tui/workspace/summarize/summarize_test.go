@@ -442,6 +442,10 @@ func TestTrimTruncated(t *testing.T) {
 		{"Shipped v1.2. Next up is the mig", "Shipped v1.2."},
 		{"已发布。正在检", "已发布。"},
 		{"完成！还有", "完成！"},
+		{`Alice said "Done." and then`, `Alice said "Done."`},
+		{`Alice said "Done."`, `Alice said "Done."`},
+		{"It shipped (finally.) Next we", "It shipped (finally.)"},
+		{"\u300c\u5b8c\u6210\u3002\u300d\u8fd8\u6709", "\u300c\u5b8c\u6210\u3002\u300d"},
 		{"Alice shipped it. Bob merged it.", "Alice shipped it. Bob merged it."},
 	}
 	for _, tt := range tests {
