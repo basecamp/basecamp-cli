@@ -735,7 +735,7 @@ func newProjectsLogoRemoveCmd() *cobra.Command {
 }
 
 // projectImageFile checks the size and MIME hint before uploading. The server's
-// shared image validations remain authoritative.
+// shared image validations remain authoritative. A maxMB of 0 sets no size limit.
 func projectImageFile(arg, kind string, maxMB int) (path, contentType string, err error) {
 	path = richtext.NormalizeDragPath(arg)
 	if err := richtext.ValidateFile(path); err != nil {
@@ -746,7 +746,7 @@ func projectImageFile(arg, kind string, maxMB int) (path, contentType string, er
 		return "", "", fmt.Errorf("%s: %w", arg, err)
 	}
 	name := filepath.Base(path)
-	if info.Size() > int64(maxMB)<<20 {
+	if maxMB > 0 && info.Size() > int64(maxMB)<<20 {
 		return "", "", output.ErrUsage(fmt.Sprintf("%s exceeds maximum %s size of %d MB", name, kind, maxMB))
 	}
 	contentType = richtext.DetectMIME(path)

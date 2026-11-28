@@ -772,6 +772,14 @@ type profileCapture struct {
 	oooMethod string
 	oooPath   string
 	oooBody   map[string]any
+
+	// requests records each mutating profile or avatar request, in order.
+	requests          []string
+	avatarFields      []string
+	avatarFilename    string
+	avatarContentType string
+	avatarBytes       []byte
+	avatarStatus      int // answer for PUT /my/avatar.json; 0 means 204
 }
 
 // setupProfileMockServer routes the profile PUT/GET and out-of-office
@@ -789,7 +797,32 @@ func setupProfileMockServer(t *testing.T, accountID string, capture *profileCapt
 			json.NewEncoder(w).Encode(map[string]any{
 				"id": 12345, "name": "Test User", "title": "Engineer", "bio": "current bio",
 			})
+		case r.URL.Path == fmt.Sprintf("/%s/my/avatar.json", accountID) && r.Method == http.MethodPut:
+			capture.requests = append(capture.requests, "PUT /my/avatar.json")
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				http.Error(w, fmt.Sprintf("bad multipart body: %v", err), http.StatusBadRequest)
+				return
+			}
+			for field := range r.MultipartForm.File {
+				capture.avatarFields = append(capture.avatarFields, field)
+			}
+			for field := range r.MultipartForm.Value {
+				capture.avatarFields = append(capture.avatarFields, field)
+			}
+			if f, header, err := r.FormFile("avatar"); err == nil {
+				capture.avatarFilename = header.Filename
+				capture.avatarContentType = header.Header.Get("Content-Type")
+				capture.avatarBytes, _ = io.ReadAll(f)
+				f.Close()
+			}
+			if capture.avatarStatus != 0 {
+				w.WriteHeader(capture.avatarStatus)
+				w.Write([]byte(`{"error":"Avatar must be a PNG, JPEG, GIF, WebP, AVIF, HEIF, or HEIC image"}`))
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 		case r.URL.Path == profilePath && r.Method == http.MethodPut:
+			capture.requests = append(capture.requests, "PUT /my/profile.json")
 			capture.putSeen = true
 			body, _ := io.ReadAll(r.Body)
 			capture.putBody = map[string]any{}
@@ -1494,4 +1527,104 @@ func TestMeOnAnAgentWhoseBossHasNoNameSaysWhichPerson(t *testing.T) {
 		"id": 777, "name": "Jane Doe (agent)", "personable_type": "Agent", "boss": map[string]any{"id": 42, "name": " "},
 	})
 	assert.Equal(t, "Jane Doe (agent) - agent in Basecamp account 555, working for person 42", summary)
+}
+
+// writeAvatarFile writes a PNG-named file holding PNG signature bytes and
+// returns its path.
+func writeAvatarFile(t *testing.T, name string) (string, []byte) {
+	t.Helper()
+	data := []byte("\x89PNG\r\n\x1a\navatar-bytes")
+	path := filepath.Join(t.TempDir(), name)
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+	return path, data
+}
+
+// TestPeopleUpdateAvatarAlone verifies that --avatar on its own uploads the
+// file as the one multipart field "avatar" to PUT /my/avatar.json, sends no
+// profile update, and reads the profile back.
+func TestPeopleUpdateAvatarAlone(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, buf := setupPeopleMockApp(t, server)
+	path, data := writeAvatarFile(t, "me.png")
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "me", "--avatar", path)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"PUT /my/avatar.json"}, capture.requests)
+	assert.Equal(t, []string{"avatar"}, capture.avatarFields)
+	assert.Equal(t, "me.png", capture.avatarFilename)
+	assert.Equal(t, "image/png", capture.avatarContentType)
+	assert.Equal(t, data, capture.avatarBytes)
+
+	var result struct {
+		Data struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result), "output: %s", buf.String())
+	assert.Equal(t, int64(12345), result.Data.ID)
+}
+
+// TestPeopleUpdateAvatarWithFields verifies that --avatar alongside profile
+// flags uploads the avatar first, then sends the profile fields.
+func TestPeopleUpdateAvatarWithFields(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+	path, _ := writeAvatarFile(t, "me.png")
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "me", "--avatar", path, "--title", "Staff Engineer")
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"PUT /my/avatar.json", "PUT /my/profile.json"}, capture.requests)
+	assert.Equal(t, "Staff Engineer", capture.putBody["title"])
+	_, hasAvatar := capture.putBody["avatar"]
+	assert.False(t, hasAvatar, "the avatar must not go in the profile's JSON body")
+}
+
+// TestPeopleUpdateAvatarRejectsNonImage verifies that a file that isn't an
+// accepted image is refused before any request is sent.
+func TestPeopleUpdateAvatarRejectsNonImage(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+	path := filepath.Join(t.TempDir(), "notes.txt")
+	require.NoError(t, os.WriteFile(path, []byte("not an image"), 0o600))
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "me", "--avatar", path, "--title", "Staff Engineer")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported image type")
+	assert.Empty(t, capture.requests, "nothing should be sent for a refused file")
+}
+
+// TestPeopleUpdateAvatarMissingFile verifies that a path that doesn't exist is
+// refused before any request is sent.
+func TestPeopleUpdateAvatarMissingFile(t *testing.T) {
+	capture := &profileCapture{}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "me", "--avatar", filepath.Join(t.TempDir(), "missing.png"))
+	require.Error(t, err)
+	assert.Empty(t, capture.requests)
+}
+
+// TestPeopleUpdateAvatarRefusedLeavesProfile verifies that when the server
+// refuses the avatar, the error surfaces and the profile fields aren't sent.
+func TestPeopleUpdateAvatarRefusedLeavesProfile(t *testing.T) {
+	capture := &profileCapture{avatarStatus: http.StatusUnprocessableEntity}
+	server := setupProfileMockServer(t, "99999", capture)
+	app, _ := setupPeopleMockApp(t, server)
+	path, _ := writeAvatarFile(t, "me.png")
+
+	cmd := NewPeopleCmd()
+	err := executePeopleCommand(cmd, app, "update", "me", "--avatar", path, "--title", "Staff Engineer")
+	require.Error(t, err)
+	assert.Equal(t, []string{"PUT /my/avatar.json"}, capture.requests)
+	assert.False(t, capture.putSeen)
 }

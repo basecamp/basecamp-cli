@@ -13577,6 +13577,7 @@ FLAG basecamp people show --todolist type=string
 FLAG basecamp people show --verbose type=count
 FLAG basecamp people update --account type=string
 FLAG basecamp people update --agent type=bool
+FLAG basecamp people update --avatar type=string
 FLAG basecamp people update --bio type=string
 FLAG basecamp people update --cache-dir type=string
 FLAG basecamp people update --count type=bool
