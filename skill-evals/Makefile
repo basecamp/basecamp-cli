@@ -1,4 +1,4 @@
-MODEL ?= claude-sonnet-4-20250514
+MODEL ?= claude-sonnet-5-5
 SKILL ?= ../skills/basecamp/SKILL.md
 BASECAMP_BIN ?= ../bin/basecamp
 
