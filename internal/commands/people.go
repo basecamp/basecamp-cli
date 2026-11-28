@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/mail"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -342,7 +343,7 @@ func requireMeTarget(target string) error {
 }
 
 func newPeopleUpdateCmd() *cobra.Command {
-	var name, email, title, bio, location, timeZone string
+	var name, email, title, bio, location, timeZone, avatar string
 
 	cmd := &cobra.Command{
 		Use:   "update [me] [flags]",
@@ -359,6 +360,11 @@ empty value to clear that field:
   basecamp people update me --title "Staff Engineer" --location "Chicago, IL"
   basecamp people update me --bio ""
 
+--avatar uploads an image file as your profile photo, replacing the current
+one. It accepts ` + projectImageFormatNames() + ` files:
+
+  basecamp people update me --avatar ~/photo.png
+
 Week-start and time-format are account preferences, not profile fields, and
 are not edited here.`,
 		Example: `basecamp people update me --bio "Building the Basecamp CLI" --title "Staff Engineer"`,
@@ -371,7 +377,7 @@ are not edited here.`,
 			if err := requireMeTarget(target); err != nil {
 				return err
 			}
-			return runPeopleUpdate(cmd, name, email, title, bio, location, timeZone)
+			return runPeopleUpdate(cmd, name, email, title, bio, location, timeZone, avatar)
 		},
 	}
 
@@ -381,12 +387,23 @@ are not edited here.`,
 	cmd.Flags().StringVar(&bio, "bio", "", "Short bio (tagline)")
 	cmd.Flags().StringVar(&location, "location", "", "Location")
 	cmd.Flags().StringVar(&timeZone, "time-zone", "", "Rails time zone name (e.g. America/Chicago)")
+	cmd.Flags().StringVar(&avatar, "avatar", "", "Image file to upload as your profile photo")
 
 	return cmd
 }
 
-func runPeopleUpdate(cmd *cobra.Command, name, email, title, bio, location, timeZone string) error {
+func runPeopleUpdate(cmd *cobra.Command, name, email, title, bio, location, timeZone, avatar string) error {
 	app := appctx.FromContext(cmd.Context())
+
+	// The avatar is checked before anything is sent, so a bad path or format
+	// changes nothing. bc3 sets no size limit on avatars, so none is set here.
+	var avatarPath, avatarContentType string
+	if cmd.Flags().Changed("avatar") {
+		var err error
+		if avatarPath, avatarContentType, err = projectImageFile(avatar, "avatar", 0); err != nil {
+			return err
+		}
+	}
 
 	req := &basecamp.UpdateMyProfileRequest{}
 	changed := false
@@ -405,7 +422,7 @@ func runPeopleUpdate(cmd *cobra.Command, name, email, title, bio, location, time
 	setStr("location", location, &req.Location)
 	setStr("time-zone", timeZone, &req.TimeZoneName)
 
-	if !changed {
+	if !changed && avatarPath == "" {
 		return noChanges(cmd)
 	}
 
@@ -413,8 +430,21 @@ func runPeopleUpdate(cmd *cobra.Command, name, email, title, bio, location, time
 		return err
 	}
 
-	if err := app.Account().People().UpdateMyProfile(cmd.Context(), req); err != nil {
-		return convertSDKError(err)
+	// The avatar goes first: it's the request most likely to be refused (an
+	// image the server won't take), and when it is, nothing has changed yet.
+	if avatarPath != "" {
+		if err := uploadMyAvatar(cmd, app, avatarPath, avatarContentType); err != nil {
+			return err
+		}
+	}
+
+	if changed {
+		if err := app.Account().People().UpdateMyProfile(cmd.Context(), req); err != nil {
+			if avatarPath != "" {
+				return fmt.Errorf("avatar uploaded, but updating the other profile fields failed: %w", convertSDKError(err))
+			}
+			return convertSDKError(err)
+		}
 	}
 
 	respOpts := []output.ResponseOption{
@@ -434,6 +464,19 @@ func runPeopleUpdate(cmd *cobra.Command, name, email, title, bio, location, time
 		return app.OK(map[string]any{"updated": true}, respOpts...)
 	}
 	return app.OK(person, respOpts...)
+}
+
+func uploadMyAvatar(cmd *cobra.Command, app *appctx.App, path, contentType string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	defer f.Close()
+
+	if err := app.Account().People().UpdateMyAvatar(cmd.Context(), f, filepath.Base(path), contentType); err != nil {
+		return convertSDKError(err)
+	}
+	return nil
 }
 
 func newPeopleOutOfOfficeCmd() *cobra.Command {
