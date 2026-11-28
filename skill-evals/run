@@ -36,7 +36,7 @@ TOOL = {
 
 def parse_args(argv)
   opts = {
-    model: "claude-sonnet-4-20250514", skill: DEFAULT_SKILL.to_s,
+    model: "claude-sonnet-5-5", skill: DEFAULT_SKILL.to_s,
     basecamp_bin: ROOT.join("..", "bin", "basecamp").to_s,
     samples: 1, cases: [], tags: [],
     json: false, verbose: false, self_test: false, save: nil, compare: nil
