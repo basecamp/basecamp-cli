@@ -2,6 +2,7 @@ package summarize
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -10,7 +11,14 @@ import (
 	"github.com/basecamp/basecamp-cli/internal/hostutil"
 )
 
+// ErrTruncated is returned by a provider, alongside the partial text, when the
+// model stopped because it hit the token limit rather than finishing. The
+// text is still usable; Summarize trims it before caching.
+var ErrTruncated = errors.New("summary truncated at token limit")
+
 // Provider generates summaries via an LLM or similar service.
+// When the model was cut off at maxTokens, Complete returns the partial text
+// and an error wrapping ErrTruncated.
 type Provider interface {
 	Complete(ctx context.Context, prompt string, maxTokens int) (string, error)
 }

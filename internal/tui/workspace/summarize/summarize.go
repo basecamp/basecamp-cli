@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -127,6 +128,16 @@ func (s *Summarizer) Summarize(ctx context.Context, req Request) tea.Cmd {
 		llmCtx, llmCancel := context.WithTimeout(ctx, 30*time.Second)
 		defer llmCancel()
 		result, err := s.provider.Complete(llmCtx, prompt, maxTokens)
+		if errors.Is(err, ErrTruncated) {
+			// Cut off at the token limit. Failures are not cached, so
+			// returning here would repeat the paid call on every poll;
+			// cache the text trimmed back to something that reads as finished.
+			result = trimTruncated(result)
+			err = nil
+			if result == "" {
+				return nil
+			}
+		}
 		if err != nil {
 			return nil // silently fall back to extractive
 		}
@@ -147,4 +158,21 @@ func contentHash(segments []Segment) string {
 	}
 	h := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(h[:8]) // 16 hex chars is plenty
+}
+
+// trimTruncated shortens text that a model cut off mid-thought. It keeps
+// everything up to the last sentence end; if there is none, it drops the
+// dangling word and appends an ellipsis so the cut is visible.
+func trimTruncated(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.LastIndexAny(s, ".!?"); i >= 0 {
+		return s[:i+1]
+	}
+	if i := strings.LastIndexAny(s, " \t\n"); i > 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	if s == "" {
+		return ""
+	}
+	return s + "\u2026"
 }

@@ -430,3 +430,82 @@ func TestExtractSummary_FourSegments_Zoom500(t *testing.T) {
 		t.Errorf("result too long: %d runes", runeLen(result))
 	}
 }
+
+func TestTrimTruncated(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"Alice shipped it. Bob is reviewing the chan", "Alice shipped it."},
+		{"Done! Is the deploy go", "Done!"},
+		{"Alice and Bob are discussing the rel", "Alice and Bob are discussing the…"},
+		{"Unbroken", "Unbroken…"},
+		{"   ", ""},
+	}
+	for _, tt := range tests {
+		if got := trimTruncated(tt.in); got != tt.want {
+			t.Errorf("trimTruncated(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// fakeProvider returns a canned result and counts calls.
+type fakeProvider struct {
+	text  string
+	err   error
+	calls int
+}
+
+func (f *fakeProvider) Complete(context.Context, string, int) (string, error) {
+	f.calls++
+	return f.text, f.err
+}
+
+func runSummarize(t *testing.T, p Provider, cache *SummaryCache, req Request) {
+	t.Helper()
+	cmd := NewSummarizer(p, cache, 1).Summarize(context.Background(), req)
+	if cmd == nil {
+		t.Fatal("expected a cmd")
+	}
+	cmd()
+}
+
+func TestSummarizer_Summarize_TruncatedIsTrimmedAndCached(t *testing.T) {
+	cache := NewSummaryCache(t.TempDir(), time.Hour, 100)
+	req := Request{ContentKey: "test:1", Content: []Segment{{Author: "A", Text: "B"}}, TargetChars: 200}
+	p := &fakeProvider{text: "Alice shipped it. Bob is reviewing the chan", err: ErrTruncated}
+
+	runSummarize(t, p, cache, req)
+
+	got := NewSummarizer(p, cache, 1).SummarizeSync(req)
+	if !got.FromCache || got.Summary != "Alice shipped it." {
+		t.Errorf("got %+v, want cached %q", got, "Alice shipped it.")
+	}
+
+	// Cached, so a later poll must not call the provider again.
+	if cmd := NewSummarizer(p, cache, 1).Summarize(context.Background(), req); cmd != nil {
+		t.Error("expected nil cmd once the trimmed summary is cached")
+	}
+	if p.calls != 1 {
+		t.Errorf("provider called %d times, want 1", p.calls)
+	}
+}
+
+func TestSummarizer_Summarize_TruncatedEmptyNotCached(t *testing.T) {
+	cache := NewSummaryCache(t.TempDir(), time.Hour, 100)
+	req := Request{ContentKey: "test:1", Content: []Segment{{Author: "A", Text: "B"}}, TargetChars: 200}
+
+	runSummarize(t, &fakeProvider{text: "  ", err: ErrTruncated}, cache, req)
+
+	if got := NewSummarizer(nil, cache, 1).SummarizeSync(req); got.FromCache {
+		t.Errorf("empty truncated result was cached: %+v", got)
+	}
+}
+
+func TestSummarizer_Summarize_CompleteCachedUnchanged(t *testing.T) {
+	cache := NewSummaryCache(t.TempDir(), time.Hour, 100)
+	req := Request{ContentKey: "test:1", Content: []Segment{{Author: "A", Text: "B"}}, TargetChars: 200}
+
+	runSummarize(t, &fakeProvider{text: "All good, no period"}, cache, req)
+
+	if got := NewSummarizer(nil, cache, 1).SummarizeSync(req); got.Summary != "All good, no period" {
+		t.Errorf("got %q", got.Summary)
+	}
+}

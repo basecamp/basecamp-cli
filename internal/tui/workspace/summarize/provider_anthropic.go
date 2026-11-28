@@ -69,12 +69,16 @@ func (p *AnthropicProvider) Complete(ctx context.Context, prompt string, maxToke
 		Content []struct {
 			Text string `json:"text"`
 		} `json:"content"`
+		StopReason string `json:"stop_reason"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
 	}
 	if len(result.Content) == 0 {
 		return "", fmt.Errorf("anthropic: empty response")
+	}
+	if result.StopReason == "max_tokens" {
+		return result.Content[0].Text, ErrTruncated
 	}
 	return result.Content[0].Text, nil
 }

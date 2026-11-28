@@ -76,6 +76,7 @@ func (p *OpenAIProvider) Complete(ctx context.Context, prompt string, maxTokens 
 			Message struct {
 				Content string `json:"content"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -83,6 +84,9 @@ func (p *OpenAIProvider) Complete(ctx context.Context, prompt string, maxTokens 
 	}
 	if len(result.Choices) == 0 {
 		return "", fmt.Errorf("openai: empty response")
+	}
+	if result.Choices[0].FinishReason == "length" {
+		return result.Choices[0].Message.Content, ErrTruncated
 	}
 	return result.Choices[0].Message.Content, nil
 }
