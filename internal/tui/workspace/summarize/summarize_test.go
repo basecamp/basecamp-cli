@@ -438,6 +438,11 @@ func TestTrimTruncated(t *testing.T) {
 		{"Alice and Bob are discussing the rel", "Alice and Bob are discussing the…"},
 		{"Unbroken", "Unbroken…"},
 		{"   ", ""},
+		{"The error rate rose to 12.5% during the deploy and", "The error rate rose to 12.5% during the deploy…"},
+		{"Shipped v1.2. Next up is the mig", "Shipped v1.2."},
+		{"已发布。正在检", "已发布。"},
+		{"完成！还有", "完成！"},
+		{"Alice shipped it. Bob merged it.", "Alice shipped it. Bob merged it."},
 	}
 	for _, tt := range tests {
 		if got := trimTruncated(tt.in); got != tt.want {

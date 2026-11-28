@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -165,8 +167,8 @@ func contentHash(segments []Segment) string {
 // dangling word and appends an ellipsis so the cut is visible.
 func trimTruncated(s string) string {
 	s = strings.TrimSpace(s)
-	if i := strings.LastIndexAny(s, ".!?"); i >= 0 {
-		return s[:i+1]
+	if i := lastSentenceEnd(s); i >= 0 {
+		return s[:i]
 	}
 	if i := strings.LastIndexAny(s, " \t\n"); i > 0 {
 		s = strings.TrimSpace(s[:i])
@@ -175,4 +177,26 @@ func trimTruncated(s string) string {
 		return ""
 	}
 	return s + "\u2026"
+}
+
+// lastSentenceEnd returns the byte offset just past the last sentence end in
+// s, or -1. A '.', '!' or '?' ends a sentence only when whitespace or the end
+// of s follows it, so "12.5%" or "v1.2" is not cut; the full-width '。', '！'
+// and '？' end one wherever they appear.
+func lastSentenceEnd(s string) int {
+	end := -1
+	prev, prevEnd := rune(0), 0
+	for i, r := range s {
+		if (prev == '.' || prev == '!' || prev == '?') && unicode.IsSpace(r) {
+			end = prevEnd
+		}
+		prev, prevEnd = r, i+utf8.RuneLen(r)
+		if r == '\u3002' || r == '\uff01' || r == '\uff1f' {
+			end = prevEnd
+		}
+	}
+	if prev == '.' || prev == '!' || prev == '?' {
+		end = len(s)
+	}
+	return end
 }
