@@ -215,6 +215,7 @@ Gateway tool: call with {"action": "...", "params": {...}}.
 Call {"action": "describe", "params": {"action": "NAME"}} for an action's full parameter schema.
 
 ACTIONS (RO = read-only):
+- delete_my_avatar (destructive): Remove the current user's avatar, leaving their initials (returns 204 No Content)
 - disable_out_of_office: Disable out of office for a person
 - disable_project_clients: Disable clients on a project
 - enable_out_of_office: Enable or replace out of office for a person

@@ -12720,6 +12720,85 @@
         }
       }
     },
+    "/{accountId}/my/avatar.json": {
+      "delete": {
+        "description": "Remove the current user's avatar, leaving their initials (returns 204 No Content).\nUsers only: an agent's token gets 403.",
+        "operationId": "DeleteMyAvatar",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "description": "Basecamp account ID (numeric string)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$",
+              "description": "Basecamp account ID (numeric string)"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "DeleteMyAvatar 204 response"
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RateLimitError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "People"
+        ],
+        "x-basecamp-idempotent": {
+          "natural": true
+        },
+        "x-basecamp-retry": {
+          "maxAttempts": 2,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        }
+      }
+    },
     "/{accountId}/my/bookmarks.json": {
       "get": {
         "description": "List the current user's bookmarks, most recently bookmarked first (paginated).\nA bookmark is a personal link between the current user and a single recording,\nvisible only to its creator; each entry wraps the shared recording projection.",
@@ -42163,6 +42242,10 @@
       },
       "UpdateMessageTypeResponseContent": {
         "$ref": "#/components/schemas/MessageType"
+      },
+      "UpdateMyAvatarInputPayload": {
+        "type": "string",
+        "contentEncoding": "byte"
       },
       "UpdateMyNoteRequestContent": {
         "type": "object",

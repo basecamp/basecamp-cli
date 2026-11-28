@@ -61,6 +61,7 @@ EXCLUDED_OPERATIONS = {
     "CreateAttachment",
     "CreateCampfireUpload",
     "UpdateAccountLogo",
+    "UpdateMyAvatar",
     "UpdateProjectWallpaper",
     "UpdateProjectLogo",
 }
