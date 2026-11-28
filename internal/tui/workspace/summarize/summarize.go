@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -127,6 +130,16 @@ func (s *Summarizer) Summarize(ctx context.Context, req Request) tea.Cmd {
 		llmCtx, llmCancel := context.WithTimeout(ctx, 30*time.Second)
 		defer llmCancel()
 		result, err := s.provider.Complete(llmCtx, prompt, maxTokens)
+		if errors.Is(err, ErrTruncated) {
+			// Cut off at the token limit. Failures are not cached, so
+			// returning here would repeat the paid call on every poll;
+			// cache the text trimmed back to something that reads as finished.
+			result = trimTruncated(result)
+			err = nil
+			if result == "" {
+				return nil
+			}
+		}
 		if err != nil {
 			return nil // silently fall back to extractive
 		}
@@ -148,3 +161,54 @@ func contentHash(segments []Segment) string {
 	h := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(h[:8]) // 16 hex chars is plenty
 }
+
+// trimTruncated shortens text that a model cut off mid-thought. It keeps
+// everything up to the last sentence end; if there is none, it drops the
+// dangling word and appends an ellipsis so the cut is visible.
+func trimTruncated(s string) string {
+	s = strings.TrimSpace(s)
+	if i := lastSentenceEnd(s); i >= 0 {
+		return s[:i]
+	}
+	if i := strings.LastIndexAny(s, " \t\n"); i > 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	if s == "" {
+		return ""
+	}
+	return s + "\u2026"
+}
+
+// lastSentenceEnd returns the byte offset just past the last sentence end in
+// s, or -1. A '.', '!' or '?' ends a sentence only when whitespace or the end
+// of s follows it, so "12.5%" or "v1.2" is not cut; the full-width '。', '！'
+// and '？' end one wherever they appear. Closing quotes and brackets right
+// after a terminator stay with the sentence, so `He said "Done."` is kept.
+func lastSentenceEnd(s string) int {
+	end, pending := -1, -1
+	for i, r := range s {
+		w := i + utf8.RuneLen(r)
+		switch {
+		case r == '.' || r == '!' || r == '?':
+			pending = w
+		case r == '\u3002' || r == '\uff01' || r == '\uff1f':
+			end, pending = w, w
+		case pending >= 0 && strings.ContainsRune(sentenceClosers, r):
+			if end == i {
+				end = w
+			}
+			pending = w
+		case pending >= 0 && unicode.IsSpace(r):
+			end, pending = pending, -1
+		default:
+			pending = -1
+		}
+	}
+	if pending >= 0 {
+		end = pending
+	}
+	return end
+}
+
+// sentenceClosers may follow a sentence terminator and still belong to it.
+const sentenceClosers = "\"')]}\u201d\u2019\u00bb\u300d\u300f\uff09"

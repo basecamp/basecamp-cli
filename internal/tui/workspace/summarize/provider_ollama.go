@@ -66,10 +66,14 @@ func (p *OllamaProvider) Complete(ctx context.Context, prompt string, maxTokens 
 	}
 
 	var result struct {
-		Response string `json:"response"`
+		Response   string `json:"response"`
+		DoneReason string `json:"done_reason"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
+	}
+	if result.DoneReason == "length" {
+		return result.Response, ErrTruncated
 	}
 	return result.Response, nil
 }
